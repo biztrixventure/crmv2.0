@@ -12,10 +12,14 @@
 //   • Wraps res.json: reads total, runs the shared enforceEgress() (row cap +
 //     daily count, logs allow/deny), and either 429s or passes the payload.
 //   • Field selection: when an export.columns config exists for this
-//     dataset+role, disallowed keys are DELETED from each response row so the
-//     restricted field's value can never reach the browser/CSV (data-level
-//     enforcement — universal; header-level removal is additionally applied by
-//     the reference export handlers).
+//     dataset+role/user, row keys that no allowed COLUMN depends on are DELETED
+//     from each response row, so a restricted field's value never reaches the
+//     browser/CSV. This is defense-in-depth ONLY — the client's shared export
+//     runner (frontend/src/utils/exportSpec.js) is what actually removes the
+//     header and the value from the file. The strip is DEPENDENCY-AWARE (see
+//     utils/exportDatasets.js): a computed column such as `paid_tenure` keeps
+//     the raw fields it derives from, and an unrecognised column keeps the whole
+//     row rather than blank a cell the client was told it may export.
 //
 // Mounted globally BEFORE the routers; a request without `__egress` returns
 // immediately. Deferring pages 2+ keeps the whole export authorized by one
@@ -23,11 +27,13 @@
 // ============================================================================
 const { enforceEgress } = require('../utils/egressGuard');
 const { resolveExportColumns } = require('../utils/egressConfig');
+const { rowKeysForColumns } = require('../utils/exportDatasets');
 
 // dataset → the response key that holds the row array (so we can strip columns).
 const DATASET_ROWS_KEY = {
   sales: 'sales', transfers: 'transfers', callbacks: 'callbacks',
   callback_audit: 'entries', reviews: 'reviews', numbers: 'numbers',
+  users: 'users',
   company_data: 'sales',   // CompanyDetail reuses list shapes
 };
 
@@ -64,13 +70,16 @@ function egressAudit(req, res, next) {
           return origJson({ error: decision.message, code: 'EGRESS_LIMIT', limit: decision.limit });
         }
 
-        // Field selection — delete disallowed keys from every row (data-level).
+        // Field selection — drop every raw row key no allowed column reads.
+        // rowKeysForColumns returns null ("keep the row intact") for an unknown
+        // dataset or an unmapped column, so this can never blank a cell the
+        // client's export spec still intends to write.
         const allowed = await resolveExportColumns({ companyId: req.user?.company_id, dataset, role: req.user?.role, userId: req.user?.id });
-        if (allowed && allowed.length) {
+        const keep = rowKeysForColumns(dataset, allowed);
+        if (keep) {
           const key = DATASET_ROWS_KEY[dataset];
           const rows = key && Array.isArray(payload?.[key]) ? payload[key] : null;
           if (rows) {
-            const keep = new Set(allowed);
             for (const row of rows) {
               for (const k of Object.keys(row)) if (!keep.has(k)) delete row[k];
             }

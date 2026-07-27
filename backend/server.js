@@ -318,7 +318,10 @@ app.use('/api/kanban',
 // PROTECTED ROUTES (auth required)
 // ============================================================================
 
-app.use('/api/users', authMiddleware, readonlyGuard, usersRoutes);
+// egressAudit here so the Manager export modal's "Users" tab is governed like
+// every other export. It no-ops on any request without the __egress marker, so
+// ordinary user-list browsing is untouched.
+app.use('/api/users', authMiddleware, readonlyGuard, egressAudit, usersRoutes);
 // SuperAdmin tool — readonly_admin management. The route file itself gates
 // on req.user.role === 'superadmin', and readonlyGuard would 403 any RO
 // caller trying to PUT/POST/DELETE here anyway.

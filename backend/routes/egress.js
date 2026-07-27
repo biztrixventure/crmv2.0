@@ -8,8 +8,9 @@
 //   GET   /egress/limits           — all egress_limits rows
 //   PUT   /egress/limits           — upsert one limit row
 //   DELETE/egress/limits/:id       — delete a limit row
-//   GET   /egress/columns          — export.columns for a dataset+role
-//   PUT   /egress/columns          — set export.columns.<dataset>.<role>
+//   GET   /egress/columns          — export.columns for a dataset+role/user
+//   PUT   /egress/columns          — set export.columns for a dataset+role/user
+//   GET   /egress/my-columns       — the CALLER's resolved columns (any authed user)
 //   GET   /egress/list-layout      — list.layout for a shell+role
 //   PUT   /egress/list-layout      — set list.layout.<shell>.<role>
 //   GET   /egress/my-usage         — caller's own limits + today's usage (client pre-check)
@@ -22,6 +23,9 @@ const { asyncHandler } = require('../middleware/errorHandler');
 const { isSuperAdmin } = require('../models/helpers');
 const { setConfig, getConfig, clearConfigCache } = require('../utils/businessConfig');
 const { resolveEgressLimits, usageToday } = require('../utils/egressGuard');
+const {
+  resolveExportColumnsFor, readUserColumnMap, isEmptyColumnOverride, USERS_KEY,
+} = require('../utils/egressConfig');
 
 const router = express.Router();
 
@@ -219,24 +223,64 @@ router.put('/export-access', superOnly, asyncHandler(async (req, res) => {
 }));
 
 // ── export.columns config ─────────────────────────────────────────────────────
-// Scope = a specific USER (userId, wins) or a ROLE. Per-user config lets a
-// superadmin give one person a one-column (or many-column) export distinct from
-// their role's default. Key: export.columns.<dataset>.<userId|role>.
+// Scope = a specific USER (userId, wins) or a ROLE.
+//   role  → export.columns.<dataset>.<role>   (one row per dataset+role)
+//   user  → export.columns.__users            (ONE row: userId → dataset → cols)
+// The per-user map mirrors pwa_users: a single cached read resolves every
+// dataset for a user, and an override that selects nothing is deleted rather
+// than stored. Legacy per-user rows written before the map still resolve (see
+// resolveExportColumns), so nothing configured earlier stops working.
 router.get('/columns', superOnly, asyncHandler(async (req, res) => {
   const { dataset, role, userId } = req.query;
-  const scope = userId || role;
-  if (!dataset || !scope) return res.status(400).json({ error: 'dataset and role/userId are required' });
-  const v = await getConfig(null, `export.columns.${dataset}.${scope}`, null);
-  res.json({ columns: Array.isArray(v) ? v : null });   // null = all (unconfigured)
+  if (!dataset || !(userId || role)) return res.status(400).json({ error: 'dataset and role/userId are required' });
+  if (userId) {
+    const map = await readUserColumnMap(null);
+    const v = map[userId] && map[userId][dataset];
+    if (Array.isArray(v)) return res.json({ columns: v });
+    const legacy = await getConfig(null, `export.columns.${dataset}.${userId}`, null);
+    return res.json({ columns: Array.isArray(legacy) ? legacy : null });
+  }
+  const v = await getConfig(null, `export.columns.${dataset}.${role}`, null);
+  res.json({ columns: Array.isArray(v) ? v : null });   // null = unconfigured → surface default
 }));
 router.put('/columns', superOnly, asyncHandler(async (req, res) => {
   const { dataset, role, userId } = req.body || {};
-  const scope = userId || role;
   const columns = Array.isArray(req.body.columns) ? req.body.columns.map(String) : null;
-  if (!dataset || !scope) return res.status(400).json({ error: 'dataset and role/userId are required' });
-  await setConfig('global', `export.columns.${dataset}.${scope}`, columns, req.user.id);
+  if (!dataset || !(userId || role)) return res.status(400).json({ error: 'dataset and role/userId are required' });
+
+  if (userId) {
+    const map = await readUserColumnMap(null);
+    const entry = { ...(map[String(userId)] || {}) };
+    if (columns && columns.length) entry[dataset] = columns;
+    else delete entry[dataset];                        // "reset to default"
+    if (isEmptyColumnOverride(entry)) delete map[String(userId)];
+    else map[String(userId)] = entry;
+    // 'global' is the SCOPE STRING here, not a company id — setConfig and
+    // getConfig are not symmetric. Passing null writes a row nothing reads back.
+    await setConfig('global', USERS_KEY, map, req.user.id);
+    // Retire any legacy per-user row so it cannot shadow a later reset.
+    await setConfig('global', `export.columns.${dataset}.${userId}`, null, req.user.id);
+    clearConfigCache();
+    return res.json({ ok: true, columns });
+  }
+
+  await setConfig('global', `export.columns.${dataset}.${role}`, columns, req.user.id);
   clearConfigCache();
   res.json({ ok: true, columns });
+}));
+
+// ── the caller's OWN resolved export columns (any authed user) ────────────────
+// Every shell's export runner reads this on mount to learn which columns it may
+// write. null for a dataset = unconfigured → that surface keeps its own default
+// column set, which is why today's files are byte-identical until a superadmin
+// configures one. One request, one read of the per-user map, all datasets.
+router.get('/my-columns', asyncHandler(async (req, res) => {
+  const datasets = String(req.query.datasets || '').split(',').map(s => s.trim()).filter(Boolean).slice(0, 30);
+  if (!datasets.length) return res.json({ columns: {} });
+  const columns = await resolveExportColumnsFor({
+    companyId: req.user.company_id, role: req.user.role, userId: req.user.id, datasets,
+  });
+  res.json({ columns });
 }));
 
 // ── list.layout config ────────────────────────────────────────────────────────
