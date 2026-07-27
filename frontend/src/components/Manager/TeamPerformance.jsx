@@ -69,7 +69,7 @@ function AgentBars({ agents, metric = 'sales' }) {
         return (
           <div key={a.user_id} className="flex items-center gap-2.5">
             <span className="w-4 text-[11px] font-bold text-center" style={{ color: 'var(--color-text-tertiary)' }}>{i + 1}</span>
-            <span className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0" style={{ backgroundColor: PALETTE[i % PALETTE.length] }}>{initials(a.name)}</span>
+            <span className="w-6 h-6 rounded-full flex items-center justify-center text-[11px] sm:text-[10px] font-bold text-white flex-shrink-0" style={{ backgroundColor: PALETTE[i % PALETTE.length] }}>{initials(a.name)}</span>
             <div className="flex-1 min-w-0">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-xs font-semibold truncate" style={{ color: 'var(--color-text)' }}>{a.name}</span>

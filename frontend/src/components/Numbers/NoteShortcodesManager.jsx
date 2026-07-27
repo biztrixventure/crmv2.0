@@ -76,7 +76,7 @@ export default function NoteShortcodesManager() {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
                         <span className="text-xs font-mono font-bold px-1.5 py-0.5 rounded" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-primary-600)' }}>/{r.code}</span>
-                        {!r.company_id && <span className="text-[10px] font-bold flex items-center gap-0.5" style={{ color: 'var(--color-text-tertiary)' }}><Globe size={10} /> global</span>}
+                        {!r.company_id && <span className="text-[11px] sm:text-[10px] font-bold flex items-center gap-0.5" style={{ color: 'var(--color-text-tertiary)' }}><Globe size={10} /> global</span>}
                       </div>
                       <p className="text-sm mt-1 whitespace-pre-wrap break-words" style={{ color: 'var(--color-text)' }}>{r.text}</p>
                     </div>

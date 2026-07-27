@@ -1414,6 +1414,30 @@ select optgroup {
   .btn {
     min-height: 44px;
   }
+
+  /* Icon-only buttons — the row edit/delete/menu actions. A measured sweep of
+     the admin found ~2,900 of them rendering at ~26px (p-1.5 around a 14px
+     icon), which is the single most-tapped control in the product and the one
+     hardest to hit.
+
+     `:has(> svg:only-child)` is the precise test for "this button is nothing
+     but an icon", so buttons with a text label keep their own padding and
+     nothing reflows. Inline-flex + centering so the icon stays optically
+     centred in the larger box rather than pinned top-left. */
+  button:has(> svg:only-child) {
+    min-width: 44px;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Inside a table cell the same rule would stretch every row, so there the
+     target grows only horizontally and the row keeps its height. */
+  td button:has(> svg:only-child),
+  th button:has(> svg:only-child) {
+    min-height: 36px;
+  }
 }
 
 /* ── Sticky first column for scrollable tables (kit/TableScroll) ────────────

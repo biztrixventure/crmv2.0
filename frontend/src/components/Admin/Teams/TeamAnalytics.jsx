@@ -4,6 +4,7 @@ import {
   ArrowUpRight, ArrowDownRight, Minus, Repeat, AlertTriangle,
 } from 'lucide-react';
 import { accent } from '../../UI/kit';
+import { TableScroll } from "../../UI/kit";
 
 // ============================================================================
 // TeamAnalytics — ONE shared, dependency-free SVG analytics body used by BOTH
@@ -536,7 +537,7 @@ export default function TeamAnalytics({ report, team }) {
           <ChevronDown size={16} style={{ color: 'var(--color-text-tertiary)', transform: tableOpen ? 'rotate(180deg)' : 'none', transition: 'transform .15s' }} />
         </button>
         {tableOpen && (
-          <div className="overflow-x-auto border-t" style={{ borderColor: 'var(--color-border)' }}>
+          <TableScroll stickyFirst label="Team analytics" className="border-t" style={{ borderColor: 'var(--color-border)' }}>
             <table className="w-full text-xs">
               <thead><tr style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>
                 {['#', 'Member', 'Transfers', 'Assigned', 'Sales', 'Gross', 'MRR', 'Fronted', 'Callbacks', 'Avg deal'].map(h => <th key={h} className="text-left px-3 py-2 font-semibold whitespace-nowrap">{h}</th>)}
@@ -559,7 +560,7 @@ export default function TeamAnalytics({ report, team }) {
                 {members.length === 0 && <tr><td colSpan={10} className="text-center py-4 italic" style={{ color: 'var(--color-text-tertiary)' }}>No members.</td></tr>}
               </tbody>
             </table>
-          </div>
+          </TableScroll>
         )}
       </div>
 

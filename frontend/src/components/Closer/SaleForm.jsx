@@ -642,7 +642,7 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
             </div>
           )}
           {zipLoading === false && zipInfo && val.length === 5 && (
-            <p className="text-[10px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
+            <p className="text-[11px] sm:text-[10px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
               {zipInfo.city}, {zipInfo.state}
             </p>
           )}
@@ -746,7 +746,7 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
             <Building2 size={14} className="text-white" />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-[10px] font-bold uppercase tracking-widest mb-0.5"
+            <p className="text-[11px] sm:text-[10px] font-bold uppercase tracking-widest mb-0.5"
               style={{ color: 'var(--color-primary-600)' }}>Lead Source</p>
             <div className="flex items-center gap-2 flex-wrap">
               {transfer.fronter_name && (
@@ -792,7 +792,7 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
                     <span className="flex items-center gap-1.5">
                       {field.label}
                       {field.show_to_fronter === false && (
-                        <span className="text-[9px] px-1.5 py-0.5 rounded font-bold normal-case tracking-normal"
+                        <span className="text-[11px] sm:text-[9px] px-1.5 py-0.5 rounded font-bold normal-case tracking-normal"
                           style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-600)' }}>
                           Closer Only
                         </span>
@@ -871,7 +871,7 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
                   <span className="flex items-center gap-1.5">
                     {field.label}
                     {field.show_to_fronter === false && (
-                      <span className="text-[9px] px-1.5 py-0.5 rounded font-bold normal-case tracking-normal"
+                      <span className="text-[11px] sm:text-[9px] px-1.5 py-0.5 rounded font-bold normal-case tracking-normal"
                         style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-600)' }}>
                         Closer Only
                       </span>

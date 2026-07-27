@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Edit2, Trash2, Eye, CheckCircle, XCircle, ChevronUp, ChevronDown, ChevronsUpDown, Building2, Users } from 'lucide-react';
 import { Card } from '../../../components/UI';
+import { TableScroll } from "../../UI/kit";
 
 const SortIcon = ({ col, sort }) => {
   if (sort.col !== col) return <ChevronsUpDown size={11} className="opacity-30" />;
@@ -43,7 +44,7 @@ const CompanyList = ({ companies, onEdit, onDeactivate, onActivate, onHardDelete
 
   return (
     <Card variant="outlined" className="overflow-hidden">
-      <div className="overflow-x-auto">
+      <TableScroll stickyFirst label="Companies">
         <table className="w-full text-sm">
           <thead>
             <tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
@@ -158,7 +159,7 @@ const CompanyList = ({ companies, onEdit, onDeactivate, onActivate, onHardDelete
             })}
           </tbody>
         </table>
-      </div>
+      </TableScroll>
 
       {/* Footer summary */}
       <div className="px-3 py-2 flex items-center gap-3 text-xs text-text-secondary"

@@ -179,7 +179,7 @@ export default function PaymentRemindersPanel() {
                       <div className="text-[11px] font-semibold" style={{ color: d <= 1 ? '#dc2626' : d <= 3 ? '#d97706' : 'var(--color-text-tertiary)' }}>
                         {d < 0 ? `${-d}d overdue` : d === 0 ? 'due today' : `in ${d}d`}
                       </div>
-                      {s.payment_due_note && <div className="text-[10px] mt-0.5 truncate max-w-[180px]" title={s.payment_due_note} style={{ color: 'var(--color-text-tertiary)' }}>{s.payment_due_note}</div>}
+                      {s.payment_due_note && <div className="text-[11px] sm:text-[10px] mt-0.5 truncate max-w-[180px]" title={s.payment_due_note} style={{ color: 'var(--color-text-tertiary)' }}>{s.payment_due_note}</div>}
                     </td>
                     <td className="px-4 py-3" style={{ color: 'var(--color-text)' }}>{money(s.monthly_payment)}</td>
                     <td className="px-4 py-3">
@@ -395,7 +395,7 @@ function SuperSettings({ onSaved }) {
             </div>
             {(cfg.clientFilter || []).length > 0 && (
               <button type="button" onClick={() => setCfg(prev => ({ ...prev, clientFilter: [] }))}
-                className="mt-2 text-[10px] font-bold" style={{ color: 'var(--color-text-tertiary)' }}>Clear — show all clients</button>
+                className="mt-2 text-[11px] sm:text-[10px] font-bold" style={{ color: 'var(--color-text-tertiary)' }}>Clear — show all clients</button>
             )}
           </div>
 

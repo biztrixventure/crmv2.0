@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import client from '../../api/client';
+import { TableScroll } from "../UI/kit";
 
 // ── Compliance recording review ──────────────────────────────────────────────
 // Queue of "coded + mapped" sales; the reviewer hears every candidate leg
@@ -566,7 +567,7 @@ function QueueView({ companyList }) {
       </p>
 
       {/* table */}
-      <div className="rounded-xl overflow-x-auto" style={{ border: '1px solid var(--color-border)' }}>
+      <TableScroll stickyFirst label="Recordings" className="rounded-xl" style={{ border: '1px solid var(--color-border)' }}>
         <table className="w-full text-sm">
           <thead>
             <tr style={{ background: 'var(--color-surface)', color: 'var(--color-text-secondary)' }}>
@@ -624,7 +625,7 @@ function QueueView({ companyList }) {
             ))}
           </tbody>
         </table>
-      </div>
+      </TableScroll>
 
       {total > PAGE && (
         <div className="flex items-center justify-between text-xs" style={{ color: 'var(--color-text-secondary)' }}>

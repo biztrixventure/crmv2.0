@@ -1,5 +1,5 @@
 // Field — the ONE labelled control wrapper. Unifies the 4 label idioms found
-// across the admin surfaces (text-[10px] / text-[11px] / text-xs, uppercase or
+// across the admin surfaces (text-[11px] sm:text-[10px] / text-[11px] / text-xs, uppercase or
 // not). Wraps anything: ThemedSelect, ThemedDate, an `.input`, a checkbox grid.
 //
 // It is a WRAPPER, not a form-field renderer — components/Form/FormField.jsx is
@@ -23,7 +23,7 @@ export default function Field({
   return (
     <Tag className={`block ${className}`}>
       {label && (
-        <span className="text-[10px] font-bold uppercase tracking-wider block mb-1"
+        <span className="text-[11px] sm:text-[10px] font-bold uppercase tracking-wider block mb-1"
           style={{ color: 'var(--color-text-secondary)' }}>
           {label}
           {required && <span style={{ color: 'var(--color-error-600)' }}> *</span>}

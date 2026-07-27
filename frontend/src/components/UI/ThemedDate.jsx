@@ -200,7 +200,7 @@ export default function ThemedDate({
 
           <div className="grid grid-cols-7 gap-0.5 mb-0.5">
             {WEEKDAYS.map((w, i) => (
-              <div key={i} className="text-center text-[10px] font-bold py-0.5" style={{ color: 'var(--color-text-tertiary)' }}>{w}</div>
+              <div key={i} className="text-center text-[11px] sm:text-[10px] font-bold py-0.5" style={{ color: 'var(--color-text-tertiary)' }}>{w}</div>
             ))}
           </div>
 

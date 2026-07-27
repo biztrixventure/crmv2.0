@@ -108,7 +108,7 @@ export default function SaleStatusFilterPills({ value = '', onChange, className 
               without crowding the pills. Hidden on the smallest screens via
               the parent's overflow-x scroll. */}
           <span
-            className="text-[10px] uppercase tracking-widest font-bold px-1 flex-shrink-0"
+            className="text-[11px] sm:text-[10px] uppercase tracking-widest font-bold px-1 flex-shrink-0"
             style={{ color: 'var(--color-text-tertiary)' }}
           >
             {g.label}

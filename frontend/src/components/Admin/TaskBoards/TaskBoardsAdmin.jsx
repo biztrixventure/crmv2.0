@@ -56,7 +56,7 @@ export default function TaskBoardsAdmin() {
               <div className="min-w-0 flex-1">
                 <div className="font-bold text-sm flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
                   {b.title}
-                  {b.archived && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded uppercase" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-tertiary)' }}>Archived</span>}
+                  {b.archived && <span className="text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded uppercase" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-tertiary)' }}>Archived</span>}
                 </div>
                 <div className="text-[11px] mt-0.5 font-mono truncate" style={{ color: 'var(--color-text-tertiary)' }}>{linkFor(b)}</div>
                 <div className="text-[11px] mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>{b.card_count} card{b.card_count === 1 ? '' : 's'} · created {new Date(b.created_at).toLocaleDateString()}</div>

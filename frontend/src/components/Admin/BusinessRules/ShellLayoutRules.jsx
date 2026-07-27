@@ -429,7 +429,7 @@ const ShellLayoutRules = ({ config, scope, onSave }) => {
                   <GripVertical size={13} style={{ color: 'var(--color-text-tertiary)' }} className="flex-shrink-0" />
 
                   <div className="flex flex-col" style={{ minWidth: 110 }}>
-                    <span className="text-[9px] font-bold uppercase tracking-wider text-text-tertiary">Key</span>
+                    <span className="text-[11px] sm:text-[9px] font-bold uppercase tracking-wider text-text-tertiary">Key</span>
                     <code
                       className="text-xs font-mono px-1 py-0.5 rounded"
                       style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}
@@ -439,7 +439,7 @@ const ShellLayoutRules = ({ config, scope, onSave }) => {
                   </div>
 
                   <div className="flex flex-col flex-1 min-w-[140px]">
-                    <label className="text-[9px] font-bold uppercase tracking-wider text-text-tertiary">Label</label>
+                    <label className="text-[11px] sm:text-[9px] font-bold uppercase tracking-wider text-text-tertiary">Label</label>
                     {isEditing ? (
                       <div className="flex items-center gap-1">
                         <input

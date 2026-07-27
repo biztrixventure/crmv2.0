@@ -60,12 +60,12 @@ export default function SendBatchModal({ dataset, filters, onClose, onSent }) {
             Distributes the <b>{dataset}</b> result of your current filters, de-duplicated to distinct phone numbers.
           </p>
           <div>
-            <label className="text-[10px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-tertiary)' }}>Batch name</label>
+            <label className="text-[11px] sm:text-[10px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-tertiary)' }}>Batch name</label>
             <input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Texas non-buyers — Feb"
               className="w-full text-sm rounded-lg px-3 py-2 mt-1" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }} />
           </div>
           <div>
-            <label className="text-[10px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-tertiary)' }}>Send to</label>
+            <label className="text-[11px] sm:text-[10px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-tertiary)' }}>Send to</label>
             <div className="mt-1"><UserPicker value={recipient} onChange={setRecipient} /></div>
             {recipient && <RulePreview preview={preview} previewing={previewing} recipientName={recipient.name} />}
           </div>

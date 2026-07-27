@@ -230,7 +230,7 @@ export default function SaleDetailDrawer({ sale: saleProp, onClose, onResold }) 
     cancellation_date: sale.cancellation_date ? <Row key="cancellation_date" label="Cancellation Date" value={fmtSaleDate(sale.cancellation_date)} highlight="var(--color-error-600, var(--color-error-600))" /> : null,
     // How long the customer kept paying (sale date → cancellation date). Only
     // meaningful once a cancel date is set; hidden otherwise.
-    paid_for: (() => { const t = salePaidTenure(sale); return t ? <Row key="paid_for" label="Paid For" value={<span className="inline-flex items-center gap-1.5">{t.label}<span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: 'color-mix(in srgb, var(--color-warning-500) 16%, transparent)', color: 'var(--color-warning-700)' }}>{t.monthsFloat}mo</span></span>} highlight="var(--color-warning-700)" /> : null; })(),
+    paid_for: (() => { const t = salePaidTenure(sale); return t ? <Row key="paid_for" label="Paid For" value={<span className="inline-flex items-center gap-1.5">{t.label}<span className="text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: 'color-mix(in srgb, var(--color-warning-500) 16%, transparent)', color: 'var(--color-warning-700)' }}>{t.monthsFloat}mo</span></span>} highlight="var(--color-warning-700)" /> : null; })(),
     cancellation_reason: sale.cancellation_reason_key ? <Row key="cancellation_reason" label="Cancellation Reason" value={reasonLabelOf(sale.cancellation_reason_key)} highlight="var(--color-error-600, var(--color-error-600))" /> : null,
     closer_disposition: sale.closer_disposition ? <Row key="closer_disposition" label="Closer Disposition" value={sale.closer_disposition} highlight="var(--color-primary-600)" /> : null,
     monthly_payment:  (canFinancial && sale.monthly_payment)  ? <Row key="monthly_payment" label="Monthly Payment" value={`$${Number(sale.monthly_payment).toLocaleString()}/mo`} highlight="var(--color-success-600)" /> : null,
@@ -314,7 +314,7 @@ export default function SaleDetailDrawer({ sale: saleProp, onClose, onResold }) 
           style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
           <SaleStatusBadge sale={sale} size="md" />
           {sale.is_resell && (
-            <span className="text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded inline-flex items-center gap-1"
+            <span className="text-[11px] sm:text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded inline-flex items-center gap-1"
               style={{ backgroundColor: 'var(--color-primary-100, color-mix(in srgb, var(--color-primary) 16%, transparent))', color: 'var(--color-primary-700, #4338ca)' }}>
               <RefreshCw size={10} /> Resell{sale.resell_intent ? ` · ${sale.resell_intent}` : ''}
             </span>
@@ -345,7 +345,7 @@ export default function SaleDetailDrawer({ sale: saleProp, onClose, onResold }) 
         {Array.isArray(lifetime?.sales) && lifetime.sales.length > 1 && (
           <div className="flex items-center gap-1.5 px-4 py-2 flex-shrink-0 overflow-x-auto"
             style={{ borderBottom: '1px solid var(--color-border)', background: 'var(--color-surface)' }}>
-            <span className="text-[10px] font-bold uppercase tracking-wide mr-1 flex-shrink-0 whitespace-nowrap" style={{ color: 'var(--color-text-tertiary)' }}>
+            <span className="text-[11px] sm:text-[10px] font-bold uppercase tracking-wide mr-1 flex-shrink-0 whitespace-nowrap" style={{ color: 'var(--color-text-tertiary)' }}>
               {lifetime.sales.length} sales
             </span>
             {lifetime.sales.map((ls, i) => {
@@ -363,7 +363,7 @@ export default function SaleDetailDrawer({ sale: saleProp, onClose, onResold }) 
                   <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: tint.c }} />
                   <span className="opacity-60">#{i + 1}</span>
                   <span>{ls.reference_no ? `${ls.reference_no}`.toUpperCase() : (ls.sale_date || 'sale')}</span>
-                  {paid && <span className="text-[9px] font-bold px-1 rounded" style={{ background: 'color-mix(in srgb, var(--color-warning-500) 16%, transparent)', color: 'var(--color-warning-700)' }}>{paid.short}</span>}
+                  {paid && <span className="text-[11px] sm:text-[9px] font-bold px-1 rounded" style={{ background: 'color-mix(in srgb, var(--color-warning-500) 16%, transparent)', color: 'var(--color-warning-700)' }}>{paid.short}</span>}
                 </button>
               );
             })}
@@ -465,7 +465,7 @@ export default function SaleDetailDrawer({ sale: saleProp, onClose, onResold }) 
                       {g.reference_no || g.id.slice(0, 8)}
                     </code>
                     {g.plan && <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{g.plan}</span>}
-                    <span className="text-[10px] uppercase tracking-wide font-bold ml-auto" style={{ color: 'var(--color-text-secondary)' }}>
+                    <span className="text-[11px] sm:text-[10px] uppercase tracking-wide font-bold ml-auto" style={{ color: 'var(--color-text-secondary)' }}>
                       {(g.status || '').replace(/_/g, ' ')}
                     </span>
                   </button>
@@ -492,7 +492,7 @@ export default function SaleDetailDrawer({ sale: saleProp, onClose, onResold }) 
                         backgroundColor: isCurrent ? 'var(--color-primary-50, #eef2ff)' : 'var(--color-bg-secondary)',
                         border: isCurrent ? '1px solid var(--color-primary-300, #c7d2fe)' : '1px solid var(--color-border)',
                       }}>
-                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded"
+                      <span className="text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded"
                         style={{ backgroundColor: isCurrent ? 'var(--color-primary-200, #c7d2fe)' : 'var(--color-surface)', color: isCurrent ? 'var(--color-primary-700, #4338ca)' : 'var(--color-text-secondary)' }}>
                         #{i + 1}
                       </span>
@@ -513,26 +513,26 @@ export default function SaleDetailDrawer({ sale: saleProp, onClose, onResold }) 
                           {c.plan}
                         </span>
                       )}
-                      <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded"
+                      <span className="text-[11px] sm:text-[10px] font-bold uppercase px-1.5 py-0.5 rounded"
                         style={{
                           backgroundColor: c.is_resell ? 'color-mix(in srgb, var(--color-primary) 16%, transparent)' : 'color-mix(in srgb, var(--color-success-500) 16%, transparent)',
                           color:           c.is_resell ? '#6d28d9' : '#166534',
                         }}>
                         {c.is_resell ? 'resell' : 'original'}
                       </span>
-                      <span className="text-[10px] uppercase tracking-wide font-bold ml-auto"
+                      <span className="text-[11px] sm:text-[10px] uppercase tracking-wide font-bold ml-auto"
                         style={{ color: 'var(--color-text-secondary)' }}>
                         {(c.status || '').replace(/_/g, ' ')}
                       </span>
                       {c.cancellation_date && (
-                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded"
+                        <span className="text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded"
                           style={{ backgroundColor: 'var(--color-error-50, color-mix(in srgb, var(--color-error-500) 14%, transparent))', color: 'var(--color-error-700, var(--color-error-700))' }}>
                           cancelled {c.cancellation_date}
                         </span>
                       )}
                       {(() => { const t = salePaidTenure(c); return t ? (
                         <span title={`Paid from ${c.sale_date} to ${c.cancellation_date}`}
-                          className="text-[10px] font-bold px-1.5 py-0.5 rounded"
+                          className="text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded"
                           style={{ backgroundColor: 'color-mix(in srgb, var(--color-warning-500) 16%, transparent)', color: 'var(--color-warning-700)' }}>
                           paid {t.label}
                         </span>

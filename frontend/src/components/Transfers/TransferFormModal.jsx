@@ -261,7 +261,7 @@ const TransferFormModal = ({
                                 </div>
                               )}
                               {!zipLoading && zipInfo && val.length === 5 && (
-                                <p className="text-[10px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
+                                <p className="text-[11px] sm:text-[10px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
                                   {zipInfo.city}, {zipInfo.state}
                                 </p>
                               )}

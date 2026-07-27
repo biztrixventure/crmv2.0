@@ -326,7 +326,7 @@ export default function ManualEntryModal({ isOpen, prefillPhone, onClose, onCrea
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {formFieldsSorted.map(f => (
                   <div key={f.id || f.name}>
-                    <label className="text-[10px] font-semibold uppercase tracking-wide text-text-tertiary block mb-0.5">
+                    <label className="text-[11px] sm:text-[10px] font-semibold uppercase tracking-wide text-text-tertiary block mb-0.5">
                       {f.label || f.name}
                       {f.is_required && <span className="text-error-600 ml-0.5">*</span>}
                     </label>
@@ -339,11 +339,11 @@ export default function ManualEntryModal({ isOpen, prefillPhone, onClose, onCrea
                     {/* ZIP resolution hint — small note under any field
                         whose type is 'zip' once City/State have come back. */}
                     {f.field_type === 'zip' && zipLoading && (
-                      <p className="text-[10px] text-text-tertiary mt-1">Looking up ZIP…</p>
+                      <p className="text-[11px] sm:text-[10px] text-text-tertiary mt-1">Looking up ZIP…</p>
                     )}
                     {f.field_type === 'zip' && !zipLoading && zipInfo
                        && (formData[f.name] || '').length === 5 && (
-                      <p className="text-[10px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
+                      <p className="text-[11px] sm:text-[10px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
                         {zipInfo.city}, {zipInfo.state}
                       </p>
                     )}

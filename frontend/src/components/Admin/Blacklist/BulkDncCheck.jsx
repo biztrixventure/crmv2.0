@@ -3,6 +3,7 @@ import * as XLSX from 'xlsx';
 import { Upload, ClipboardList, Play, Zap, Download, X, Loader2, ShieldAlert, ShieldCheck, AlertTriangle, FileSpreadsheet } from 'lucide-react';
 import { toast } from 'sonner';
 import client from '../../../api/client';
+import { TableScroll } from "../../UI/kit";
 
 // Bulk DNC / blacklist checker: paste a list OR upload a CSV/XLSX, then check
 // every number. Two modes — "cached + fresh" (reuse the shared cache, only
@@ -217,7 +218,7 @@ export default function BulkDncCheck() {
               <Download size={13} /> Export CSV
             </button>
           </div>
-          <div className="rounded-lg overflow-x-auto" style={card}>
+          <TableScroll stickyFirst label="DNC results" className="rounded-lg" style={card}>
             <table className="w-full text-xs">
               <thead>
                 <tr style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>
@@ -246,7 +247,7 @@ export default function BulkDncCheck() {
               </tbody>
             </table>
             {shown.length > 500 && <p className="text-[11px] px-3 py-2" style={{ color: 'var(--color-text-tertiary)' }}>Showing first 500 — export CSV for all {shown.length}.</p>}
-          </div>
+          </TableScroll>
         </div>
       )}
     </div>

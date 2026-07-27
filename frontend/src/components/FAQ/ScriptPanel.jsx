@@ -87,7 +87,7 @@ const ScriptCard = ({ script, open, onToggle, q }) => {
         {!isOpen && matched.length > 0 && (
           <div className="flex flex-wrap gap-1 mt-1.5">
             {matched.slice(0, 4).map((s, i) => (
-              <span key={i} className="text-[10px] px-1.5 py-0.5 rounded-md font-semibold inline-flex items-center gap-1"
+              <span key={i} className="text-[11px] sm:text-[10px] px-1.5 py-0.5 rounded-md font-semibold inline-flex items-center gap-1"
                 style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>↳ {s.heading || 'section'}</span>
             ))}
           </div>
@@ -95,7 +95,7 @@ const ScriptCard = ({ script, open, onToggle, q }) => {
         {splitKeywords(script.keywords).length > 0 && (
           <div className="flex flex-wrap gap-1 mt-2">
             {splitKeywords(script.keywords).slice(0, isOpen ? 99 : 6).map(k => (
-              <span key={k} className="text-[10px] px-1.5 py-0.5 rounded-md font-medium inline-flex items-center gap-0.5"
+              <span key={k} className="text-[11px] sm:text-[10px] px-1.5 py-0.5 rounded-md font-medium inline-flex items-center gap-0.5"
                 style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}><Tag size={8} /> {k}</span>
             ))}
           </div>
@@ -138,7 +138,7 @@ const ScriptCard = ({ script, open, onToggle, q }) => {
                     const active = tagFilter === tl;
                     return (
                       <button key={t} onClick={() => setTagFilter(active ? '' : tl)}
-                        className="text-[10px] px-1.5 py-0.5 rounded font-medium inline-flex items-center gap-0.5 transition-all hover:scale-105"
+                        className="text-[11px] sm:text-[10px] px-1.5 py-0.5 rounded font-medium inline-flex items-center gap-0.5 transition-all hover:scale-105"
                         style={{ backgroundColor: active ? 'var(--color-primary-600)' : 'var(--color-primary-100)', color: active ? '#fff' : 'var(--color-primary-700)' }}
                         title="Show only this heading">
                         <Tag size={8} /> {t}
@@ -237,7 +237,7 @@ const ScriptPanel = () => {
           <div className="sticky top-4 space-y-4">
           {categories.length > 0 && (
             <div className="rounded-2xl p-3" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-              <p className="text-[10px] font-bold uppercase tracking-widest px-2 mb-2" style={{ color: 'var(--color-text-tertiary)' }}>Categories</p>
+              <p className="text-[11px] sm:text-[10px] font-bold uppercase tracking-widest px-2 mb-2" style={{ color: 'var(--color-text-tertiary)' }}>Categories</p>
               <div className="space-y-0.5 max-h-[40vh] overflow-y-auto">
                 <TopicButton active={categoryId === ''} label="All categories" count={scripts.length} icon={LayoutGrid} onClick={() => setCategoryId('')} />
                 {categories.map(c => (
@@ -249,7 +249,7 @@ const ScriptPanel = () => {
             </div>
           )}
           <div className="rounded-2xl p-3" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-            <p className="text-[10px] font-bold uppercase tracking-widest px-2 mb-2" style={{ color: 'var(--color-text-tertiary)' }}>Browse by Topic</p>
+            <p className="text-[11px] sm:text-[10px] font-bold uppercase tracking-widest px-2 mb-2" style={{ color: 'var(--color-text-tertiary)' }}>Browse by Topic</p>
             <div className="space-y-0.5 max-h-[60vh] overflow-y-auto">
               <TopicButton active={topic === ''} label="All Scripts" count={scripts.length} icon={LayoutGrid} onClick={() => setTopic('')} />
               {topics.map(([t, c]) => <TopicButton key={t} active={topic === t} label={t} count={c} icon={Tag} onClick={() => setTopic(topic === t ? '' : t)} />)}

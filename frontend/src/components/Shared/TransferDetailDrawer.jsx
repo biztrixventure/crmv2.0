@@ -235,20 +235,20 @@ export default function TransferDetailDrawer({ transfer, onClose }) {
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>{d.disposition_name}</span>
                     {d.setter_role && (
-                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full"
+                      <span className="text-[11px] sm:text-[9px] font-bold px-1.5 py-0.5 rounded-full"
                         style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>
                         {ROLE_LABELS[d.setter_role] || d.setter_role}
                       </span>
                     )}
-                    <span className="text-[10px] ml-auto" style={{ color: 'var(--color-text-tertiary)' }}>
+                    <span className="text-[11px] sm:text-[10px] ml-auto" style={{ color: 'var(--color-text-tertiary)' }}>
                       {new Date(d.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                     </span>
                   </div>
                   {d.setter_name && (
-                    <p className="text-[10px] mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>By {d.setter_name}</p>
+                    <p className="text-[11px] sm:text-[10px] mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>By {d.setter_name}</p>
                   )}
                   {d.note && (
-                    <p className="text-[10px] mt-1 px-2 py-1 rounded-lg italic"
+                    <p className="text-[11px] sm:text-[10px] mt-1 px-2 py-1 rounded-lg italic"
                       style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}>
                       "{d.note}"
                     </p>
@@ -336,7 +336,7 @@ export default function TransferDetailDrawer({ transfer, onClose }) {
               <p className="text-xs font-bold" style={{ color: 'var(--color-primary-700, #4338ca)' }}>
                 Manual entry by closer · {manualEntry.closer_name}
               </p>
-              <p className="text-[10px] mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+              <p className="text-[11px] sm:text-[10px] mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
                 Logged on {manualEntry.entered_at ? new Date(manualEntry.entered_at).toLocaleString() : 'unknown date'} — attributed to this fronter.
               </p>
             </div>

@@ -207,7 +207,7 @@ const ActivityPanel = () => {
           <ChevronLeft size={16} />
           <Activity size={14} />
           {onlineCount > 0 && (
-            <span className="text-[9px] font-bold px-1 rounded-full" style={{ backgroundColor: '#22c55e' }}>{onlineCount}</span>
+            <span className="text-[11px] sm:text-[9px] font-bold px-1 rounded-full" style={{ backgroundColor: '#22c55e' }}>{onlineCount}</span>
           )}
         </button>
       )}

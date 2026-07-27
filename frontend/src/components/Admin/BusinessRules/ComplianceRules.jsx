@@ -226,14 +226,14 @@ const ComplianceRules = ({ config, scope, onSave }) => {
                 {/* Key — slug, read-only after creation to keep referential
                     integrity with existing rows. */}
                 <div className="flex flex-col" style={{ minWidth: 110 }}>
-                  <span className="text-[9px] font-bold uppercase tracking-wider text-text-tertiary">Key</span>
+                  <span className="text-[11px] sm:text-[9px] font-bold uppercase tracking-wider text-text-tertiary">Key</span>
                   <code className="text-xs font-mono px-1 py-0.5 rounded"
                     style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>{s.key}</code>
                 </div>
 
                 {/* Label */}
                 <div className="flex flex-col flex-1 min-w-[120px]">
-                  <label className="text-[9px] font-bold uppercase tracking-wider text-text-tertiary">Label</label>
+                  <label className="text-[11px] sm:text-[9px] font-bold uppercase tracking-wider text-text-tertiary">Label</label>
                   <input type="text" value={s.label || ''}
                     onChange={(e) => updateRow(i, { label: e.target.value })}
                     placeholder="Display label"
@@ -242,7 +242,7 @@ const ComplianceRules = ({ config, scope, onSave }) => {
 
                 {/* Badge color */}
                 <div className="flex flex-col" style={{ minWidth: 130 }}>
-                  <label className="text-[9px] font-bold uppercase tracking-wider text-text-tertiary">Badge color</label>
+                  <label className="text-[11px] sm:text-[9px] font-bold uppercase tracking-wider text-text-tertiary">Badge color</label>
                   <ThemedSelect value={s.badge || 'secondary'}
                     onChange={(e) => updateRow(i, { badge: e.target.value })}
                     className="input text-xs py-1">
@@ -252,7 +252,7 @@ const ComplianceRules = ({ config, scope, onSave }) => {
 
                 {/* Category */}
                 <div className="flex flex-col" style={{ minWidth: 130 }}>
-                  <label className="text-[9px] font-bold uppercase tracking-wider text-text-tertiary">Category</label>
+                  <label className="text-[11px] sm:text-[9px] font-bold uppercase tracking-wider text-text-tertiary">Category</label>
                   <ThemedSelect value={s.category || 'neutral'}
                     onChange={(e) => updateRow(i, { category: e.target.value })}
                     className="input text-xs py-1">

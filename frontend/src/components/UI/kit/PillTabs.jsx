@@ -79,7 +79,7 @@ export default function PillTabs({ items = [], value, onChange, className = '', 
               {t.label}
               {t.count != null && (
                 <span
-                  className="text-[10px] font-bold px-1.5 rounded-full"
+                  className="text-[11px] sm:text-[10px] font-bold px-1.5 rounded-full"
                   style={{
                     background: on
                       ? 'color-mix(in srgb, var(--color-primary-600) 14%, transparent)'

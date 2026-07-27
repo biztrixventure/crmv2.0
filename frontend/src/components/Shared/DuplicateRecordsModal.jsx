@@ -141,7 +141,7 @@ const DuplicateRecordsModal = ({ onClose, showCompany = false, title = 'Duplicat
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
                     {/* Submitted by */}
                     <div className="rounded-lg px-2.5 py-2" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
-                      <p className="text-[10px] font-bold uppercase tracking-wide mb-0.5" style={{ color: 'var(--color-text-tertiary)' }}>Submitted by</p>
+                      <p className="text-[11px] sm:text-[10px] font-bold uppercase tracking-wide mb-0.5" style={{ color: 'var(--color-text-tertiary)' }}>Submitted by</p>
                       <p className="flex items-center gap-1 font-semibold" style={{ color: 'var(--color-text)' }}>
                         <User size={11} /> {r.fronter?.name || 'Unknown'}
                       </p>
@@ -150,7 +150,7 @@ const DuplicateRecordsModal = ({ onClose, showCompany = false, title = 'Duplicat
 
                     {/* Original record */}
                     <div className="rounded-lg px-2.5 py-2" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
-                      <p className="text-[10px] font-bold uppercase tracking-wide mb-0.5" style={{ color: 'var(--color-text-tertiary)' }}>Original record</p>
+                      <p className="text-[11px] sm:text-[10px] font-bold uppercase tracking-wide mb-0.5" style={{ color: 'var(--color-text-tertiary)' }}>Original record</p>
                       {r.original_transfer ? (
                         <>
                           <p className="font-semibold" style={{ color: 'var(--color-text)' }}>Created {fmtDay(r.original_transfer.created_at)}</p>
@@ -163,7 +163,7 @@ const DuplicateRecordsModal = ({ onClose, showCompany = false, title = 'Duplicat
 
                     {/* Current record */}
                     <div className="rounded-lg px-2.5 py-2" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
-                      <p className="text-[10px] font-bold uppercase tracking-wide mb-0.5 flex items-center gap-1" style={{ color: 'var(--color-text-tertiary)' }}>
+                      <p className="text-[11px] sm:text-[10px] font-bold uppercase tracking-wide mb-0.5 flex items-center gap-1" style={{ color: 'var(--color-text-tertiary)' }}>
                         <ArrowRight size={10} /> Current record
                       </p>
                       {r.current_transfer ? (

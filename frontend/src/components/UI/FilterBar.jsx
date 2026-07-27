@@ -131,7 +131,7 @@ export default function FilterBar({
       {Array.isArray(activeChips) && activeChips.length > 0 && (
         <div className="flex items-center gap-1.5 flex-wrap">
           <FilterIcon size={11} style={{ color: 'var(--color-text-tertiary)' }} />
-          <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-tertiary)' }}>
+          <span className="text-[11px] sm:text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-tertiary)' }}>
             Active
           </span>
           {activeChips.map(c => (

@@ -127,6 +127,6 @@ const Stat = ({ icon: Icon, color, n, label }) => (
   <div className="rounded-xl p-2 text-center" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
     <Icon size={15} style={{ color }} className="mx-auto mb-0.5" />
     <div className="text-lg font-bold leading-none" style={{ color: 'var(--color-text)' }}>{n}</div>
-    <div className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{label}</div>
+    <div className="text-[11px] sm:text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{label}</div>
   </div>
 );

@@ -214,7 +214,7 @@ function MiniCalendar({ todaySales, todayXfers, todayLoading, selectedFrom, sele
       {/* Day-of-week labels */}
       <div className="grid grid-cols-7 mb-0.5">
         {DAY_ABBR.map((d, i) => (
-          <span key={i} className="text-center text-[9px] font-bold"
+          <span key={i} className="text-center text-[11px] sm:text-[9px] font-bold"
             style={{ color: 'var(--color-text-tertiary)' }}>{d}</span>
         ))}
       </div>

@@ -50,7 +50,7 @@ const FAQCard = ({ faq, open, onToggle, q }) => (
         {splitKeywords(faq.keywords).length > 0 && (
           <div className="flex flex-wrap gap-1 mt-2">
             {splitKeywords(faq.keywords).slice(0, open ? 99 : 5).map(k => (
-              <span key={k} className="text-[10px] px-1.5 py-0.5 rounded-md font-medium inline-flex items-center gap-0.5"
+              <span key={k} className="text-[11px] sm:text-[10px] px-1.5 py-0.5 rounded-md font-medium inline-flex items-center gap-0.5"
                 style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>
                 <Tag size={8} /> {k}
               </span>
@@ -64,7 +64,7 @@ const FAQCard = ({ faq, open, onToggle, q }) => (
 
     {open && (
       <div className="px-4 sm:px-5 pb-5 pl-[3.75rem] animate-fade-in">
-        <p className="text-[10px] font-bold uppercase tracking-widest mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Answer</p>
+        <p className="text-[11px] sm:text-[10px] font-bold uppercase tracking-widest mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Answer</p>
         <p className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: 'var(--color-text)' }}>{faq.answer}</p>
       </div>
     )}
@@ -201,7 +201,7 @@ const FAQPanel = () => {
           <div className="sticky top-4 space-y-4">
             {audiences.length > 0 && (
               <div className="rounded-2xl p-3" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-                <p className="text-[10px] font-bold uppercase tracking-widest px-2 mb-2" style={{ color: 'var(--color-text-tertiary)' }}>Audience</p>
+                <p className="text-[11px] sm:text-[10px] font-bold uppercase tracking-widest px-2 mb-2" style={{ color: 'var(--color-text-tertiary)' }}>Audience</p>
                 <div className="space-y-0.5">
                   <TopicButton active={audience === ''} label="Everyone" count={faqs.length} onClick={() => { setAudience(''); setTopic(''); }} />
                   {audiences.map(a => (
@@ -214,7 +214,7 @@ const FAQPanel = () => {
 
             {categories.length > 0 && (
               <div className="rounded-2xl p-3" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-                <p className="text-[10px] font-bold uppercase tracking-widest px-2 mb-2" style={{ color: 'var(--color-text-tertiary)' }}>Categories</p>
+                <p className="text-[11px] sm:text-[10px] font-bold uppercase tracking-widest px-2 mb-2" style={{ color: 'var(--color-text-tertiary)' }}>Categories</p>
                 <div className="space-y-0.5 max-h-[40vh] overflow-y-auto">
                   <TopicButton active={categoryId === ''} label="All categories" count={audienceScoped.length} icon={LayoutGrid} onClick={() => setCategoryId('')} />
                   {categories.map(c => (
@@ -227,7 +227,7 @@ const FAQPanel = () => {
             )}
 
             <div className="rounded-2xl p-3" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-              <p className="text-[10px] font-bold uppercase tracking-widest px-2 mb-2" style={{ color: 'var(--color-text-tertiary)' }}>Browse by Topic</p>
+              <p className="text-[11px] sm:text-[10px] font-bold uppercase tracking-widest px-2 mb-2" style={{ color: 'var(--color-text-tertiary)' }}>Browse by Topic</p>
               <div className="space-y-0.5 max-h-[60vh] overflow-y-auto">
                 <TopicButton active={topic === ''} label="All FAQs" count={audienceScoped.length} icon={LayoutGrid} onClick={() => setTopic('')} />
                 {topics.map(([t, c]) => (

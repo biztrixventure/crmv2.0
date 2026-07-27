@@ -185,7 +185,7 @@ export default function SheetScoreRow({ config, initialValues = {}, initialNotes
           {/* group band */}
           <div className="flex">
             {bands.map((b, i) => (
-              <div key={i} className="flex-shrink-0 px-2 py-1 text-[9px] font-extrabold uppercase tracking-wider truncate"
+              <div key={i} className="flex-shrink-0 px-2 py-1 text-[11px] sm:text-[9px] font-extrabold uppercase tracking-wider truncate"
                 style={{ width: b.w, background: GROUP_BAND[b.group], color: 'var(--color-text-secondary)', borderRight: '1px solid var(--color-border)', borderBottom: '1px solid var(--color-border)' }}>
                 {GROUP_LABEL[b.group] || b.group}
               </div>
@@ -194,7 +194,7 @@ export default function SheetScoreRow({ config, initialValues = {}, initialNotes
           {/* column labels */}
           <div className="flex">
             {columns.map(c => (
-              <div key={c.key} className="flex-shrink-0 px-1.5 py-1 text-[9px] font-bold leading-tight break-words flex items-end"
+              <div key={c.key} className="flex-shrink-0 px-1.5 py-1 text-[11px] sm:text-[9px] font-bold leading-tight break-words flex items-end"
                 title={pretty(c.label)} style={{ width: c.w, height: 42, background: GROUP_TINT[c.group], color: 'var(--color-text-secondary)', borderRight: '1px solid var(--color-border)', borderBottom: '1px solid var(--color-border)' }}>
                 {pretty(c.label)}
               </div>
@@ -210,7 +210,7 @@ export default function SheetScoreRow({ config, initialValues = {}, initialNotes
 
       <div className="flex items-end gap-2 p-2.5" style={{ borderTop: '1px solid var(--color-border)' }}>
         <div className="flex-1">
-          <div className="text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: 'var(--color-text-tertiary)' }}>Overall notes / coaching feedback</div>
+          <div className="text-[11px] sm:text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: 'var(--color-text-tertiary)' }}>Overall notes / coaching feedback</div>
           <textarea placeholder="Write detailed feedback — multiple lines welcome. Shift+Enter for a new line." value={notes} onChange={e => setNotes(e.target.value)} disabled={readOnly}
             rows={3} style={{ ...selStyle, width: '100%', minHeight: 64, resize: 'vertical', lineHeight: 1.5, fontFamily: 'inherit' }} />
         </div>

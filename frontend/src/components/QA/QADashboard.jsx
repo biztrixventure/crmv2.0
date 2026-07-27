@@ -105,7 +105,7 @@ function MethodCard({ wt, m, day }) {
     <Card style={{ borderTop: `3px solid ${meta.color}` }}>
       <div className="flex items-baseline justify-between">
         <div><div className="text-base font-extrabold" style={{ color: 'var(--color-text)' }}>{meta.label}</div><div className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{meta.sub}</div></div>
-        <div className="text-right"><div className="text-2xl font-extrabold" style={{ color: meta.color }}>{pending}</div><div className="text-[10px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>{day ? 'Pending that day' : 'Pending'}</div></div>
+        <div className="text-right"><div className="text-2xl font-extrabold" style={{ color: meta.color }}>{pending}</div><div className="text-[11px] sm:text-[10px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>{day ? 'Pending that day' : 'Pending'}</div></div>
       </div>
       <div className="mt-3"><MethodMini m={mini} /></div>
       <div className="flex items-center justify-between mt-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
@@ -172,7 +172,7 @@ export function QAManagerDashboard({ companyId, onOpenReports }) {
       <div className="grid md:grid-cols-2 gap-4">
         <Card><div className="text-sm font-bold mb-1" style={{ color: 'var(--color-text)' }}>Team workload by method</div><div className="grid place-items-center"><Radar axes={radar} /></div></Card>
         <Card><div className="text-sm font-bold mb-3" style={{ color: 'var(--color-text)' }}>Team reviews — last 14 days</div><Bars data={(data.daily || []).map(d => ({ label: d.date.slice(5), value: d.done }))} height={120} />
-          <div className="grid grid-cols-4 gap-2 mt-4">{WT.map(w => <div key={w} className="text-center"><div className="text-lg font-extrabold" style={{ color: WT_META[w].color }}>{(by[w]?.total) || 0}</div><div className="text-[10px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>{WT_META[w].label}</div></div>)}</div>
+          <div className="grid grid-cols-4 gap-2 mt-4">{WT.map(w => <div key={w} className="text-center"><div className="text-lg font-extrabold" style={{ color: WT_META[w].color }}>{(by[w]?.total) || 0}</div><div className="text-[11px] sm:text-[10px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>{WT_META[w].label}</div></div>)}</div>
         </Card>
       </div>
 
@@ -249,7 +249,7 @@ function AgentDetail({ agent, companyId, date, range, onClose }) {
                   {rows.map(r => (
                     <tr key={r.id} style={{ borderTop: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>
                       <td className="px-3 py-1.5 whitespace-nowrap">{r.reviewed_at ? new Date(r.reviewed_at).toLocaleDateString() : '—'}</td>
-                      <td className="px-3 py-1.5"><span className="text-[10px] font-bold px-1.5 py-0.5 rounded uppercase" style={{ background: `color-mix(in srgb, ${WT_META[r.method]?.color || '#888'} 15%, transparent)`, color: WT_META[r.method]?.color || '#888' }}>{WT_META[r.method]?.label || r.method}</span></td>
+                      <td className="px-3 py-1.5"><span className="text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded uppercase" style={{ background: `color-mix(in srgb, ${WT_META[r.method]?.color || '#888'} 15%, transparent)`, color: WT_META[r.method]?.color || '#888' }}>{WT_META[r.method]?.label || r.method}</span></td>
                       <td className="px-3 py-1.5 truncate" style={{ maxWidth: 140, color: 'var(--color-text)' }}>{r.agent || r.subject_name || '—'}</td>
                       <td className="px-3 py-1.5 truncate" style={{ maxWidth: 130 }}>{r.customer_name || '—'}</td>
                       <td className="px-3 py-1.5 font-bold" style={{ color: r.passed === false ? '#dc2626' : r.passed === true ? '#059669' : 'var(--color-text-tertiary)' }}>{r.passed === true ? 'Pass' : r.passed === false ? 'Fail' : (r.autofail_result || '—')}</td>
@@ -267,7 +267,7 @@ function AgentDetail({ agent, companyId, date, range, onClose }) {
 const MiniStat = ({ label, value, tint = 'var(--color-primary-600)' }) => (
   <div style={{ background: 'var(--color-bg-secondary)', borderRadius: 12, padding: 10, textAlign: 'center' }}>
     <div className="text-xl font-extrabold" style={{ color: tint }}>{value}</div>
-    <div className="text-[10px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>{label}</div>
+    <div className="text-[11px] sm:text-[10px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>{label}</div>
   </div>
 );
 
@@ -282,9 +282,9 @@ function AgentCard({ a, date, onOpen }) {
           <span style={{ width: 40, height: 40, borderRadius: '50%', background: 'var(--color-primary-100)', color: 'var(--color-primary-700)', display: 'grid', placeItems: 'center', fontWeight: 800 }}>{(a.name || '?').slice(0, 2).toUpperCase()}</span>
           <div className="min-w-0 flex-1">
             <div className="font-bold truncate" style={{ color: 'var(--color-text)' }}>{a.name}</div>
-            <div className="flex gap-1 mt-0.5 flex-wrap">{[...new Set(a.methods || [])].map(m => <span key={m} className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase" style={{ background: `color-mix(in srgb, ${WT_META[m]?.color || '#888'} 16%, transparent)`, color: WT_META[m]?.color || '#888' }}>{WT_META[m]?.label || m}</span>)}</div>
+            <div className="flex gap-1 mt-0.5 flex-wrap">{[...new Set(a.methods || [])].map(m => <span key={m} className="text-[11px] sm:text-[9px] font-bold px-1.5 py-0.5 rounded uppercase" style={{ background: `color-mix(in srgb, ${WT_META[m]?.color || '#888'} 16%, transparent)`, color: WT_META[m]?.color || '#888' }}>{WT_META[m]?.label || m}</span>)}</div>
           </div>
-          <div className="text-right"><div className="text-2xl font-extrabold" style={{ color: '#d97706' }}>{pending}</div><div className="text-[9px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>{date ? 'Pending·day' : 'Pending'}</div></div>
+          <div className="text-right"><div className="text-2xl font-extrabold" style={{ color: '#d97706' }}>{pending}</div><div className="text-[11px] sm:text-[9px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>{date ? 'Pending·day' : 'Pending'}</div></div>
         </div>
         <div className="grid grid-cols-2 gap-3 mt-3 items-center">
           <Radar axes={radar} size={150} />
@@ -329,7 +329,7 @@ function Welcome({ name, sub, date, setDate, methods, busy }) {
         <div className="text-white/80 text-sm font-semibold flex items-center gap-2">{greet}, {busy && <Loader2 size={13} className="animate-spin text-white/80" />}</div>
         <div className="text-2xl font-extrabold text-white truncate">{name || 'there'} 👋</div>
         <div className="text-white/80 text-sm mt-0.5">{sub}</div>
-        {methods && methods.length > 0 && <div className="flex gap-1 mt-2">{[...new Set(methods)].map(m => <span key={m} className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: 'rgba(255,255,255,0.22)', color: '#fff' }}>{WT_META[m]?.label || m}</span>)}</div>}
+        {methods && methods.length > 0 && <div className="flex gap-1 mt-2">{[...new Set(methods)].map(m => <span key={m} className="text-[11px] sm:text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: 'rgba(255,255,255,0.22)', color: '#fff' }}>{WT_META[m]?.label || m}</span>)}</div>}
       </div>
       <label className="flex items-center gap-2 px-3 py-2 rounded-xl" style={{ background: 'rgba(255,255,255,0.16)' }}>
         <CalendarDays size={16} className="text-white" />

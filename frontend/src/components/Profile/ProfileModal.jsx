@@ -164,7 +164,7 @@ const ThemeSection = ({ uid }) => {
         style={{ background: 'var(--color-bg-secondary)', borderBottom: open ? '1px solid var(--color-border)' : 'none' }}>
         <span className="flex items-center gap-2 font-bold text-sm" style={{ color: 'var(--color-text)' }}>
           <Palette size={15} style={{ color: 'var(--color-primary-600)' }} />
-          My colours {saved && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: 'var(--color-primary-600)', color: '#fff' }}>Custom</span>}
+          My colours {saved && <span className="text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: 'var(--color-primary-600)', color: '#fff' }}>Custom</span>}
         </span>
         <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>{open ? 'Close' : 'Personalise'}</span>
       </button>
@@ -211,7 +211,7 @@ const ThemeSection = ({ uid }) => {
                     className="w-7 h-7 rounded cursor-pointer flex-shrink-0 bg-transparent" style={{ border: 'none', padding: 0 }} />
                   <span className="min-w-0">
                     <span className="block text-xs font-semibold truncate" style={{ color: 'var(--color-text)' }}>{tok.label}</span>
-                    <span className="block text-[10px] font-mono" style={{ color: 'var(--color-text-tertiary)' }}>{core[tok.key]}</span>
+                    <span className="block text-[11px] sm:text-[10px] font-mono" style={{ color: 'var(--color-text-tertiary)' }}>{core[tok.key]}</span>
                   </span>
                 </label>
               ))}

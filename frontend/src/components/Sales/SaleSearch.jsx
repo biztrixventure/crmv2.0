@@ -131,7 +131,7 @@ const SaleSearch = ({ companyId, user }) => {
                     <p className="font-bold text-text truncate">{s.customer_name || '—'}</p>
                     {s.group_count > 1 && (
                       <span title="Multi-vehicle bundle — this is one car of one deal"
-                        className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded whitespace-nowrap flex-shrink-0"
+                        className="text-[11px] sm:text-[10px] font-bold uppercase px-1.5 py-0.5 rounded whitespace-nowrap flex-shrink-0"
                         style={{ backgroundColor: '#d1fae5', color: '#065f46' }}>
                         {s.group_count}-car deal
                       </span>

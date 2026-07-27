@@ -70,7 +70,7 @@ const StatCardTriple = ({
         >
           {value}
         </span>
-        <span className="text-[9px] font-bold uppercase tracking-wider text-text-tertiary mt-1 truncate max-w-full">
+        <span className="text-[11px] sm:text-[9px] font-bold uppercase tracking-wider text-text-tertiary mt-1 truncate max-w-full">
           {segLabel}
         </span>
       </button>
@@ -101,7 +101,7 @@ const StatCardTriple = ({
         </div>
       )}
 
-      {caption && <p className="text-[10px] text-text-tertiary leading-tight">{caption}</p>}
+      {caption && <p className="text-[11px] sm:text-[10px] text-text-tertiary leading-tight">{caption}</p>}
     </Card>
   );
 };

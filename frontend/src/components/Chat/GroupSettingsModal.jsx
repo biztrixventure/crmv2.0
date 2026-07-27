@@ -201,7 +201,7 @@ const GroupSettingsModal = ({ conversation, meId, onClose, onUpdated, onLeft, on
                         {m.name}{m.id === meId && ' (You)'}
                         {m.member_role === 'admin' && <Crown size={12} style={{ color: 'var(--color-primary-600)' }} title="Admin" />}
                       </p>
-                      {m.role && <p className="text-[10px] truncate" style={{ color: 'var(--color-text-tertiary)' }}>{m.role}</p>}
+                      {m.role && <p className="text-[11px] sm:text-[10px] truncate" style={{ color: 'var(--color-text-tertiary)' }}>{m.role}</p>}
                     </div>
                     {isAdmin && m.id !== meId && (
                       <div className="flex items-center gap-1 flex-shrink-0">

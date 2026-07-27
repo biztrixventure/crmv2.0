@@ -5,6 +5,7 @@ import client from '../../../api/client';
 import ThemedSelect from '../../UI/Select';
 import ThemedDate from '../../UI/ThemedDate';
 import { SectionHeader, PillTabs, Loading, KpiTile, Field } from '../../UI/kit';
+import { TableScroll } from "../../UI/kit";
 
 // Searchable "pick a user" control (name → id) backed by the recipients
 // directory — replaces raw UUID entry. Single-select; onPick({id,name,...}).
@@ -170,7 +171,7 @@ function AuditTab() {
         <span className="text-xs ml-auto tabular-nums" style={{ color: 'var(--color-text-tertiary)' }}>{total.toLocaleString()} events</span>
       </div>
 
-      <div className="rounded-xl overflow-x-auto" style={box}>
+      <TableScroll stickyFirst label="Egress records" className="rounded-xl" style={box}>
         <table className="w-full text-sm">
           <thead><tr style={{ color: 'var(--color-text-secondary)', background: 'var(--color-bg-secondary)' }}>
             {['When', 'User', 'Action', 'Dataset', 'Rows / Dur', 'Status', ''].map((h, i) => <th key={i} className="text-left px-3 py-2 text-xs font-semibold whitespace-nowrap">{h}</th>)}
@@ -204,7 +205,7 @@ function AuditTab() {
               ))}
           </tbody>
         </table>
-      </div>
+      </TableScroll>
 
       {total > PAGE && (
         <div className="flex items-center justify-between text-xs" style={{ color: 'var(--color-text-secondary)' }}>
@@ -305,7 +306,7 @@ function LimitsTab() {
       <div>
         <p className="text-sm font-bold mb-1" style={{ color: 'var(--color-text)' }}>Role defaults <span className="text-xs font-normal" style={{ color: 'var(--color-text-tertiary)' }}>· {areaName(area)}</span></p>
         <p className="text-xs mb-2" style={{ color: 'var(--color-text-secondary)' }}>Max caps per role. Blank = <b>unlimited (∞)</b>; set to <b>0</b> to block entirely. Applies to every user of that role unless a company/user override exists. Edits save on blur.</p>
-        <div className="rounded-xl overflow-x-auto" style={box}>
+        <TableScroll stickyFirst label="Egress records" className="rounded-xl" style={box}>
           <table className="w-full text-sm">
             <thead><tr style={{ color: 'var(--color-text-secondary)', background: 'var(--color-bg-secondary)' }}>
               {['Role', 'Max rows / export', 'Max exports / day', 'Max rec. min / day'].map(h => <th key={h} className="text-left px-3 py-2 text-xs font-semibold whitespace-nowrap">{h}</th>)}
@@ -322,7 +323,7 @@ function LimitsTab() {
                 ))}
             </tbody>
           </table>
-        </div>
+        </TableScroll>
         {recDisabled && <p className="text-[11px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>Recording-minute caps aren’t area-specific — switch to “All areas” to set them.</p>}
       </div>
 
@@ -371,7 +372,7 @@ function LimitsTab() {
           </div>
           <p className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>Blank = unlimited, 0 = blocked. A user/company override beats the role default for that action{area === '__all' ? '' : ` in ${areaName(area)}`}. (recording caps are always global.)</p>
         </div>
-        <div className="rounded-xl overflow-x-auto" style={box}>
+        <TableScroll stickyFirst label="Egress records" className="rounded-xl" style={box}>
           <table className="w-full text-sm">
             <thead><tr style={{ color: 'var(--color-text-secondary)', background: 'var(--color-bg-secondary)' }}>
               {['Scope', 'Name', 'Action', 'Rows', 'Exports/day', 'Rec min/day', ''].map(h => <th key={h} className="text-left px-3 py-2 text-xs font-semibold">{h}</th>)}
@@ -391,7 +392,7 @@ function LimitsTab() {
                 ))}
             </tbody>
           </table>
-        </div>
+        </TableScroll>
       </div>
     </div>
   );
@@ -478,7 +479,7 @@ function FieldsTab() {
                   <label key={field} title={`Column key: ${field}`} className="flex items-center gap-2 text-xs px-2 py-1.5 rounded-lg cursor-pointer" style={{ background: on ? 'var(--color-primary-50,#eef2ff)' : 'transparent', border: '1px solid var(--color-border)' }}>
                     <input type="checkbox" checked={on} onChange={() => toggleCol(field)} />
                     <span className="flex-1">{labelFor(field)}{sens && <span title="Sensitive / PII — think before including in an export" style={{ color: '#d97706', marginLeft: 3 }}>•</span>}</span>
-                    <code className="text-[9px]" style={{ color: 'var(--color-text-tertiary)' }}>{field}</code>
+                    <code className="text-[11px] sm:text-[9px]" style={{ color: 'var(--color-text-tertiary)' }}>{field}</code>
                   </label>
                 );
               })}
@@ -524,7 +525,7 @@ function FieldsTab() {
           <p className="text-xs" style={{ color: 'var(--color-error-600,#dc2626)' }}>No columns selected — the exported file would have no data columns. Check at least one field on the left.</p>
         ) : (
           <>
-            <div className="overflow-x-auto rounded-lg" style={{ border: '1px solid var(--color-border)' }}>
+            <TableScroll stickyFirst label="Egress records" className="rounded-lg" style={{ border: '1px solid var(--color-border)' }}>
               <table className="text-xs" style={{ borderCollapse: 'collapse', minWidth: '100%' }}>
                 <thead>
                   <tr style={{ background: 'var(--color-bg-secondary)' }}>
@@ -539,7 +540,7 @@ function FieldsTab() {
                   <tr>{previewFields.map(f => <td key={f} className="px-3 py-2 whitespace-nowrap" style={{ borderRight: '1px solid var(--color-border)', borderTop: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>{sampleFor(f)}</td>)}</tr>
                 </tbody>
               </table>
-            </div>
+            </TableScroll>
             <div className="mt-2 rounded-lg p-2 overflow-x-auto" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
               <div className="text-[11px] sm:text-[10px] font-bold mb-1" style={{ color: 'var(--color-text-tertiary)' }}>RAW CSV HEADER (column keys as written to the file)</div>
               <code className="text-[11px] whitespace-nowrap" style={{ color: 'var(--color-text)' }}>{previewFields.join(',')}</code>
@@ -606,7 +607,7 @@ function ExportAccessTab() {
     );
   };
   const Matrix = ({ scopeType, rows }) => (
-    <div className="overflow-x-auto rounded-xl" style={box}>
+    <TableScroll stickyFirst label="Egress records" className="rounded-xl" style={box}>
       <table className="w-full text-xs" style={{ borderCollapse: 'collapse' }}>
         <thead>
           <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
@@ -623,7 +624,7 @@ function ExportAccessTab() {
           ))}
         </tbody>
       </table>
-    </div>
+    </TableScroll>
   );
 
   return (

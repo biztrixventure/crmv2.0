@@ -39,7 +39,7 @@ export default function PendingFromDialer({ onPick, refreshSignal }) {
               <div className="min-w-0">
                 <p className="text-sm font-semibold flex items-center gap-2 flex-wrap" style={{ color: 'var(--color-text)' }}>
                   <Phone size={13} /> {phone || '—'}
-                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded inline-flex items-center gap-0.5" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}><Hash size={8} /> {it.vicidial_vendor_code}</span>
+                  <span className="text-[11px] sm:text-[10px] font-mono px-1.5 py-0.5 rounded inline-flex items-center gap-0.5" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}><Hash size={8} /> {it.vicidial_vendor_code}</span>
                 </p>
                 {it.closer_disposition ? (
                   <p className="text-xs mt-1 flex items-center gap-1.5 flex-wrap" style={{ color: 'var(--color-text-secondary)' }}>

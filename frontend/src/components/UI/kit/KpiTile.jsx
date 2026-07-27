@@ -65,10 +65,10 @@ export default function KpiTile({
           1. global.css sets `p { margin: 12px 0 }`, and Tailwind's mt-* only
              overrides margin-TOP — the base margin-bottom survives. Hence m-0
              on every <p> here, with spacing re-applied explicitly.
-          2. the arbitrary text-[10px] sets font SIZE only, so the label keeps
+          2. the arbitrary text-[11px] sm:text-[10px] sets font SIZE only, so the label keeps
              the inherited 24px line-height. Hence leading-none. */}
       <div className="flex items-start justify-between gap-2">
-        <p className="text-[10px] font-bold uppercase tracking-wider truncate leading-none m-0"
+        <p className="text-[11px] sm:text-[10px] font-bold uppercase tracking-wider truncate leading-none m-0"
           style={{ color: active ? a.fg : 'var(--color-text-secondary)' }}>
           {label}
         </p>

@@ -13,7 +13,7 @@ const Kpi = ({ icon: Icon, label, value, tip, accent }) => (
       style={{ backgroundColor: 'var(--color-bg-secondary)', borderColor: 'var(--color-border)' }}>
       <Icon size={14} className="mx-auto mb-1" style={{ color: accent }} />
       <div className="text-lg font-extrabold" style={{ color: 'var(--color-text)' }}>{value}</div>
-      <div className="text-[10px] uppercase tracking-wide font-semibold" style={{ color: 'var(--color-text-secondary)' }}>{label}</div>
+      <div className="text-[11px] sm:text-[10px] uppercase tracking-wide font-semibold" style={{ color: 'var(--color-text-secondary)' }}>{label}</div>
     </div>
   </Tooltip>
 );

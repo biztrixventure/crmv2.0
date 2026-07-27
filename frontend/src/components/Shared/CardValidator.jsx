@@ -12,7 +12,7 @@ const Check2 = ({ ok, label, hint }) => (
   <div className="flex items-center gap-2 text-sm">
     <span className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0"
       style={{ backgroundColor: ok == null ? 'var(--color-bg-secondary)' : ok ? '#16a34a' : '#dc2626', color: '#fff' }}>
-      {ok == null ? <span className="text-[10px]">–</span> : ok ? <Check size={13} /> : <X size={13} />}
+      {ok == null ? <span className="text-[11px] sm:text-[10px]">–</span> : ok ? <Check size={13} /> : <X size={13} />}
     </span>
     <span style={{ color: 'var(--color-text)' }}>{label}</span>
     {hint && <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>{hint}</span>}

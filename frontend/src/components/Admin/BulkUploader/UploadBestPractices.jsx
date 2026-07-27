@@ -179,7 +179,7 @@ const UploadBestPractices = ({ kind = 'transfer', fields = [], startOpen = false
                     <div className="flex-shrink-0" style={{ minWidth: 168 }}>
                       <Code>{f.key}</Code>
                       {isSale && (
-                        <span className="text-[9px] ml-1.5 px-1 py-0.5 rounded font-bold"
+                        <span className="text-[11px] sm:text-[9px] ml-1.5 px-1 py-0.5 rounded font-bold"
                           style={origin === 'closer'
                             ? { backgroundColor: '#ede9fe', color: '#6d28d9' }
                             : { backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>
@@ -187,9 +187,9 @@ const UploadBestPractices = ({ kind = 'transfer', fields = [], startOpen = false
                         </span>
                       )}
                       {f.required
-                        ? <span className="text-[9px] ml-1 px-1 py-0.5 rounded font-bold" style={{ backgroundColor: 'var(--color-success-100,#dcfce7)', color: 'var(--color-success-700,#15803d)' }}>REQUIRED</span>
-                        : <span className="text-[9px] ml-1" style={{ color: 'var(--color-text-tertiary)' }}>optional</span>}
-                      {f.isPhone && <span className="text-[9px] ml-1 px-1 py-0.5 rounded font-bold" style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>match key</span>}
+                        ? <span className="text-[11px] sm:text-[9px] ml-1 px-1 py-0.5 rounded font-bold" style={{ backgroundColor: 'var(--color-success-100,#dcfce7)', color: 'var(--color-success-700,#15803d)' }}>REQUIRED</span>
+                        : <span className="text-[11px] sm:text-[9px] ml-1" style={{ color: 'var(--color-text-tertiary)' }}>optional</span>}
+                      {f.isPhone && <span className="text-[11px] sm:text-[9px] ml-1 px-1 py-0.5 rounded font-bold" style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>match key</span>}
                     </div>
                     <span className="text-xs">{ruleFor(f.field_type)}</span>
                   </div>

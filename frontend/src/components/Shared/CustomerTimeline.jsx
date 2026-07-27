@@ -43,7 +43,7 @@ const Chip = ({ label, value, color }) => (
   <div className="flex flex-col items-center px-3 py-1.5 rounded-lg"
     style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', minWidth: 64 }}>
     <span className="text-sm font-bold leading-none" style={{ color: color || 'var(--color-text)' }}>{value}</span>
-    <span className="text-[10px] uppercase tracking-wide mt-1" style={{ color: 'var(--color-text-secondary)' }}>{label}</span>
+    <span className="text-[11px] sm:text-[10px] uppercase tracking-wide mt-1" style={{ color: 'var(--color-text-secondary)' }}>{label}</span>
   </div>
 );
 
@@ -87,7 +87,7 @@ export default function CustomerTimeline({ phone, currentRef = null }) {
         <p className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--color-primary-600)' }}>
           Customer Lifetime Timeline
         </p>
-        <span className="text-[10px] uppercase tracking-wide font-semibold" style={{ color: 'var(--color-text-tertiary)' }}>
+        <span className="text-[11px] sm:text-[10px] uppercase tracking-wide font-semibold" style={{ color: 'var(--color-text-tertiary)' }}>
           {timeline.length} event{timeline.length === 1 ? '' : 's'}
         </span>
       </div>
@@ -130,12 +130,12 @@ export default function CustomerTimeline({ phone, currentRef = null }) {
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>{ev.title}</span>
                     {ev.ref && (
-                      <code className="text-[10px] font-mono px-1.5 py-0.5 rounded"
+                      <code className="text-[11px] sm:text-[10px] font-mono px-1.5 py-0.5 rounded"
                         style={{ backgroundColor: 'var(--color-surface)', color: 'var(--color-text-secondary)' }}>
                         {String(ev.ref).toUpperCase()}
                       </code>
                     )}
-                    <span className="text-[10px] ml-auto whitespace-nowrap" style={{ color: 'var(--color-text-tertiary)' }}>
+                    <span className="text-[11px] sm:text-[10px] ml-auto whitespace-nowrap" style={{ color: 'var(--color-text-tertiary)' }}>
                       {fmt(ev.at)}
                     </span>
                   </div>
@@ -145,7 +145,7 @@ export default function CustomerTimeline({ phone, currentRef = null }) {
                         <span className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>{ev.detail}</span>
                       )}
                       {ev.actor && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded font-semibold"
+                        <span className="text-[11px] sm:text-[10px] px-1.5 py-0.5 rounded font-semibold"
                           style={{ backgroundColor: 'var(--color-surface)', color: 'var(--color-text-secondary)' }}>
                           {ev.actor}
                         </span>

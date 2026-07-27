@@ -7,6 +7,7 @@ import { useComplianceStatuses } from '../../hooks/useComplianceStatuses';
 import { useCancellationReasons } from '../../hooks/useCancellationReasons';
 import ThemedSelect from '../UI/Select';
 import ThemedDate from '../UI/ThemedDate';
+import { TableScroll } from "../UI/kit";
 
 /*
  * BulkStatusUpdate
@@ -302,7 +303,7 @@ export default function BulkStatusUpdate() {
           </div>
 
           {results.matched.length > 0 ? (
-            <div className="overflow-x-auto">
+            <TableScroll stickyFirst label="Bulk status">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b" style={{ borderColor: 'var(--color-border)' }}>
@@ -377,7 +378,7 @@ export default function BulkStatusUpdate() {
                   })}
                 </tbody>
               </table>
-            </div>
+            </TableScroll>
           ) : (
             <p className="text-sm text-center py-8 italic" style={{ color: 'var(--color-text-secondary)' }}>
               None of the references matched any sale.
@@ -591,7 +592,7 @@ function BatchesSection() {
           No bulk-status batches yet. Apply an update above to see history here.
         </p>
       ) : (
-        <div className="overflow-x-auto">
+        <TableScroll stickyFirst label="Bulk status">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b" style={{ borderColor: 'var(--color-border)' }}>
@@ -629,7 +630,7 @@ function BatchesSection() {
               ))}
             </tbody>
           </table>
-        </div>
+        </TableScroll>
       )}
     </div>
   );

@@ -248,7 +248,7 @@ const ReportsPanel = ({ companyId }) => {
               <Icon size={14} />
               {label}
               {!loading && count > 0 && (
-                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md"
+                <span className="text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded-md"
                   style={{
                     backgroundColor: activeTab === key ? 'rgba(255,255,255,0.2)' : 'var(--color-border)',
                     color: activeTab === key ? 'white' : 'var(--color-text-secondary)',
@@ -333,21 +333,21 @@ const ReportsPanel = ({ companyId }) => {
                     <div className="hidden sm:flex items-center gap-4 flex-shrink-0 text-right">
                       <div>
                         <p className="text-xs font-bold text-info-600">{f.completed}</p>
-                        <Tooltip text={METRIC_TIP.connected}><p className="text-[10px] cursor-help" style={{ color: 'var(--color-text-tertiary)' }}>connected</p></Tooltip>
+                        <Tooltip text={METRIC_TIP.connected}><p className="text-[11px] sm:text-[10px] cursor-help" style={{ color: 'var(--color-text-tertiary)' }}>connected</p></Tooltip>
                       </div>
                       <div>
                         <p className="text-xs font-bold text-success-600">{f.converted}</p>
-                        <Tooltip text={METRIC_TIP.converted}><p className="text-[10px] cursor-help" style={{ color: 'var(--color-text-tertiary)' }}>converted</p></Tooltip>
+                        <Tooltip text={METRIC_TIP.converted}><p className="text-[11px] sm:text-[10px] cursor-help" style={{ color: 'var(--color-text-tertiary)' }}>converted</p></Tooltip>
                       </div>
                       <div>
                         <p className="text-xs font-bold text-error-600">{f.rejected}</p>
-                        <Tooltip text={METRIC_TIP.rejected}><p className="text-[10px] cursor-help" style={{ color: 'var(--color-text-tertiary)' }}>rejected</p></Tooltip>
+                        <Tooltip text={METRIC_TIP.rejected}><p className="text-[11px] sm:text-[10px] cursor-help" style={{ color: 'var(--color-text-tertiary)' }}>rejected</p></Tooltip>
                       </div>
                     </div>
                     {/* Conv rate */}
                     <div className="text-right flex-shrink-0 min-w-[48px]">
                       <p className="text-sm font-black" style={{ color: rateColor }}>{convPct}%</p>
-                      <Tooltip text={METRIC_TIP['conv rate']}><p className="text-[10px] cursor-help" style={{ color: 'var(--color-text-tertiary)' }}>conv rate</p></Tooltip>
+                      <Tooltip text={METRIC_TIP['conv rate']}><p className="text-[11px] sm:text-[10px] cursor-help" style={{ color: 'var(--color-text-tertiary)' }}>conv rate</p></Tooltip>
                     </div>
                   </div>
                 );
@@ -420,19 +420,19 @@ const ReportsPanel = ({ companyId }) => {
                     <div className="hidden sm:flex items-center gap-4 flex-shrink-0 text-right">
                       <div>
                         <p className="text-xs font-bold text-success-600">{c.won}</p>
-                        <Tooltip text={METRIC_TIP.won}><p className="text-[10px] cursor-help" style={{ color: 'var(--color-text-tertiary)' }}>won</p></Tooltip>
+                        <Tooltip text={METRIC_TIP.won}><p className="text-[11px] sm:text-[10px] cursor-help" style={{ color: 'var(--color-text-tertiary)' }}>won</p></Tooltip>
                       </div>
                       {hasPermission('view_financial_data') && (
                         <div>
                           <p className="text-xs font-bold text-primary-600">${c.revenue.toLocaleString()}</p>
-                          <Tooltip text={METRIC_TIP['down rev']}><p className="text-[10px] cursor-help" style={{ color: 'var(--color-text-tertiary)' }}>down rev</p></Tooltip>
+                          <Tooltip text={METRIC_TIP['down rev']}><p className="text-[11px] sm:text-[10px] cursor-help" style={{ color: 'var(--color-text-tertiary)' }}>down rev</p></Tooltip>
                         </div>
                       )}
                     </div>
                     {/* Win rate */}
                     <div className="text-right flex-shrink-0 min-w-[48px]">
                       <p className="text-sm font-black" style={{ color: rateColor }}>{winPct}%</p>
-                      <Tooltip text={METRIC_TIP['win rate']}><p className="text-[10px] cursor-help" style={{ color: 'var(--color-text-tertiary)' }}>win rate</p></Tooltip>
+                      <Tooltip text={METRIC_TIP['win rate']}><p className="text-[11px] sm:text-[10px] cursor-help" style={{ color: 'var(--color-text-tertiary)' }}>win rate</p></Tooltip>
                     </div>
                   </div>
                 );

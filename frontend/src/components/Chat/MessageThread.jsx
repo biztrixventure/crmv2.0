@@ -70,7 +70,7 @@ const Bubble = memo(({ m, mine, meId, showName, read, settings = {}, onEdit, onD
             style={{ color: m.is_guest ? '#0891b2' : (m.sender_font_color || 'var(--color-primary-600)') }}>
             {m.sender_name}
             {m.is_guest && (
-              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wide"
+              <span className="text-[11px] sm:text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wide"
                 style={{ backgroundColor: 'rgba(8,145,178,0.12)', color: '#0891b2' }}>Guest</span>
             )}
           </p>
@@ -295,7 +295,7 @@ const MessageThread = ({ conversation, meId, onlineIds, onBack, banned, msgSetti
             {isBroadcast && <Megaphone size={13} style={{ color: 'var(--color-primary-600)' }} />}
             {conversation.title}{conversation.is_locked && <Lock size={13} style={{ color: 'var(--color-text-tertiary)' }} />}
             {isBroadcast && (
-              <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full flex-shrink-0"
+              <span className="text-[11px] sm:text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full flex-shrink-0"
                 style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>Official</span>
             )}
           </p>

@@ -53,7 +53,7 @@ const AnnouncementPopup = () => {
               <Icon size={18} className="text-white" />
             </div>
             <div className="min-w-0">
-              <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: a.bar }}>{a.chip}</span>
+              <span className="text-[11px] sm:text-[10px] font-bold uppercase tracking-widest" style={{ color: a.bar }}>{a.chip}</span>
               <h3 className="text-lg font-bold leading-tight" style={{ color: 'var(--color-text)' }}>{current.title}</h3>
             </div>
           </div>

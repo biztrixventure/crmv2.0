@@ -87,7 +87,7 @@ export default function CustomerHistoryBanner({ phone, className = '' }) {
         <div className="mt-1.5 flex flex-col gap-0.5">
           {rows.slice(0, 3).map(r => (
             <div key={r.id} className="flex items-center gap-2 text-[11px] flex-wrap" style={{ color: 'var(--color-text-secondary)' }}>
-              <span className="font-bold px-1.5 py-0.5 rounded text-[10px] uppercase"
+              <span className="font-bold px-1.5 py-0.5 rounded text-[11px] sm:text-[10px] uppercase"
                 style={ACTIVE_STATUSES.has(r.status)
                   ? { background: 'var(--color-error-100, #fee2e2)', color: 'var(--color-error-700, #b91c1c)' }
                   : { background: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>

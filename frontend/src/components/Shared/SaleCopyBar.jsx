@@ -142,7 +142,7 @@ function CopyPresetManager({ initial, onClose, onSaved }) {
                     {sel.fields.length === 0 && <div className="text-xs px-1 py-2" style={{ color: 'var(--color-text-tertiary)' }}>No fields yet — add from the dropdown below.</div>}
                     {sel.fields.map((k, i) => (
                       <div key={i} className="flex items-center gap-2 px-2 py-1.5 rounded-lg" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
-                        <span className="text-[10px] font-bold tabular-nums w-6" style={{ color: 'var(--color-text-tertiary)' }}>{i + 1}</span>
+                        <span className="text-[11px] sm:text-[10px] font-bold tabular-nums w-6" style={{ color: 'var(--color-text-tertiary)' }}>{i + 1}</span>
                         <span className="flex-1 text-sm" style={{ color: 'var(--color-text)' }}>{(FIELD_BY_KEY[k] || {}).label || k}</span>
                         <button onClick={() => moveField(i, -1)} disabled={i === 0} title="Up"><ChevronUp size={15} style={{ color: i === 0 ? 'var(--color-text-tertiary)' : 'var(--color-text-secondary)' }} /></button>
                         <button onClick={() => moveField(i, 1)} disabled={i === sel.fields.length - 1} title="Down"><ChevronDown size={15} style={{ color: i === sel.fields.length - 1 ? 'var(--color-text-tertiary)' : 'var(--color-text-secondary)' }} /></button>

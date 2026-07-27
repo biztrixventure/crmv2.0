@@ -510,8 +510,8 @@ const NumberUploadManager = ({ user, companyId: companyIdProp }) => {
                       {headers.map((h, i) => (
                         <th key={i} className="px-3 py-2 text-left text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>
                           {h || `Column ${i + 1}`}
-                          {i === phoneCol && <span className="ml-1 text-[9px] px-1 rounded" style={{ backgroundColor: '#dbeafe', color: '#2563eb' }}>phone</span>}
-                          {i === nameCol && <span className="ml-1 text-[9px] px-1 rounded" style={{ backgroundColor: '#ede9fe', color: '#7c3aed' }}>name</span>}
+                          {i === phoneCol && <span className="ml-1 text-[11px] sm:text-[9px] px-1 rounded" style={{ backgroundColor: '#dbeafe', color: '#2563eb' }}>phone</span>}
+                          {i === nameCol && <span className="ml-1 text-[11px] sm:text-[9px] px-1 rounded" style={{ backgroundColor: '#ede9fe', color: '#7c3aed' }}>name</span>}
                         </th>
                       ))}
                     </tr>

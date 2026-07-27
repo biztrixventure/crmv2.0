@@ -208,7 +208,7 @@ function Compose({ me, preset, onClose, onSent }) {
                   <button onClick={() => applyTemplate(t)} className="flex-1 min-w-0 text-left px-2 py-2">
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-semibold truncate" style={{ color: 'var(--color-text)' }}>{t.name}</span>
-                      <span className="text-[9px] font-bold uppercase flex-shrink-0" style={{ color: tierColor[t.tier] }}>{t.tier}</span>
+                      <span className="text-[11px] sm:text-[9px] font-bold uppercase flex-shrink-0" style={{ color: tierColor[t.tier] }}>{t.tier}</span>
                     </div>
                     {t.subject && <div className="text-[11px] truncate" style={{ color: 'var(--color-text-secondary)' }}>{t.subject}</div>}
                   </button>
@@ -378,7 +378,7 @@ function ThreadView({ threadId, meId, onBack, onCompose, refreshUnread }) {
           <div key={e.id} className="rounded-xl p-3.5" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>{e.mine ? 'You' : e.sender_name}</span>
-              {e.is_forward && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>FWD</span>}
+              {e.is_forward && <span className="text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>FWD</span>}
               <span className="text-[11px] ml-auto flex-shrink-0" style={{ color: 'var(--color-text-tertiary)' }}>{fmtFull(e.sent_at)}</span>
             </div>
             <div className="text-[11px] mt-0.5 flex items-center gap-1 flex-wrap" style={{ color: 'var(--color-text-secondary)' }}>

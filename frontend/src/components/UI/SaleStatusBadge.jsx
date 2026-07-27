@@ -44,7 +44,7 @@ export default function SaleStatusBadge({ sale, size = 'sm', showDateAlways = fa
       {showChip && (
         <span
           title={`Cancelled on ${cancelDate}`}
-          className="inline-flex items-center text-[10px] font-bold px-1.5 py-0.5 rounded whitespace-nowrap"
+          className="inline-flex items-center text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded whitespace-nowrap"
           style={{
             backgroundColor: 'var(--color-error-50, #fef2f2)',
             color:           'var(--color-error-700, #b91c1c)',

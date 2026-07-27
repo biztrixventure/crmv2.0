@@ -27,7 +27,7 @@ function GuestRow({ g, group, onToggle, onDelete, canManage }) {
       <div className="min-w-0 flex-1">
         <p className="text-sm font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
           {g.name}
-          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded"
+          <span className="text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded"
             style={{ background: g.is_active ? ok.soft : bad.soft, color: g.is_active ? ok.fg : bad.fg }}>
             {g.is_active ? 'Active' : 'Disabled'}
           </span>

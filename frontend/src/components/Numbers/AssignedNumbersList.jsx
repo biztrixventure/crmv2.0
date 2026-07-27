@@ -502,7 +502,7 @@ const AssignedNumbersList = ({ user }) => {
                               {n.phone_number}
                             </button>
                             {copiedId === n.phone_number
-                              ? <span className="inline-flex items-center gap-0.5 text-[10px] font-bold" style={{ color: '#059669' }}><Check size={9} /> copied</span>
+                              ? <span className="inline-flex items-center gap-0.5 text-[11px] sm:text-[10px] font-bold" style={{ color: '#059669' }}><Check size={9} /> copied</span>
                               : <button onClick={(e) => copyNumber(e, n.phone_number)} title="Copy" className="p-1 rounded-lg hover:bg-bg-secondary transition-colors opacity-0 group-hover:opacity-100"><Copy size={11} style={{ color: 'var(--color-text-tertiary)' }} /></button>}
                             <StatusBadge status={n.status} />
                             {n.transfer_id && (

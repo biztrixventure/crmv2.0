@@ -54,7 +54,7 @@ export function Donut({ data = [], size = 150, centerValue, centerLabel }) {
             <span className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: d.color || PALETTE[i % PALETTE.length] }} />
             <span className="truncate" style={{ color: 'var(--color-text-secondary)' }}>{d.label}</span>
             <span className="font-bold tabular-nums ml-auto" style={{ color: 'var(--color-text)' }}>{d.value}</span>
-            <span className="tabular-nums text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>{total ? Math.round(d.value / total * 100) : 0}%</span>
+            <span className="tabular-nums text-[11px] sm:text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>{total ? Math.round(d.value / total * 100) : 0}%</span>
           </div>
         ))}
         {items.length === 0 && <div className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>No data</div>}

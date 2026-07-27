@@ -10,7 +10,7 @@ const Row = ({ f, mapping, setMap, headers }) => (
     <div>
       <span className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>
         {f.label}{f.required && <span style={{ color: '#ef4444' }}> *</span>}
-        {f.isPhone && <span className="text-[10px] ml-1.5 px-1.5 py-0.5 rounded font-bold" style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>CLI</span>}
+        {f.isPhone && <span className="text-[11px] sm:text-[10px] ml-1.5 px-1.5 py-0.5 rounded font-bold" style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>CLI</span>}
       </span>
       {f.desc && <p className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{f.desc}</p>}
     </div>

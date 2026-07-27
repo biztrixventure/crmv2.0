@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import client from '../../api/client';
 import ThemedSelect from '../UI/Select';
 import { useAuth } from '../../contexts/AuthContext';
+import { TableScroll } from "../UI/kit";
 
 // ============================================================================
 // QaAdminTab — Compliance owns the QA department (mig 181 + 186).
@@ -63,7 +64,7 @@ const todayISO = () => isoDay(new Date());
 const daysAgoISO = (n) => isoDay(new Date(Date.now() - n * 86400000));
 const fmtWhen = (ts) => { try { return ts ? new Date(String(ts).replace(' ', 'T')).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : ''; } catch { return ''; } };
 const agoOf = (ts) => { if (!ts) return '—'; const s = Math.floor((Date.now() - new Date(String(ts).replace(' ', 'T')).getTime()) / 1000); if (s < 60) return `${s}s ago`; const m = Math.floor(s / 60); if (m < 60) return `${m}m ago`; const h = Math.floor(m / 60); if (h < 24) return `${h}h ago`; return `${Math.floor(h / 24)}d ago`; };
-const WtPill = ({ k, n }) => { const d = wtDef(k); return <span className="text-[9px] font-bold px-1 py-0.5 rounded" style={{ background: `${d.tint}1f`, color: d.tint }}>{WT_SHORT[k] || k}{n != null ? ` ${n}` : ''}</span>; };
+const WtPill = ({ k, n }) => { const d = wtDef(k); return <span className="text-[11px] sm:text-[9px] font-bold px-1 py-0.5 rounded" style={{ background: `${d.tint}1f`, color: d.tint }}>{WT_SHORT[k] || k}{n != null ? ` ${n}` : ''}</span>; };
 // a company's currently-enabled review types, in a fixed order (tra/rcm from
 // qa.methods, closer legs from qa.closer — default both on).
 const enabledTypes = (co) => ['tra', 'rcm', 'closer_sales', 'closer_dispo']
@@ -115,7 +116,7 @@ function TeamReport({ team, onPick }) {
           <button onClick={exportCsv} title="Download this roster (with turnaround + active-days) as a CSV for the selected window" className="ml-auto text-[11px] font-bold px-2.5 py-1 rounded-lg inline-flex items-center gap-1" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}>Export CSV</button>
         )}
       </div>
-      <div className="rounded-xl overflow-auto" style={{ border: '1px solid var(--color-border)' }}>
+      <TableScroll stickyFirst label="QA records" className="rounded-xl" style={{ border: '1px solid var(--color-border)' }}>
         <table className="w-full text-sm" style={{ borderCollapse: 'collapse' }}>
           <thead className="sticky top-0" style={{ background: 'var(--color-surface-hover)' }}><tr>{cols.map(([k, l]) => <Th key={k} k={k} label={l} />)}</tr></thead>
           <tbody>
@@ -145,7 +146,7 @@ function TeamReport({ team, onPick }) {
             {!rows.length && <tr><td colSpan={7} className="px-3 py-8 text-center text-sm" style={{ color: 'var(--color-text-tertiary)' }}>No QA people yet.</td></tr>}
           </tbody>
         </table>
-      </div>
+      </TableScroll>
     </div>
   );
 }
@@ -546,7 +547,7 @@ function TeamConsole({ companies, users, reloadUsers, reloadAll, removeAssign, s
             </span>
             <div className="min-w-0 flex-1">
               <div className="text-sm font-extrabold truncate" style={{ color: 'var(--color-text)' }}>{person.name}</div>
-              <div className="flex items-center gap-1 mt-0.5">{person.levels.map(l => <span key={l} className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase" style={{ background: 'var(--color-surface-hover)', color: l === 'qa_manager' ? 'var(--color-primary-600)' : 'var(--color-warning-600)' }}>{lvlLabel(l)}</span>)}</div>
+              <div className="flex items-center gap-1 mt-0.5">{person.levels.map(l => <span key={l} className="text-[11px] sm:text-[9px] font-bold px-1.5 py-0.5 rounded uppercase" style={{ background: 'var(--color-surface-hover)', color: l === 'qa_manager' ? 'var(--color-primary-600)' : 'var(--color-warning-600)' }}>{lvlLabel(l)}</span>)}</div>
             </div>
             <span className="text-[11px] inline-flex items-center gap-1 px-2 py-1 rounded-lg tabular-nums"
               title="Open (unscored) calls on their plate right now"
@@ -717,7 +718,7 @@ function RuleBuilder({ companies, onDone, onCancel, fixedReviewer }) {
         <div className="text-[11px] font-bold mb-1.5" style={{ color: 'var(--color-text-tertiary)' }}>KINDS OF CALLS TO REVIEW <span className="font-normal">— tick any combination (a call has a fronter leg and a closer leg)</span></div>
         {[['Fronter calls', ['tra', 'rcm']], ['Closer calls', ['closer_sales', 'closer_dispo']]].map(([groupLabel, keys]) => (
           <div key={groupLabel} className="mb-2">
-            <div className="text-[9px] font-bold uppercase tracking-wide mb-1" style={{ color: 'var(--color-text-tertiary)' }}>{groupLabel}</div>
+            <div className="text-[11px] sm:text-[9px] font-bold uppercase tracking-wide mb-1" style={{ color: 'var(--color-text-tertiary)' }}>{groupLabel}</div>
             <div className="space-y-1.5">
               {keys.map(k => WORK_TYPE_DEFS.find(w => w.key === k)).map(w => {
                 const on = types.includes(w.key); const I = w.icon;
@@ -937,7 +938,7 @@ function CompanyConfig({ company, onToggleMethod, onCloserChange }) {
 
   const ScoreStatus = ({ slot }) => {
     const has = cards && cards[slot];
-    return <span className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={has ? { background: 'rgba(5,150,105,0.14)', color: '#059669' } : { background: 'rgba(217,119,6,0.14)', color: 'var(--color-warning-600)' }} title={has ? 'An active scorecard exists for this type.' : 'No active scorecard yet — set one in the QA app → Scorecards & Config, otherwise this type can’t be scored.'}>{has ? '✓ scorecard' : '⚠ no scorecard'}</span>;
+    return <span className="text-[11px] sm:text-[9px] font-bold px-1.5 py-0.5 rounded" style={has ? { background: 'rgba(5,150,105,0.14)', color: '#059669' } : { background: 'rgba(217,119,6,0.14)', color: 'var(--color-warning-600)' }} title={has ? 'An active scorecard exists for this type.' : 'No active scorecard yet — set one in the QA app → Scorecards & Config, otherwise this type can’t be scored.'}>{has ? '✓ scorecard' : '⚠ no scorecard'}</span>;
   };
   const TypeCard = ({ k, label, desc, on, onToggle, children }) => {
     const d = wtDef(k);
@@ -969,7 +970,7 @@ function CompanyConfig({ company, onToggleMethod, onCloserChange }) {
       <div className="text-[11px] sm:text-[10px] font-bold uppercase tracking-wide mt-1 mb-1.5 flex items-center gap-1" style={{ color: 'var(--color-text-tertiary)' }}>
         Review types <InfoTip w={320} text="The 4 QA review types for this company. FRONTER: TRA (every CRM transfer) + RCM (random raw dialer calls). CLOSER: Closed Sale + Unclosed Sale — the closer's leg of each transfer. Each type has its OWN scorecard, set in the QA app → Scorecards & Config; the badge shows whether one exists." />
       </div>
-      <div className="mb-1 text-[9px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-primary-600)' }}>Fronter calls</div>
+      <div className="mb-1 text-[11px] sm:text-[9px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-primary-600)' }}>Fronter calls</div>
       <div className="grid gap-2 mb-2.5" style={{ gridTemplateColumns: '1fr 1fr' }}>
         <TypeCard k="tra" label="TRA · Transfers" desc="Reviews every transfer entered in the CRM — full coverage of the fronter leg." on={methods.includes('tra')} onToggle={() => onToggleMethod('tra')} />
         <TypeCard k="rcm" label="RCM · Random" desc="A daily random sample of the fronters' raw dialer calls (numbers NOT in the CRM)." on={methods.includes('rcm')} onToggle={() => onToggleMethod('rcm')}>
@@ -985,7 +986,7 @@ function CompanyConfig({ company, onToggleMethod, onCloserChange }) {
           </div>
         </TypeCard>
       </div>
-      <div className="mb-1 text-[9px] font-bold uppercase tracking-wide" style={{ color: '#059669' }}>Closer calls <span className="font-normal normal-case" style={{ color: 'var(--color-text-tertiary)' }}>— the closer's leg of each transfer</span></div>
+      <div className="mb-1 text-[11px] sm:text-[9px] font-bold uppercase tracking-wide" style={{ color: '#059669' }}>Closer calls <span className="font-normal normal-case" style={{ color: 'var(--color-text-tertiary)' }}>— the closer's leg of each transfer</span></div>
       <div className="grid gap-2" style={{ gridTemplateColumns: '1fr 1fr' }}>
         <TypeCard k="closer_sales" label="Closed Sale" desc="The closer's call on a transfer that SOLD. Reviewed live from the CRM (Live / Load Day)." on={closerOn.includes('closer_sales')} onToggle={() => toggleCloser('closer_sales')} />
         <TypeCard k="closer_dispo" label="Unclosed Sale" desc="The closer's call on a transfer that did NOT sell (a non-sale disposition)." on={closerOn.includes('closer_dispo')} onToggle={() => toggleCloser('closer_dispo')}>

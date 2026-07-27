@@ -33,7 +33,7 @@ const OverdueDot = ({ callback }) => {
   if (callback.status !== 'pending') return null;
   if (!callback.callback_at || new Date(callback.callback_at) >= new Date()) return null;
   return (
-    <span title="Overdue" className="inline-flex items-center gap-0.5 ml-1 px-1.5 py-0.5 rounded text-[10px] font-semibold"
+    <span title="Overdue" className="inline-flex items-center gap-0.5 ml-1 px-1.5 py-0.5 rounded text-[11px] sm:text-[10px] font-semibold"
       style={{ backgroundColor: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca' }}>
       <AlertCircle size={9} /> OD
     </span>
@@ -139,7 +139,7 @@ const AgentStatsModal = ({ userId, userName, companyId, onClose }) => {
                   <div key={s.label} className="rounded-xl p-3 text-center"
                     style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
                     <p className="text-xl font-bold" style={{ color: s.color }}>{s.value}</p>
-                    <p className="text-[10px] text-text-secondary mt-0.5">{s.label}</p>
+                    <p className="text-[11px] sm:text-[10px] text-text-secondary mt-0.5">{s.label}</p>
                   </div>
                 ))}
               </div>
@@ -173,10 +173,10 @@ const AgentStatsModal = ({ userId, userName, companyId, onClose }) => {
                         style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
                         <div>
                           <p className="text-xs font-semibold text-text">{cb.customer_name || '—'}</p>
-                          <p className="text-[10px] text-text-secondary">{cb.customer_phone || ''}</p>
+                          <p className="text-[11px] sm:text-[10px] text-text-secondary">{cb.customer_phone || ''}</p>
                         </div>
                         <div className="text-right">
-                          <p className="text-[10px] text-text-secondary">{fmtDateTime(cb.callback_at)}</p>
+                          <p className="text-[11px] sm:text-[10px] text-text-secondary">{fmtDateTime(cb.callback_at)}</p>
                           <PriorityBadge priority={cb.priority} />
                         </div>
                       </div>
@@ -218,7 +218,7 @@ const PriorityStatsBar = ({ callbacks }) => {
           style={{ backgroundColor: p.bg, color: p.text, borderColor: p.border }}>
           <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: p.dot }} />
           {p.label}: {p.count}
-          <span className="opacity-60 text-[10px]">({total > 0 ? Math.round(p.count / total * 100) : 0}%)</span>
+          <span className="opacity-60 text-[11px] sm:text-[10px]">({total > 0 ? Math.round(p.count / total * 100) : 0}%)</span>
         </span>
       ))}
       <span className="text-xs text-text-secondary ml-auto">
@@ -366,7 +366,7 @@ const ManagerCallbacksTab = ({ user }) => {
           <CalendarDays size={12} />
           Created Today
           {todayCount !== null && (
-            <span className="px-1.5 py-0.5 rounded-md text-[10px] font-bold"
+            <span className="px-1.5 py-0.5 rounded-md text-[11px] sm:text-[10px] font-bold"
               style={{ backgroundColor: isTodayActive ? '#bfdbfe' : 'var(--color-border)', color: isTodayActive ? '#1d4ed8' : 'var(--color-text-secondary)' }}>
               {todayCount}
             </span>

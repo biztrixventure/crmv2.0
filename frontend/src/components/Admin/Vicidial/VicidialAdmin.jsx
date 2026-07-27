@@ -464,14 +464,14 @@ const Agents = () => {
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search people or agent id…" className="input" style={{ paddingLeft: 34 }} />
       </div>
       {loading ? <Loading variant="rows" rows={3} /> : agents.length === 0 ? <p className="text-sm py-6 text-center" style={{ color: 'var(--color-text-tertiary)' }}>No users.</p> : (
-        <div className="rounded-2xl overflow-x-auto" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+        <TableScroll stickyFirst label="VICIdial" className="rounded-2xl" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
           <table className="w-full text-sm">
             <thead><tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
               {['User', 'Mapped agent ids', 'Add / suggested from dialer'].map(h => <th key={h} className="px-4 py-2.5 text-left text-xs font-bold uppercase whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>{h}</th>)}
             </tr></thead>
             <tbody>{agents.map(a => <AgentRow key={a.user_id} a={a} roster={roster} onSaved={load} />)}</tbody>
           </table>
-        </div>
+        </TableScroll>
       )}
     </div>
   );
@@ -556,7 +556,7 @@ const DispoMap = () => {
                     <tr key={r.id} style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: trulyUnmapped ? 'var(--color-warning-50, #fffbeb)' : undefined }}>
                       <td className="px-4 py-2.5 font-mono font-bold" style={{ color: 'var(--color-text)' }}>
                         {r.vici_code}
-                        {!r.company_id && <span className="ml-2 text-[9px] font-sans font-bold px-1.5 py-0.5 rounded-full align-middle" style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>🌐 global</span>}
+                        {!r.company_id && <span className="ml-2 text-[11px] sm:text-[9px] font-sans font-bold px-1.5 py-0.5 rounded-full align-middle" style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>🌐 global</span>}
                       </td>
                       <td className="px-4 py-2.5">
                         <ThemedSelect value={r.disposition_name || ''} onChange={e => setMap(r, e.target.value)} className="input py-1.5 text-sm">

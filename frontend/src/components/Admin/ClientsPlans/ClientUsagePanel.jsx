@@ -97,7 +97,7 @@ function UsageTable({ title, icon: Icon, rows }) {
               </div>
               <div className="flex flex-wrap gap-1">
                 {Object.entries(r.status).sort((a, b) => b[1] - a[1]).map(([s, n]) => (
-                  <span key={s} className="text-[10px] font-semibold px-1.5 py-0.5 rounded"
+                  <span key={s} className="text-[11px] sm:text-[10px] font-semibold px-1.5 py-0.5 rounded"
                     style={{ background: statusColor(s) + '22', color: statusColor(s) }}>{pretty(s)} {n}</span>
                 ))}
               </div>

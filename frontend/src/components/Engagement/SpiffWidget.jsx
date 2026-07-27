@@ -90,7 +90,7 @@ const SpiffWidget = () => {
               </div>
               {c.leaderboard?.length > 0 && (
                 <div className="space-y-1 pt-1">
-                  <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-tertiary)' }}>Leaderboard</p>
+                  <p className="text-[11px] sm:text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-tertiary)' }}>Leaderboard</p>
                   {c.leaderboard.slice(0, 5).map(e => (
                     <div key={e.user_id || e.id} className="flex items-center justify-between text-sm">
                       <span className="flex items-center gap-2" style={{ color: 'var(--color-text)' }}>

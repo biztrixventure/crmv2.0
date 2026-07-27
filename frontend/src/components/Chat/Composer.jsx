@@ -226,7 +226,7 @@ const Composer = ({ onSend, onTyping, disabled, disabledReason, meId, members = 
                 <>
                   <Avatar name={it.name} size={26} />
                   <span className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>{it.name}</span>
-                  {it.role && <span className="text-[10px] px-1.5 py-0.5 rounded ml-auto" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>{it.role}</span>}
+                  {it.role && <span className="text-[11px] sm:text-[10px] px-1.5 py-0.5 rounded ml-auto" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>{it.role}</span>}
                 </>
               ) : (
                 <>

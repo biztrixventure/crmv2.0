@@ -156,7 +156,7 @@ const TransferStatusRules = ({ config, scope, onSave }) => {
 
                 {/* Key — locked after creation. */}
                 <div className="flex flex-col" style={{ minWidth: 110 }}>
-                  <span className="text-[9px] font-bold uppercase tracking-wider text-text-tertiary">Key</span>
+                  <span className="text-[11px] sm:text-[9px] font-bold uppercase tracking-wider text-text-tertiary">Key</span>
                   <code
                     className="text-xs font-mono px-1 py-0.5 rounded"
                     style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}
@@ -167,7 +167,7 @@ const TransferStatusRules = ({ config, scope, onSave }) => {
 
                 {/* Label */}
                 <div className="flex flex-col flex-1 min-w-[120px]">
-                  <label className="text-[9px] font-bold uppercase tracking-wider text-text-tertiary">Label</label>
+                  <label className="text-[11px] sm:text-[9px] font-bold uppercase tracking-wider text-text-tertiary">Label</label>
                   <input
                     type="text"
                     value={s.label || ''}
@@ -179,7 +179,7 @@ const TransferStatusRules = ({ config, scope, onSave }) => {
 
                 {/* Badge color */}
                 <div className="flex flex-col" style={{ minWidth: 140 }}>
-                  <label className="text-[9px] font-bold uppercase tracking-wider text-text-tertiary">Badge color</label>
+                  <label className="text-[11px] sm:text-[9px] font-bold uppercase tracking-wider text-text-tertiary">Badge color</label>
                   <ThemedSelect
                     value={s.badge || 'secondary'}
                     onChange={(e) => updateRow(i, { badge: e.target.value })}

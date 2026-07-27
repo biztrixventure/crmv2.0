@@ -47,13 +47,13 @@ export default function CloserPendingDispos({ onChanged, refreshSignal, onOpenSa
                 <p className="text-sm font-semibold flex items-center gap-2 flex-wrap" style={{ color: 'var(--color-text)' }}>
                   {it.disposition_name || it.raw_dispo}
                   {it.disposition_name && it.raw_dispo && (
-                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>{it.raw_dispo}</span>
+                    <span className="text-[11px] sm:text-[10px] font-mono px-1.5 py-0.5 rounded" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>{it.raw_dispo}</span>
                   )}
                   {!it.disposition_name && (
-                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ backgroundColor: 'var(--color-warning-100, #fef3c7)', color: 'var(--color-warning-700, #b45309)' }}>unmapped</span>
+                    <span className="text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ backgroundColor: 'var(--color-warning-100, #fef3c7)', color: 'var(--color-warning-700, #b45309)' }}>unmapped</span>
                   )}
                   {it.transfer && (
-                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ backgroundColor: 'rgba(16,185,129,0.12)', color: '#047857' }}>needs sale form</span>
+                    <span className="text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ backgroundColor: 'rgba(16,185,129,0.12)', color: '#047857' }}>needs sale form</span>
                   )}
                 </p>
                 <p className="text-[11px] mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>
@@ -130,7 +130,7 @@ function AssignModal({ item, onClose, onDone }) {
                 <div className="min-w-0">
                   <p className="text-sm font-semibold truncate flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
                     {tr.name}
-                    {tr.pending && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>not confirmed</span>}
+                    {tr.pending && <span className="text-[11px] sm:text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>not confirmed</span>}
                   </p>
                   <p className="text-xs flex items-center gap-2 truncate" style={{ color: 'var(--color-text-tertiary)' }}>
                     <span className="flex items-center gap-1"><Phone size={11} /> {tr.phone || '—'}</span>

@@ -117,8 +117,8 @@ export default function BatchRoster() {
                         <td className="px-3 py-2 truncate max-w-[160px]" style={{ color: 'var(--color-text-secondary)' }}>{r.customer_name || '—'}</td>
                         <td className="px-3 py-2">
                           {isEx
-                            ? <span className="text-[10px] font-bold px-1.5 py-0.5 rounded whitespace-nowrap inline-flex items-center gap-1" style={{ color: 'var(--color-warning-600)' }}><Ban size={11} /> {EX_REASON[r.exclusion_reason] || 'excluded'}</span>
-                            : <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-tertiary)' }}>{r.status}</span>}
+                            ? <span className="text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded whitespace-nowrap inline-flex items-center gap-1" style={{ color: 'var(--color-warning-600)' }}><Ban size={11} /> {EX_REASON[r.exclusion_reason] || 'excluded'}</span>
+                            : <span className="text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-tertiary)' }}>{r.status}</span>}
                         </td>
                         <td className="px-3 py-2" style={{ color: 'var(--color-text)' }}>{r.holder_name || '—'}</td>
                         <td className="px-3 py-2 truncate max-w-[160px]" style={{ color: 'var(--color-text-secondary)' }}>{r.batch_name}</td>
@@ -129,7 +129,7 @@ export default function BatchRoster() {
                       {open && (
                         <tr style={{ background: 'var(--color-surface)' }}>
                           <td colSpan={8} className="px-3 py-2">
-                            <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: 'var(--color-text-tertiary)' }}><GitBranch size={11} /> Chain for {r.phone_number}</div>
+                            <div className="flex items-center gap-1.5 text-[11px] sm:text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: 'var(--color-text-tertiary)' }}><GitBranch size={11} /> Chain for {r.phone_number}</div>
                             {lineage[r.batch_id]
                               ? <Lineage data={lineage[r.batch_id]} onBack={() => setExpanded(null)} />
                               : <div className="py-3 text-center"><Loader2 size={14} className="animate-spin inline" style={{ color: 'var(--color-text-tertiary)' }} /></div>}

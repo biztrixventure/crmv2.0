@@ -55,7 +55,7 @@ const SaleUpdateReviewer = ({ updates, decisions, toggleUpdate, setAllUpdates })
                       <tr key={j} style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: cat.bg }}>
                         <td className="px-3 py-2">
                           <span className="font-semibold" style={{ color: 'var(--color-text)' }}>{c.label}</span>
-                          <span className="text-[9px] ml-1.5 px-1 py-0.5 rounded font-bold uppercase" style={{ color: cat.text }}>{cat.label}</span>
+                          <span className="text-[11px] sm:text-[9px] ml-1.5 px-1 py-0.5 rounded font-bold uppercase" style={{ color: cat.text }}>{cat.label}</span>
                         </td>
                         <td className="px-3 py-2 line-through" style={{ color: 'var(--color-text-tertiary)' }}>{String(c.prev ?? '') || '—'}</td>
                         <td className="px-3 py-2 font-semibold" style={{ color: cat.text }}>{String(c.next ?? '') || '—'}</td>

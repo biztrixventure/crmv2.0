@@ -107,9 +107,9 @@ function MetaRow({ row, fields, onSaved }) {
         {open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
         <span className="font-semibold text-text">{row.value}</span>
         {row.company_id
-          ? <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: 'var(--color-info-500)', color: '#fff' }}>Company</span>
-          : <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>Global</span>}
-        {row.hidden && <span className="text-[10px] text-text-tertiary">hidden</span>}
+          ? <span className="text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: 'var(--color-info-500)', color: '#fff' }}>Company</span>
+          : <span className="text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>Global</span>}
+        {row.hidden && <span className="text-[11px] sm:text-[10px] text-text-tertiary">hidden</span>}
         <span className="ml-auto text-[11px] text-text-secondary truncate max-w-[45%]">{summary || 'no details set'}</span>
       </button>
       {open && (

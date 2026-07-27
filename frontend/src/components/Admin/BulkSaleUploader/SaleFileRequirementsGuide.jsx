@@ -91,13 +91,13 @@ const FieldRule = ({ icon: Icon, name, label, type, required, helper, children, 
               <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>“{label}”</span>
             )}
             {required && (
-              <span className="text-[9px] px-1.5 py-0.5 rounded font-bold"
+              <span className="text-[11px] sm:text-[9px] px-1.5 py-0.5 rounded font-bold"
                 style={{ backgroundColor: 'var(--color-error-50, #fef2f2)', color: 'var(--color-error-700, #b91c1c)' }}>
                 REQUIRED
               </span>
             )}
             {type && (
-              <span className="text-[9px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wide"
+              <span className="text-[11px] sm:text-[9px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wide"
                 style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>
                 {type}
               </span>

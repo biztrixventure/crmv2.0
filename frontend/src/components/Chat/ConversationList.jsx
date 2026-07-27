@@ -69,8 +69,8 @@ const PersonRow = ({ u, onStartDM, colorFor }) => (
     <div className="flex-1 min-w-0">
       <p className="text-sm font-semibold truncate" style={{ color: colorFor(u.id, 'var(--color-text)') }}>{u.name}</p>
       <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-        {u.role && <span className="text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded" style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>{u.role}</span>}
-        {u.company && <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}>{u.company}</span>}
+        {u.role && <span className="text-[11px] sm:text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded" style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>{u.role}</span>}
+        {u.company && <span className="text-[11px] sm:text-[10px] px-1.5 py-0.5 rounded" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}>{u.company}</span>}
       </div>
     </div>
   </button>

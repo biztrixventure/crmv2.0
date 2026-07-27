@@ -26,6 +26,7 @@ import UserDetailDrawer              from '../../Shared/UserDetailDrawer';
 import CallbackNumberDetailDrawer    from '../../Shared/CallbackNumberDetailDrawer';
 import CallbackPhoneHistoryDrawer    from '../../Shared/CallbackPhoneHistoryDrawer';
 import { Loading } from '../../UI/kit';
+import { TableScroll } from "../../UI/kit";
 
 // ── constants ─────────────────────────────────────────────────────────────────
 const SALE_BADGE     = { open:'info', sold:'success', cancelled:'error', follow_up:'warning', closed_won:'success', closed_lost:'error', compliance_cancelled:'error', dispute:'warning', chargeback:'error' };
@@ -740,7 +741,7 @@ const MembersPanel = ({ companyId }) => {
         </Card>
       ) : (
         <Card className="overflow-hidden">
-          <div className="overflow-x-auto">
+          <TableScroll stickyFirst label="Company records">
             <table className="w-full text-sm">
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--color-border)', background: 'var(--color-bg-secondary)' }}>
@@ -817,7 +818,7 @@ const MembersPanel = ({ companyId }) => {
                 ))}
               </tbody>
             </table>
-          </div>
+          </TableScroll>
         </Card>
       )}
 
@@ -1138,7 +1139,7 @@ const NumbersPanel = ({ companyId }) => {
         <p className="text-center text-text-secondary py-8 text-sm">No callback numbers.</p>
       ) : (
         <Card className="overflow-hidden">
-          <div className="overflow-x-auto">
+          <TableScroll stickyFirst label="Company records">
             <table className="w-full text-sm">
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--color-border)', background: 'var(--color-bg-secondary)' }}>
@@ -1170,7 +1171,7 @@ const NumbersPanel = ({ companyId }) => {
                 ))}
               </tbody>
             </table>
-          </div>
+          </TableScroll>
           {total > LIMIT && (
             <div className="flex items-center justify-between px-4 py-3" style={{ borderTop: '1px solid var(--color-border)' }}>
               <span className="text-xs text-text-secondary">{(page-1)*LIMIT+1}–{Math.min(page*LIMIT,total)} of {total}</span>

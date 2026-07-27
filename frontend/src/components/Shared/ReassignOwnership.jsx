@@ -78,7 +78,7 @@ export default function ReassignOwnership({ kind, record, onDone }) {
       <button onClick={() => setOpen(o => !o)}
         className="w-full flex items-center justify-between gap-2 px-3 py-2.5 text-sm font-semibold"
         style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text)' }}>
-        <span className="flex items-center gap-2"><Shuffle size={15} className="text-primary-600" /> Reassign ownership <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: 'var(--color-primary-100, #e0e7ff)', color: 'var(--color-primary-700)' }}>ADMIN</span></span>
+        <span className="flex items-center gap-2"><Shuffle size={15} className="text-primary-600" /> Reassign ownership <span className="text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: 'var(--color-primary-100, #e0e7ff)', color: 'var(--color-primary-700)' }}>ADMIN</span></span>
         <ChevronDown size={15} style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .15s' }} />
       </button>
 

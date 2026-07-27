@@ -3,6 +3,7 @@ import { AlertTriangle, Download, RefreshCw, Loader2, Search, ChevronDown, Chevr
 import { toast } from 'sonner';
 import client from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
+import { TableScroll } from "../UI/kit";
 
 // Duplicate-sold report: every customer NUMBER (customer_uuid) with >= 2 real
 // sales. Surfaces the whole picture — the same number sold repeatedly (even in
@@ -175,7 +176,7 @@ export default function DoubleSoldTab() {
         <span className="text-xs px-2 py-1" style={{ color: 'var(--color-text-muted)' }}>{loading ? 'Loading…' : `${view.length} shown`}</span>
       </div>
 
-      <div className="overflow-x-auto" style={card}>
+      <TableScroll stickyFirst label="Duplicate sold" style={card}>
         <table className="w-full text-sm">
           <thead>
             <tr style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-muted)' }}>
@@ -222,7 +223,7 @@ export default function DoubleSoldTab() {
                         <div className="text-[11px] font-bold uppercase tracking-wide mb-2" style={{ color: 'var(--color-text-secondary)' }}>
                           {g.sales?.length || 0} sales on {g.phone || 'this number'}
                         </div>
-                        <div className="overflow-x-auto rounded-lg" style={{ border: '1px solid var(--color-border)' }}>
+                        <TableScroll stickyFirst label="Duplicate sold" className="rounded-lg" style={{ border: '1px solid var(--color-border)' }}>
                           <table className="w-full text-xs">
                             <thead>
                               <tr style={{ background: 'var(--color-surface)', color: 'var(--color-text-tertiary)' }}>
@@ -243,7 +244,7 @@ export default function DoubleSoldTab() {
                               ))}
                             </tbody>
                           </table>
-                        </div>
+                        </TableScroll>
                       </td>
                     </tr>
                   )}
@@ -252,7 +253,7 @@ export default function DoubleSoldTab() {
             })}
           </tbody>
         </table>
-      </div>
+      </TableScroll>
     </div>
   );
 }

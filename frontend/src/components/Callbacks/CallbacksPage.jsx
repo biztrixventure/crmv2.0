@@ -351,31 +351,31 @@ const CallbackModal = ({ callback, companyId, companyTimezone, onSave, onClose }
             <div className="rounded-xl p-3 grid grid-cols-2 gap-3"
               style={{ backgroundColor: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.18)' }}>
               <div>
-                <p className="text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: '#6366f1' }}>
+                <p className="text-[11px] sm:text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: '#6366f1' }}>
                   Customer hears
                 </p>
                 <p className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>
                   {custPreview || agentPreview}
                 </p>
                 {zipInfo && (
-                  <p className="text-[10px] mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>
+                  <p className="text-[11px] sm:text-[10px] mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>
                     {zipInfo.city}, {zipInfo.state}
                   </p>
                 )}
                 {customerTz && (
-                  <p className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>
+                  <p className="text-[11px] sm:text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>
                     {new Intl.DateTimeFormat('en-US', { timeZone: customerTz, weekday: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }).format(now)}
                   </p>
                 )}
               </div>
               <div>
-                <p className="text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: '#10b981' }}>
+                <p className="text-[11px] sm:text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: '#10b981' }}>
                   You get notified at
                 </p>
                 <p className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>
                   {agentPreview}
                 </p>
-                <p className="text-[10px] mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>
+                <p className="text-[11px] sm:text-[10px] mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>
                   {new Intl.DateTimeFormat('en-US', { timeZone: agentTz, weekday: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }).format(now)}
                 </p>
               </div>
@@ -795,7 +795,7 @@ const CallbacksPage = ({ user }) => {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 mb-3 p-3 rounded-xl"
           style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
           <div>
-            <label className="block text-[10px] font-bold uppercase tracking-wide mb-1"
+            <label className="block text-[11px] sm:text-[10px] font-bold uppercase tracking-wide mb-1"
               style={{ color: 'var(--color-text-secondary)' }}>Priority</label>
             <ThemedSelect value={priority} onChange={e => setPriority(e.target.value)} className="input text-sm py-1.5">
               <option value="">Any</option>
@@ -805,31 +805,31 @@ const CallbacksPage = ({ user }) => {
             </ThemedSelect>
           </div>
           <div>
-            <label className="block text-[10px] font-bold uppercase tracking-wide mb-1"
+            <label className="block text-[11px] sm:text-[10px] font-bold uppercase tracking-wide mb-1"
               style={{ color: 'var(--color-text-secondary)' }}>Search</label>
             <input value={search} onChange={e => setSearch(e.target.value)}
               placeholder="Name or phone…" className="input text-sm py-1.5" />
           </div>
           <div>
-            <label className="block text-[10px] font-bold uppercase tracking-wide mb-1"
+            <label className="block text-[11px] sm:text-[10px] font-bold uppercase tracking-wide mb-1"
               style={{ color: 'var(--color-text-secondary)' }}>Scheduled From</label>
             <ThemedDate value={dateFrom} onChange={e => setDateFrom(e.target.value)}
               className="input text-sm py-1.5" />
           </div>
           <div>
-            <label className="block text-[10px] font-bold uppercase tracking-wide mb-1"
+            <label className="block text-[11px] sm:text-[10px] font-bold uppercase tracking-wide mb-1"
               style={{ color: 'var(--color-text-secondary)' }}>Scheduled To</label>
             <ThemedDate value={dateTo} onChange={e => setDateTo(e.target.value)}
               className="input text-sm py-1.5" />
           </div>
           <div>
-            <label className="block text-[10px] font-bold uppercase tracking-wide mb-1"
+            <label className="block text-[11px] sm:text-[10px] font-bold uppercase tracking-wide mb-1"
               style={{ color: 'var(--color-text-secondary)' }}>Created From</label>
             <ThemedDate value={createdFrom} onChange={e => setCreatedFrom(e.target.value)}
               className="input text-sm py-1.5" />
           </div>
           <div>
-            <label className="block text-[10px] font-bold uppercase tracking-wide mb-1"
+            <label className="block text-[11px] sm:text-[10px] font-bold uppercase tracking-wide mb-1"
               style={{ color: 'var(--color-text-secondary)' }}>Created To</label>
             <ThemedDate value={createdTo} onChange={e => setCreatedTo(e.target.value)}
               className="input text-sm py-1.5" />

@@ -234,9 +234,9 @@ const TransferCard = ({ transfer, onCreateSale, onDispositionSubmit, onResell, d
               </div>
             )}
           </div>
-          {zipCbErr && <p className="text-[10px] text-red-500">{zipCbErr}</p>}
+          {zipCbErr && <p className="text-[11px] sm:text-[10px] text-red-500">{zipCbErr}</p>}
           {zipCbInfo && (
-            <div className="flex items-center gap-1 text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
+            <div className="flex items-center gap-1 text-[11px] sm:text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
               <Globe size={10} />{zipCbInfo.city}, {zipCbInfo.state} · {getTzAbbr(zipCbInfo.timezone)}
             </div>
           )}
@@ -259,7 +259,7 @@ const TransferCard = ({ transfer, onCreateSale, onDispositionSubmit, onResell, d
               : null;
             const agentTime = `${formatInTz(utcIso, agentTz, { hour: '2-digit', minute: '2-digit', hour12: true })} ${getTzAbbr(agentTz)}`;
             return (
-              <div className="rounded-lg p-2 text-[10px]"
+              <div className="rounded-lg p-2 text-[11px] sm:text-[10px]"
                 style={{ backgroundColor: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.18)' }}>
                 {custTime && <div><span style={{ color: '#6366f1', fontWeight: 700 }}>Customer:</span> {custTime}</div>}
                 <div><span style={{ color: '#10b981', fontWeight: 700 }}>You:</span> {agentTime}</div>
@@ -333,7 +333,7 @@ const TransferCard = ({ transfer, onCreateSale, onDispositionSubmit, onResell, d
             </span>
             {transfer.cross_company && (
               <span title={`Same phone exists in ${transfer.cross_company_count} fronter companies`}
-                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider"
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] sm:text-[10px] font-bold uppercase tracking-wider"
                 style={{ backgroundColor: 'var(--color-warning-100, #fef3c7)', color: 'var(--color-warning-700, #b45309)', border: '1px solid var(--color-warning-300, #fcd34d)' }}>
                 <Globe size={9} /> {transfer.cross_company_count} cos
               </span>
@@ -344,7 +344,7 @@ const TransferCard = ({ transfer, onCreateSale, onDispositionSubmit, onResell, d
             {hasSale && <SaleStatusBadge status={saleStatus} />}
             {hasSale && transfer.sale_is_resell && (
               <span title={`Resell sale on this lead`}
-                className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded whitespace-nowrap"
+                className="inline-flex items-center gap-1 text-[11px] sm:text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded whitespace-nowrap"
                 style={{ backgroundColor: '#ddd6fe', color: '#5b21b6' }}>
                 ↻ resell
               </span>
