@@ -51,6 +51,8 @@ import NoteShortcodesManager from "../components/Numbers/NoteShortcodesManager";
 import client from "../api/client";
 import DotGridBg from "../components/UI/DotGridBg";
 import { Loading } from "../components/UI/kit";
+import AdminHub from "../components/Admin/Layout/AdminHub";
+import { resolveHub, HUB_MEMBER_IDS, ADMIN_HUBS } from "../config/adminHubs";
 
 // ============================================================================
 // AdminPanel — main component
@@ -149,6 +151,76 @@ const AdminPanel = () => {
     ...(user?.role === 'superadmin'                    ? [{ id: "user-control",   label: "User Control Center"  }] : []),
   ].filter(item => roTabAllowed(item.id));   // RO: governance.nav allowlist (null = parity); non-RO = always true
 
+  // Fold hub members into their hub for the SIDEBAR only. A hub shows if the
+  // viewer may see at least one of its members, so readonly-admin governance
+  // still decides visibility per surface — it just presents as one row.
+  const sidebarItems = (() => {
+    const visible = new Set(navItems.map(i => i.id));
+    // The three cross-company shortcuts all land in the Compliance shell, which
+    // has its own Records nav — collapse them to one row, but keep the row if
+    // ANY of them is permitted so a narrower RO grant still gets in.
+    const CC = ['cc-sales', 'cc-transfers', 'cc-callbacks'];
+    const out = [];
+    const emitted = new Set();
+    for (const item of navItems) {
+      if (CC.includes(item.id)) {
+        if (emitted.has('cc')) continue;
+        emitted.add('cc');
+        out.push({ id: 'cc-sales', label: 'Records', memberIds: CC.filter(id => visible.has(id)) });
+        continue;
+      }
+      if (!HUB_MEMBER_IDS.has(item.id)) { out.push(item); continue; }
+      const hub = ADMIN_HUBS.find(h => h.members.some(m => m.id === item.id));
+      if (!hub || emitted.has(hub.id)) continue;
+      emitted.add(hub.id);
+      out.push({ id: hub.id, label: hub.label, memberIds: hub.members.map(m => m.id).filter(id => visible.has(id)) });
+    }
+    return out;
+  })();
+
+  // One place that maps a tab id -> its component. Hubs call this too, so a
+  // grouped surface renders exactly what it rendered as a standalone tab.
+  const renderTab = (id) => {
+    switch (id) {
+      case 'dashboard':         return <AdminAnalyticsDashboard isReadOnly={isReadOnly} user={user} />;
+      case 'calendar':          return <EventsCalendar canEdit={user?.role === 'superadmin'} />;
+      case 'teams':             return <TeamManager />;
+      case 'sale-search':       return <LeadIntelligence />;
+      case 'customer-profiles': return <CustomerProfile />;
+      case 'numbers':           return <NumbersIntelligence />;
+      case 'data-analyzer':     return <DataAnalyzer />;
+      case 'batches':           return <BatchInbox />;
+      case 'roster':            return <BatchRoster />;
+      case 'note-shortcodes':   return <NoteShortcodesManager />;
+      case 'data-cleanup':      return <DataCleanup />;
+      case 'vicidial':          return <VicidialAdmin />;
+      case 'task-boards':       return <TaskBoardsAdmin />;
+      case 'vehicles':          return <VehicleManager />;
+      case 'clients-plans':     return <ClientsPlansHub />;
+      case 'faqs':              return <FAQManager />;
+      case 'scripts':           return <ScriptManager />;
+      case 'bulk-upload':       return <BulkUploadHub />;
+      case 'announcements':     return <AnnouncementsManager />;
+      case 'marquee':           return <MarqueeManager />;
+      case 'spiff':             return <SpiffManager />;
+      case 'payments':          return <PaymentRemindersPanel />;
+      case 'chat':              return <ChatAdmin />;
+      case 'features':          return <FeatureFlagsManager />;
+      case 'business-rules':    return <BusinessRulesHub />;
+      case 'blacklist':         return <BlacklistSettings />;
+      case 'egress':            return <EgressGovernance />;
+      case 'branding':          return <BrandingManager />;
+      case 'appearance':        return <AppearanceManager />;
+      case 'number-lists':      return <NumberAssignmentPanel user={user} />;
+      case 'readonly-admins':   return <ReadonlyAdminManager />;
+      case 'user-control':      return user?.role === 'superadmin' ? <UserControlCenter /> : null;
+      default:                  return null;
+    }
+  };
+
+  // null for a plain tab; { hub, member } when this id belongs to a hub.
+  const hubView = resolveHub(activeTab);
+
   return (
     <div ref={rootRef} className={`min-h-screen bg-bg relative${roNoCopy ? ' copy-locked' : ''}`}>
       <DotGridBg />
@@ -167,7 +239,7 @@ const AdminPanel = () => {
 
       <EngagementBanners />
       <div className="flex" style={{ height: 'calc(100vh - 64px)' }}>
-        {sidebarOpen && <AdminSidebar navItems={navItems} activeTab={activeTab} onTabChange={setActiveTab} />}
+        {sidebarOpen && <AdminSidebar navItems={sidebarItems} activeTab={activeTab} onTabChange={setActiveTab} />}
 
         <main className="flex-1 overflow-auto relative z-10">
           {activeTab === 'forms' ? (
@@ -199,38 +271,19 @@ const AdminPanel = () => {
                       Read-only admin — view only, no modifications.
                     </div>
                   )}
-                  {activeTab === "dashboard"   && <AdminAnalyticsDashboard isReadOnly={isReadOnly} user={user} />}
-                  {activeTab === "calendar"    && <EventsCalendar canEdit={user?.role === 'superadmin'} />}
-                  {activeTab === "teams"       && <TeamManager />}
-                  {activeTab === "sale-search" && <LeadIntelligence />}
-                  {activeTab === "customer-profiles" && <CustomerProfile />}
-                  {activeTab === "numbers"     && <NumbersIntelligence />}
-                  {activeTab === "data-analyzer" && <DataAnalyzer />}
-                  {activeTab === "batches" && <BatchInbox />}
-                  {activeTab === "roster" && <BatchRoster />}
-                  {activeTab === "note-shortcodes" && <NoteShortcodesManager />}
-                  {activeTab === "data-cleanup" && <DataCleanup />}
-                  {activeTab === "vicidial" && <VicidialAdmin />}
-                  {activeTab === "task-boards" && <TaskBoardsAdmin />}
-                  {activeTab === "vehicles"     && <VehicleManager />}
-                  {activeTab === "clients-plans" && <ClientsPlansHub />}
-                  {activeTab === "faqs"        && <FAQManager />}
-                  {activeTab === "scripts"     && <ScriptManager />}
-                  {activeTab === "bulk-upload" && <BulkUploadHub />}
-                  {activeTab === "announcements" && <AnnouncementsManager />}
-                  {activeTab === "marquee"       && <MarqueeManager />}
-                  {activeTab === "spiff"         && <SpiffManager />}
-                  {activeTab === "payments"      && <PaymentRemindersPanel />}
-                  {activeTab === "chat"          && <ChatAdmin />}
-                  {activeTab === "features"    && <FeatureFlagsManager />}
-                  {activeTab === "business-rules" && <BusinessRulesHub />}
-                  {activeTab === "blacklist" && <BlacklistSettings />}
-                  {activeTab === "egress"       && <EgressGovernance />}
-                  {activeTab === "branding"     && <BrandingManager />}
-                  {activeTab === "appearance"   && <AppearanceManager />}
-                  {activeTab === "number-lists" && <NumberAssignmentPanel user={user} />}
-                  {activeTab === "readonly-admins" && <ReadonlyAdminManager />}
-                  {activeTab === "user-control" && user?.role === 'superadmin' && <UserControlCenter />}
+                  {/* Hub tabs (config/adminHubs.js) group related surfaces
+                      behind one sidebar row. A member id still routes here —
+                      the hub just opens on that member — so deep links and a
+                      persisted adminTab keep working. */}
+                  {hubView
+                    ? <AdminHub
+                        hub={hubView.hub}
+                        activeMember={hubView.member}
+                        onMemberChange={setActiveTab}
+                        allowed={roTabAllowed}
+                        renderTab={renderTab}
+                      />
+                    : renderTab(activeTab)}
                   <DevCredit />
                 </div>
               );
