@@ -407,8 +407,13 @@ const CompanyManagement = () => {
       <div className="flex gap-0 flex-1 min-h-0 rounded-xl overflow-hidden border"
         style={{ borderColor: 'var(--color-border)' }}>
 
-        {/* ──── LEFT: company list ──────────────────────────────────── */}
-        <div className="w-72 xl:w-80 flex-shrink-0 flex flex-col overflow-hidden"
+        {/* ──── LEFT: company list ──────────────────────────────────────
+            Below `lg` this becomes a ONE-PANE-AT-A-TIME flow: the list fills
+            the screen, and picking a company replaces it with the detail
+            (which already renders a Back button). Side-by-side at 390 gave the
+            list 290px and the detail ~90px — narrow enough that the empty-state
+            text broke one word per line. */}
+        <div className={`w-full lg:w-72 xl:w-80 lg:flex-shrink-0 flex-col overflow-hidden ${selected ? 'hidden lg:flex' : 'flex'}`}
           style={{ borderRight: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
 
           {/* list header: search + filters */}
@@ -513,10 +518,13 @@ const CompanyManagement = () => {
           </div>
         </div>
 
-        {/* ──── RIGHT: detail / empty ───────────────────────────────── */}
-        <div className="flex-1 min-w-0 overflow-y-auto" style={{ backgroundColor: 'var(--color-bg)' }}>
+        {/* ──── RIGHT: detail / empty ─────────────────────────────────
+            Hidden below `lg` until something is selected — the SummaryPanel's
+            "pick a company" prompt is redundant on a phone, where the list is
+            already the whole screen. */}
+        <div className={`flex-1 min-w-0 overflow-y-auto ${selected ? 'block' : 'hidden lg:block'}`} style={{ backgroundColor: 'var(--color-bg)' }}>
           {selected ? (
-            <div className="p-5">
+            <div className="p-3 sm:p-5">
               <CompanyDetail
                 key={selected.id}
                 company={selected}

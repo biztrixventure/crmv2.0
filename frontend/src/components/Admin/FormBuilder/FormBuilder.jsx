@@ -25,6 +25,7 @@ import client from '../../../api/client';
 import { toast, toastError } from '../../../utils/toast';
 import { useSaleConfigs } from '../../../hooks/useSaleConfigs';
 import ThemedSelect from '../../UI/Select';
+import { PillTabs } from '../../UI/kit';
 
 // ── Base fields ───────────────────────────────────────────────────────────────
 const BASE_FIELDS = [
@@ -115,9 +116,12 @@ const FB_SIDEBAR = [
   },
 ];
 
+// Below `lg` this 208px rail is replaced by the horizontal section switcher in
+// the content area — the builder canvas needs the full width far more than the
+// nav does, and at 390 the rail left it ~185px.
 const FormBuilderSidebar = ({ active, onChange }) => (
   <aside
-    className="flex-shrink-0 flex flex-col"
+    className="flex-shrink-0 hidden lg:flex flex-col"
     style={{
       width: 208,
       backgroundColor: 'var(--color-surface)',
@@ -1877,7 +1881,7 @@ const FormLayoutPanel = ({ saleClients, salePlans }) => {
             </div>
           ) : (
             <div
-              className="rounded-2xl p-4 grid grid-cols-5 gap-3 content-start min-h-48"
+              className="rounded-2xl p-4 grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 gap-3 content-start min-h-48"
               style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}
               onDragOver={e => e.preventDefault()}
               onDrop={e => { if (dragOverIdx === null && dragIndex.current !== null) onDrop(e, canvasFields.length - 1); }}>
@@ -1907,7 +1911,7 @@ const FormLayoutPanel = ({ saleClients, salePlans }) => {
       {showPreview && canvasFields.length > 0 && (
         <div className="rounded-2xl p-6" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
           <h4 className="text-lg font-bold text-text mb-4 flex items-center gap-2"><Eye size={18} /> Form Preview</h4>
-          <div className="grid grid-cols-5 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 gap-4">
             {canvasFields.map((field, idx) => (
               <div key={idx} className={SPAN_CLASS[field.column_span || 1]}>
                 <label className="block text-sm font-medium text-text-secondary mb-1">
@@ -2009,8 +2013,18 @@ const FormBuilder = () => {
     <div className="flex" style={{ height: '100%' }}>
       <FormBuilderSidebar active={activeSection} onChange={setActiveSection} />
 
-      <div className="flex-1 overflow-auto" style={{ backgroundColor: 'var(--color-bg)' }}>
-        <div className="p-6 lg:p-8 w-full">
+      <div className="flex-1 min-w-0 overflow-auto" style={{ backgroundColor: 'var(--color-bg)' }}>
+        {/* Mobile section switcher — the sidebar's rows, flattened onto one
+            scrolling strip. Same ids, so activeSection and any deep link into a
+            section behave identically to clicking the rail. */}
+        <div className="lg:hidden px-3 pt-3">
+          <PillTabs
+            value={activeSection}
+            onChange={setActiveSection}
+            items={FB_SIDEBAR.flatMap(g => g.items).map(i => ({ key: i.id, label: i.label, icon: i.icon }))}
+          />
+        </div>
+        <div className="p-3 sm:p-6 lg:p-8 w-full">
           {activeSection === 'layout' && (
             <FormLayoutPanel saleClients={clients} salePlans={plans} />
           )}

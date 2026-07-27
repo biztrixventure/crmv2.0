@@ -3,6 +3,7 @@ import { CalendarClock, Phone, CheckCircle, AlertTriangle, XCircle, Settings2, D
 import client from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 import CopyableNumber from '../UI/CopyableNumber';
+import { TableScroll } from '../UI/kit';
 
 // Monthly-payment retention surface. Backend role-scopes GET /upcoming:
 //   closer → own due policies · manager → team · compliance → at-risk queue.
@@ -141,7 +142,12 @@ export default function PaymentRemindersPanel() {
           </p>
         </div>
       ) : (
-        <div className="rounded-xl border overflow-hidden" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}>
+        <TableScroll
+          /* Was `overflow-hidden`, which CLIPPED rather than scrolled: at 390
+             the table measures 496px, so Status and the call/collected actions
+             were sliced off the right edge with no way to reach them at all. */
+          stickyFirst label="Payments due" className="rounded-xl border"
+          style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}>
           <table className="w-full text-sm">
             <thead>
               <tr style={{ backgroundColor: 'var(--color-bg-secondary)', borderBottom: '1px solid var(--color-border)' }}>
@@ -215,7 +221,7 @@ export default function PaymentRemindersPanel() {
               })}
             </tbody>
           </table>
-        </div>
+        </TableScroll>
       )}
 
       {/* Detail drawer — click a row to see the full record + act with a note */}
