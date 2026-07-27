@@ -119,9 +119,17 @@ export default function BrandingManager() {
         </div>
       </div>
 
+      {/* `min-w-0` on the grid ITEMS is what actually fixes this panel. A grid
+          item defaults to min-width:auto, i.e. it refuses to be narrower than
+          its content's minimum — and the social-preview column contains a
+          `truncate` title, whose white-space:nowrap makes that minimum the
+          ENTIRE string. So the column demanded ~422px, both columns stretched
+          to match, and the panel ran 92px past a 390px viewport. min-w-0 lets
+          the column shrink, which is also the only way `truncate` can ever
+          engage. */}
       <div className="grid md:grid-cols-2 gap-6">
         {/* ── Identity + SEO ── */}
-        <div className="p-4 space-y-4" style={card}>
+        <div className="p-4 space-y-4 min-w-0" style={card}>
           <h3 className="text-sm font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-muted)' }}>Identity &amp; SEO</h3>
           <Field label="Site / Brand name"><input value={b.site_name || ''} onChange={set('site_name')} className="w-full px-3 py-2 text-sm rounded-lg" style={inputStyle} /></Field>
           <Field label="Browser tab title" hint="Shown in the browser tab and as the default page title."><input value={b.tab_title || ''} onChange={set('tab_title')} className="w-full px-3 py-2 text-sm rounded-lg" style={inputStyle} /></Field>
@@ -138,7 +146,7 @@ export default function BrandingManager() {
         </div>
 
         {/* ── Social preview ── */}
-        <div className="space-y-6">
+        <div className="space-y-6 min-w-0">
           <div className="p-4 space-y-4" style={card}>
             <h3 className="text-sm font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-muted)' }}>Social link preview (Open Graph)</h3>
             <ImageField label="Preview image" hint="Shown when a link is shared. 1200×630 recommended." kind="og_image" value={b.og_image_url} onChange={set('og_image_url')} />
@@ -164,11 +172,9 @@ export default function BrandingManager() {
           <div className="p-4" style={card}>
             <h3 className="text-sm font-bold uppercase tracking-wide mb-3" style={{ color: 'var(--color-text-muted)' }}>Preview</h3>
             <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
-              {/* `min-w-0` on both: an <img> is a replaced element, so its
-                  min-width:auto resolves to the IMAGE's intrinsic width — a
-                  1200px OG image therefore set a ~419px floor that `w-full`
-                  can't override, and that floor was what made this whole panel
-                  92px too wide at 390. */}
+              {/* min-w-0 here is belt-and-braces for the replaced <img>; the
+                  actual 92px floor came from the truncate title below, not
+                  from this image. */}
               <div className="w-full min-w-0 flex items-center justify-center" style={{ aspectRatio: '1200 / 630', background: 'var(--color-bg)' }}>
                 {b.og_image_url
                   ? <img src={b.og_image_url} alt="" className="w-full h-full min-w-0 object-cover" />
