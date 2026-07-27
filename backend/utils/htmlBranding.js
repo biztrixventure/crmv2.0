@@ -36,6 +36,19 @@ function metaBlock(b, reqUrl) {
     b.meta_keywords ? `<meta name="keywords" content="${esc(b.meta_keywords)}" />` : '',
     `<meta name="theme-color" content="${esc(b.theme_color || '#6E5838')}" />`,
     `<link rel="icon" href="${favicon}" />`,
+    // PWA. This is the injector the SINGLE-SERVICE deploy actually runs — the
+    // backend serves the frontend build, so frontend/server.cjs is not in the
+    // path in production. Stage 1 added these tags only there, and the result
+    // was a manifest endpoint that answered 200 while the served HTML never
+    // linked it: not installable, and beforeinstallprompt could never fire.
+    // Keep the two blocks in step.
+    //
+    // Linking is unconditional and safe — it only makes the app installable,
+    // and nothing installs itself. The service worker stays behind the
+    // superadmin's `enabled` switch, which is the part that changes behaviour.
+    `<link rel="manifest" href="/manifest.webmanifest" />`,
+    `<meta name="apple-mobile-web-app-title" content="${esc(b.site_name || 'BizTrix')}" />`,
+    favicon ? `<link rel="apple-touch-icon" href="${favicon}" />` : '',
     `<meta property="og:type" content="${esc(b.og_type || 'website')}" />`,
     b.site_name ? `<meta property="og:site_name" content="${esc(b.site_name)}" />` : '',
     `<meta property="og:title" content="${ogTitle}" />`,

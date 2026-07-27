@@ -16,6 +16,7 @@ import AcceptInvite from "./pages/AcceptInvite";
 import ImpersonateCallback from "./pages/ImpersonateCallback";
 import GuestChat from "./pages/GuestChat";
 import BrandedLoader from "./components/UI/BrandedLoader";
+import InstallPrompt from "./components/UI/InstallPrompt";
 import ThemeRuntime from "./components/ThemeRuntime";
 import UserThemeRuntime from "./components/UserThemeRuntime";
 import "./styles/global.css";
@@ -136,6 +137,11 @@ const AppContent = () => {
       {isAuthenticated && assistantOn && (
         <Suspense fallback={null}><MascotAssistant /></Suspense>
       )}
+      {/* Install affordance. Renders only once the browser has itself decided
+          the app is installable, so it can never be a button that does nothing.
+          Gated on being signed in: offering to install a CRM to someone sitting
+          on the login page is asking a stranger to put it on their home screen. */}
+      {isAuthenticated && <InstallPrompt />}
     </Router>
   );
 };
