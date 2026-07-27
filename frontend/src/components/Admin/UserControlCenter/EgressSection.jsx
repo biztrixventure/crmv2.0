@@ -24,6 +24,7 @@ import { Panel, SectionHeader, Loading, CheckRow, Field, useFlash, accent } from
 // Single source of truth for the export field catalog — shared with the canonical
 // Data Egress screen so the two never drift (no duplicated hardcoded list).
 import { EXPORT_DATASETS, labelFor } from '../EgressGovernance/EgressGovernance';
+import { defaultColumnsForRole } from '../../../utils/exportSpec';
 
 const AREA_LABEL = {
   __global: 'All exports', sales: 'Sales', transfers: 'Transfers', callbacks: 'Callbacks',
@@ -301,9 +302,13 @@ function ColumnsCard({ userId, onErr, onOk }) {
   useEffect(() => { load(ds); }, [ds, load]);
 
   const fields = EXPORT_DATASETS[ds]?.fields || [];
-  const isOn = (f) => selected == null ? true : selected.includes(f);
+  // Unconfigured means "whatever this export writes today", NOT every catalog
+  // column — seeding an edit from the real defaults keeps a save from silently
+  // widening this person's export.
+  const defaults = defaultColumnsForRole(ds);
+  const isOn = (f) => selected == null ? defaults.includes(f) : selected.includes(f);
   const toggle = (f) => {
-    const base = selected == null ? [...fields] : selected;
+    const base = selected == null ? [...defaults] : selected;
     setSelected(base.includes(f) ? base.filter(x => x !== f) : [...base, f]);
   };
   const save = async (cols) => {
@@ -324,12 +329,12 @@ function ColumnsCard({ userId, onErr, onOk }) {
           </ThemedSelect>
         }
       />
-      <p className="text-[11px] text-text-secondary mb-2">{selected == null ? 'All columns (unconfigured — user exports the full set).' : `${selected.length} of ${fields.length} columns.`}</p>
+      <p className="text-[11px] text-text-secondary mb-2">{selected == null ? `Unconfigured — this user gets their role's export (${defaults.length} columns, shown checked).` : `${selected.length} of ${fields.length} columns.`}</p>
       {loading ? <Loading variant="rows" rows={3} label="Loading columns…" /> : (
         <>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 max-h-56 overflow-y-auto">
             {fields.map(f => (
-              <CheckRow key={f} checked={isOn(f)} onChange={() => toggle(f)} label={labelFor(f)} />
+              <CheckRow key={f} checked={isOn(f)} onChange={() => toggle(f)} label={labelFor(ds, f)} />
             ))}
           </div>
           <div className="flex items-center gap-2 mt-3">

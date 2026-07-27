@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback, useRef, Fragment } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from 'react';
 import { Shield, Download, Sliders, Columns, Search, RefreshCw, Loader2, Plus, Trash2, ChevronDown, ChevronRight, Check, User, Building2, X, AlertTriangle, Headphones } from 'lucide-react';
 import { toast } from 'sonner';
 import client from '../../../api/client';
 import ThemedSelect from '../../UI/Select';
+import { DATASETS, CONFIGURABLE_DATASETS, columnLabel, defaultColumnsForRole } from '../../../utils/exportSpec';
 import ThemedDate from '../../UI/ThemedDate';
 import { SectionHeader, PillTabs, Loading, KpiTile, Field } from '../../UI/kit';
 import { TableScroll } from "../../UI/kit";
@@ -61,32 +62,31 @@ function UserSearchPicker({ onPick }) {
 
 const ROLES = ['closer', 'fronter', 'closer_manager', 'fronter_manager', 'operations_manager', 'company_admin', 'compliance_manager', 'portal_client'];
 const ACTIONS = ['csv_export', 'recording_listen'];
-// Export datasets + their configurable field catalogs (field key → label). Typed
-// columns per surface; the admin toggles which appear in the exported file.
+// Export datasets + their field catalogs are DERIVED from utils/exportSpec —
+// the same array the exporters read their values through, so a checkbox here
+// cannot offer a column no export can write.
+//
+// The literal that used to live here had drifted badly: it offered nine sale
+// fields (policy_number, plan, monthly_payment, car_*) that no export has ever
+// written, and omitted three (Cancellation Date, Paid Days, Paid Tenure) that
+// every compliance sale export writes — so those were unconfigurable. Deriving
+// the list makes that class of drift impossible rather than merely fixed.
+//
+// data_analyzer is appended by hand because its columns are genuinely dynamic
+// (label-based, chosen on the analyzer itself), so it gets no checkbox list.
 export const EXPORT_DATASETS = {
-  sales:        { label: 'Sales', fields: ['customer_name', 'customer_phone', 'customer_email', 'reference_no', 'policy_number', 'customer_uuid', 'status', 'closer_name', 'fronter_name', 'company_name', 'sale_date', 'plan', 'client_name', 'monthly_payment', 'down_payment', 'car_year', 'car_make', 'car_model', 'car_vin'] },
-  transfers:    { label: 'Transfers', fields: ['customer_name', 'customer_phone', 'customer_uuid', 'created_by_name', 'assigned_closer_name', 'latest_disposition', 'company_name', 'status', 'created_at'] },
-  callbacks:    { label: 'Callbacks', fields: ['customer_name', 'customer_phone', 'customer_uuid', 'status', 'priority', 'callback_at', 'notes', 'fronter_name', 'closer_name', 'company_name'] },
-  reviews:      { label: 'Call Reviews', fields: ['customer_name', 'rating', 'reviewer_name', 'created_at', 'notes'] },
-  data_analyzer:{ label: 'Data Analyzer', fields: [] },   // dynamic (label-based) — configured on the analyzer's own columns
+  ...Object.fromEntries(CONFIGURABLE_DATASETS.map(k => [k, {
+    label: DATASETS[k].label,
+    fields: DATASETS[k].columns.map(c => c.key),
+  }])),
+  data_analyzer: { label: 'Data Analyzer', fields: [] },
 };
 const SHELLS = ['staff', 'manager', 'compliance'];
 
-// Friendly column labels + a realistic sample value for the file PREVIEW. The
-// checkbox + preview show the label; the SAVED config still uses the raw field
-// key (unchanged), so nothing about existing export.columns behavior changes.
-const titleize = (k) => k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-const FIELD_LABELS = {
-  customer_name: 'Customer Name', customer_phone: 'Customer Phone', customer_email: 'Customer Email',
-  customer_uuid: 'Customer UUID', reference_no: 'Reference #', policy_number: 'Policy #',
-  closer_name: 'Closer', fronter_name: 'Fronter', company_name: 'Company', client_name: 'Client / Plan',
-  sale_date: 'Sale Date', monthly_payment: 'Monthly $', down_payment: 'Down $',
-  car_year: 'Car Year', car_make: 'Car Make', car_model: 'Car Model', car_vin: 'VIN',
-  created_by_name: 'Created By', assigned_closer_name: 'Assigned Closer', latest_disposition: 'Disposition',
-  created_at: 'Created At', callback_at: 'Callback At', reviewer_name: 'Reviewer', rating: 'Rating',
-  status: 'Status', priority: 'Priority', notes: 'Notes', plan: 'Plan',
-};
-export const labelFor = (k) => FIELD_LABELS[k] || titleize(k);
+// Labels come from the column definition, so a checkbox and the CSV header can
+// never disagree. Dataset-scoped because the same key means different things in
+// different files (`status`, `created_at`, `company_name`).
+export const labelFor = (dataset, key) => columnLabel(dataset, key);
 const SAMPLE_VALUES = {
   customer_name: 'John Smith', customer_phone: '(555) 201-4477', customer_email: 'john.smith@example.com',
   customer_uuid: 'e3b0c442-98fc-1c14-9afb-4c8996fb9242', reference_no: 'REF-100482', policy_number: 'POL-77310',
@@ -95,7 +95,15 @@ const SAMPLE_VALUES = {
   car_year: '2019', car_make: 'Toyota', car_model: 'Camry', car_vin: '4T1BF1FK5CU512345',
   created_by_name: 'Mia Cole', assigned_closer_name: 'Ava Reed', latest_disposition: 'Sold',
   created_at: '2026-07-18 14:32', callback_at: '2026-07-20 10:00', reviewer_name: 'Sam Diaz', rating: '4.5',
-  status: 'closed_won', priority: 'high', notes: 'Called back, confirmed card.', plan: 'Gold', client_name_alt: '',
+  status: 'closed_won', priority: 'high', notes: 'Called back, confirmed card.', plan: 'Gold',
+  cancellation_date: '2026-09-02', paid_days: '46', paid_tenure: '1 month 16d',
+  compliance_note: 'Verified on recording.', agent_name: 'Ava Reed', is_duplicate: 'No',
+  duplicate_reason: '', sale_reference_no: 'REF-100482', old_status: 'pending', new_status: 'completed',
+  actor_name: 'Sam Diaz', callback_deleted: 'No', name: 'Ava Reed', email: 'ava.reed@example.com',
+  role: 'closer', is_active: 'Active', level: 'closer manager',
+  phone_number: '(555) 201-4477', list_name: 'Warm Q3', assignment_day: '2026-07-18',
+  transferred_at: '2026-07-18 14:32', rank: '1', total: '128', completed: '96', converted: '41',
+  rejected: '12', conv_pct: '32%', won: '37', win_rate: '29%', revenue: '$14,700',
 };
 const sampleFor = (k) => SAMPLE_VALUES[k] != null ? SAMPLE_VALUES[k] : '—';
 
@@ -420,9 +428,18 @@ function FieldsTab() {
       .then(r => setLayout(r.data.layout || { page_size: '', default_view: '' })).catch(() => setLayout({}));
   }, [shell, role]);
 
+  // Unconfigured does NOT mean "every catalog column" — it means "whatever that
+  // role's export button writes today". Seeding the first edit from the real
+  // default is what keeps a save from silently WIDENING someone's export.
+  const defaultCols = useMemo(
+    () => new Set(defaultColumnsForRole(dataset, scopeType === 'role' ? role : undefined)),
+    [dataset, role, scopeType],
+  );
+  const isOn = (field) => (cols == null ? defaultCols.has(field) : cols.has(field));
+
   const toggleCol = (field) => {
     setCols(prev => {
-      const next = new Set(prev == null ? cat.fields : prev);   // first edit seeds from "all"
+      const next = new Set(prev == null ? defaultCols : prev);   // seeds from today's real columns
       next.has(field) ? next.delete(field) : next.add(field);
       return next;
     });
@@ -439,7 +456,7 @@ function FieldsTab() {
     catch (e) { toast.error(e.response?.data?.error || 'Save failed'); }
   };
 
-  const previewFields = cat.fields.length ? cat.fields.filter(f => (cols == null ? true : cols.has(f))) : [];
+  const previewFields = cat.fields.length ? cat.fields.filter(isOn) : [];
   const uuidField = cat.fields.includes('customer_uuid');
   const uuidShown = previewFields.includes('customer_uuid');
 
@@ -470,15 +487,15 @@ function FieldsTab() {
           <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>The Data Analyzer has dynamic columns — its export field-selection is label-based and configured directly on the analyzer’s output (not a fixed catalog).</p>
         ) : (
           <>
-            <p className="text-xs mb-2" style={{ color: 'var(--color-text-secondary)' }}>Checked = included in the exported file for {scopeType === 'user' ? (colUser?.name || 'the user') : 'this role'}. {cols == null && <b>Currently all fields (unconfigured).</b>}</p>
+            <p className="text-xs mb-2" style={{ color: 'var(--color-text-secondary)' }}>Checked = included in the exported file for {scopeType === 'user' ? (colUser?.name || 'the user') : 'this role'}. {cols == null && <b>Unconfigured — showing the columns this export writes today.</b>}</p>
             <div className="grid grid-cols-2 gap-1.5 max-h-64 overflow-y-auto mb-3">
               {cat.fields.map(field => {
-                const on = cols == null ? true : cols.has(field);
+                const on = isOn(field);
                 const sens = /uuid|phone|email|vin|payment/i.test(field) || field === 'customer_name';
                 return (
                   <label key={field} title={`Column key: ${field}`} className="flex items-center gap-2 text-xs px-2 py-1.5 rounded-lg cursor-pointer" style={{ background: on ? 'var(--color-primary-50,#eef2ff)' : 'transparent', border: '1px solid var(--color-border)' }}>
                     <input type="checkbox" checked={on} onChange={() => toggleCol(field)} />
-                    <span className="flex-1">{labelFor(field)}{sens && <span title="Sensitive / PII — think before including in an export" style={{ color: '#d97706', marginLeft: 3 }}>•</span>}</span>
+                    <span className="flex-1">{labelFor(dataset, field)}{sens && <span title="Sensitive / PII — think before including in an export" style={{ color: '#d97706', marginLeft: 3 }}>•</span>}</span>
                     <code className="text-[11px] sm:text-[9px]" style={{ color: 'var(--color-text-tertiary)' }}>{field}</code>
                   </label>
                 );
@@ -531,7 +548,7 @@ function FieldsTab() {
                   <tr style={{ background: 'var(--color-bg-secondary)' }}>
                     {previewFields.map(f => (
                       <th key={f} className="px-3 py-2 text-left whitespace-nowrap font-bold" style={{ borderRight: '1px solid var(--color-border)', color: 'var(--color-text)' }}>
-                        {labelFor(f)}{(/uuid|phone|email|vin|payment/i.test(f) || f === 'customer_name') && <span title="Sensitive / PII" style={{ color: '#d97706' }}> •</span>}
+                        {labelFor(dataset, f)}{(/uuid|phone|email|vin|payment/i.test(f) || f === 'customer_name') && <span title="Sensitive / PII" style={{ color: '#d97706' }}> •</span>}
                       </th>
                     ))}
                   </tr>
@@ -550,7 +567,7 @@ function FieldsTab() {
                 <AlertTriangle size={13} className="flex-shrink-0 mt-0.5" /> Customer UUID column is <strong>{uuidShown ? ' INCLUDED' : ' hidden'}</strong> in this export{uuidShown ? ' — a stable per-customer identifier. Uncheck “Customer UUID” on the left to keep it out of the file.' : '.'}
               </p>
             )}
-            <p className="text-[11px] mt-2" style={{ color: 'var(--color-text-tertiary)' }}>{cols == null ? 'This dataset is unconfigured, so ALL catalog columns (plus any raw form fields on the record) export by default.' : `${previewFields.length} column${previewFields.length === 1 ? '' : 's'} will be written for this role.`}</p>
+            <p className="text-[11px] mt-2" style={{ color: 'var(--color-text-tertiary)' }}>{cols == null ? `Unconfigured — this export writes these ${previewFields.length} columns today. Saving pins them, after which the file follows this list everywhere that role exports this data.` : `${previewFields.length} column${previewFields.length === 1 ? '' : 's'} will be written for this role.`}</p>
           </>
         )}
       </div>
