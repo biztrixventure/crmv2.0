@@ -334,7 +334,7 @@ export default function BulkStatusUpdate() {
                         <td className="px-3 py-2 font-mono text-xs align-top">
                           <div>{s.matched_via || s.reference_no || '—'}</div>
                           {s.policy_number && s.policy_number !== s.matched_via && (
-                            <div className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>{s.policy_number}</div>
+                            <div className="text-[11px] sm:text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>{s.policy_number}</div>
                           )}
                         </td>
                         <td className="px-3 py-2 align-top">
@@ -347,7 +347,7 @@ export default function BulkStatusUpdate() {
                             {lbl}
                           </span>
                           {s.cancellation_date && (
-                            <div className="text-[10px] mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>
+                            <div className="text-[11px] sm:text-[10px] mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>
                               cancelled {s.cancellation_date}
                             </div>
                           )}
@@ -457,7 +457,7 @@ export default function BulkStatusUpdate() {
                   <ThemedDate value={bulkDate}
                     onChange={e => setBulkDate(e.target.value)}
                     className="input text-sm" />
-                  <p className="text-[10px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
+                  <p className="text-[11px] sm:text-[10px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
                     Pick one date here to apply to every row. Rows that already have their own date in the table above keep their own.
                   </p>
                 </div>
@@ -474,7 +474,7 @@ export default function BulkStatusUpdate() {
                       <option key={r.key} value={r.key}>{r.label}</option>
                     ))}
                   </ThemedSelect>
-                  <p className="text-[10px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
+                  <p className="text-[11px] sm:text-[10px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
                     Canonical reason key drives top-reason reports. Free-text note below stays per-row.
                   </p>
                 </div>
@@ -505,7 +505,7 @@ export default function BulkStatusUpdate() {
                     borderColor: isCancelStatus && !bulkReason.trim() && selectedRows.some(id => !rowState[id]?.note?.trim()) ? 'var(--color-error-300, #fca5a5)' : 'var(--color-border)',
                   }}
                 />
-                <p className="text-[10px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
+                <p className="text-[11px] sm:text-[10px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
                   Type one reason here to apply to every row. Rows with their own note in the table above keep their own.
                 </p>
               </div>
@@ -595,12 +595,12 @@ function BatchesSection() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b" style={{ borderColor: 'var(--color-border)' }}>
-                <th className="px-3 py-2 text-left text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-secondary)' }}>When</th>
-                <th className="px-3 py-2 text-left text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-secondary)' }}>Operator</th>
-                <th className="px-3 py-2 text-left text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-secondary)' }}>New status</th>
-                <th className="px-3 py-2 text-left text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-secondary)' }}>Reason key</th>
-                <th className="px-3 py-2 text-left text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-secondary)' }}>Affected</th>
-                <th className="px-3 py-2 text-right text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-secondary)' }}>Action</th>
+                <th className="px-3 py-2 text-left text-[11px] sm:text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-secondary)' }}>When</th>
+                <th className="px-3 py-2 text-left text-[11px] sm:text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-secondary)' }}>Operator</th>
+                <th className="px-3 py-2 text-left text-[11px] sm:text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-secondary)' }}>New status</th>
+                <th className="px-3 py-2 text-left text-[11px] sm:text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-secondary)' }}>Reason key</th>
+                <th className="px-3 py-2 text-left text-[11px] sm:text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-secondary)' }}>Affected</th>
+                <th className="px-3 py-2 text-right text-[11px] sm:text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-secondary)' }}>Action</th>
               </tr>
             </thead>
             <tbody>
@@ -613,7 +613,7 @@ function BatchesSection() {
                   <td className="px-3 py-2 text-xs">{b.applied_count}</td>
                   <td className="px-3 py-2 text-right">
                     {b.reverted_at ? (
-                      <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded"
+                      <span className="text-[11px] sm:text-[10px] uppercase font-bold px-1.5 py-0.5 rounded"
                         style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>
                         reverted {new Date(b.reverted_at).toLocaleDateString()}
                       </span>

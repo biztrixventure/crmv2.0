@@ -252,7 +252,7 @@ export default function VehicleEligibilityRules({ config, scope, onSave }) {
                 <NumInput value={combined?.[1] ?? null}
                   onChange={v => patch('max_age_miles_combined', combined ? [combined[0], v] : (v !== null ? [0, v] : null))} placeholder="100000" suffix="mi" />
               </div>
-              <p className="text-[10px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
+              <p className="text-[11px] sm:text-[10px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
                 Both must be under the pair; either side over fails.
               </p>
             </div>
@@ -274,7 +274,7 @@ export default function VehicleEligibilityRules({ config, scope, onSave }) {
               onChange={e => patch('disallowed_makes', parseMakeList(e.target.value))}
               placeholder="ferrari, lamborghini, rolls-royce, bentley, maserati"
               className="input text-sm py-1.5 w-full" />
-            <p className="text-[10px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
+            <p className="text-[11px] sm:text-[10px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
               Comma-separated, lowercase. Closer-typed makes are normalized to lowercase before comparing.
             </p>
           </div>

@@ -216,7 +216,7 @@ const BusinessRulesHub = () => {
                   <p.icon size={15} style={{ color: active ? 'white' : 'var(--color-text-secondary)' }} />
                 </div>
                 <span className="flex-1 text-left">{p.label}</span>
-                {dis && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>Soon</span>}
+                {dis && <span className="text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>Soon</span>}
               </button>
             );
           })}

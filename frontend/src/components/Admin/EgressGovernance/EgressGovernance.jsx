@@ -541,7 +541,7 @@ function FieldsTab() {
               </table>
             </div>
             <div className="mt-2 rounded-lg p-2 overflow-x-auto" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
-              <div className="text-[10px] font-bold mb-1" style={{ color: 'var(--color-text-tertiary)' }}>RAW CSV HEADER (column keys as written to the file)</div>
+              <div className="text-[11px] sm:text-[10px] font-bold mb-1" style={{ color: 'var(--color-text-tertiary)' }}>RAW CSV HEADER (column keys as written to the file)</div>
               <code className="text-[11px] whitespace-nowrap" style={{ color: 'var(--color-text)' }}>{previewFields.join(',')}</code>
             </div>
             {uuidField && (

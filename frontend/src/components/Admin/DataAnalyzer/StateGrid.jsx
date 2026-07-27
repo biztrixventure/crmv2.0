@@ -22,7 +22,7 @@ const ChipGrid = ({ value = [], onChange, options = [], allOptions, cols = 7 }) 
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>
+      <div className="flex items-center justify-between text-[11px] sm:text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>
         <span>{value.length} of {all.length} selected</span>
         <div className="flex gap-2">
           <button type="button" onClick={selectAll} className="font-bold underline">all</button>
@@ -121,7 +121,7 @@ const CollapsibleChipGrid = ({ value = [], onChange, options = [], cols = 5, col
           )}
           <ChipGrid value={value} onChange={onChange} options={filtered} allOptions={options} cols={cols} />
           {options.length > filtered.length && (
-            <p className="text-[10px] italic text-center"
+            <p className="text-[11px] sm:text-[10px] italic text-center"
               style={{ color: 'var(--color-text-tertiary)' }}>
               Showing {filtered.length} of {options.length}. Refine the search to narrow.
             </p>

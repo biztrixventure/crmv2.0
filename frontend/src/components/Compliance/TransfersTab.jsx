@@ -211,7 +211,7 @@ const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
           <CalendarDays size={12} />
           Created Today
           {todayCount !== null && (
-            <span className="px-1.5 py-0.5 rounded-md text-[10px] font-bold"
+            <span className="px-1.5 py-0.5 rounded-md text-[11px] sm:text-[10px] font-bold"
               style={{ backgroundColor: isTodayActive ? '#bfdbfe' : 'var(--color-border)', color: isTodayActive ? '#1d4ed8' : 'var(--color-text-secondary)' }}>
               {todayCount}
             </span>
@@ -298,7 +298,7 @@ const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
                           title={t.duplicate_reason === 'refresh'
                             ? 'Duplicate VICIDIAL transfer that refreshed an existing lead in place — click for history'
                             : 'Created as a duplicate — click to see its full history'}
-                          className="mt-1 inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full transition-colors"
+                          className="mt-1 inline-flex items-center gap-1 text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded-full transition-colors"
                           style={{ backgroundColor: '#fef3c7', color: '#b45309', border: '1px solid #fcd34d' }}>
                           <Copy size={10} /> {t.duplicate_reason === 'refresh' ? 'Duplicate · in-place' : 'Duplicate Transfer'}
                         </button>

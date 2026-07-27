@@ -130,7 +130,7 @@ export default function TabStatsStrip({
           <Icon size={15} style={{ color }} />
         </div>
         <div className="min-w-0 flex-1">
-          <p className="text-[10px] font-bold uppercase tracking-wider truncate"
+          <p className="text-[11px] sm:text-[10px] font-bold uppercase tracking-wider truncate"
             style={{ color: accentLabel ? color : 'var(--color-text-secondary)' }}>{label}</p>
           <p className="text-xl font-extrabold leading-none mt-1 truncate"
             style={{ color: 'var(--color-text)', fontFamily: 'var(--font-display)', letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>

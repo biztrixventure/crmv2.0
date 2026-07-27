@@ -51,7 +51,7 @@ const Chip = ({ icon: Icon, label, value, accent }) => (
     <Icon size={14} style={{ color: accent || 'var(--color-primary-600)', flexShrink: 0 }} />
     <div className="min-w-0">
       <p className="text-sm font-bold leading-none" style={{ color: 'var(--color-text)' }}>{value}</p>
-      <p className="text-[10px] truncate" style={{ color: 'var(--color-text-tertiary)' }}>{label}</p>
+      <p className="text-[11px] sm:text-[10px] truncate" style={{ color: 'var(--color-text-tertiary)' }}>{label}</p>
     </div>
   </div>
 );
@@ -59,7 +59,7 @@ const Chip = ({ icon: Icon, label, value, accent }) => (
 const StatusBadge = ({ status }) => {
   const m = STATUS_META[status] || STATUS_META.offline;
   return (
-    <span className="inline-flex items-center gap-1.5 text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0"
+    <span className="inline-flex items-center gap-1.5 text-[11px] sm:text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0"
       style={{ backgroundColor: m.bg, color: m.fg }}>
       <span className="rounded-full" style={{ width: 6, height: 6, backgroundColor: m.dot }} />
       {m.label}
@@ -80,7 +80,7 @@ const UserRow = ({ u, status, sessions, livePage }) => {
               <p className="text-sm font-semibold truncate" style={{ color: 'var(--color-text)' }}>{u.name}</p>
               <StatusBadge status={status} />
               {sessions > 1 && (
-                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0"
+                <span className="text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0"
                   style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}
                   title={`${sessions} active sessions (tabs/devices)`}>
                   ×{sessions}
@@ -98,7 +98,7 @@ const UserRow = ({ u, status, sessions, livePage }) => {
                 : u.never_seen ? 'Never logged in'
                 : formatLastSeen(u.last_seen_at, { prefix: '' })?.trim() || '—'}
             </p>
-            <p className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>
+            <p className="text-[11px] sm:text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>
               today {fmtMin(u.today.active_minutes)}
             </p>
           </div>
@@ -115,7 +115,7 @@ const UserRow = ({ u, status, sessions, livePage }) => {
           <p><span className="font-semibold">7-day total:</span> {fmtMin(u.week_minutes)}</p>
           <p><span className="font-semibold">Active days (30d):</span> {u.month_active_days}</p>
           <p className="flex items-center gap-1"><Zap size={10} /> <span className="font-semibold">Engagement:</span> {u.engagement}/100</p>
-          <p className="col-span-2 truncate"><span className="font-semibold">{status !== 'offline' ? 'Current page' : 'Last page'}:</span> <code className="text-[10px]">{page || '—'}</code></p>
+          <p className="col-span-2 truncate"><span className="font-semibold">{status !== 'offline' ? 'Current page' : 'Last page'}:</span> <code className="text-[11px] sm:text-[10px]">{page || '—'}</code></p>
           {u.today.top_module && <p><span className="font-semibold">Top module:</span> {u.today.top_module}</p>}
           <p className="flex items-center gap-1 truncate"><Monitor size={10} /> {u.device || '—'}</p>
           {u.ip && <p className="flex items-center gap-1 col-span-2"><MapPin size={10} /> {u.ip}</p>}
@@ -225,7 +225,7 @@ const ActivityPanel = () => {
         <div className="flex items-center justify-between px-4 h-14 flex-shrink-0" style={{ background: 'var(--gradient-sidebar)' }}>
           <span className="flex items-center gap-2 font-bold text-white text-sm">
             <Activity size={16} /> User Activity
-            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ backgroundColor: 'rgba(255,255,255,0.25)' }}>
+            <span className="text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ backgroundColor: 'rgba(255,255,255,0.25)' }}>
               {onlineCount} online
             </span>
           </span>
@@ -312,7 +312,7 @@ const ActivityPanel = () => {
           )}
         </div>
 
-        <p className="px-3 py-1.5 text-[10px] flex-shrink-0" style={{ borderTop: '1px solid var(--color-border)', color: 'var(--color-text-tertiary)' }}>
+        <p className="px-3 py-1.5 text-[11px] sm:text-[10px] flex-shrink-0" style={{ borderTop: '1px solid var(--color-border)', color: 'var(--color-text-tertiary)' }}>
           Live status is realtime · aggregates refresh every 60s
           {data?.generated_at ? ` · updated ${new Date(data.generated_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : ''}
         </p>

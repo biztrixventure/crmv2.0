@@ -95,17 +95,17 @@ const CompanyCard = ({ company, isSelected, onSelect, onEdit, onDeactivate, onAc
           </div>
           <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
             {company.slug && (
-              <span className="text-[10px] font-mono text-text-secondary truncate max-w-[100px]">{company.slug}</span>
+              <span className="text-[11px] sm:text-[10px] font-mono text-text-secondary truncate max-w-[100px]">{company.slug}</span>
             )}
             {company.company_type && (
-              <span className="text-[10px] font-semibold px-1.5 py-px rounded-md"
+              <span className="text-[11px] sm:text-[10px] font-semibold px-1.5 py-px rounded-md"
                 style={{ backgroundColor: ts.bg, color: ts.color, border: `1px solid ${ts.border}` }}>
                 {ts.label}
               </span>
             )}
           </div>
           {company.created_at && (
-            <p className="text-[10px] text-text-secondary mt-0.5 opacity-70">
+            <p className="text-[11px] sm:text-[10px] text-text-secondary mt-0.5 opacity-70">
               {new Date(company.created_at).toLocaleDateString()}
             </p>
           )}
@@ -223,7 +223,7 @@ const SortBtn = ({ col, sort, onClick, label }) => {
   const showDir = active && col !== 'custom';   // custom has no asc/desc, just on/off
   return (
     <button onClick={() => onClick(col)}
-      className="flex items-center gap-0.5 text-[10px] font-semibold transition-colors"
+      className="flex items-center gap-0.5 text-[11px] sm:text-[10px] font-semibold transition-colors"
       style={{
         color: active ? 'var(--color-primary-700)' : 'var(--color-text-secondary)',
       }}>
@@ -241,7 +241,7 @@ const SortBtn = ({ col, sort, onClick, label }) => {
 const Chip = ({ active, onClick, children }) => (
   <button
     onClick={onClick}
-    className="px-2 py-0.5 rounded-md text-[10px] font-semibold transition-all border"
+    className="px-2 py-0.5 rounded-md text-[11px] sm:text-[10px] font-semibold transition-all border"
     style={{
       backgroundColor: active ? 'var(--color-primary-600)' : 'transparent',
       color:           active ? '#fff' : 'var(--color-text-secondary)',
@@ -441,7 +441,7 @@ const CompanyManagement = () => {
 
             {/* type filter */}
             <div className="flex items-center gap-1 flex-wrap">
-              <span className="text-[10px] text-text-secondary font-medium w-10 flex-shrink-0">Type</span>
+              <span className="text-[11px] sm:text-[10px] text-text-secondary font-medium w-10 flex-shrink-0">Type</span>
               <Chip active={typeFilter==='all'}     onClick={() => setTypeFilter('all')}>All</Chip>
               <Chip active={typeFilter==='fronter'} onClick={() => setTypeFilter('fronter')}>Fronter {counts.fronter}</Chip>
               <Chip active={typeFilter==='closer'}  onClick={() => setTypeFilter('closer')}>Closer {counts.closer}</Chip>
@@ -449,7 +449,7 @@ const CompanyManagement = () => {
 
             {/* status filter */}
             <div className="flex items-center gap-1 flex-wrap">
-              <span className="text-[10px] text-text-secondary font-medium w-10 flex-shrink-0">Status</span>
+              <span className="text-[11px] sm:text-[10px] text-text-secondary font-medium w-10 flex-shrink-0">Status</span>
               <Chip active={statusFilt==='all'}      onClick={() => setStatusFilt('all')}>All</Chip>
               <Chip active={statusFilt==='active'}   onClick={() => setStatusFilt('active')}>Active {counts.active}</Chip>
               <Chip active={statusFilt==='inactive'} onClick={() => setStatusFilt('inactive')}>Inactive {counts.inactive}</Chip>
@@ -457,7 +457,7 @@ const CompanyManagement = () => {
 
             {/* sort */}
             <div className="flex items-center gap-2">
-              <span className="text-[10px] text-text-secondary font-medium w-10 flex-shrink-0">Sort</span>
+              <span className="text-[11px] sm:text-[10px] text-text-secondary font-medium w-10 flex-shrink-0">Sort</span>
               <SortBtn col="name"    sort={sort} onClick={toggleSort} />
               <SortBtn col="created" sort={sort} onClick={toggleSort} />
               {/* Custom: enables drag-and-drop reordering. The order persists
@@ -465,7 +465,7 @@ const CompanyManagement = () => {
               <SortBtn col="custom"  sort={sort} onClick={() => setSort({ col: 'custom', dir: 'asc' })} />
             </div>
             {sort.col === 'custom' && (
-              <p className="text-[10px] italic" style={{ color: 'var(--color-text-tertiary)' }}>
+              <p className="text-[11px] sm:text-[10px] italic" style={{ color: 'var(--color-text-tertiary)' }}>
                 Drag the grip handle to reorder. Saved automatically.
               </p>
             )}
@@ -506,7 +506,7 @@ const CompanyManagement = () => {
           )}
 
           {/* footer count */}
-          <div className="px-3 py-1.5 flex-shrink-0 flex items-center justify-between text-[10px] text-text-secondary"
+          <div className="px-3 py-1.5 flex-shrink-0 flex items-center justify-between text-[11px] sm:text-[10px] text-text-secondary"
             style={{ borderTop: '1px solid var(--color-border)' }}>
             <span>{filtered.length} shown</span>
             <span>{counts.active} active · {counts.fronter} fronter · {counts.closer} closer</span>

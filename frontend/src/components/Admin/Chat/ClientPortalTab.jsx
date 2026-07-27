@@ -173,7 +173,7 @@ export default function ClientPortalTab() {
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <span className="font-semibold text-sm" style={{ color: 'var(--color-text)' }}>{c.name}</span>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full font-bold"
+                  <span className="text-[11px] sm:text-[10px] px-2 py-0.5 rounded-full font-bold"
                     style={{ background: c.is_active ? 'var(--color-success-100)' : 'var(--color-bg-secondary)', color: c.is_active ? 'var(--color-success-700)' : 'var(--color-text-tertiary)' }}>
                     {c.is_active ? 'Active' : 'Disabled'}
                   </span>

@@ -244,7 +244,7 @@ const ClientPlanManager = () => {
                       className="flex items-center gap-2 px-2.5 py-1.5 rounded-md transition-colors"
                       style={{ backgroundColor: on ? 'var(--color-primary-100)' : 'transparent', border: '1px solid', borderColor: on ? 'var(--color-primary-300)' : 'transparent', opacity: c.hidden ? 0.5 : 1 }}>
                       <button onClick={() => setActive(c)} className="flex-1 flex items-center justify-between text-left">
-                        <span className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>{c.value}{c.hidden && <span className="ml-1 text-[10px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>· hidden</span>}</span>
+                        <span className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>{c.value}{c.hidden && <span className="ml-1 text-[11px] sm:text-[10px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>· hidden</span>}</span>
                         <span className="flex items-center gap-1 text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>
                           {count} / {plans.length} plans
                           <ChevronRight size={12} />
@@ -309,7 +309,7 @@ const ClientPlanManager = () => {
                         <input type="checkbox" checked={on} disabled={!active}
                           onChange={() => toggleMapping(active.value, p.value)}
                           className="w-3.5 h-3.5 accent-primary-600" />
-                        <span className="text-sm font-medium" style={{ color: on ? 'var(--color-primary-700)' : 'var(--color-text)' }}>{p.value}{p.hidden && <span className="ml-1 text-[10px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>· hidden</span>}</span>
+                        <span className="text-sm font-medium" style={{ color: on ? 'var(--color-primary-700)' : 'var(--color-text)' }}>{p.value}{p.hidden && <span className="ml-1 text-[11px] sm:text-[10px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>· hidden</span>}</span>
                       </label>
                       <HideDeleteMenu hidden={p.hidden} busy={busy}
                         onToggleHidden={() => toggleHiddenConfig(p)}

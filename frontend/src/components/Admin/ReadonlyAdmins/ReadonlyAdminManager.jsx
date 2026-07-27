@@ -368,7 +368,7 @@ export default function ReadonlyAdminManager() {
                         );
                       })}
                     </div>
-                    <p className="text-[10px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>The “Allow exports” flag above is the master switch; these refine it per area. Enforced at the egress guard.</p>
+                    <p className="text-[11px] sm:text-[10px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>The “Allow exports” flag above is the master switch; these refine it per area. Enforced at the egress guard.</p>
                   </Section>
 
                   {/* Per-button controls */}
@@ -376,7 +376,7 @@ export default function ReadonlyAdminManager() {
                     <div className="flex items-center gap-2 mb-2 flex-wrap">
                       <QuickBtn onClick={() => setAllControls(u.id, false)} icon={<Eye size={11} />}>All buttons</QuickBtn>
                       <QuickBtn onClick={() => setAllControls(u.id, true)} icon={<EyeOff size={11} />}>Hide all buttons</QuickBtn>
-                      <span className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>Unchecked = the button never renders for this admin.</span>
+                      <span className="text-[11px] sm:text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>Unchecked = the button never renders for this admin.</span>
                     </div>
                     <ControlsMatrix disabled={e.controls ?? server.controls} onToggle={(k) => toggleControl(u.id, k)} />
                   </Section>
@@ -418,13 +418,13 @@ function Field({ label, children }) {
 function Section({ icon, title, children }) {
   return (
     <div className="pt-3">
-      <p className="text-[10px] font-bold uppercase tracking-widest mb-1.5 flex items-center gap-1.5" style={{ color: 'var(--color-text-tertiary)' }}>{icon}{title}</p>
+      <p className="text-[11px] sm:text-[10px] font-bold uppercase tracking-widest mb-1.5 flex items-center gap-1.5" style={{ color: 'var(--color-text-tertiary)' }}>{icon}{title}</p>
       {children}
     </div>
   );
 }
 function Badge({ color, text, title, children }) {
-  return <span title={title} className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded" style={{ backgroundColor: color, color: text }}>{children}</span>;
+  return <span title={title} className="inline-flex items-center gap-1 text-[11px] sm:text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded" style={{ backgroundColor: color, color: text }}>{children}</span>;
 }
 function QuickBtn({ onClick, icon, children }) {
   return <button onClick={onClick} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold border" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>{icon}{children}</button>;
@@ -435,7 +435,7 @@ function TabMatrix({ grouped, allowed, onToggle }) {
     <div className="space-y-2">
       {grouped.map(([g, items]) => (
         <div key={g}>
-          <p className="text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: 'var(--color-text-tertiary)' }}>{ADMIN_TAB_GROUPS[g] || g}</p>
+          <p className="text-[11px] sm:text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: 'var(--color-text-tertiary)' }}>{ADMIN_TAB_GROUPS[g] || g}</p>
           <div className="rounded-lg p-2 grid grid-cols-2 md:grid-cols-3 gap-1.5" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
             {items.map(t => (
               <label key={t.id} className="inline-flex items-center gap-1.5 cursor-pointer text-xs">
@@ -456,7 +456,7 @@ function ControlsMatrix({ disabled, onToggle }) {
     <div className="space-y-2">
       {groupedControls().map(([tabId, controls]) => (
         <div key={tabId}>
-          <p className="text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: 'var(--color-text-tertiary)' }}>{TAB_LABEL[tabId] || CC_LABEL[tabId] || tabId}</p>
+          <p className="text-[11px] sm:text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: 'var(--color-text-tertiary)' }}>{TAB_LABEL[tabId] || CC_LABEL[tabId] || tabId}</p>
           <div className="rounded-lg p-2 grid grid-cols-2 md:grid-cols-3 gap-1.5" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
             {controls.map(c => (
               <label key={c.key} className="inline-flex items-center gap-1.5 cursor-pointer text-xs">
@@ -476,7 +476,7 @@ function CompanyMatrix({ companies, selected, onToggle, onAll, onNone }) {
       <div className="flex items-center gap-2 mb-1.5">
         <QuickBtn onClick={onAll} icon={<Eye size={11} />}>All companies</QuickBtn>
         <QuickBtn onClick={onNone} icon={<EyeOff size={11} />}>None</QuickBtn>
-        <span className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>{all ? 'Every company (parity)' : `${(selected || []).length} of ${companies.length}`}</span>
+        <span className="text-[11px] sm:text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>{all ? 'Every company (parity)' : `${(selected || []).length} of ${companies.length}`}</span>
       </div>
       {companies.length === 0 ? (
         <p className="text-xs italic" style={{ color: 'var(--color-text-tertiary)' }}>No companies loaded.</p>
@@ -497,7 +497,7 @@ function ActivityTimeline({ rows, onRefresh }) {
   return (
     <div className="rounded-lg overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
       <div className="flex items-center justify-between px-2 py-1.5" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
-        <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-tertiary)' }}>{rows.length} recent events</span>
+        <span className="text-[11px] sm:text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-tertiary)' }}>{rows.length} recent events</span>
         <QuickBtn onClick={onRefresh} icon={<RotateCcw size={11} />}>Refresh</QuickBtn>
       </div>
       {rows.length === 0 ? (
@@ -511,7 +511,7 @@ function ActivityTimeline({ rows, onRefresh }) {
               {r.dataset && <span style={{ color: 'var(--color-text-secondary)' }}>{r.dataset}</span>}
               {r.surface && <span style={{ color: 'var(--color-text-tertiary)' }}>{r.surface}</span>}
               {r.path && <span style={{ color: 'var(--color-text-tertiary)' }}>{r.http_method} {r.path}</span>}
-              <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded" style={{ backgroundColor: r.verified ? '#dcfce7' : '#f1f5f9', color: r.verified ? '#166534' : '#64748b' }}>{r.verified ? 'verified' : 'reported'}</span>
+              <span className="ml-auto text-[11px] sm:text-[10px] px-1.5 py-0.5 rounded" style={{ backgroundColor: r.verified ? '#dcfce7' : '#f1f5f9', color: r.verified ? '#166534' : '#64748b' }}>{r.verified ? 'verified' : 'reported'}</span>
             </div>
           ))}
         </div>

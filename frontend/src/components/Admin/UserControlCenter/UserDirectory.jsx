@@ -149,7 +149,7 @@ export default function UserDirectory({ onSelect }) {
                       {inactive && <Circle size={7} fill="var(--color-error-500)" style={{ color: 'var(--color-error-500)' }} />}
                     </div>
                     <div className="text-[11px] truncate" style={{ color: 'var(--color-text-secondary)' }}>{u.email || (results ? u.company_name : activeCompany?.name) || '—'}</div>
-                    <span className="inline-block mt-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+                    <span className="inline-block mt-1 text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded-full"
                       style={{ background: col + '22', color: col }}>{prettyRole(lvl)}{results && u.company_name ? ` · ${u.company_name}` : ''}</span>
                   </div>
                 </button>

@@ -45,7 +45,7 @@ function InfoTip({ text, w = 250 }) {
 }
 
 const StepBadge = ({ n }) => (
-  <span className="inline-flex items-center justify-center rounded-full text-[10px] font-bold" style={{ width: 16, height: 16, background: 'var(--color-primary-600)', color: '#fff' }}>{n}</span>
+  <span className="inline-flex items-center justify-center rounded-full text-[11px] sm:text-[10px] font-bold" style={{ width: 16, height: 16, background: 'var(--color-primary-600)', color: '#fff' }}>{n}</span>
 );
 
 const WORK_TYPE_DEFS = [
@@ -80,9 +80,9 @@ function KpiStrip({ kpis }) {
     <div className="grid gap-2 mb-3" style={{ gridTemplateColumns: 'repeat(4, minmax(0,1fr))' }}>
       {tiles.map(([label, val, sub, tip]) => (
         <div key={label} className="p-3 rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-          <div className="text-[10px] font-bold uppercase tracking-wide flex items-center gap-1" style={{ color: 'var(--color-text-tertiary)' }}>{label} <InfoTip text={tip} /></div>
+          <div className="text-[11px] sm:text-[10px] font-bold uppercase tracking-wide flex items-center gap-1" style={{ color: 'var(--color-text-tertiary)' }}>{label} <InfoTip text={tip} /></div>
           <div className="text-2xl font-extrabold tabular-nums leading-tight" style={{ color: 'var(--color-text)' }}>{val}</div>
-          <div className="text-[10px] truncate" style={{ color: 'var(--color-text-tertiary)' }}>{sub}</div>
+          <div className="text-[11px] sm:text-[10px] truncate" style={{ color: 'var(--color-text-tertiary)' }}>{sub}</div>
         </div>
       ))}
     </div>
@@ -127,7 +127,7 @@ function TeamReport({ team, onPick }) {
                     <div className="font-semibold truncate inline-flex items-center gap-1.5" style={{ color: 'var(--color-text)', maxWidth: 240 }}>{r.name}
                       {r.levels.map(l => <span key={l} className="text-[8px] font-bold px-1 py-0.5 rounded uppercase" style={{ background: 'var(--color-surface-hover)', color: l === 'qa_manager' ? 'var(--color-primary-600)' : 'var(--color-warning-600)' }}>{lvlLabel(l)}</span>)}
                     </div>
-                    <div className="text-[10px] mt-0.5 flex items-center gap-1 flex-wrap" style={{ color: 'var(--color-text-tertiary)' }}>
+                    <div className="text-[11px] sm:text-[10px] mt-0.5 flex items-center gap-1 flex-wrap" style={{ color: 'var(--color-text-tertiary)' }}>
                       {r.companies.length ? r.companies.slice(0, 3).map(c => c.company_name).filter(Boolean).join(' · ') : <span style={{ color: 'var(--color-warning-600)' }}>no company access</span>}
                       {r.companies.length > 3 && <span>+{r.companies.length - 3}</span>}
                       {Object.keys(r.by_work_type || {}).length > 0 && <span className="inline-flex gap-0.5 ml-1">{Object.entries(r.by_work_type).map(([k, n]) => <WtPill key={k} k={k} n={n} />)}</span>}
@@ -269,7 +269,7 @@ function ManagersConsole() {
           <div className="flex items-center gap-2 mb-2">
             <User size={15} style={{ color: 'var(--color-primary-600)' }} />
             <div className="text-sm font-bold flex-1 truncate" style={{ color: 'var(--color-text)' }}>{m.name}</div>
-            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-tertiary)' }}>MANAGER</span>
+            <span className="text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-tertiary)' }}>MANAGER</span>
           </div>
           <div className="flex items-start gap-2 mb-1.5">
             <div className="flex items-center gap-1 text-[11px] font-bold flex-shrink-0 pt-1" style={{ color: 'var(--color-text-tertiary)', width: 82 }}><Building2 size={12} /> Companies</div>
@@ -310,7 +310,7 @@ function ManagersConsole() {
                   <button key={id} onClick={() => toggle(id)} className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left" style={{ background: checked ? 'color-mix(in srgb, var(--color-primary) 12%, transparent)' : 'transparent' }}>
                     <span className="w-4 h-4 rounded flex items-center justify-center flex-shrink-0" style={{ border: '1.5px solid ' + (checked ? 'var(--color-primary)' : 'var(--color-border)'), background: checked ? 'var(--color-primary)' : 'transparent' }}>{checked && <Check size={11} style={{ color: '#fff' }} />}</span>
                     <span className="text-[13px] flex-1 truncate" style={{ color: 'var(--color-text)' }}>{item.name}</span>
-                    {otherOwner && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded flex-shrink-0" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-warning-600)' }}>with {mgrName[owner] || 'another'}</span>}
+                    {otherOwner && <span className="text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded flex-shrink-0" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-warning-600)' }}>with {mgrName[owner] || 'another'}</span>}
                   </button>
                 );
               })}
@@ -494,7 +494,7 @@ function TeamConsole({ companies, users, reloadUsers, reloadAll, removeAssign, s
           </div>
           <div className="flex items-center gap-1">
             {[['', 'All'], ['qa_manager', 'Managers'], ['qa_agent', 'Agents']].map(([k, l]) => (
-              <button key={k} onClick={() => setLvl(k)} className="text-[10px] font-bold px-2 py-1 rounded-lg flex-1"
+              <button key={k} onClick={() => setLvl(k)} className="text-[11px] sm:text-[10px] font-bold px-2 py-1 rounded-lg flex-1"
                 style={lvl === k ? { background: 'var(--color-primary-600)', color: '#fff' } : { background: 'var(--color-bg)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}>{l}</button>
             ))}
           </div>
@@ -512,10 +512,10 @@ function TeamConsole({ companies, users, reloadUsers, reloadAll, removeAssign, s
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block text-xs font-bold truncate" style={{ color: 'var(--color-text)' }}>{u.name}</span>
-                    <span className="block text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>{u.levels.map(lvlLabel).join(' + ')} · {u.companies.length} compan{u.companies.length === 1 ? 'y' : 'ies'}</span>
+                    <span className="block text-[11px] sm:text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>{u.levels.map(lvlLabel).join(' + ')} · {u.companies.length} compan{u.companies.length === 1 ? 'y' : 'ies'}</span>
                   </span>
                   {u.open_tasks > 0 && (
-                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full tabular-nums" title={`${u.open_tasks} open call(s) on their plate right now`}
+                    <span className="text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded-full tabular-nums" title={`${u.open_tasks} open call(s) on their plate right now`}
                       style={u.open_tasks >= 25 ? { background: 'rgba(220,38,38,0.12)', color: '#dc2626' } : u.open_tasks >= 15 ? { background: 'rgba(217,119,6,0.12)', color: '#d97706' } : { background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}>
                       {u.open_tasks}
                     </span>
@@ -525,7 +525,7 @@ function TeamConsole({ companies, users, reloadUsers, reloadAll, removeAssign, s
               );
             })}
         </div>
-        <div className="p-2 text-[10px] flex items-center gap-1.5" style={{ color: 'var(--color-text-tertiary)', borderTop: '1px solid var(--color-border)' }}>
+        <div className="p-2 text-[11px] sm:text-[10px] flex items-center gap-1.5" style={{ color: 'var(--color-text-tertiary)', borderTop: '1px solid var(--color-border)' }}>
           <Lock size={11} /> New QA accounts are created by the Super Admin.
         </div>
       </div>
@@ -557,7 +557,7 @@ function TeamConsole({ companies, users, reloadUsers, reloadAll, removeAssign, s
 
           {/* company access */}
           <div className="p-3 rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-            <div className="text-[10px] font-bold uppercase tracking-wide mb-2 flex items-center gap-1" style={{ color: 'var(--color-text-tertiary)' }}>
+            <div className="text-[11px] sm:text-[10px] font-bold uppercase tracking-wide mb-2 flex items-center gap-1" style={{ color: 'var(--color-text-tertiary)' }}>
               Company access <InfoTip text="The companies this person can review. For agents, the TRA/RCM chips set which scorecard applies to that type. The QA manager then distributes the actual calls from Load Day. × removes them from that company." />
             </div>
             <div className="flex flex-wrap gap-1.5 items-center">
@@ -567,8 +567,8 @@ function TeamConsole({ companies, users, reloadUsers, reloadAll, removeAssign, s
                 if (confirmRemove === c.ucr_id) return (
                   <span key={c.ucr_id} className="inline-flex items-center gap-1.5 text-[11px] px-2 py-1 rounded-lg" style={{ background: 'rgba(220,38,38,0.08)', border: '1px solid #dc262666', color: 'var(--color-text-secondary)' }}>
                     <span>Remove <b style={{ color: 'var(--color-text)' }}>{person.name}</b> from <b style={{ color: 'var(--color-text)' }}>{coName}</b>? Their unscored calls return to the pool; the account is <b>not</b> deleted.</span>
-                    <button onClick={() => { setConfirmRemove(null); removeAssign(c.ucr_id, coName); }} className="text-[10px] font-bold px-2 py-0.5 rounded" style={{ background: '#dc2626', color: '#fff' }}>Remove access</button>
-                    <button onClick={() => setConfirmRemove(null)} className="text-[10px] font-bold px-2 py-0.5 rounded" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}>Keep</button>
+                    <button onClick={() => { setConfirmRemove(null); removeAssign(c.ucr_id, coName); }} className="text-[11px] sm:text-[10px] font-bold px-2 py-0.5 rounded" style={{ background: '#dc2626', color: '#fff' }}>Remove access</button>
+                    <button onClick={() => setConfirmRemove(null)} className="text-[11px] sm:text-[10px] font-bold px-2 py-0.5 rounded" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}>Keep</button>
                   </span>
                 );
                 return (
@@ -578,11 +578,11 @@ function TeamConsole({ companies, users, reloadUsers, reloadAll, removeAssign, s
                       <span className="inline-flex items-center gap-0.5">
                         {METHODS.map(([k, l]) => {
                           const on = (c.methods || []).includes(k);
-                          return <button key={k} onClick={() => setAgentMethod(person.user_id, c.company_id, c.methods || [], k)} title={`${l} — bind this agent to the ${l} section for ${coName}: their reviews here use the ${l} scorecard, and Distribute can hand them ${l} calls. Click to ${on ? 'unbind' : 'bind'}.`} className="font-bold px-1 rounded uppercase text-[10px]"
+                          return <button key={k} onClick={() => setAgentMethod(person.user_id, c.company_id, c.methods || [], k)} title={`${l} — bind this agent to the ${l} section for ${coName}: their reviews here use the ${l} scorecard, and Distribute can hand them ${l} calls. Click to ${on ? 'unbind' : 'bind'}.`} className="font-bold px-1 rounded uppercase text-[11px] sm:text-[10px]"
                             style={on ? { background: k === 'tra' ? 'rgba(37,99,235,0.18)' : 'rgba(217,119,6,0.18)', color: k === 'tra' ? 'var(--color-primary-600)' : 'var(--color-warning-600)' } : { color: 'var(--color-text-tertiary)', border: '1px solid var(--color-border)' }}>{on ? '✓' : ''}{l}</button>;
                         })}
                       </span>
-                    ) : <span className="text-[10px] font-bold" style={{ color: 'var(--color-primary-600)' }}>MGR</span>}
+                    ) : <span className="text-[11px] sm:text-[10px] font-bold" style={{ color: 'var(--color-primary-600)' }}>MGR</span>}
                     <button onClick={() => setConfirmRemove(c.ucr_id)} title="Remove access to this company (asks first — never deletes the account)"><X size={12} style={{ color: 'var(--color-error-600)' }} /></button>
                   </span>
                 );
@@ -729,7 +729,7 @@ function RuleBuilder({ companies, onDone, onCancel, fixedReviewer }) {
                     </span>
                     <span className="min-w-0">
                       <span className="block text-xs font-bold" style={{ color: on ? w.tint : 'var(--color-text)' }}>{w.label}</span>
-                      <span className="block text-[10px] leading-snug mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>{w.desc}</span>
+                      <span className="block text-[11px] sm:text-[10px] leading-snug mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>{w.desc}</span>
                     </span>
                   </button>
                 );
@@ -768,7 +768,7 @@ function RuleBuilder({ companies, onDone, onCancel, fixedReviewer }) {
               <I size={11} />{l}
             </button>
           ))}
-          {subjectMode === 'specific' && <span className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>{subjects.length} selected — single or multiple, your choice</span>}
+          {subjectMode === 'specific' && <span className="text-[11px] sm:text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>{subjects.length} selected — single or multiple, your choice</span>}
         </div>
         {subjectMode === 'specific' && (
           !companyId ? <div className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>Pick a company first to see its agents.</div>
@@ -788,7 +788,7 @@ function RuleBuilder({ companies, onDone, onCancel, fixedReviewer }) {
                 );
               })}
               {types.includes('rcm') && companyUsers.some(u => subjects.includes(u.user_id) && !u.has_dialer) && (
-                <div className="w-full text-[10px] mt-1" style={{ color: 'var(--color-warning-600)' }}>⚠ Users marked ⚠ have no dialer id — their random (RCM) calls can't be pulled until their dialer mapping is set. TRA/closer reviews still work for them.</div>
+                <div className="w-full text-[11px] sm:text-[10px] mt-1" style={{ color: 'var(--color-warning-600)' }}>⚠ Users marked ⚠ have no dialer id — their random (RCM) calls can't be pulled until their dialer mapping is set. TRA/closer reviews still work for them.</div>
               )}
             </div>
         )}
@@ -858,7 +858,7 @@ function RulesSection({ rules, reload }) {
             <div className="flex items-center gap-2 px-3 py-2" style={{ borderBottom: '1px solid var(--color-border)' }}>
               <Building2 size={13} style={{ color: 'var(--color-text-tertiary)' }} />
               <span className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>{g.name || coId.slice(0, 8)}</span>
-              <span className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>{g.rules.length} rule{g.rules.length === 1 ? '' : 's'}</span>
+              <span className="text-[11px] sm:text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>{g.rules.length} rule{g.rules.length === 1 ? '' : 's'}</span>
               <button onClick={() => runNow(coId)} disabled={applying === coId}
                 className="ml-auto text-[11px] font-bold px-2.5 py-1 rounded-lg inline-flex items-center gap-1"
                 style={{ background: 'var(--color-primary-600)', color: '#fff', opacity: applying === coId ? 0.6 : 1 }}
@@ -874,19 +874,19 @@ function RulesSection({ rules, reload }) {
                     <div className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>{r.reviewer_name || r.reviewer_id.slice(0, 6)} <span className="text-[11px] font-normal" style={{ color: 'var(--color-text-tertiary)' }}>listens to</span></div>
                     <div className="flex flex-wrap gap-1 mt-1">
                       {(r.work_types || []).map(k => { const d = wtDef(k); const I = d.icon; return (
-                        <span key={k} className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: `${d.tint}18`, color: d.tint }}><I size={10} />{d.label}</span>
+                        <span key={k} className="inline-flex items-center gap-1 text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: `${d.tint}18`, color: d.tint }}><I size={10} />{d.label}</span>
                       ); })}
                       {(r.work_types || []).includes('closer_dispo') && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded font-semibold" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}>
+                        <span className="text-[11px] sm:text-[10px] px-1.5 py-0.5 rounded font-semibold" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}>
                           {(r.dispositions || []).length ? `dispo: ${r.dispositions.join(', ')}` : 'dispo: any non-SALE'}
                         </span>
                       )}
-                      <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded font-semibold" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}>
+                      <span className="inline-flex items-center gap-1 text-[11px] sm:text-[10px] px-1.5 py-0.5 rounded font-semibold" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}>
                         {(r.subject_names || []).length ? <><User size={10} />{r.subject_names.join(', ')}</> : <><Users size={10} />all agents</>}
                       </span>
                     </div>
                   </div>
-                  <button onClick={() => toggle(r)} className="text-[10px] font-bold px-2 py-1 rounded uppercase" style={r.is_active ? { background: 'rgba(5,150,105,0.14)', color: '#059669' } : { background: 'var(--color-surface-hover)', color: 'var(--color-text-tertiary)' }}>{r.is_active ? 'Active' : 'Paused'}</button>
+                  <button onClick={() => toggle(r)} className="text-[11px] sm:text-[10px] font-bold px-2 py-1 rounded uppercase" style={r.is_active ? { background: 'rgba(5,150,105,0.14)', color: '#059669' } : { background: 'var(--color-surface-hover)', color: 'var(--color-text-tertiary)' }}>{r.is_active ? 'Active' : 'Paused'}</button>
                   <button onClick={() => remove(r)} title="Delete rule"><X size={14} style={{ color: 'var(--color-error-600)' }} /></button>
                 </div>
               ))}
@@ -944,10 +944,10 @@ function CompanyConfig({ company, onToggleMethod, onCloserChange }) {
     return (
       <div className="p-2.5 rounded-xl" style={{ background: on ? `${d.tint}0e` : 'var(--color-bg)', border: `1px solid ${on ? d.tint + '66' : 'var(--color-border)'}` }}>
         <div className="flex items-start gap-2">
-          <button onClick={onToggle} className="text-[10px] font-bold px-2 py-1 rounded uppercase flex-shrink-0" style={on ? { background: `${d.tint}22`, color: d.tint, border: `1px solid ${d.tint}` } : { background: 'var(--color-surface-hover)', color: 'var(--color-text-tertiary)', border: '1px solid transparent' }}>{on ? '✓ On' : 'Off'}</button>
+          <button onClick={onToggle} className="text-[11px] sm:text-[10px] font-bold px-2 py-1 rounded uppercase flex-shrink-0" style={on ? { background: `${d.tint}22`, color: d.tint, border: `1px solid ${d.tint}` } : { background: 'var(--color-surface-hover)', color: 'var(--color-text-tertiary)', border: '1px solid transparent' }}>{on ? '✓ On' : 'Off'}</button>
           <div className="min-w-0 flex-1">
             <div className="text-xs font-bold inline-flex items-center gap-1.5 flex-wrap" style={{ color: 'var(--color-text)' }}>{label} <ScoreStatus slot={k} /></div>
-            <div className="text-[10px] leading-snug mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>{desc}</div>
+            <div className="text-[11px] sm:text-[10px] leading-snug mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>{desc}</div>
           </div>
         </div>
         {on && children && <div className="mt-2 pt-2" style={{ borderTop: '1px dashed var(--color-border)' }}>{children}</div>}
@@ -958,7 +958,7 @@ function CompanyConfig({ company, onToggleMethod, onCloserChange }) {
     <div className="flex items-start gap-3 py-2" style={{ borderBottom: '1px dashed var(--color-border)' }}>
       <div style={{ width: 210 }} className="flex-shrink-0">
         <div className="text-xs font-bold flex items-center gap-1" style={{ color: 'var(--color-text)' }}>{title}{tip && <InfoTip text={tip} />}</div>
-        {sub && <div className="text-[10px] mt-0.5 leading-snug" style={{ color: 'var(--color-text-tertiary)' }}>{sub}</div>}
+        {sub && <div className="text-[11px] sm:text-[10px] mt-0.5 leading-snug" style={{ color: 'var(--color-text-tertiary)' }}>{sub}</div>}
       </div>
       <div className="flex items-center gap-2 flex-wrap flex-1 min-w-0">{children}</div>
     </div>
@@ -966,7 +966,7 @@ function CompanyConfig({ company, onToggleMethod, onCloserChange }) {
 
   return (
     <div className="px-3 pb-3 pt-1" style={{ borderTop: '1px solid var(--color-border)', background: 'var(--color-bg)' }}>
-      <div className="text-[10px] font-bold uppercase tracking-wide mt-1 mb-1.5 flex items-center gap-1" style={{ color: 'var(--color-text-tertiary)' }}>
+      <div className="text-[11px] sm:text-[10px] font-bold uppercase tracking-wide mt-1 mb-1.5 flex items-center gap-1" style={{ color: 'var(--color-text-tertiary)' }}>
         Review types <InfoTip w={320} text="The 4 QA review types for this company. FRONTER: TRA (every CRM transfer) + RCM (random raw dialer calls). CLOSER: Closed Sale + Unclosed Sale — the closer's leg of each transfer. Each type has its OWN scorecard, set in the QA app → Scorecards & Config; the badge shows whether one exists." />
       </div>
       <div className="mb-1 text-[9px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-primary-600)' }}>Fronter calls</div>
@@ -976,11 +976,11 @@ function CompanyConfig({ company, onToggleMethod, onCloserChange }) {
           <div className="flex items-center gap-1.5 flex-wrap">
             <ThemedSelect value={rcm.mode} onChange={e => setKey('qa.rcm.sample', { ...rcm, mode: e.target.value })} style={{ ...inp, fontSize: 11, padding: '4px 8px' }}><option value="fixed">A fixed number</option><option value="percentage">A percentage</option></ThemedSelect>
             <input type="number" value={rcm.value} onChange={e => setKey('qa.rcm.sample', { ...rcm, value: +e.target.value })} style={{ ...inp, width: 58, fontSize: 11, padding: '4px 8px' }} />
-            <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{rcm.mode === 'percentage' ? '%' : 'calls'}</span>
+            <span className="text-[11px] sm:text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{rcm.mode === 'percentage' ? '%' : 'calls'}</span>
             <ThemedSelect value={rcm.period} onChange={e => setKey('qa.rcm.sample', { ...rcm, period: e.target.value })} style={{ ...inp, fontSize: 11, padding: '4px 8px' }}><option value="day">/day</option><option value="week">/week</option></ThemedSelect>
             {(() => {
               const opts = companyType === 'fronter' ? [['fronter', 'fronters']] : companyType === 'closer' ? [['closer', 'closers']] : [['fronter', 'fronters'], ['closer', 'closers']];
-              return <><span className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>of:</span>{opts.map(([r, label]) => <label key={r} className="flex items-center gap-1 text-[10px]" style={{ color: 'var(--color-text-secondary)' }}><input type="checkbox" checked={covers.includes(r)} onChange={e => setKey('qa.rcm.covers', e.target.checked ? [...new Set([...covers, r])] : covers.filter(x => x !== r))} />{label}</label>)}</>;
+              return <><span className="text-[11px] sm:text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>of:</span>{opts.map(([r, label]) => <label key={r} className="flex items-center gap-1 text-[11px] sm:text-[10px]" style={{ color: 'var(--color-text-secondary)' }}><input type="checkbox" checked={covers.includes(r)} onChange={e => setKey('qa.rcm.covers', e.target.checked ? [...new Set([...covers, r])] : covers.filter(x => x !== r))} />{label}</label>)}</>;
             })()}
           </div>
         </TypeCard>
@@ -990,17 +990,17 @@ function CompanyConfig({ company, onToggleMethod, onCloserChange }) {
         <TypeCard k="closer_sales" label="Closed Sale" desc="The closer's call on a transfer that SOLD. Reviewed live from the CRM (Live / Load Day)." on={closerOn.includes('closer_sales')} onToggle={() => toggleCloser('closer_sales')} />
         <TypeCard k="closer_dispo" label="Unclosed Sale" desc="The closer's call on a transfer that did NOT sell (a non-sale disposition)." on={closerOn.includes('closer_dispo')} onToggle={() => toggleCloser('closer_dispo')}>
           <div>
-            <div className="text-[10px] font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>Which dispositions count as Unclosed <span className="font-normal" style={{ color: 'var(--color-text-tertiary)' }}>— none picked = any non-sale</span></div>
+            <div className="text-[11px] sm:text-[10px] font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>Which dispositions count as Unclosed <span className="font-normal" style={{ color: 'var(--color-text-tertiary)' }}>— none picked = any non-sale</span></div>
             <div className="flex flex-wrap gap-1">
               {dispos === null ? <Loader2 size={12} className="animate-spin" style={{ color: 'var(--color-text-tertiary)' }} />
-                : !dispos.length ? <span className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>No closer dispositions seen yet for this company.</span>
-                : dispos.slice(0, 24).map(d => { const on = unclSet.has(d.code); return <button key={d.code} onClick={() => toggleUncl(d.code)} className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={on ? { background: 'rgba(220,38,38,0.12)', color: '#dc2626', border: '1px solid #dc262666' } : { background: 'var(--color-surface)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}>{d.code} <span className="opacity-60">{d.count}</span></button>; })}
+                : !dispos.length ? <span className="text-[11px] sm:text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>No closer dispositions seen yet for this company.</span>
+                : dispos.slice(0, 24).map(d => { const on = unclSet.has(d.code); return <button key={d.code} onClick={() => toggleUncl(d.code)} className="text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded" style={on ? { background: 'rgba(220,38,38,0.12)', color: '#dc2626', border: '1px solid #dc262666' } : { background: 'var(--color-surface)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}>{d.code} <span className="opacity-60">{d.count}</span></button>; })}
             </div>
           </div>
         </TypeCard>
       </div>
 
-      <div className="text-[10px] font-bold uppercase tracking-wide mt-3 mb-0.5" style={{ color: 'var(--color-text-tertiary)' }}>General settings</div>
+      <div className="text-[11px] sm:text-[10px] font-bold uppercase tracking-wide mt-3 mb-0.5" style={{ color: 'var(--color-text-tertiary)' }}>General settings</div>
       <Row title="Unclaimed calls expire after"
         sub="A waiting call nobody picks up is removed automatically — old calls never pile into an endless backlog."
         tip="Only applies to calls still sitting in the pool with no reviewer. Anything assigned, in progress, or scored is kept forever.">

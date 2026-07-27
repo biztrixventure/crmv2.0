@@ -205,12 +205,12 @@ const FAQManager = () => {
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className="font-semibold" style={{ color: 'var(--color-text)' }}>{faq.question}</p>
                       <AudienceBadge audience={faq.audience} />
-                      {!faq.is_active && <span className="text-[10px] px-1.5 py-0.5 rounded font-bold" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>HIDDEN</span>}
+                      {!faq.is_active && <span className="text-[11px] sm:text-[10px] px-1.5 py-0.5 rounded font-bold" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>HIDDEN</span>}
                     </div>
                     {!open && <p className="text-xs mt-1 line-clamp-1" style={{ color: 'var(--color-text-secondary)' }}>{faq.answer}</p>}
                     <div className="flex flex-wrap items-center gap-1 mt-2">
                       <CategoryChips ids={faq.category_ids} categories={catHook.categories} />
-                      {splitKeywords(faq.keywords).map(k => <span key={k} className="text-[10px] px-1.5 py-0.5 rounded-md font-medium inline-flex items-center gap-0.5" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}><Tag size={8} /> {k}</span>)}
+                      {splitKeywords(faq.keywords).map(k => <span key={k} className="text-[11px] sm:text-[10px] px-1.5 py-0.5 rounded-md font-medium inline-flex items-center gap-0.5" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}><Tag size={8} /> {k}</span>)}
                     </div>
                   </div>
                   <div className="flex items-center gap-1 flex-shrink-0" onClick={e => e.stopPropagation()}>
@@ -221,7 +221,7 @@ const FAQManager = () => {
                 </div>
                 {open && (
                   <div className="px-4 pb-4 pl-[2.85rem] animate-fade-in">
-                    <p className="text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: 'var(--color-text-secondary)' }}>Answer</p>
+                    <p className="text-[11px] sm:text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: 'var(--color-text-secondary)' }}>Answer</p>
                     <p className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: 'var(--color-text)' }}>{faq.answer}</p>
                   </div>
                 )}

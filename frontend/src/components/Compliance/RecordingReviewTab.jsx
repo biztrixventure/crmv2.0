@@ -22,17 +22,17 @@ const money = (n) => (n == null || n === '' || isNaN(+n)) ? null : `$${(+n).toLo
 
 const inp = { background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', color: 'var(--color-text)', borderRadius: 999, padding: '8px 12px', fontSize: 13, outline: 'none' };
 function Field({ label, children }) {
-  return <label className="flex flex-col gap-1"><span className="text-[10px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-tertiary)' }}>{label}</span>{children}</label>;
+  return <label className="flex flex-col gap-1"><span className="text-[11px] sm:text-[10px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-tertiary)' }}>{label}</span>{children}</label>;
 }
 function AgentBadge({ c }) {
   const kind = c.is_closer_agent ? 'Closer' : (c.agent_role === 'fronter' || c.agent_role === 'fronter_manager' ? 'Fronter' : 'Other agent');
   const color = kind === 'Closer' ? 'var(--color-success-600)' : kind === 'Fronter' ? 'var(--color-warning-600)' : 'var(--color-text-tertiary)';
-  return <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: 'var(--color-surface-hover)', color }}>{kind}</span>;
+  return <span className="text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: 'var(--color-surface-hover)', color }}>{kind}</span>;
 }
 function PhoneBadge({ c }) {
   return c.phone_matches
-    ? <span className="text-[10px] font-bold px-1.5 py-0.5 rounded inline-flex items-center gap-0.5" style={{ background: 'var(--color-success-50, rgba(22,163,74,0.12))', color: 'var(--color-success-600)' }}><CheckCheck size={11} />phone</span>
-    : <span className="text-[10px] font-bold px-1.5 py-0.5 rounded inline-flex items-center gap-0.5" style={{ background: 'var(--color-error-50, rgba(220,38,38,0.12))', color: 'var(--color-error-600)' }}><AlertTriangle size={11} />no phone match</span>;
+    ? <span className="text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded inline-flex items-center gap-0.5" style={{ background: 'var(--color-success-50, rgba(22,163,74,0.12))', color: 'var(--color-success-600)' }}><CheckCheck size={11} />phone</span>
+    : <span className="text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded inline-flex items-center gap-0.5" style={{ background: 'var(--color-error-50, rgba(220,38,38,0.12))', color: 'var(--color-error-600)' }}><AlertTriangle size={11} />no phone match</span>;
 }
 
 // ── shared: candidate list with inline players + ordered selection ────────────
@@ -67,7 +67,7 @@ function CandidateList({ candidates, loading, chosen, setChosen, emptyText }) {
       {/* selected (play order) */}
       {chosen.length > 0 && (
         <div className="p-2.5 rounded-xl" style={{ background: 'var(--color-surface-hover)', border: '1px solid var(--color-primary-600)' }}>
-          <div className="text-[10px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-primary-600)' }}>Confirmed play order ({chosen.length})</div>
+          <div className="text-[11px] sm:text-[10px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-primary-600)' }}>Confirmed play order ({chosen.length})</div>
           <div className="space-y-1">
             {chosen.map((rid, i) => {
               const c = byId.get(rid);
@@ -253,9 +253,9 @@ function ReviewModal({ saleId, onClose, onConfirmed }) {
         <>
           {manualMode && (
             <div className="p-2.5 rounded-xl mb-3 flex items-end gap-2 flex-wrap" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-              <div className="flex-1 min-w-[130px]"><label className="text-[10px] font-bold uppercase block" style={{ color: 'var(--color-text-tertiary)' }}>Phone</label><input value={mPhone} onChange={e => setMPhone(e.target.value)} inputMode="tel" onKeyDown={e => e.key === 'Enter' && runManualSearch(mPhone, mFrom, mTo)} style={{ ...inp }} /></div>
-              <div><label className="text-[10px] font-bold uppercase block" style={{ color: 'var(--color-text-tertiary)' }}>From</label><ThemedDate value={mFrom} onChange={e => setMFrom(e.target.value)} style={inp} /></div>
-              <div><label className="text-[10px] font-bold uppercase block" style={{ color: 'var(--color-text-tertiary)' }}>To</label><ThemedDate value={mTo} onChange={e => setMTo(e.target.value)} style={inp} /></div>
+              <div className="flex-1 min-w-[130px]"><label className="text-[11px] sm:text-[10px] font-bold uppercase block" style={{ color: 'var(--color-text-tertiary)' }}>Phone</label><input value={mPhone} onChange={e => setMPhone(e.target.value)} inputMode="tel" onKeyDown={e => e.key === 'Enter' && runManualSearch(mPhone, mFrom, mTo)} style={{ ...inp }} /></div>
+              <div><label className="text-[11px] sm:text-[10px] font-bold uppercase block" style={{ color: 'var(--color-text-tertiary)' }}>From</label><ThemedDate value={mFrom} onChange={e => setMFrom(e.target.value)} style={inp} /></div>
+              <div><label className="text-[11px] sm:text-[10px] font-bold uppercase block" style={{ color: 'var(--color-text-tertiary)' }}>To</label><ThemedDate value={mTo} onChange={e => setMTo(e.target.value)} style={inp} /></div>
               <button onClick={() => runManualSearch(mPhone, mFrom, mTo)} disabled={manualBusy} className="text-sm font-bold px-3 py-2 rounded-lg flex items-center gap-1.5" style={{ background: 'var(--gradient-sidebar)', color: 'var(--color-text-inverse)' }}>{manualBusy ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />} Search</button>
               <button onClick={() => { setManualMode(false); setManualCands(null); setChosen((data?.existing || []).map(c => c.recording_id)); }} className="text-xs font-semibold px-2 py-2 rounded-lg" style={{ color: 'var(--color-text-secondary)' }}>Back</button>
             </div>
@@ -443,9 +443,9 @@ function ClientSalePicker({ clips, onClose, onDone }) {
                 {filteredClients.map(c => (
                   <button key={c.id} onClick={() => pickClient(c)} className="w-full text-left flex items-center gap-3 p-2.5 rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', opacity: c.is_active ? 1 : 0.55 }}>
                     <div className="min-w-0 flex-1">
-                      <div className="text-sm font-semibold flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>{c.name}{!c.is_active && <span className="text-[10px] font-bold" style={{ color: 'var(--color-error-600)' }}>· inactive</span>}</div>
+                      <div className="text-sm font-semibold flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>{c.name}{!c.is_active && <span className="text-[11px] sm:text-[10px] font-bold" style={{ color: 'var(--color-error-600)' }}>· inactive</span>}</div>
                       <div className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>{c.login_email}</div>
-                      <div className="text-[10px] mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>
+                      <div className="text-[11px] sm:text-[10px] mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>
                         {(c.closer_names || []).length ? `${c.closer_names.length} closer${c.closer_names.length === 1 ? '' : 's'}` : ''}
                         {(c.closer_names || []).length && (c.client_names || []).length ? ' · ' : ''}
                         {(c.client_names || []).length ? c.client_names.join(', ') : ''}
@@ -468,7 +468,7 @@ function ClientSalePicker({ clips, onClose, onDone }) {
                 {sales.map(r => (
                   <button key={r.sale_id} onClick={() => attach(r)} disabled={saving} className="w-full text-left flex items-center gap-3 p-2.5 rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
                     <div className="min-w-0 flex-1">
-                      <div className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>{r.customer_name || '—'} {r.confirmed && <span className="text-[10px] font-bold" style={{ color: 'var(--color-success-600)' }}>· has {r.clip_count} clip{r.clip_count === 1 ? '' : 's'}</span>}</div>
+                      <div className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>{r.customer_name || '—'} {r.confirmed && <span className="text-[11px] sm:text-[10px] font-bold" style={{ color: 'var(--color-success-600)' }}>· has {r.clip_count} clip{r.clip_count === 1 ? '' : 's'}</span>}</div>
                       <div className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>{r.customer_phone} · {r.closer_name || '—'} · {fmtDate(r.sale_date)}{r.client_name ? ` · ${r.client_name}` : ''}</div>
                     </div>
                     {saving === r.sale_id ? <Loader2 size={16} className="animate-spin" style={{ color: 'var(--color-primary-600)' }} /> : <Link2 size={16} style={{ color: 'var(--color-primary-600)' }} />}
@@ -601,11 +601,11 @@ function QueueView({ companyList }) {
                     {r.customer_name || '—'}
                     {r.group_count > 1 && (
                       <span title="Multi-vehicle bundle — one call likely covers all its cars"
-                        className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded whitespace-nowrap"
+                        className="text-[11px] sm:text-[10px] font-bold uppercase px-1.5 py-0.5 rounded whitespace-nowrap"
                         style={{ background: '#d1fae5', color: '#065f46' }}>{r.group_count}-car deal</span>
                     )}
                   </span>
-                  {r.recording_ids && <div className="text-[10px] font-mono mt-0.5 truncate max-w-[220px]" title={r.recording_ids} style={{ color: 'var(--color-text-tertiary)' }}>rec {r.recording_ids}</div>}
+                  {r.recording_ids && <div className="text-[11px] sm:text-[10px] font-mono mt-0.5 truncate max-w-[220px]" title={r.recording_ids} style={{ color: 'var(--color-text-tertiary)' }}>rec {r.recording_ids}</div>}
                 </td>
                 <td className="px-3 py-2 tabular-nums whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>{r.customer_phone || '—'}</td>
                 <td className="px-3 py-2 whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>{r.closer_name || '—'}</td>

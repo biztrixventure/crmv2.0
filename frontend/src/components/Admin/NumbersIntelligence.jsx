@@ -11,6 +11,7 @@ import {
   PhoneCall, Clock, Loader2, Voicemail, AlertTriangle, History,
 } from 'lucide-react';
 import client from '../../api/client';
+import { TableScroll } from '../UI/kit';
 import { useAuth } from '../../contexts/AuthContext';
 
 const STATUS_CFG = {
@@ -511,7 +512,7 @@ const NumbersIntelligence = () => {
           </div>
         ) : (
           <>
-            <div className="overflow-x-auto">
+            <TableScroll stickyFirst label="Numbers">
               <table className="w-full text-sm">
                 <thead>
                   <tr style={{ backgroundColor: 'var(--color-bg-secondary)', borderBottom: '1px solid var(--color-border)' }}>
@@ -602,7 +603,7 @@ const NumbersIntelligence = () => {
                   ))}
                 </tbody>
               </table>
-            </div>
+            </TableScroll>
 
             {/* Pagination */}
             {totalP > 1 && (

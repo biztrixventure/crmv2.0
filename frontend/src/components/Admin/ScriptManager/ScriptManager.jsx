@@ -210,13 +210,13 @@ const ScriptManager = () => {
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className="font-semibold" style={{ color: 'var(--color-text)' }}>{s.title}</p>
                       <AudienceBadge audience={s.audience} />
-                      {!s.is_active && <span className="text-[10px] px-1.5 py-0.5 rounded font-bold" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>HIDDEN</span>}
+                      {!s.is_active && <span className="text-[11px] sm:text-[10px] px-1.5 py-0.5 rounded font-bold" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>HIDDEN</span>}
                     </div>
                     {!open && <p className="text-xs mt-1 line-clamp-2" style={{ color: 'var(--color-text-secondary)' }}>{s.content}</p>}
                     {(s.category_ids?.length > 0) && <div className="mt-2"><CategoryChips ids={s.category_ids} categories={catHook.categories} /></div>}
                     {splitKeywords(s.keywords).length > 0 && (
                       <div className="flex flex-wrap gap-1 mt-2">
-                        {splitKeywords(s.keywords).map(k => <span key={k} className="text-[10px] px-1.5 py-0.5 rounded-md font-medium inline-flex items-center gap-0.5" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}><Tag size={8} /> {k}</span>)}
+                        {splitKeywords(s.keywords).map(k => <span key={k} className="text-[11px] sm:text-[10px] px-1.5 py-0.5 rounded-md font-medium inline-flex items-center gap-0.5" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}><Tag size={8} /> {k}</span>)}
                       </div>
                     )}
                   </div>
@@ -238,7 +238,7 @@ const ScriptManager = () => {
                         <p className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>{sec.heading}</p>
                         {sec.tags && (
                           <div className="flex flex-wrap gap-1 my-1">
-                            {splitKeywords(sec.tags).map(t => <span key={t} className="text-[10px] px-1.5 py-0.5 rounded font-medium" style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>{t}</span>)}
+                            {splitKeywords(sec.tags).map(t => <span key={t} className="text-[11px] sm:text-[10px] px-1.5 py-0.5 rounded font-medium" style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>{t}</span>)}
                           </div>
                         )}
                         <RichView html={sec.content} className="text-sm" style={{ color: 'var(--color-text-secondary)' }} />

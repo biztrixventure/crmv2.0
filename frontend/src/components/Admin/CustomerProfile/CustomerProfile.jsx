@@ -20,7 +20,7 @@ const PaidChip = ({ sale }) => {
   if (!t) return null;
   return (
     <span title={`Kept paying ${t.label} — from ${sale.sale_date} to ${sale.cancellation_date || sale.date}`}
-      className="text-[10px] font-bold px-1.5 py-0.5 rounded-full whitespace-nowrap"
+      className="text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded-full whitespace-nowrap"
       style={{ background: '#f59e0b22', color: '#b45309', border: '1px solid #f59e0b55' }}>
       paid {t.label}
     </span>
@@ -79,7 +79,7 @@ const LegendDot = ({ color, dash, slash }) => (
   <svg width="12" height="12" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7.5" fill={`${color}22`} stroke={color} strokeWidth="2.5" strokeDasharray={dash ? '3 2.5' : undefined} />{slash && <line x1="4.6" y1="15.4" x2="15.4" y2="4.6" stroke={color} strokeWidth="2.5" />}</svg>
 );
 const DotsLegend = () => (
-  <span className="inline-flex items-center gap-2 text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>
+  <span className="inline-flex items-center gap-2 text-[11px] sm:text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>
     <span className="inline-flex items-center gap-1"><LegendDot color="#16a34a" />sold</span>
     <span className="inline-flex items-center gap-1"><LegendDot color="#d97706" dash />in review</span>
     <span className="inline-flex items-center gap-1"><LegendDot color="#dc2626" slash />cancelled</span>
@@ -693,7 +693,7 @@ export default function CustomerProfile() {
                   <span className="flex items-center gap-2">
                     <span className="font-bold text-sm truncate" style={{ color: 'var(--color-text)' }}>{r.name || '—'}</span>
                     {r.segment_label && (
-                      <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold flex-shrink-0"
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[11px] sm:text-[10px] font-bold flex-shrink-0"
                         style={{ backgroundColor: `${segColor}22`, color: segColor, border: `1px solid ${segColor}44` }}>
                         {r.segment_label}
                       </span>

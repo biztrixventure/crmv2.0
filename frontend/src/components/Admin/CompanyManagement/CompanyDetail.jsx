@@ -394,7 +394,7 @@ const RecordsPanel = ({ companyId, type, companyType }) => {
                           <div className="flex items-center gap-1" style={{ color: 'var(--color-text-secondary)' }}>
                             {new Date(r.callback_at).toLocaleString()}
                             {isOverdue && (
-                              <span title="Overdue" className="inline-flex items-center gap-0.5 px-1 py-px rounded text-[10px] font-semibold"
+                              <span title="Overdue" className="inline-flex items-center gap-0.5 px-1 py-px rounded text-[11px] sm:text-[10px] font-semibold"
                                 style={{ backgroundColor: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca' }}>
                                 <AlertCircle size={9} /> OD
                               </span>

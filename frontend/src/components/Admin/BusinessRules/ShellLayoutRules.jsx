@@ -324,7 +324,7 @@ const ShellLayoutRules = ({ config, scope, onSave }) => {
             <div className="flex flex-col">
               <span className="text-sm font-semibold text-text">{it.label}</span>
               <code
-                className="text-[10px] font-mono px-1 py-0.5 rounded mt-0.5 w-fit"
+                className="text-[11px] sm:text-[10px] font-mono px-1 py-0.5 rounded mt-0.5 w-fit"
                 style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}
               >
                 {it.key}
@@ -482,14 +482,14 @@ const ShellLayoutRules = ({ config, scope, onSave }) => {
                       disabled={t.enabled === false}
                       onChange={() => persistAll({ default_tab: t.key })}
                     />
-                    <span className="text-[10px] font-semibold text-text-secondary">Default</span>
+                    <span className="text-[11px] sm:text-[10px] font-semibold text-text-secondary">Default</span>
                   </label>
 
                   <button
                     type="button"
                     onClick={() => updateTab(i, { enabled: t.enabled === false })}
                     title={t.enabled === false ? 'Show this tab' : 'Hide this tab'}
-                    className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-semibold transition-colors flex-shrink-0"
+                    className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] sm:text-[10px] font-semibold transition-colors flex-shrink-0"
                     style={{
                       border: '1px solid var(--color-border)',
                       backgroundColor: t.enabled === false ? 'var(--color-bg-secondary)' : 'var(--color-success-50, #ecfdf5)',
@@ -572,7 +572,7 @@ const ShellLayoutRules = ({ config, scope, onSave }) => {
                     }}>
                     {r.label}
                     {hides > 0 && (
-                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+                      <span className="text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded-full"
                         style={{ backgroundColor: active ? 'rgba(255,255,255,0.25)' : 'var(--color-error-100, #fee2e2)', color: active ? 'white' : 'var(--color-error-700, #b91c1c)' }}>
                         {hides} hidden
                       </span>

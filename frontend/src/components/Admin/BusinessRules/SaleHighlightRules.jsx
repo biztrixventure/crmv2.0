@@ -88,7 +88,7 @@ const SaleHighlightRules = ({ config, onSave }) => {
                 style={{ background: (val.enabled !== false && rowBg(n)) || 'transparent', borderTop: '1px solid var(--color-border)', boxShadow: (val.enabled !== false && rowBg(n)) ? 'inset 3px 0 0 #f59e0b' : 'none' }}>
                 <span className="font-semibold flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
                   Sample customer
-                  {n >= 2 && <span className="text-[10px] font-extrabold px-1.5 py-0.5 rounded-full" style={{ background: '#f59e0b22', color: '#b45309', border: '1px solid #f59e0b55' }}>×{n}</span>}
+                  {n >= 2 && <span className="text-[11px] sm:text-[10px] font-extrabold px-1.5 py-0.5 rounded-full" style={{ background: '#f59e0b22', color: '#b45309', border: '1px solid #f59e0b55' }}>×{n}</span>}
                 </span>
                 <span className="text-xs text-text-tertiary">{n} sale{n === 1 ? '' : 's'} on this number</span>
               </div>

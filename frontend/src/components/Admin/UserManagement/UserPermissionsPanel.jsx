@@ -323,7 +323,7 @@ const UserPermissionsPanel = ({ user }) => {
                 </p>
                 <details>
                   <summary className="cursor-pointer" style={{ color: 'var(--color-text-tertiary)' }}>raw</summary>
-                  <pre className="text-[10px] overflow-x-auto mt-1 p-2 rounded" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>{JSON.stringify({ resolved: diag.resolved, grant_rows: diag.grant_rows }, null, 2)}</pre>
+                  <pre className="text-[11px] sm:text-[10px] overflow-x-auto mt-1 p-2 rounded" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>{JSON.stringify({ resolved: diag.resolved, grant_rows: diag.grant_rows }, null, 2)}</pre>
                 </details>
               </>
             )}
@@ -402,7 +402,7 @@ const UserPermissionsPanel = ({ user }) => {
                     <p className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>{f.label || pretty(f.key)}</p>
                     <p className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{f.description || f.key}</p>
                   </div>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full flex-shrink-0 font-semibold"
+                  <span className="text-[11px] sm:text-[10px] px-2 py-0.5 rounded-full flex-shrink-0 font-semibold"
                     style={{ backgroundColor: featCompany[f.key] ? 'var(--color-success-50)' : 'var(--color-bg-secondary)', color: featCompany[f.key] ? 'var(--color-success-700)' : 'var(--color-text-tertiary)', border: `1px solid ${featCompany[f.key] ? 'var(--color-success-200)' : 'var(--color-border)'}` }}>
                     {featCompany[f.key] ? 'company ✓' : 'company ✗'}
                   </span>
@@ -462,7 +462,7 @@ const UserPermissionsPanel = ({ user }) => {
                 {isCollapsed ? <ChevronDown size={14} style={{ color: 'var(--color-text-tertiary)' }} /> : <ChevronUp size={14} style={{ color: 'var(--color-text-tertiary)' }} />}
                 <span className="font-bold text-sm" style={{ color: 'var(--color-text)' }}>{areaLabel(category)}</span>
                 <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{visible.length}</span>
-                {ovc > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded-full font-bold" style={{ backgroundColor: 'var(--color-primary-50)', color: 'var(--color-primary-700)' }}>{ovc}</span>}
+                {ovc > 0 && <span className="text-[11px] sm:text-[10px] px-1.5 py-0.5 rounded-full font-bold" style={{ backgroundColor: 'var(--color-primary-50)', color: 'var(--color-primary-700)' }}>{ovc}</span>}
               </button>
               <div className="flex items-center gap-1">
                 <button onClick={() => bulkGroup(perms, 'on')}      className="text-[11px] font-semibold px-2 py-0.5 rounded" style={{ color: 'var(--color-success-600)' }}>Grant all</button>
@@ -483,7 +483,7 @@ const UserPermissionsPanel = ({ user }) => {
                       <p className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>{perm.description || pretty(perm.name)}</p>
                       <p className="text-[11px] font-mono" style={{ color: 'var(--color-text-tertiary)' }}>{perm.name}</p>
                     </div>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full flex-shrink-0 font-semibold"
+                    <span className="text-[11px] sm:text-[10px] px-2 py-0.5 rounded-full flex-shrink-0 font-semibold"
                       style={{ backgroundColor: hasRole ? 'var(--color-success-50)' : 'var(--color-bg-secondary)', color: hasRole ? 'var(--color-success-700)' : 'var(--color-text-tertiary)', border: `1px solid ${hasRole ? 'var(--color-success-200)' : 'var(--color-border)'}` }}>
                       {hasRole ? 'role ✓' : 'role ✗'}
                     </span>

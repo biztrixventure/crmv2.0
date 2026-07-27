@@ -69,7 +69,7 @@ const BoxRow = ({ box, onSaved, onDelete }) => {
       </div>
       <div className="mt-2">
         <Field label="IP validation URL (optional)" v={f.validation_url} onChange={v => set('validation_url', v)} ph="https://host:81/PATH/index.php — blank = http://<host>:81/index.php" />
-        <p className="text-[10px] mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>
+        <p className="text-[11px] sm:text-[10px] mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>
           Full URL of the dialer's IP-validation portal. Leave blank for the classic <code>http://&lt;host&gt;:81/index.php</code> form. Set it for dialers with a custom scheme/port/path (e.g. <code>https://host:81/KyZvls/index.php</code>).
         </p>
       </div>
@@ -88,7 +88,7 @@ const BoxRow = ({ box, onSaved, onDelete }) => {
 
 const Field = ({ label, v, onChange, ph, disabled, type = 'text' }) => (
   <div>
-    <label className="block text-[10px] font-bold uppercase tracking-wide mb-0.5" style={{ color: 'var(--color-text-tertiary)' }}>{label}</label>
+    <label className="block text-[11px] sm:text-[10px] font-bold uppercase tracking-wide mb-0.5" style={{ color: 'var(--color-text-tertiary)' }}>{label}</label>
     <input type={type} value={v} onChange={e => onChange(e.target.value)} placeholder={ph} disabled={disabled} className="input text-sm" />
   </div>
 );
@@ -182,7 +182,7 @@ const IPValidation = () => {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           <Field label="Validation URL" v={adhoc.validation_url} onChange={v => setAdhoc(p => ({ ...p, validation_url: v }))} ph="https://tmcsolinb.i5.tel:81/KyZvls/index.php" />
           <div>
-            <label className="block text-[10px] font-bold uppercase tracking-wide mb-0.5" style={{ color: 'var(--color-text-tertiary)' }}>Use saved box creds (optional)</label>
+            <label className="block text-[11px] sm:text-[10px] font-bold uppercase tracking-wide mb-0.5" style={{ color: 'var(--color-text-tertiary)' }}>Use saved box creds (optional)</label>
             <ThemedSelect value={adhoc.box} onChange={e => setAdhoc(p => ({ ...p, box: e.target.value }))} className="input text-sm">
               <option value="">— enter creds below —</option>
               {(boxes || []).map(b => <option key={b.id} value={b.name}>{b.name} ({b.prefix})</option>)}
@@ -563,7 +563,7 @@ const DispoMap = () => {
                           {dispositions.map(d => <option key={d} value={d}>{d}</option>)}
                           {r.disposition_name && !dispositions.includes(r.disposition_name) && <option value={r.disposition_name}>{r.disposition_name}</option>}
                         </ThemedSelect>
-                        {coveredByGlobal && <p className="text-[10px] mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>Resolves via 🌐 Global — only set here to override for this company.</p>}
+                        {coveredByGlobal && <p className="text-[11px] sm:text-[10px] mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>Resolves via 🌐 Global — only set here to override for this company.</p>}
                       </td>
                       <td className="px-4 py-2.5 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>{r.hits}</td>
                       <td className="px-4 py-2.5"><button onClick={() => del(r)} className="p-1.5 rounded-lg hover:bg-error-50"><Trash2 size={15} style={{ color: '#ef4444' }} /></button></td>

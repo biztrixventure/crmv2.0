@@ -19,7 +19,7 @@ const STATUS_TINT = {
 };
 const StatusTag = ({ s }) => {
   const t = STATUS_TINT[s] || { bg: '#f3f4f6', c: '#6b7280', label: s };
-  return <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: t.bg, color: t.c }}>{t.label}</span>;
+  return <span className="text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: t.bg, color: t.c }}>{t.label}</span>;
 };
 
 // Signal chips → predicate over a group row.
@@ -117,7 +117,7 @@ export default function DoubleSoldTab() {
   const card = { background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 12 };
   const Stat = ({ label, value, tint }) => (
     <div className="px-3 py-2 rounded-lg" style={{ ...card, minWidth: 92 }}>
-      <div className="text-[10px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-tertiary)' }}>{label}</div>
+      <div className="text-[11px] sm:text-[10px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-tertiary)' }}>{label}</div>
       <div className="text-lg font-extrabold tabular-nums" style={{ color: tint || 'var(--color-text)' }}>{value}</div>
     </div>
   );
@@ -168,7 +168,7 @@ export default function DoubleSoldTab() {
             <button key={s.key} onClick={() => setSignal(s.key)}
               className="text-xs font-semibold px-2.5 py-1 rounded-full inline-flex items-center gap-1.5"
               style={on ? { background: 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))', color: '#fff' } : { background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}>
-              {s.label}<span className="text-[10px] px-1.5 rounded-full" style={{ background: on ? 'rgba(255,255,255,0.25)' : 'var(--color-bg)', color: on ? '#fff' : 'var(--color-text-tertiary)' }}>{n}</span>
+              {s.label}<span className="text-[11px] sm:text-[10px] px-1.5 rounded-full" style={{ background: on ? 'rgba(255,255,255,0.25)' : 'var(--color-bg)', color: on ? '#fff' : 'var(--color-text-tertiary)' }}>{n}</span>
             </button>
           );
         })}

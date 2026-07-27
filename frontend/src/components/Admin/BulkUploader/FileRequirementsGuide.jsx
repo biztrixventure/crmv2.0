@@ -44,7 +44,7 @@ const FileRequirementsGuide = ({ reference = [], fields = [], formFields = [], p
                   <CheckCircle2 size={14} className="mt-0.5 flex-shrink-0" style={{ color: 'var(--color-success-600)' }} />
                   <div>
                     <code className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>{f.key}</code>
-                    {f.isPhone && <span className="text-[10px] ml-1.5 px-1 py-0.5 rounded font-bold" style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>CLI</span>}
+                    {f.isPhone && <span className="text-[11px] sm:text-[10px] ml-1.5 px-1 py-0.5 rounded font-bold" style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>CLI</span>}
                     {f.desc && <span className="text-xs ml-1.5" style={{ color: 'var(--color-text-secondary)' }}>— {f.desc}</span>}
                   </div>
                 </div>

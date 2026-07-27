@@ -323,7 +323,7 @@ const ProfileDrawer = ({ group, onClose }) => {
               {tab === 'overview' && (
                 <div className="space-y-4">
                   {/* Stat grid */}
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                     {[
                       { label: 'Transfers',  value: ins.total_transfers, color: '#2563eb', bg: '#dbeafe' },
                       { label: 'Sales',      value: ins.total_sales,     color: '#16a34a', bg: '#dcfce7' },
@@ -650,7 +650,7 @@ const ProfileDrawer = ({ group, onClose }) => {
                                 <StatusBadge status={s.status} map={SALE_STATUS} />
                                 {s.is_resell && (
                                   <span title={`Resell · ${s.resell_intent || ''}`}
-                                    className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded whitespace-nowrap"
+                                    className="inline-flex items-center gap-1 text-[11px] sm:text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded whitespace-nowrap"
                                     style={{ backgroundColor: '#ddd6fe', color: '#5b21b6' }}>
                                     ↻ {(s.resell_intent || 'resell').replace(/_/g, ' ')}
                                   </span>

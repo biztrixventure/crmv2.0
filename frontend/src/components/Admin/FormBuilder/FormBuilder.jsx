@@ -732,7 +732,7 @@ const OptionsEditor = ({ field, onSave, onClose }) => {
     <div className="px-3 pb-3 pt-2"
       style={{ borderTop: '1px dashed var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
       <div className="flex items-center justify-between mb-2">
-        <p className="text-[10px] font-bold uppercase tracking-wider text-text-secondary inline-flex items-center gap-1.5">
+        <p className="text-[11px] sm:text-[10px] font-bold uppercase tracking-wider text-text-secondary inline-flex items-center gap-1.5">
           <List size={11} /> Options · {opts.length}
         </p>
         <button onClick={onClose} title="Close editor"
@@ -742,7 +742,7 @@ const OptionsEditor = ({ field, onSave, onClose }) => {
         </button>
       </div>
 
-      <p className="text-[10px] leading-relaxed mb-2" style={{ color: 'var(--color-text-tertiary)' }}>
+      <p className="text-[11px] sm:text-[10px] leading-relaxed mb-2" style={{ color: 'var(--color-text-tertiary)' }}>
         Click a chip to rename. ✕ asks once before removing. Historical records keep the old text, so removing or renaming an option here never rewrites past sales.
       </p>
 
@@ -783,7 +783,7 @@ const OptionsEditor = ({ field, onSave, onClose }) => {
               title={pendingRemove === i ? 'Click again to confirm' : 'Remove'}
               aria-label={pendingRemove === i ? `Confirm remove ${o}` : `Remove ${o}`}>
               {pendingRemove === i
-                ? <span className="text-[10px] font-bold px-1">Remove?</span>
+                ? <span className="text-[11px] sm:text-[10px] font-bold px-1">Remove?</span>
                 : <X size={10} style={{ color: 'var(--color-error-500)' }} />}
             </button>
           </span>
@@ -940,7 +940,7 @@ const FullEditPanel = ({ field, isSale, isCloserDeal, onPatch, onConfigureMappin
               {/* Form-data key (locked) */}
               <div>
                 <label className="text-[11px] font-bold uppercase tracking-wide text-text-secondary mb-1 block">
-                  Form-data key <span className="text-[10px] font-normal italic">(locked)</span>
+                  Form-data key <span className="text-[11px] sm:text-[10px] font-normal italic">(locked)</span>
                 </label>
                 <input value={field.name || ''} readOnly
                   className="input text-sm py-2 w-full font-mono"
@@ -951,7 +951,7 @@ const FullEditPanel = ({ field, isSale, isCloserDeal, onPatch, onConfigureMappin
               {/* Type */}
               <div>
                 <label className="text-[11px] font-bold uppercase tracking-wide text-text-secondary mb-1 block">
-                  Type {typeLocked && <span className="text-[10px] font-normal italic">(locked)</span>}
+                  Type {typeLocked && <span className="text-[11px] sm:text-[10px] font-normal italic">(locked)</span>}
                 </label>
                 {typeLocked ? (
                   <input value={field.field_type} readOnly

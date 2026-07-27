@@ -105,11 +105,11 @@ function Pill({ active, onClick, children, color }) {
   );
 }
 function DeltaChip({ pct }) {
-  if (pct == null) return <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>NEW</span>;
+  if (pct == null) return <span className="text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>NEW</span>;
   const flat = pct === 0, up = pct > 0;
   const Icon = flat ? Minus : (up ? ArrowUpRight : ArrowDownRight);
   const color = flat ? 'var(--color-text-tertiary)' : (up ? '#16a34a' : '#dc2626');
-  return <span className="inline-flex items-center gap-0.5 text-[10px] font-bold tabular-nums" style={{ color }}><Icon size={11} />{up ? '+' : ''}{pct}%</span>;
+  return <span className="inline-flex items-center gap-0.5 text-[11px] sm:text-[10px] font-bold tabular-nums" style={{ color }}><Icon size={11} />{up ? '+' : ''}{pct}%</span>;
 }
 function Sparkline({ points, color }) {
   const mounted = useMounted();
@@ -135,7 +135,7 @@ function TrendTile({ label, value, tone = 'primary', deltaPct, spark, icon }) {
   return (
     <div className="rounded-xl p-3" style={{ ...box, borderLeft: `3px solid ${c}` }}>
       <div className="flex items-center justify-between gap-1">
-        <span className="text-[10px] font-bold uppercase tracking-widest flex items-center gap-1 truncate" style={{ color: 'var(--color-text-tertiary)' }}>{icon}{label}</span>
+        <span className="text-[11px] sm:text-[10px] font-bold uppercase tracking-widest flex items-center gap-1 truncate" style={{ color: 'var(--color-text-tertiary)' }}>{icon}{label}</span>
         {deltaPct !== undefined && <DeltaChip pct={deltaPct} />}
       </div>
       <div className="flex items-end justify-between gap-2 mt-1">
@@ -197,7 +197,7 @@ function Combo3DChart({ trend, teamType }) {
     <div className="rounded-2xl p-4" style={box}>
       <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
         <p className="text-[11px] font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-tertiary)' }}>Daily trend — 3D</p>
-        <div className="flex items-center gap-3 text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
+        <div className="flex items-center gap-3 text-[11px] sm:text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
           <span className="inline-flex items-center gap-1"><span style={{ width: 9, height: 9, background: bs.color, display: 'inline-block', borderRadius: 2 }} />{bs.label}</span>
           <span className="inline-flex items-center gap-1"><span style={{ width: 12, height: 3, background: ls.color, display: 'inline-block', borderRadius: 2 }} />{ls.label}</span>
         </div>
@@ -205,9 +205,9 @@ function Combo3DChart({ trend, teamType }) {
 
       {/* metric switchers */}
       <div className="flex items-center gap-2 mb-2 flex-wrap">
-        <span className="text-[10px] font-bold uppercase tracking-widest mr-1" style={{ color: 'var(--color-text-tertiary)' }}>Bars</span>
+        <span className="text-[11px] sm:text-[10px] font-bold uppercase tracking-widest mr-1" style={{ color: 'var(--color-text-tertiary)' }}>Bars</span>
         {BAR_METRICS.map(k => <Pill key={k} active={barMetric === k} onClick={() => setBarMetric(k)} color={SERIES[k].color}>{SERIES[k].label}</Pill>)}
-        <span className="text-[10px] font-bold uppercase tracking-widest mx-1" style={{ color: 'var(--color-text-tertiary)' }}>Line</span>
+        <span className="text-[11px] sm:text-[10px] font-bold uppercase tracking-widest mx-1" style={{ color: 'var(--color-text-tertiary)' }}>Line</span>
         {LINE_METRICS.map(k => <Pill key={k} active={lineMetric === k} onClick={() => setLineMetric(k)} color={SERIES[k].color}>{SERIES[k].label}</Pill>)}
         <Pill active={dual} onClick={() => setDual(d => !d)}>{dual ? 'Dual axis' : 'Shared axis'}</Pill>
       </div>
@@ -278,7 +278,7 @@ function Combo3DChart({ trend, teamType }) {
         </div>
         {n > 0 && tip && (
           <div style={{ position: 'absolute', left: Math.max(0, Math.min(W, tip.x)) - (wrapRef.current?.scrollLeft || 0), top: tip.y, transform: 'translate(-50%, calc(-100% - 8px))', pointerEvents: 'none', zIndex: 20, background: 'var(--color-surface)', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-lg,0 8px 24px rgba(0,0,0,.15))', borderRadius: 8, padding: '6px 9px', minWidth: 128 }}>
-            <div className="text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: 'var(--color-text-tertiary)' }}>{tip.title}</div>
+            <div className="text-[11px] sm:text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: 'var(--color-text-tertiary)' }}>{tip.title}</div>
             {tip.rows.map((row, i) => (
               <div key={i} className="flex items-center gap-1.5 text-xs">
                 <span style={{ width: 8, height: 8, borderRadius: 2, background: row.color, display: 'inline-block' }} />
@@ -289,7 +289,7 @@ function Combo3DChart({ trend, teamType }) {
           </div>
         )}
       </div>
-      <p className="text-[10px] mt-2" style={{ color: 'var(--color-text-tertiary)' }}>
+      <p className="text-[11px] sm:text-[10px] mt-2" style={{ color: 'var(--color-text-tertiary)' }}>
         Left axis: {bs.label} · right axis: {ls.label} · empty days shown as zero. Transfer days use created date; sale days use sale date — don’t over-read single-day gaps.
       </p>
     </div>
@@ -344,7 +344,7 @@ function DonutChart({ data, centerLabel, isMoney, size = 168, top = 6 }) {
             <span className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: d.color || PALETTE[i % PALETTE.length] }} />
             <span className="truncate" style={{ color: 'var(--color-text-secondary)' }}>{d.label}</span>
             <span className="font-bold tabular-nums ml-auto" style={{ color: 'var(--color-text)' }}>{fmt(d.value)}</span>
-            <span className="tabular-nums text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>{total ? Math.round(d.value / total * 100) : 0}%</span>
+            <span className="tabular-nums text-[11px] sm:text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>{total ? Math.round(d.value / total * 100) : 0}%</span>
           </div>
         ))}
         {items.length === 0 && <div className="text-xs italic" style={{ color: 'var(--color-text-tertiary)' }}>No data in range.</div>}
@@ -411,7 +411,7 @@ function Leaderboard({ members, team, dn }) {
             <div key={m.user_id} className="flex items-center gap-2" title={`${dn(m)} · ${m.transfers} transfers · ${m.sales} sales · ${money(m.gross)} · ${m.callbacks} callbacks`}>
               <span className="w-5 flex-shrink-0 text-center">
                 {medal != null
-                  ? <span className="inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-black text-white" style={{ backgroundColor: MEDAL[medal] }}>{medal + 1}</span>
+                  ? <span className="inline-flex items-center justify-center w-5 h-5 rounded-full text-[11px] sm:text-[10px] font-black text-white" style={{ backgroundColor: MEDAL[medal] }}>{medal + 1}</span>
                   : <span className="text-[11px] font-bold" style={{ color: 'var(--color-text-tertiary)' }}>{i + 1}</span>}
               </span>
               <span className="text-[11px] truncate w-28 flex-shrink-0 flex items-center gap-1" style={{ color: 'var(--color-text-secondary)' }}>
@@ -522,7 +522,7 @@ export default function TeamAnalytics({ report, team }) {
             { l: 'Avg MRR/deal', v: totals.sales ? money((totals.mrr || 0) / totals.sales) : '—', c: '#7c3aed' },
           ].map((s, i) => (
             <div key={i} className="rounded-xl p-3 text-center" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
-              <div className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-tertiary)' }}>{s.l}</div>
+              <div className="text-[11px] sm:text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-tertiary)' }}>{s.l}</div>
               <div className="text-lg font-extrabold mt-0.5 tabular-nums" style={{ color: s.c }}>{s.v}</div>
             </div>
           ))}

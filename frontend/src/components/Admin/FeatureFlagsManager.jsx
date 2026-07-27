@@ -75,7 +75,7 @@ function FlagForm({ initial, onSave, onCancel }) {
           className="w-full px-3 py-2 rounded-xl text-sm resize-none"
           style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }} />
       </div>
-      <div className="grid grid-cols-3 gap-3 mb-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
         <div>
           <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>Category</label>
           <ThemedSelect value={form.category} onChange={e => set('category', e.target.value)}

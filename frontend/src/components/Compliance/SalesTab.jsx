@@ -402,7 +402,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                         <p className="font-semibold flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>{s.customer_name || '—'}
                           {dupN >= 2 && (
                             <span title={`${dupN} sales on this customer number (active + cancelled)${s.dupe_active_count != null ? ` · ${s.dupe_active_count} active` : ''}`}
-                              className="text-[10px] font-extrabold px-1.5 py-0.5 rounded-full"
+                              className="text-[11px] sm:text-[10px] font-extrabold px-1.5 py-0.5 rounded-full"
                               style={{ background: '#f59e0b22', color: '#b45309', border: '1px solid #f59e0b55' }}>×{dupN}</span>
                           )}
                         </p>
@@ -416,21 +416,21 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                           <SaleStatusBadge sale={s} size="sm" />
                           {(() => { const t = salePaidTenure(s); return t ? (
                             <span title={`Kept paying ${t.label} — sale ${fmtSaleDate(s.sale_date)} → cancelled ${fmtSaleDate(s.cancellation_date)}`}
-                              className="inline-flex items-center text-[10px] font-bold px-1.5 py-0.5 rounded whitespace-nowrap"
+                              className="inline-flex items-center text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded whitespace-nowrap"
                               style={{ backgroundColor: '#fef3c7', color: '#b45309' }}>
                               paid {t.short}
                             </span>
                           ) : null; })()}
                           {s.is_resell && (
                             <span title={`Resell · ${s.resell_intent || ''}`}
-                              className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded whitespace-nowrap"
+                              className="inline-flex items-center gap-1 text-[11px] sm:text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded whitespace-nowrap"
                               style={{ backgroundColor: '#ddd6fe', color: '#5b21b6' }}>
                               ↻ {(s.resell_intent || 'resell').replace(/_/g, ' ')}
                             </span>
                           )}
                           {s.group_count > 1 && (
                             <span title="Multi-vehicle bundle — this row is one car of one deal"
-                              className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded whitespace-nowrap"
+                              className="inline-flex items-center gap-1 text-[11px] sm:text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded whitespace-nowrap"
                               style={{ backgroundColor: '#d1fae5', color: '#065f46' }}>
                               {s.group_count}-car deal
                             </span>

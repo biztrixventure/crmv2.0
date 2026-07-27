@@ -109,7 +109,7 @@ const Modal = ({ row, reference, onClose, onSave, viewer }) => {
             <div><label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Reward description</label>
               <input value={form.reward_description} onChange={e => set('reward_description', e.target.value)} className="input" placeholder="$500 Amazon gift card" /></div>
           </div>
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
             <div><label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Starts <span style={{ color: '#ef4444' }}>*</span></label>
               <ThemedDate withTime value={form.starts_at} onChange={e => set('starts_at', e.target.value)} className="input" /></div>
             <div><label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Ends <span style={{ color: '#ef4444' }}>*</span></label>
@@ -158,7 +158,7 @@ const DetailModal = ({ campaign, reference, onClose, onChanged }) => {
         <div className="p-6 space-y-4">
           {campaign.description && (
             <div className="rounded-xl p-3" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-              <p className="text-[10px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-tertiary)' }}>Description</p>
+              <p className="text-[11px] sm:text-[10px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-tertiary)' }}>Description</p>
               <RichView html={campaign.description} className="text-sm" style={{ color: 'var(--color-text)' }} />
             </div>
           )}
@@ -169,9 +169,9 @@ const DetailModal = ({ campaign, reference, onClose, onChanged }) => {
             </div>
           ) : (
             <form onSubmit={addEntry} className="flex items-end gap-2 rounded-xl p-3" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
-              <div className="flex-1"><label className="block text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: 'var(--color-text-secondary)' }}>Participant</label>
+              <div className="flex-1"><label className="block text-[11px] sm:text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: 'var(--color-text-secondary)' }}>Participant</label>
                 <ThemedSelect value={uid} onChange={e => setUid(e.target.value)} className="input text-sm"><option value="">Select user…</option>{(reference.users || []).map(u => <option key={u.user_id} value={u.user_id}>{u.name}{u.company_name ? ` (${u.company_name})` : ''}</option>)}</ThemedSelect></div>
-              <div className="w-28"><label className="block text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: 'var(--color-text-secondary)' }}>Score</label>
+              <div className="w-28"><label className="block text-[11px] sm:text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: 'var(--color-text-secondary)' }}>Score</label>
                 <input type="number" value={val} onChange={e => setVal(e.target.value)} className="input text-sm" /></div>
               <Button type="submit" variant="primary" disabled={saving || !uid || val === ''}>Set</Button>
             </form>
@@ -249,7 +249,7 @@ const SpiffManager = () => {
                       {c.title}
                       {isAuto(c.metric_source) && (
                         <span title={`Auto-computed from ${SOURCE_LABEL[c.metric_source]}`}
-                          className="inline-flex items-center gap-0.5 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded"
+                          className="inline-flex items-center gap-0.5 text-[11px] sm:text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded"
                           style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>
                           <Zap size={10} /> Auto
                         </span>
@@ -280,7 +280,7 @@ const SpiffManager = () => {
                         {roControlAllowed('spiff.delete') && <button onClick={() => setConfirm(c)} title="Delete" className="p-1.5 rounded hover:bg-error-50"><Trash2 size={15} style={{ color: 'var(--color-error-500)' }} /></button>}
                       </>
                     ) : (
-                      <span title="Created by a superadmin — only superadmins can edit or delete this campaign." className="text-[10px] px-1.5 py-0.5 rounded font-medium" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)', border: '1px solid var(--color-border)' }}>Locked</span>
+                      <span title="Created by a superadmin — only superadmins can edit or delete this campaign." className="text-[11px] sm:text-[10px] px-1.5 py-0.5 rounded font-medium" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)', border: '1px solid var(--color-border)' }}>Locked</span>
                     )}
                   </div></td>
                 </tr>

@@ -166,7 +166,7 @@ const FieldRow = ({ field, idx, total, onToggle, onMove, dnd }) => {
       )}
       <div className="flex-1 min-w-0">
         <p className="text-xs font-medium text-text">{field.label || field.id}</p>
-        {field._desc && <p className="text-[10px] text-text-tertiary leading-snug mt-0.5">{field._desc}</p>}
+        {field._desc && <p className="text-[11px] sm:text-[10px] text-text-tertiary leading-snug mt-0.5">{field._desc}</p>}
       </div>
       <div className="flex items-center gap-0.5 flex-shrink-0">
         <button type="button" onClick={() => onMove(idx, -1)} disabled={idx === 0}
@@ -185,7 +185,7 @@ const FieldRow = ({ field, idx, total, onToggle, onMove, dnd }) => {
       <button type="button" onClick={onToggle}
         aria-label={field.visible ? 'Hide field' : 'Show field'}
         title={field.visible ? 'Hide field' : 'Show field'}
-        className="inline-flex items-center justify-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold flex-shrink-0"
+        className="inline-flex items-center justify-center gap-1 px-1.5 py-0.5 rounded text-[11px] sm:text-[10px] font-bold flex-shrink-0"
         style={{
           backgroundColor: field.visible ? 'var(--color-success-100, #d1fae5)' : 'var(--color-bg-secondary)',
           color: field.visible ? 'var(--color-success-700, #047857)' : 'var(--color-text-tertiary)',
@@ -243,13 +243,13 @@ const SectionRow = ({ section, catalogEntry, idx, total, expanded, onExpandToggl
           <div className="flex items-center gap-2">
             <p className="text-sm font-bold text-text">{section.label || catalogEntry?.label || section.id}</p>
             {hasFields && fieldCount > 0 && (
-              <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded"
+              <span className="text-[11px] sm:text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded"
                 style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>
                 {visibleFieldCount}/{fieldCount} fields
               </span>
             )}
             {canDropHere && (
-              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded"
+              <span className="inline-flex items-center gap-1 text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded"
                 style={{ backgroundColor: `${accent}1a`, color: accent }}>
                 <MoveRight size={10} /> drop field here
               </span>
@@ -511,7 +511,7 @@ const DrawerLayoutRules = ({ config, scope, onSave, userId = null, userName = ''
         <h2 className="text-2xl font-bold text-text mb-1 flex items-center gap-2.5"
           style={{ fontFamily: 'var(--font-display)' }}>
           <LayoutTemplate size={22} className="text-primary-600" /> Drawer Layout
-          <span className="text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full ml-1"
+          <span className="text-[11px] sm:text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full ml-1"
             style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>
             field-level
           </span>

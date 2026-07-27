@@ -265,12 +265,12 @@ const ComplianceRules = ({ config, scope, onSave }) => {
                   <label className="inline-flex items-center gap-1.5 cursor-pointer">
                     <input type="checkbox" checked={s.enabled !== false}
                       onChange={(e) => updateRow(i, { enabled: e.target.checked })} />
-                    <span className="text-[10px] font-semibold text-text-secondary">Enabled</span>
+                    <span className="text-[11px] sm:text-[10px] font-semibold text-text-secondary">Enabled</span>
                   </label>
                   <label className="inline-flex items-center gap-1.5 cursor-pointer">
                     <input type="checkbox" checked={s.editable_by_compliance !== false}
                       onChange={(e) => updateRow(i, { editable_by_compliance: e.target.checked })} />
-                    <span className="text-[10px] font-semibold text-text-secondary">In edit dialog</span>
+                    <span className="text-[11px] sm:text-[10px] font-semibold text-text-secondary">In edit dialog</span>
                   </label>
                 </div>
 
@@ -313,7 +313,7 @@ const ComplianceRules = ({ config, scope, onSave }) => {
             placeholder="New status label (e.g. Coverage gap)"
             aria-label="New status label"
             className="input text-sm py-2 flex-1" />
-          <span className="text-[10px] font-mono px-2 py-1 rounded whitespace-nowrap"
+          <span className="text-[11px] sm:text-[10px] font-mono px-2 py-1 rounded whitespace-nowrap"
             style={{ backgroundColor: 'var(--color-surface)', color: 'var(--color-text-tertiary)' }}>
             key: <strong>{slugify(newLabel) || '—'}</strong>
           </span>

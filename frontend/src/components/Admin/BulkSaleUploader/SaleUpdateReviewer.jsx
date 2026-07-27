@@ -43,9 +43,9 @@ const SaleUpdateReviewer = ({ updates, decisions, toggleUpdate, setAllUpdates })
               <table className="w-full text-sm">
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
-                    <th className="px-3 py-2 text-left text-[10px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-tertiary)' }}>Field</th>
-                    <th className="px-3 py-2 text-left text-[10px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-tertiary)' }}>Previous</th>
-                    <th className="px-3 py-2 text-left text-[10px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-tertiary)' }}>New</th>
+                    <th className="px-3 py-2 text-left text-[11px] sm:text-[10px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-tertiary)' }}>Field</th>
+                    <th className="px-3 py-2 text-left text-[11px] sm:text-[10px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-tertiary)' }}>Previous</th>
+                    <th className="px-3 py-2 text-left text-[11px] sm:text-[10px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-tertiary)' }}>New</th>
                   </tr>
                 </thead>
                 <tbody>

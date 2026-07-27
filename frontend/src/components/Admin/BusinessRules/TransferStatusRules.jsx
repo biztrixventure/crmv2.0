@@ -198,7 +198,7 @@ const TransferStatusRules = ({ config, scope, onSave }) => {
                     checked={s.enabled !== false}
                     onChange={(e) => updateRow(i, { enabled: e.target.checked })}
                   />
-                  <span className="text-[10px] font-semibold text-text-secondary">Enabled</span>
+                  <span className="text-[11px] sm:text-[10px] font-semibold text-text-secondary">Enabled</span>
                 </label>
 
                 {/* Move */}
@@ -261,7 +261,7 @@ const TransferStatusRules = ({ config, scope, onSave }) => {
             className="input text-sm py-2 flex-1"
           />
           <span
-            className="text-[10px] font-mono px-2 py-1 rounded whitespace-nowrap"
+            className="text-[11px] sm:text-[10px] font-mono px-2 py-1 rounded whitespace-nowrap"
             style={{ backgroundColor: 'var(--color-surface)', color: 'var(--color-text-tertiary)' }}
           >
             key: <strong>{slugify(newLabel) || '—'}</strong>

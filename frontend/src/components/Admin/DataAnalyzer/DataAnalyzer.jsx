@@ -9,7 +9,7 @@ import { useComplianceStatuses } from '../../../hooks/useComplianceStatuses';
 import { useTransferStatuses } from '../../../hooks/useTransferStatuses';
 import ThemedSelect from '../../UI/Select';
 import ThemedDate from '../../UI/ThemedDate';
-import { SectionHeader } from '../../UI/kit';
+import { SectionHeader, TableScroll } from '../../UI/kit';
 
 // Default filter-card order (applies to BOTH sales and transfers — each dataset
 // picks the names it has, the rest are skipped). Dataset-specific synthetic
@@ -191,7 +191,7 @@ const Section = ({ title, open, onToggle, children, count }) => (
       <span className="flex items-center gap-2 text-sm font-bold" style={{ color: 'var(--color-text)' }}>
         {title}
         {count > 0 && (
-          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded"
+          <span className="text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded"
             style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>
             {count}
           </span>
@@ -506,7 +506,7 @@ const StatPill = ({ label, value, tone = 'primary' }) => {
   const [bg, fg] = tones[tone] || tones.primary;
   return (
     <div className="rounded-lg px-3 py-2" style={{ backgroundColor: bg, border: '1px solid var(--color-border)' }}>
-      <p className="text-[10px] font-bold uppercase tracking-wide" style={{ color: fg, opacity: 0.7 }}>{label}</p>
+      <p className="text-[11px] sm:text-[10px] font-bold uppercase tracking-wide" style={{ color: fg, opacity: 0.7 }}>{label}</p>
       <p className="text-base font-black" style={{ color: fg, letterSpacing: '-0.02em' }}>{value}</p>
     </div>
   );
@@ -892,7 +892,7 @@ const DataAnalyzer = () => {
           <div className="flex items-center justify-between mb-1.5">
             <Label><span className="flex items-center gap-1.5"><Building2 size={13} /> Companies {companyIds.length > 0 && <span className="opacity-60">({companyIds.length} selected)</span>}</span></Label>
             {companyIds.length > 0 && (
-              <button type="button" onClick={() => setCompanyIds([])} className="text-[10px] font-bold flex items-center gap-0.5" style={{ color: 'var(--color-text-tertiary)' }}><X size={11} /> all companies</button>
+              <button type="button" onClick={() => setCompanyIds([])} className="text-[11px] sm:text-[10px] font-bold flex items-center gap-0.5" style={{ color: 'var(--color-text-tertiary)' }}><X size={11} /> all companies</button>
             )}
           </div>
           <div className="flex flex-wrap gap-1.5">
@@ -914,7 +914,7 @@ const DataAnalyzer = () => {
                 );
               })}
           </div>
-          <p className="text-[10px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>None selected = all companies. Pick one or more to scope the data + export.</p>
+          <p className="text-[11px] sm:text-[10px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>None selected = all companies. Pick one or more to scope the data + export.</p>
         </div>
 
         <div className="h-px" style={{ backgroundColor: 'var(--color-border)' }} />
@@ -949,7 +949,7 @@ const DataAnalyzer = () => {
             </span>
           )}
         </div>
-        <p className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>Pick a start and end date (or a quick range). Click <strong>Run query</strong> to apply with the other filters.</p>
+        <p className="text-[11px] sm:text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>Pick a start and end date (or a quick range). Click <strong>Run query</strong> to apply with the other filters.</p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-[420px_1fr] gap-5">
@@ -977,11 +977,11 @@ const DataAnalyzer = () => {
           <Section title={<span className="flex items-center gap-1.5"><Filter size={14} /> Filters</span>}
             open={open.filters} onToggle={() => setOpen(o => ({ ...o, filters: !o.filters }))} count={activeCount}>
             <div className="flex items-center justify-between -mt-1 mb-1">
-              <p className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>Drag the ⠿ handle to reorder · click a row to expand/collapse.</p>
+              <p className="text-[11px] sm:text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>Drag the ⠿ handle to reorder · click a row to expand/collapse.</p>
               <div className="flex gap-1.5">
-                <button type="button" onClick={expandAllFields} className="text-[10px] font-bold" style={{ color: 'var(--color-primary-600)' }}>Expand all</button>
+                <button type="button" onClick={expandAllFields} className="text-[11px] sm:text-[10px] font-bold" style={{ color: 'var(--color-primary-600)' }}>Expand all</button>
                 <span style={{ color: 'var(--color-border)' }}>·</span>
-                <button type="button" onClick={collapseAllFields} className="text-[10px] font-bold" style={{ color: 'var(--color-primary-600)' }}>Collapse all</button>
+                <button type="button" onClick={collapseAllFields} className="text-[11px] sm:text-[10px] font-bold" style={{ color: 'var(--color-primary-600)' }}>Collapse all</button>
               </div>
             </div>
             {orderedFields.map(f => {
@@ -1006,13 +1006,13 @@ const DataAnalyzer = () => {
                           <span className="ml-1 font-medium normal-case opacity-60">({f.field_type})</span>
                         </span>
                         {!fopen && selCount > 0 && (
-                          <span className="ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded flex-shrink-0" style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>{selCount}</span>
+                          <span className="ml-1 text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded flex-shrink-0" style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>{selCount}</span>
                         )}
                       </button>
                     </span>
                     {active && (
                       <button type="button" onClick={() => setFilters(s => { const n = { ...s }; delete n[f.name]; return n; })}
-                        className="text-[10px] font-bold flex items-center gap-0.5 flex-shrink-0 ml-1" style={{ color: 'var(--color-text-tertiary)' }}>
+                        className="text-[11px] sm:text-[10px] font-bold flex items-center gap-0.5 flex-shrink-0 ml-1" style={{ color: 'var(--color-text-tertiary)' }}>
                         <X size={11} /> clear
                       </button>
                     )}
@@ -1028,11 +1028,11 @@ const DataAnalyzer = () => {
                           <div className="flex items-center gap-2 mb-2">
                             <button type="button"
                               onClick={() => setFilters(s => onParentOrChildChange(s, f, allOn ? [] : [...allOpts], allFilterFields, vehicleTree))}
-                              className="text-[10px] font-bold px-2 py-0.5 rounded transition-colors"
+                              className="text-[11px] sm:text-[10px] font-bold px-2 py-0.5 rounded transition-colors"
                               style={{ backgroundColor: allOn ? 'var(--color-primary-100)' : 'var(--color-bg-secondary)', color: 'var(--color-primary-700)', border: '1px solid var(--color-border)' }}>
                               {allOn ? 'Clear all' : `Select all (${allOpts.length})`}
                             </button>
-                            <span className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>{cur.length} of {allOpts.length}</span>
+                            <span className="text-[11px] sm:text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>{cur.length} of {allOpts.length}</span>
                           </div>
                         );
                       })()}
@@ -1083,7 +1083,7 @@ const DataAnalyzer = () => {
             </div>
           </div>
 
-          <div className="rounded-xl overflow-x-auto" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+          <TableScroll stickyFirst label="Results" className="rounded-xl" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
             <table className="w-full text-xs">
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
@@ -1108,7 +1108,7 @@ const DataAnalyzer = () => {
                     ))}
               </tbody>
             </table>
-          </div>
+          </TableScroll>
         </div>
       </div>
     </div>

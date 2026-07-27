@@ -86,7 +86,7 @@ const AutoMatchedReview = ({ newSales, onChangeTransfer, excludedNew = {}, onTog
                 {r.match_warning && <AlertTriangle size={13} style={{ color: '#d97706', flexShrink: 0 }} />}
                 {r.customer_name || '—'} <span className="font-normal text-xs" style={{ color: 'var(--color-text-tertiary)' }}>· {rowLabel(r)}</span>
                 {r.resell_of && !r.is_renewal && (
-                  <span className="inline-flex items-center text-[10px] font-bold px-1.5 py-0.5 rounded"
+                  <span className="inline-flex items-center text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded"
                     style={{ backgroundColor: '#ede9fe', color: '#6d28d9', border: '1px solid #c4b5fd' }}
                     title={`Previous sale: ${r.resell_of.reference_no || '—'} · ${r.resell_of.status} · ${r.resell_of.client_name || '—'}`}>
                     ♻ Resell of {r.resell_of.reference_no || r.resell_of.id?.slice(0,8)}
@@ -95,14 +95,14 @@ const AutoMatchedReview = ({ newSales, onChangeTransfer, excludedNew = {}, onTog
                   </span>
                 )}
                 {r.is_renewal && r.resell_of && (
-                  <span className="inline-flex items-center text-[10px] font-bold px-1.5 py-0.5 rounded"
+                  <span className="inline-flex items-center text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded"
                     style={{ backgroundColor: '#ccfbf1', color: '#0f766e', border: '1px solid #5eead4' }}
                     title={`Previous term: ${r.resell_of.reference_no || '—'} · ${r.resell_of.sale_date || '—'}`}>
                     🔁 Renewal of {r.resell_of.reference_no || r.resell_of.id?.slice(0,8)} · {r.resell_of.sale_date || '—'}
                   </span>
                 )}
                 {r.client_switch && (
-                  <span className="inline-flex items-center text-[10px] font-bold px-1.5 py-0.5 rounded"
+                  <span className="inline-flex items-center text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded"
                     style={{ backgroundColor: '#dbeafe', color: '#1d4ed8', border: '1px solid #93c5fd' }}>
                     ↔ Client switch
                   </span>

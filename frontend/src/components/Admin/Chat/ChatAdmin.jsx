@@ -707,7 +707,7 @@ const GuestLinkRow = ({ g, group, onToggle, onDelete, canManage = true }) => {
       <div className="min-w-0 flex-1">
         <p className="text-sm font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
           {g.name}
-          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ backgroundColor: g.is_active ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.12)', color: g.is_active ? '#047857' : '#b91c1c' }}>
+          <span className="text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ backgroundColor: g.is_active ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.12)', color: g.is_active ? '#047857' : '#b91c1c' }}>
             {g.is_active ? 'Active' : 'Disabled'}
           </span>
         </p>
@@ -918,7 +918,7 @@ const ColorsTab = () => {
 
         {/* Company-wide */}
         <div className="rounded-xl p-3" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-          <p className="text-[10px] font-bold uppercase tracking-widest mb-2" style={{ color: 'var(--color-text-tertiary)' }}>Apply to entire company</p>
+          <p className="text-[11px] sm:text-[10px] font-bold uppercase tracking-widest mb-2" style={{ color: 'var(--color-text-tertiary)' }}>Apply to entire company</p>
           <div className="flex items-center gap-2 flex-wrap">
             <ThemedSelect value={companyId} onChange={e => setCompanyId(e.target.value)} className="input text-sm py-1">
               <option value="">— pick a company —</option>
@@ -981,7 +981,7 @@ const ColorsTab = () => {
                     {u.name || u.email}
                   </span>
                   {c && (
-                    <code className="text-[10px] px-1.5 py-0.5 rounded font-mono"
+                    <code className="text-[11px] sm:text-[10px] px-1.5 py-0.5 rounded font-mono"
                       style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>{c}</code>
                   )}
                 </label>

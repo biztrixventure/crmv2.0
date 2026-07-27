@@ -50,7 +50,7 @@ const Modal = ({ row, reference, onClose, onSave }) => {
             <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Body <span style={{ color: '#ef4444' }}>*</span></label>
             <RichTextEditor value={form.body} onChange={v => set('body', v)} placeholder="Write your announcement — bold, italic, underline, lists, links, images…" />
           </div>
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
             <div>
               <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Priority</label>
               <ThemedSelect value={form.priority} onChange={e => set('priority', e.target.value)} className="input">
@@ -128,7 +128,7 @@ const AnnouncementsManager = () => {
             <tbody>
               {rows.map(a => (
                 <tr key={a.id} className={a.is_active ? '' : 'opacity-60'} style={{ borderBottom: '1px solid var(--color-border)' }}>
-                  <td className="px-4 py-3"><p className="font-semibold" style={{ color: 'var(--color-text)' }}>{a.title}{a.reshow_hours ? <span className="ml-1.5 text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>↻ {a.reshow_hours}h</span> : null}</p><p className="text-xs line-clamp-1" style={{ color: 'var(--color-text-secondary)' }}>{stripHtml(a.body)}</p></td>
+                  <td className="px-4 py-3"><p className="font-semibold" style={{ color: 'var(--color-text)' }}>{a.title}{a.reshow_hours ? <span className="ml-1.5 text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>↻ {a.reshow_hours}h</span> : null}</p><p className="text-xs line-clamp-1" style={{ color: 'var(--color-text-secondary)' }}>{stripHtml(a.body)}</p></td>
                   <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{targetLabel(a)}</td>
                   <td className="px-4 py-3"><Badge variant={PRIORITY[a.priority]?.variant || 'secondary'} size="sm">{PRIORITY[a.priority]?.label}</Badge></td>
                   <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{a.read_count}</td>

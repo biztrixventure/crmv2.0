@@ -318,7 +318,7 @@ export default function AppearanceManager() {
                     </div>
                     {isSet && (
                       <button type="button" onClick={() => clearField(t.key)} title="Reset to default"
-                        className="text-[10px] px-1.5 py-1 rounded-md flex-shrink-0" style={{ color: 'var(--color-text-tertiary)', border: '1px solid var(--color-border)' }}>reset</button>
+                        className="text-[11px] sm:text-[10px] px-1.5 py-1 rounded-md flex-shrink-0" style={{ color: 'var(--color-text-tertiary)', border: '1px solid var(--color-border)' }}>reset</button>
                     )}
                   </div>
                 );
@@ -348,7 +348,7 @@ export default function AppearanceManager() {
                         </div>
                         {isSet && (
                           <button type="button" onClick={() => clearField(t.key)} title="Reset to auto"
-                            className="text-[10px] px-1.5 py-1 rounded-md flex-shrink-0" style={{ color: 'var(--color-text-tertiary)', border: '1px solid var(--color-border)' }}>reset</button>
+                            className="text-[11px] sm:text-[10px] px-1.5 py-1 rounded-md flex-shrink-0" style={{ color: 'var(--color-text-tertiary)', border: '1px solid var(--color-border)' }}>reset</button>
                         )}
                       </div>
                     );

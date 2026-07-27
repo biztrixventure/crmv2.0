@@ -237,7 +237,7 @@ const BulkCancelPanel = ({ onDone }) => {
         <div>
           <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Default cancellation date</label>
           <CalendarDateInput value={cancelDate} onChange={setCancelDate} />
-          <p className="text-[10px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>Used only for lines that don't include their own date.</p>
+          <p className="text-[11px] sm:text-[10px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>Used only for lines that don't include their own date.</p>
         </div>
       </div>
 
@@ -247,7 +247,7 @@ const BulkCancelPanel = ({ onDone }) => {
           <option value="">— pick a canonical reason —</option>
           {(activeReasons || []).map(r => <option key={r.key} value={r.key}>{r.label}</option>)}
         </ThemedSelect>
-        <p className="text-[10px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>Required for a cancellation — canonical key for top-reason reports.</p>
+        <p className="text-[11px] sm:text-[10px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>Required for a cancellation — canonical key for top-reason reports.</p>
       </div>
 
       <div>
@@ -588,7 +588,7 @@ const DataCleanup = () => {
           <p className="text-xs italic" style={{ color: 'var(--color-text-tertiary)' }}>Nothing here.</p>
         ) : (
           <>
-            <p className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>
+            <p className="text-[11px] sm:text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>
               {res.counts.transfers_form_data} transfers · {res.counts.sales_form_data} sales{res.column ? ` · +${res.counts.sales_column} ${res.column}` : ''}
             </p>
             <div className="flex flex-wrap gap-1.5 max-h-44 overflow-y-auto">
@@ -599,7 +599,7 @@ const DataCleanup = () => {
                     className="text-xs font-semibold px-2 py-1 rounded-md transition-colors flex items-center gap-1"
                     style={{ backgroundColor: isSel ? 'var(--color-primary-600)' : 'var(--color-surface)', color: isSel ? 'white' : 'var(--color-text)', border: `1px solid ${isSel ? 'var(--color-primary-600)' : 'var(--color-border)'}` }}>
                     <span className="font-mono">{v.value === '' ? '(blank)' : v.value}</span>
-                    <span className="text-[10px] font-bold px-1 rounded" style={{ backgroundColor: isSel ? 'rgba(255,255,255,0.25)' : 'var(--color-primary-100)', color: isSel ? 'white' : 'var(--color-primary-700)' }}>{v.count}</span>
+                    <span className="text-[11px] sm:text-[10px] font-bold px-1 rounded" style={{ backgroundColor: isSel ? 'rgba(255,255,255,0.25)' : 'var(--color-primary-100)', color: isSel ? 'white' : 'var(--color-primary-700)' }}>{v.count}</span>
                   </button>
                 );
               })}

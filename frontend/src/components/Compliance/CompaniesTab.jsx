@@ -113,7 +113,7 @@ const CompanyCard = ({ company: c, onNavigate, onOpenReport }) => {
             className={`rounded-lg px-2 py-2 text-center w-full transition-colors ${s.nav ? 'cursor-pointer hover:shadow-sm' : ''}`}
             style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
             <p className="text-lg font-extrabold leading-none" style={{ color: s.color || 'var(--color-text)' }}>{s.val}</p>
-            <p className="text-[10px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>{s.label}</p>
+            <p className="text-[11px] sm:text-[10px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>{s.label}</p>
           </Tag>
         );
       })}

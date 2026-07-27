@@ -49,7 +49,7 @@ function SourceBadge({ source, roleLevel }) {
   const a = accent(s.tone);
   const label = source === 'role' && roleLevel ? `Role · ${prettyRole(roleLevel)}` : s.label;
   return (
-    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded"
+    <span className="text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded"
       style={{ background: a.soft, color: a.fg, border: `1px solid ${a.soft}` }}>
       {label}
     </span>
@@ -207,7 +207,7 @@ export default function EgressSection({ account, assignment }) {
                 trailing={
                   <>
                     <SourceBadge source={eff.source} roleLevel={roleLevel} />
-                    {dominatedByGlobal && !overridden && <span className="text-[10px] text-text-tertiary">· blocked by global</span>}
+                    {dominatedByGlobal && !overridden && <span className="text-[11px] sm:text-[10px] text-text-tertiary">· blocked by global</span>}
                     {overridden && busy !== 'access:' + key && (
                       // Inside a <label>, so stop the click from also toggling the box.
                       <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); clearOverride(key); }}
@@ -231,7 +231,7 @@ export default function EgressSection({ account, assignment }) {
         <RecordingCap key={recRow?.id || 'rec'} initial={recRow?.max_recording_minutes_per_day} inherited={inheritNum('recording_listen', '__all', 'max_recording_minutes_per_day')} busy={busy === 'rec'} onSave={saveRecording} />
 
         <div className="mt-4 space-y-2">
-          <div className="grid grid-cols-[1fr_100px_100px_auto] gap-2 text-[10px] font-bold uppercase tracking-wider text-text-secondary px-1">
+          <div className="grid grid-cols-[1fr_100px_100px_auto] gap-2 text-[11px] sm:text-[10px] font-bold uppercase tracking-wider text-text-secondary px-1">
             <span>CSV export — area</span><span>Rows/exp</span><span>Exp/day</span><span></span>
           </div>
           {capAreas.map(area => (

@@ -86,7 +86,7 @@ export default function MyTeam() {
 
   const Stat = ({ icon, label, value, color }) => (
     <div className="rounded-xl p-3 text-center" style={box}>
-      <div className="flex items-center justify-center gap-1 text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-tertiary)' }}>{icon}{label}</div>
+      <div className="flex items-center justify-center gap-1 text-[11px] sm:text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-tertiary)' }}>{icon}{label}</div>
       <div className="text-xl font-extrabold mt-1" style={{ color: color || 'var(--color-text)' }}>{value}</div>
     </div>
   );
@@ -105,7 +105,7 @@ export default function MyTeam() {
         title={team.name}
         subtitle={
           <span className="flex items-center gap-3 flex-wrap">
-            <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded"
+            <span className="text-[11px] sm:text-[10px] uppercase font-bold px-2 py-0.5 rounded"
               style={{ background: accent('primary').soft, color: accent('primary').fg }}>{team.team_type}</span>
             <span>{report?.member_count ?? '—'} members</span>
             {isLead && <span className="inline-flex items-center gap-1"><Crown size={12} /> You lead this team</span>}

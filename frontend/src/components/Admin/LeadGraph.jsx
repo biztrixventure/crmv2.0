@@ -220,11 +220,11 @@ const LeadGraph = ({ nodes, edges }) => {
               )}
               {sel.neighbors?.length > 0 && (
                 <div>
-                  <div className="text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: 'var(--color-text-tertiary)' }}>Connected to ({sel.neighbors.length})</div>
+                  <div className="text-[11px] sm:text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: 'var(--color-text-tertiary)' }}>Connected to ({sel.neighbors.length})</div>
                   <div className="flex flex-wrap gap-1 max-h-28 overflow-auto">
                     {sel.neighbors.map((nb, i) => {
                       const m = metaOf(nb.type);
-                      return <span key={i} className="text-[10px] px-1.5 py-0.5 rounded inline-flex items-center gap-1" style={{ background: `${m.color}18`, color: m.color }}><m.Icon size={9} />{String(nb.label || '').split('\n')[0]}</span>;
+                      return <span key={i} className="text-[11px] sm:text-[10px] px-1.5 py-0.5 rounded inline-flex items-center gap-1" style={{ background: `${m.color}18`, color: m.color }}><m.Icon size={9} />{String(nb.label || '').split('\n')[0]}</span>;
                     })}
                   </div>
                 </div>

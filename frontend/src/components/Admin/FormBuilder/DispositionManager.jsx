@@ -265,7 +265,7 @@ const DispoCard = ({ config, onEdit, onDeactivate, onActivate, onHardDelete, bus
             {config.name}
           </span>
           {inactive && (
-            <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded"
+            <span className="inline-flex items-center gap-1 text-[11px] sm:text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded"
               style={{ backgroundColor: 'var(--color-bg)', color: 'var(--color-text-tertiary)', border: '1px solid var(--color-border)' }}>
               <EyeOff size={9} /> Disabled
             </span>

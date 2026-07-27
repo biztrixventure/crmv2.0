@@ -84,7 +84,7 @@ export default function TeamManager() {
             <div className="flex items-center gap-2 flex-wrap">
               <Users size={16} style={{ color: t.color || TYPE_COLOR[t.team_type] }} />
               <span className="font-bold text-sm" style={{ color: 'var(--color-text)' }}>{t.name}</span>
-              <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>{t.team_type}</span>
+              <span className="text-[11px] sm:text-[10px] uppercase font-bold px-1.5 py-0.5 rounded" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>{t.team_type}</span>
               <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{t.member_count} member{t.member_count === 1 ? '' : 's'}</span>
             </div>
             {t.lead_name && <p className="text-[11px] mt-0.5 flex items-center gap-1" style={{ color: 'var(--color-text-secondary)' }}><Crown size={11} style={{ color: '#d97706' }} /> Lead: {t.lead_name}</p>}
@@ -278,7 +278,7 @@ export function TrendChart({ data }) {
     <div className="rounded-xl p-3" style={box}>
       <div className="flex items-center justify-between mb-1">
         <p className="text-[11px] font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-tertiary)' }}>Daily trend</p>
-        <div className="flex items-center gap-3 text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
+        <div className="flex items-center gap-3 text-[11px] sm:text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
           <span className="inline-flex items-center gap-1"><span style={{ width: 8, height: 8, background: '#2563eb', display: 'inline-block', borderRadius: 2 }} /> Transfers</span>
           <span className="inline-flex items-center gap-1"><span style={{ width: 8, height: 8, background: '#16a34a', display: 'inline-block', borderRadius: 2 }} /> Sales</span>
         </div>

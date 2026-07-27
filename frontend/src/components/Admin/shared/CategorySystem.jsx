@@ -21,7 +21,7 @@ export function CategoryChips({ ids = [], categories, size = 'sm' }) {
   const byId = Object.fromEntries(categories.map(c => [c.id, c.name]));
   const names = ids.map(id => byId[id]).filter(Boolean);
   if (!names.length) return null;
-  const pad = size === 'sm' ? 'text-[10px] px-1.5 py-0.5' : 'text-xs px-2 py-0.5';
+  const pad = size === 'sm' ? 'text-[11px] sm:text-[10px] px-1.5 py-0.5' : 'text-xs px-2 py-0.5';
   return (
     <div className="flex flex-wrap gap-1">
       {names.map(n => (

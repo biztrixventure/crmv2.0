@@ -293,7 +293,7 @@ const SaleFileRequirementsGuide = ({ reference = { companies: [], closers: [] },
                 <div key={f.key} className="flex items-start gap-2">
                   <CheckCircle2 size={14} className="mt-0.5 flex-shrink-0" style={{ color: 'var(--color-success-600)' }} />
                   <div><code className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>{f.key}</code>
-                    {f.isPhone && <span className="text-[10px] ml-1.5 px-1 py-0.5 rounded font-bold" style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>match</span>}
+                    {f.isPhone && <span className="text-[11px] sm:text-[10px] ml-1.5 px-1 py-0.5 rounded font-bold" style={{ backgroundColor: 'var(--color-primary-100)', color: 'var(--color-primary-700)' }}>match</span>}
                     {f.desc && <span className="text-xs ml-1.5" style={{ color: 'var(--color-text-secondary)' }}>— {f.desc}</span>}</div>
                 </div>
               ))}
@@ -404,7 +404,7 @@ const SaleFileRequirementsGuide = ({ reference = { companies: [], closers: [] },
                         ? <p className="text-[11px] italic" style={{ color: 'var(--color-text-tertiary)' }}>No fronters configured.</p>
                         : [...frontersByCompany.entries()].map(([co, names]) => (
                           <div key={co}>
-                            <p className="text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: 'var(--color-text-tertiary)' }}>{co}</p>
+                            <p className="text-[11px] sm:text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: 'var(--color-text-tertiary)' }}>{co}</p>
                             <div className="flex flex-wrap gap-1.5">
                               {names.map(n => (
                                 <span key={n} className="text-[11px] px-2 py-0.5 rounded font-mono"
@@ -504,7 +504,7 @@ const SaleFileRequirementsGuide = ({ reference = { companies: [], closers: [] },
                     <div className="rounded-lg p-2.5 space-y-2" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
                       {hasFieldOpts && (
                         <div>
-                          <p className="text-[10px] font-bold uppercase tracking-widest mb-1.5" style={{ color: 'var(--color-text-tertiary)' }}>
+                          <p className="text-[11px] sm:text-[10px] font-bold uppercase tracking-widest mb-1.5" style={{ color: 'var(--color-text-tertiary)' }}>
                             From Form Builder · this field's options
                           </p>
                           {mappings.length > 0 ? mappings.map((m, i) => {
@@ -539,12 +539,12 @@ const SaleFileRequirementsGuide = ({ reference = { companies: [], closers: [] },
                       )}
                       {plansByCompany.size > 0 && (
                         <div>
-                          <p className="text-[10px] font-bold uppercase tracking-widest mb-1.5" style={{ color: 'var(--color-text-tertiary)' }}>
+                          <p className="text-[11px] sm:text-[10px] font-bold uppercase tracking-widest mb-1.5" style={{ color: 'var(--color-text-tertiary)' }}>
                             From Sale Configs · fallback when this field has no options
                           </p>
                           {[...plansByCompany.entries()].map(([co, vals]) => (
                             <div key={co} className="mb-1.5">
-                              <p className="text-[10px] font-semibold" style={{ color: 'var(--color-text-tertiary)' }}>{co}</p>
+                              <p className="text-[11px] sm:text-[10px] font-semibold" style={{ color: 'var(--color-text-tertiary)' }}>{co}</p>
                               <div className="flex flex-wrap gap-1.5 mt-1">
                                 {vals.map(v => (
                                   <span key={v} className="text-[11px] px-2 py-0.5 rounded font-mono"
@@ -578,7 +578,7 @@ const SaleFileRequirementsGuide = ({ reference = { companies: [], closers: [] },
                     <div className="rounded-lg p-2.5 space-y-2" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
                       {optClients.length > 0 && (
                         <div>
-                          <p className="text-[10px] font-bold uppercase tracking-widest mb-1.5" style={{ color: 'var(--color-text-tertiary)' }}>
+                          <p className="text-[11px] sm:text-[10px] font-bold uppercase tracking-widest mb-1.5" style={{ color: 'var(--color-text-tertiary)' }}>
                             From Form Builder · this field's options
                           </p>
                           <div className="flex flex-wrap gap-1.5">
@@ -591,12 +591,12 @@ const SaleFileRequirementsGuide = ({ reference = { companies: [], closers: [] },
                       )}
                       {clientsByCompany.size > 0 && (
                         <div>
-                          <p className="text-[10px] font-bold uppercase tracking-widest mb-1.5" style={{ color: 'var(--color-text-tertiary)' }}>
+                          <p className="text-[11px] sm:text-[10px] font-bold uppercase tracking-widest mb-1.5" style={{ color: 'var(--color-text-tertiary)' }}>
                             From Sale Configs
                           </p>
                           {[...clientsByCompany.entries()].map(([co, vals]) => (
                             <div key={co} className="mb-1.5">
-                              <p className="text-[10px] font-semibold" style={{ color: 'var(--color-text-tertiary)' }}>{co}</p>
+                              <p className="text-[11px] sm:text-[10px] font-semibold" style={{ color: 'var(--color-text-tertiary)' }}>{co}</p>
                               <div className="flex flex-wrap gap-1.5 mt-1">
                                 {vals.map(v => (
                                   <span key={v} className="text-[11px] px-2 py-0.5 rounded font-mono"
@@ -626,7 +626,7 @@ const SaleFileRequirementsGuide = ({ reference = { companies: [], closers: [] },
                     ) : (
                       [...frontersByCompany.entries()].map(([co, names]) => (
                         <div key={co}>
-                          <p className="text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: 'var(--color-text-tertiary)' }}>{co}</p>
+                          <p className="text-[11px] sm:text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: 'var(--color-text-tertiary)' }}>{co}</p>
                           <div className="flex flex-wrap gap-1.5">
                             {names.map(n => (
                               <span key={n} className="text-[11px] px-2 py-0.5 rounded font-mono"

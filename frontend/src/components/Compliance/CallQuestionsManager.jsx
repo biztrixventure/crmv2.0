@@ -79,7 +79,7 @@ export default function CallQuestionsManager() {
             ) : (
               <span className="text-sm flex-1" style={{ color: 'var(--color-text)' }}>
                 {q.text}
-                {!q.is_active && <span className="ml-2 text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>hidden</span>}
+                {!q.is_active && <span className="ml-2 text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>hidden</span>}
               </span>
             )}
 

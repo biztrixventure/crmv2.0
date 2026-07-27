@@ -119,7 +119,7 @@ const CheckboxRow = ({ checked, onChange, label, sub, danger, impactOn, impactOf
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-sm font-semibold text-text">{label}</span>
         {danger && (
-          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wide"
+          <span className="text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wide"
             style={{ backgroundColor: 'var(--color-warning-100, #fef3c7)', color: 'var(--color-warning-700, #b45309)' }}>
             Risky
           </span>
@@ -415,7 +415,7 @@ const ResellRules = ({ config, scope, onSave }) => {
                 border: '1px solid var(--color-border)',
                 borderLeft: `3px solid ${EMPHASIS_DOT[intent.emphasis || 'info']}`,
               }}>
-              <span className="text-[10px] font-mono px-1.5 py-1 rounded font-bold flex-shrink-0"
+              <span className="text-[11px] sm:text-[10px] font-mono px-1.5 py-1 rounded font-bold flex-shrink-0"
                 style={{ backgroundColor: EMPHASIS_BG[intent.emphasis || 'info'], color: EMPHASIS_DOT[intent.emphasis || 'info'] }}>
                 {intent.key}
               </span>
@@ -450,7 +450,7 @@ const ResellRules = ({ config, scope, onSave }) => {
             onKeyDown={(e) => { if (e.key === 'Enter') addIntent(); }}
             placeholder="New intent label (e.g. Coverage upgrade)"
             className="input text-sm py-2 flex-1 min-w-[180px]" />
-          <span className="text-[10px] font-mono px-2 py-1 rounded whitespace-nowrap"
+          <span className="text-[11px] sm:text-[10px] font-mono px-2 py-1 rounded whitespace-nowrap"
             style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>
             key: <strong>{newIntent.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 32) || '—'}</strong>
           </span>

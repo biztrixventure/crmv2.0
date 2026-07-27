@@ -150,7 +150,7 @@ const SegmentRow = ({ shell, seg, index, onMetric, onLabel, onRemove, canRemove 
   useEffect(() => { setLabel(seg.label || ''); }, [seg.label]);
   return (
     <div className="flex items-center gap-2">
-      <span className="text-[10px] font-bold w-4 text-center flex-shrink-0" style={{ color: 'var(--color-text-tertiary)' }}>{index + 1}</span>
+      <span className="text-[11px] sm:text-[10px] font-bold w-4 text-center flex-shrink-0" style={{ color: 'var(--color-text-tertiary)' }}>{index + 1}</span>
       <ThemedSelect value={seg.metric} onChange={(e) => onMetric(index, e.target.value)} className="input text-xs py-1.5 flex-1 min-w-0">
         {(KPI_METRICS[shell] || []).map(m => <option key={m.key} value={m.key}>{m.label}</option>)}
       </ThemedSelect>
@@ -202,7 +202,7 @@ const CardBuilder = ({ shell, card, layout, roleKey, layoutKey, onSave }) => {
         </button>
         {locked ? (
           <span className="text-sm font-semibold flex-1" style={{ color: 'var(--color-text)' }}>
-            {card.label} <span className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>· show / hide only</span>
+            {card.label} <span className="text-[11px] sm:text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>· show / hide only</span>
           </span>
         ) : (
           <input type="text" value={label} placeholder={def?.label || card.key}
@@ -211,7 +211,7 @@ const CardBuilder = ({ shell, card, layout, roleKey, layoutKey, onSave }) => {
             onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
             className="input text-sm py-1.5 flex-1 min-w-0 font-semibold" title="Card title" />
         )}
-        <code className="text-[10px] font-mono px-1 py-0.5 rounded flex-shrink-0" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>{card.key}</code>
+        <code className="text-[11px] sm:text-[10px] font-mono px-1 py-0.5 rounded flex-shrink-0" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>{card.key}</code>
       </div>
 
       {!locked && enabled && (
@@ -221,7 +221,7 @@ const CardBuilder = ({ shell, card, layout, roleKey, layoutKey, onSave }) => {
             onBlur={() => { if (desc !== (stored.description ?? '')) save({ description: desc }); }}
             onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
             className="input text-xs py-1.5 w-full mb-2" />
-          <p className="text-[10px] font-bold uppercase tracking-widest mb-1.5" style={{ color: 'var(--color-text-tertiary)' }}>
+          <p className="text-[11px] sm:text-[10px] font-bold uppercase tracking-widest mb-1.5" style={{ color: 'var(--color-text-tertiary)' }}>
             Numbers ({curSegs.length}/3) — choose what each represents
           </p>
           <div className="space-y-1.5">
@@ -391,7 +391,7 @@ const KpiRules = ({ config, scope, onSave }) => {
             return (
               <div key={card.key}>
                 {header && (
-                  <p className="text-[10px] font-bold uppercase tracking-widest mt-3 mb-1.5 px-1"
+                  <p className="text-[11px] sm:text-[10px] font-bold uppercase tracking-widest mt-3 mb-1.5 px-1"
                     style={{ color: 'var(--color-text-tertiary)' }}>{header}</p>
                 )}
                 <CardBuilder shell={kpiShell} card={card} layout={builderLayout}

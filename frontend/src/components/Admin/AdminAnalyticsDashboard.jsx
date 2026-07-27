@@ -11,6 +11,7 @@ import DateRangePicker, { getPresetRange } from '../UI/DateRangePicker';
 import { todayET, fmtSaleDate } from '../../utils/timezone';
 import { useComplianceStatuses } from '../../hooks/useComplianceStatuses';
 import ThemedSelect from '../UI/Select';
+import { TableScroll } from '../UI/kit';
 
 // Map our 5 semantic badge tokens to a hex so the pipeline bar gets a
 // solid background even when Tailwind tree-shakes unused classes.
@@ -59,7 +60,7 @@ const CbPriorityBadge = ({ priority }) => {
 const CbOverdueDot = ({ cb }) => {
   if (cb.status !== 'pending' || !cb.callback_at || new Date(cb.callback_at) >= new Date()) return null;
   return (
-    <span className="inline-flex items-center gap-0.5 ml-1 px-1.5 py-0.5 rounded text-[10px] font-semibold"
+    <span className="inline-flex items-center gap-0.5 ml-1 px-1.5 py-0.5 rounded text-[11px] sm:text-[10px] font-semibold"
       style={{ backgroundColor:'#fef2f2', color:'#dc2626', border:'1px solid #fecaca' }}>
       <AlertCircle size={9} /> OD
     </span>
@@ -90,7 +91,7 @@ const ExTh = ({ children }) => (
     style={{ color: 'var(--color-text-tertiary)' }}>{children}</th>
 );
 const ExTd = ({ value, mono, truncate }) => (
-  <td className={`py-2 px-2.5 text-text-secondary ${mono ? 'font-mono text-[10px]' : ''} ${truncate ? 'max-w-[200px] truncate' : 'whitespace-nowrap'}`}
+  <td className={`py-2 px-2.5 text-text-secondary ${mono ? 'font-mono text-[11px] sm:text-[10px]' : ''} ${truncate ? 'max-w-[200px] truncate' : 'whitespace-nowrap'}`}
     title={truncate && value ? String(value) : undefined}>{(value === 0 || value) ? value : '—'}</td>
 );
 const dt = (d) => d ? new Date(d).toLocaleString() : null;
@@ -99,7 +100,7 @@ const dt = (d) => d ? new Date(d).toLocaleString() : null;
 // dashboard filter row reads like the Compliance filter bar.
 const FilterField = ({ label, children, grow = false }) => (
   <div className={`flex flex-col gap-1 ${grow ? 'flex-1 min-w-[150px]' : ''}`}>
-    <label className="text-[10px] font-bold uppercase tracking-wide px-0.5" style={{ color: 'var(--color-text-tertiary)' }}>{label}</label>
+    <label className="text-[11px] sm:text-[10px] font-bold uppercase tracking-wide px-0.5" style={{ color: 'var(--color-text-tertiary)' }}>{label}</label>
     {children}
   </div>
 );
@@ -271,17 +272,17 @@ function MiniCalendar({ todaySales, todayXfers, todayLoading, selectedFrom, sele
       {/* Selection info + clear */}
       <div className="mt-1.5 flex items-center justify-between min-h-[16px]">
         {tempFrom ? (
-          <span className="text-[10px]" style={{ color: 'var(--color-primary-600)' }}>
+          <span className="text-[11px] sm:text-[10px]" style={{ color: 'var(--color-primary-600)' }}>
             Click end date…
           </span>
         ) : rangeLabel ? (
-          <span className="text-[10px] text-text-secondary truncate">{rangeLabel}</span>
+          <span className="text-[11px] sm:text-[10px] text-text-secondary truncate">{rangeLabel}</span>
         ) : (
-          <span className="text-[10px] text-text-tertiary">Click to filter</span>
+          <span className="text-[11px] sm:text-[10px] text-text-tertiary">Click to filter</span>
         )}
         {(selectedFrom || tempFrom) && (
           <button onClick={clearSelection}
-            className="text-[10px] font-semibold ml-1 flex-shrink-0"
+            className="text-[11px] sm:text-[10px] font-semibold ml-1 flex-shrink-0"
             style={{ color: 'var(--color-error-500)' }}>
             Clear
           </button>
@@ -293,7 +294,7 @@ function MiniCalendar({ todaySales, todayXfers, todayLoading, selectedFrom, sele
 
       {/* Today stats */}
       <div className="space-y-1">
-        <p className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-tertiary)' }}>
+        <p className="text-[11px] sm:text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-tertiary)' }}>
           Today · {now.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
         </p>
         {[
@@ -608,7 +609,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_210px] gap-3">
 
         {/* Metric cards */}
-        <div className="grid grid-cols-4 gap-2">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
           {metrics.map((m, i) => (
             <div key={i}
               onClick={m.onClick}
@@ -669,7 +670,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
             style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
             <div className="flex-shrink-0">
               <p className="text-xs font-bold text-text">Pipeline</p>
-              <p className="text-[10px] text-text-tertiary truncate" style={{ maxWidth: 220 }}>
+              <p className="text-[11px] sm:text-[10px] text-text-tertiary truncate" style={{ maxWidth: 220 }}>
                 {segments.map(s => s.label).join(' · ')}
               </p>
             </div>
@@ -841,8 +842,10 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
           </div>
         </div>
 
-        {/* Table */}
-        <div className="overflow-x-auto">
+        {/* Table — 2527px wide at its widest, inside a 346px phone viewport.
+            It already scrolled; what it lacked was a pinned identifying column
+            and any hint that there was more to the right. */}
+        <TableScroll stickyFirst label="Records">
           {dataTab === 'sales' ? (
             <table className="w-full text-xs">
               <thead>
@@ -885,9 +888,9 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
                       style={{ borderBottom:'1px solid var(--color-border)' }}>
                       <td className="py-2 px-2.5">
                         <p className="font-semibold text-text group-hover:text-primary-600 transition-colors leading-tight">{s.customer_name||'—'}</p>
-                        {s.customer_phone && <p className="text-[10px] text-text-tertiary">{s.customer_phone}</p>}
+                        {s.customer_phone && <p className="text-[11px] sm:text-[10px] text-text-tertiary">{s.customer_phone}</p>}
                       </td>
-                      <td className="py-2 px-2.5 font-mono text-[10px] text-text-tertiary">{s.reference_no||'—'}</td>
+                      <td className="py-2 px-2.5 font-mono text-[11px] sm:text-[10px] text-text-tertiary">{s.reference_no||'—'}</td>
                       <td className="py-2 px-2.5">
                         <SaleStatusBadge sale={s} size="sm" />
                       </td>
@@ -963,7 +966,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
                         style={{ borderBottom:'1px solid var(--color-border)' }}>
                         <td className="py-2 px-2.5">
                           <p className="font-semibold text-text group-hover:text-primary-600 transition-colors leading-tight">{name}</p>
-                          {phone && <p className="text-[10px] text-text-tertiary">{phone}</p>}
+                          {phone && <p className="text-[11px] sm:text-[10px] text-text-tertiary">{phone}</p>}
                         </td>
                         <td className="py-2 px-2.5">
                           <Badge variant={XFER_BADGE[t.status]||'secondary'} size="sm">{XFER_LABEL[t.status]||t.status||'—'}</Badge>
@@ -971,7 +974,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
                         <td className="py-2 px-2.5">
                           {t.sale_status
                             ? <Badge variant={ds.variant} size="sm">{ds.label}</Badge>
-                            : <span className="text-text-tertiary text-[10px]">—</span>}
+                            : <span className="text-text-tertiary text-[11px] sm:text-[10px]">—</span>}
                         </td>
                         <td className="py-2 px-2.5">
                           {t.latest_disposition
@@ -984,12 +987,12 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
                                 </span>
                               </span>
                             )
-                            : <span className="text-text-tertiary text-[10px]">In Progress</span>}
+                            : <span className="text-text-tertiary text-[11px] sm:text-[10px]">In Progress</span>}
                         </td>
                         <td className="py-2 px-2.5 text-text-secondary">{t.created_by_name||'—'}</td>
                         <td className="py-2 px-2.5 text-text-secondary">{t.assigned_closer_name||<span className="text-text-tertiary">—</span>}</td>
                         <td className="py-2 px-2.5 text-text-secondary">{t.company_name||'—'}</td>
-                        <td className="py-2 px-2.5 font-mono text-[10px] text-text-tertiary">{t.sale_reference_no||'—'}</td>
+                        <td className="py-2 px-2.5 font-mono text-[11px] sm:text-[10px] text-text-tertiary">{t.sale_reference_no||'—'}</td>
                         <td className="py-2 px-2.5 text-text-secondary whitespace-nowrap">{new Date(t.created_at).toLocaleDateString()}</td>
                         {expanded && (() => {
                           const addr = [fd.Address, fd.City, fd.State, fd.Zip].filter(Boolean).join(', ') || fd.customer_address;
@@ -1043,7 +1046,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
                       style={{ borderBottom:'1px solid var(--color-border)' }}>
                       <td className="py-2 px-2.5">
                         <p className="font-semibold text-text leading-tight">{c.customer_name||'—'}</p>
-                        {c.customer_phone && <p className="text-[10px] text-text-tertiary">{c.customer_phone}</p>}
+                        {c.customer_phone && <p className="text-[11px] sm:text-[10px] text-text-tertiary">{c.customer_phone}</p>}
                       </td>
                       <td className="py-2 px-2.5">
                         <CbPriorityBadge priority={c.priority} />
@@ -1073,7 +1076,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
               </tbody>
             </table>
           )}
-        </div>
+        </TableScroll>
 
         {/* Pagination */}
         {totalPages > 1 && (

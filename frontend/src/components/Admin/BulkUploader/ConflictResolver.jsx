@@ -23,13 +23,13 @@ const ConflictResolver = ({ conflicts, decisions, toggleConflict, setAllConflict
           <div key={i} className="rounded-xl p-3" style={{ backgroundColor: 'var(--color-surface)', border: `1px solid ${included ? 'var(--color-warning-300, #fbbf24)' : 'var(--color-border)'}` }}>
             <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] gap-3 items-center">
               <div className="rounded-lg p-2.5" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
-                <p className="text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: 'var(--color-text-tertiary)' }}>Existing {c.existing?.source === 'file' ? '(earlier in file)' : '(in system)'}</p>
+                <p className="text-[11px] sm:text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: 'var(--color-text-tertiary)' }}>Existing {c.existing?.source === 'file' ? '(earlier in file)' : '(in system)'}</p>
                 <p className="text-xs" style={{ color: 'var(--color-text)' }}>CLI <strong>{c.existing?.cli_number || '—'}</strong></p>
                 <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{c.existing?.fronter_name || c.existing?.fronter_user_id || '—'} · {c.existing?.company_name || c.existing?.company_id || '—'}</p>
               </div>
               <ArrowRight size={16} className="hidden md:block mx-auto" style={{ color: 'var(--color-text-tertiary)' }} />
               <div className="rounded-lg p-2.5" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
-                <p className="text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: 'var(--color-text-tertiary)' }}>Incoming (this file)</p>
+                <p className="text-[11px] sm:text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: 'var(--color-text-tertiary)' }}>Incoming (this file)</p>
                 <p className="text-xs" style={{ color: 'var(--color-text)' }}>CLI <strong>{c.incoming?.cli_number || '—'}</strong></p>
                 <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{c.incoming?.fronter_name || '—'} · {c.incoming?.company_name || '—'}</p>
               </div>
