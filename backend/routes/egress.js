@@ -243,6 +243,17 @@ router.get('/columns', superOnly, asyncHandler(async (req, res) => {
   const v = await getConfig(null, `export.columns.${dataset}.${role}`, null);
   res.json({ columns: Array.isArray(v) ? v : null });   // null = unconfigured → surface default
 }));
+// "No override" is the ABSENCE of the row, which is what resolveExportColumns
+// already reads. It is NOT a row holding null: business_config.value rejects
+// NULL, so setConfig(..., null) throws — and because the throw lands after an
+// earlier write has committed, the save half-succeeds while the UI is told it
+// failed. (That was live on the role scope's "Reset to all" before this.)
+const dropConfigRow = async (key) => {
+  const { error } = await supabaseAdmin.from('business_config')
+    .delete().eq('scope', 'global').eq('key', key);
+  if (error) throw new Error(error.message);
+};
+
 router.put('/columns', superOnly, asyncHandler(async (req, res) => {
   const { dataset, role, userId } = req.body || {};
   const columns = Array.isArray(req.body.columns) ? req.body.columns.map(String) : null;
@@ -259,12 +270,14 @@ router.put('/columns', superOnly, asyncHandler(async (req, res) => {
     // getConfig are not symmetric. Passing null writes a row nothing reads back.
     await setConfig('global', USERS_KEY, map, req.user.id);
     // Retire any legacy per-user row so it cannot shadow a later reset.
-    await setConfig('global', `export.columns.${dataset}.${userId}`, null, req.user.id);
+    await dropConfigRow(`export.columns.${dataset}.${userId}`);
     clearConfigCache();
     return res.json({ ok: true, columns });
   }
 
-  await setConfig('global', `export.columns.${dataset}.${role}`, columns, req.user.id);
+  const roleKey = `export.columns.${dataset}.${role}`;
+  if (columns && columns.length) await setConfig('global', roleKey, columns, req.user.id);
+  else await dropConfigRow(roleKey);
   clearConfigCache();
   res.json({ ok: true, columns });
 }));
