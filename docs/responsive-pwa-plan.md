@@ -5,7 +5,9 @@ chrome, every tab and sub-tab, modals, drawers, tables, filter bars, KPI strips,
 forms, and the login/auth pages. Layout only: no endpoint, payload, permission
 or business-logic change.
 
-Status: **audit complete — awaiting go-ahead before the migration.**
+Status: **steps 1–9 done** — see §6 for what shipped and, more importantly, for
+the two places where measuring corrected this audit. PWA groundwork (§5) not
+started.
 
 Method: static sweep of `components/Admin`, `components/Compliance`, `shells/`
 plus a live probe on https://crm.vertexpakistan.com as superadmin at 390×844 and
@@ -302,3 +304,78 @@ Dynamic `/manifest.webmanifest` from branding · maskable icons · boot-time SW
 registration with an app-shell + hashed-asset cache and network-only `/api` ·
 `beforeinstallprompt` capture + an install affordance · offline / reconnect
 states wired to the existing banner infrastructure.
+
+---
+
+## 6. Results — steps 1–9
+
+### Measured outcome (superadmin, production, dark + light)
+
+| Viewport | page overflow before | after |
+|---|---|---|
+| 360 / 390 | +107px | **0** |
+| 768 | +218px | **0** |
+| 1024 / 1280 / 1600 / 2560 | — | **0** |
+
+Admin content column at 390: **82px → 380px**. At 1024 the sidebar returns as
+the 256px column, the hamburger hides and the collapse toggle reappears — the
+`lg` boundary switches cleanly in both directions. Login page at 360: no
+overflow, fits without scrolling.
+
+### Commits
+
+| Commit | Scope |
+|---|---|
+| `403c425` | Admin shell chrome — off-canvas sidebar, header, `main` min-w-0, dvh |
+| `ca90c64` | Kit — `TableScroll`, `IconButton`, ChromeTabs scroll, Modal sheet |
+| `e4c8010` | Compliance chrome — tab row, TabHeader stacking, modal sheets |
+| `6269fc5` | Compliance record tables — pinned identifying column |
+| `a407d90` | The three tabs whose own content overflowed |
+| `2fb24be` | Admin tables, non-responsive grids, 10px type floor |
+| `1e6ef6b` | 44px touch targets via `pointer: coarse` |
+
+### Where measuring corrected the audit
+
+**1. The table work was polish, not bug-fixing.** §1.4 implied 30 broken
+tables. Probing every one at 390 showed *no admin table overflows the page* —
+they all sit in a scroll parent already. The real defect was that they scroll
+**blind**: the dashboard renders a 2527px table in a 346px window with no
+pinned column and no hint there is more to the right. That reframed the work
+from "wrap 30 tables" to "pin the identifying column on the tables people
+actually live in", which is what shipped.
+
+**2. The hubs were clean.** §1.9 flagged VICIdial (7 sub-tabs), Chat (8), User
+Control Center (11), Business Rules and Clients & Plans as unmeasured risk. A
+sweep of all 21 admin tabs **and every one of their sub-tabs** at 390 found the
+only content overflows anywhere were Data Analyzer and Branding — both already
+known. No hidden breakage.
+
+**3. One cause explained two thirds of the content overflow.** `SectionHeader`
+paired `flex-wrap` with `flex-shrink-0` on its actions container. Those cancel:
+the container refuses to narrow, so it overflows instead of wrapping. Being in
+the kit, every admin tab inherited it.
+
+### Also corrected
+
+§1.4's "four files with no overflow wrapper" (ChatAdmin, ClientPortalTab,
+AnnouncementsManager, SpiffManager) could **not** be confirmed — those tables
+don't render in the default view, so the claim is from static reading only and
+remains unverified.
+
+### Deliberately not changed
+
+- `flex-shrink-0` on the ActivityPanel and ChatAdmin toolbars — those sit in
+  flex-**column** parents, where it prevents vertical squashing and is correct.
+- `text-[10px]` on desktop. The floor is `text-[11px] sm:text-[10px]`: 11px on
+  a phone, byte-identical at `sm`+. Raising it everywhere would reflow every
+  dense table on the desktop this CRM is mostly used on.
+- Touch targets are gated on `pointer: coarse`, not on width — a 1024px tablet
+  is touch, a 700px desktop window is not.
+
+### Still open
+
+- Remaining lower-traffic tables (EgressGovernance ×5, VICIdial, Teams,
+  CompanyDetail, BulkUploader, the 4 unverified ones above).
+- A repeatable overflow probe checked into the repo (§3.9) — the sweeps in this
+  work were run ad hoc against production.
+- PWA groundwork (§5), including the conflicts listed there.
