@@ -188,16 +188,18 @@ export const TabHeader = ({ title, subtitle, onRefresh, onExport, extra, exportA
   const { isEnabled } = useFeatureFlags();
   const { canExport } = useAuth();
   return (
-    <div className="flex items-start justify-between mb-4 gap-4">
+    /* Stacked below `sm`: side-by-side, the actions squeeze the title into a
+       ~200px column and "All Sales" wraps across four lines at 390px. */
+    <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between mb-4 gap-3 sm:gap-4">
       <div className="min-w-0">
-        <h2 className="text-2xl font-extrabold tracking-tight" style={{ fontFamily: 'var(--font-display)', color: 'var(--color-text)' }}>
+        <h2 className="text-xl sm:text-2xl font-extrabold tracking-tight" style={{ fontFamily: 'var(--font-display)', color: 'var(--color-text)' }}>
           {title}
         </h2>
         {subtitle && (
-          <p className="text-sm mt-1 max-w-2xl leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>{subtitle}</p>
+          <p className="text-sm mt-1 max-w-2xl leading-relaxed m-0" style={{ color: 'var(--color-text-secondary)' }}>{subtitle}</p>
         )}
       </div>
-      <div className="flex items-center gap-2 flex-shrink-0">
+      <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap sm:flex-shrink-0">
         {extra}
         {onExport && isEnabled('exports') && canExport(exportArea) && (
           <button onClick={onExport}
@@ -269,30 +271,34 @@ export const FSelect = ({ label, children, ...props }) => (
 export const Overlay = ({ children }) => (
   <div className="fixed inset-0 z-50 overflow-y-auto"
     style={{ backgroundColor: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)' }}>
-    <div className="flex min-h-full items-center justify-center p-4">
+    {/* No padding below `sm` — the box goes full-screen there. */}
+    <div className="flex min-h-full items-center justify-center p-0 sm:p-4">
       {children}
     </div>
   </div>
 );
 
+// Full-screen sheet below `sm`, dialog at `sm`+ — same rule as UI/Modal, so the
+// legacy Compliance modals and the kit ones behave identically on a phone.
 export const ModalBox = ({ children, wide = false }) => (
-  <div className={`w-full ${wide ? 'max-w-2xl' : 'max-w-md'} rounded-2xl shadow-2xl overflow-hidden flex flex-col`}
-    style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', maxHeight: '90vh' }}>
+  <div className={`w-full ${wide ? 'sm:max-w-2xl' : 'sm:max-w-md'} h-dvh sm:h-auto rounded-none sm:rounded-2xl shadow-2xl overflow-hidden flex flex-col`}
+    style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', maxHeight: '100dvh' }}>
     {children}
   </div>
 );
 
 export const ModalHeader = ({ icon: Icon, title, subtitle, onClose }) => (
-  <div className="flex items-center justify-between px-6 py-4 flex-shrink-0"
+  <div className="flex items-center justify-between px-4 sm:px-6 py-3 sm:py-4 gap-3 flex-shrink-0"
     style={{ borderBottom: '1px solid var(--color-border)', background: 'var(--gradient-sidebar)' }}>
-    <div className="flex items-center gap-3">
-      {Icon && <Icon size={18} className="text-white opacity-80" />}
-      <div>
-        <p className="text-base font-bold text-white">{title}</p>
-        {subtitle && <p className="text-xs text-white opacity-70">{subtitle}</p>}
+    <div className="flex items-center gap-3 min-w-0">
+      {Icon && <Icon size={18} className="text-white opacity-80 flex-shrink-0" />}
+      <div className="min-w-0">
+        <p className="text-base font-bold text-white truncate m-0">{title}</p>
+        {subtitle && <p className="text-xs text-white opacity-70 truncate m-0">{subtitle}</p>}
       </div>
     </div>
-    <button onClick={onClose} className="p-1 rounded-lg text-white opacity-70 hover:opacity-100">
+    <button onClick={onClose} aria-label="Close"
+      className="w-11 h-11 sm:w-8 sm:h-8 flex items-center justify-center flex-shrink-0 rounded-lg text-white opacity-70 hover:opacity-100">
       ✕
     </button>
   </div>

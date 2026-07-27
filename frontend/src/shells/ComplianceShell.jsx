@@ -220,8 +220,11 @@ const ComplianceShell = () => {
 
         {/* Two-tier nav: 6 task groups on top, the active group's tabs below.
             Clicking a group jumps straight to its first tab (no dead clicks). */}
+        {/* `basis-full` below `sm` pushes "Numbers info" onto its own line
+            instead of letting it eat ~140px out of the tab strip on a phone —
+            with flex-1 the tabs shrank rather than the button wrapping. */}
         <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
-          <ChromeTabs variant="chrome" className="flex-1 min-w-0"
+          <ChromeTabs variant="chrome" className="basis-full sm:basis-0 sm:flex-1 min-w-0"
             items={groups.map(g => ({
               key: g.id, label: g.label, icon: g.icon,
               count: g.tabs.length > 1 ? g.tabs.length + (g.id === dispoHostId ? dispoTabs.length : 0) : null,
