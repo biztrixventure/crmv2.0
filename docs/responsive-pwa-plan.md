@@ -5,9 +5,9 @@ chrome, every tab and sub-tab, modals, drawers, tables, filter bars, KPI strips,
 forms, and the login/auth pages. Layout only: no endpoint, payload, permission
 or business-logic change.
 
-Status: **steps 1–9 done** — see §6 for what shipped and, more importantly, for
-the two places where measuring corrected this audit. PWA groundwork (§5) not
-started.
+Status: **steps 1–9 done** and the **PWA work (§5) shipped in five stages** —
+see §6 for the responsive results and §7 for the PWA ones, including the three
+defects that only measurement found.
 
 Method: static sweep of `components/Admin`, `components/Compliance`, `shells/`
 plus a live probe on https://crm.vertexpakistan.com as superadmin at 390×844 and
@@ -378,4 +378,82 @@ remains unverified.
   CompanyDetail, BulkUploader, the 4 unverified ones above).
 - A repeatable overflow probe checked into the repo (§3.9) — the sweeps in this
   work were run ad hoc against production.
-- PWA groundwork (§5), including the conflicts listed there.
+
+---
+
+## 7. Results — PWA (§5)
+
+### Commits
+
+| Commit | Scope |
+|---|---|
+| `cdde4e3` | Backend config, the 17-event catalog, dynamic `/manifest.webmanifest` |
+| `fa6609d` | App-shell caching, offline page, no-silent-update wiring |
+| `6df649a` | The superadmin control surface (Look & Feel → Progressive Web App) |
+| `73137b2` | All 17 events routed through the matrix + the scope defect below |
+| `0e610bc` | Boot registration, install prompt + the manifest-link defect below |
+
+### The three defects measurement found
+
+**1. The save never saved.** `PUT /api/pwa` called `setConfig(null, 'pwa', …)`.
+The first argument of `setConfig` is the SCOPE STRING, not a company id —
+`getConfig(companyId, …)` takes a company and falls back to the global scope
+internally, `setConfig` does not. Every save wrote a row under `scope=null` that
+nothing could read back. Every other caller in the repo passes the literal
+`'global'`. Verified fixed by flipping a setting, saving, reloading the page and
+re-reading it from the server: it persisted.
+
+**2. The manifest was never linked.** Stage 1 added `<link rel="manifest">` to
+`frontend/server.cjs`. Production is the **single-service** deploy: the backend
+serves the frontend build via `utils/htmlBranding.js`, so `server.cjs` is not in
+the request path at all. `/manifest.webmanifest` answered 200 with correct
+content while the served HTML never referenced it — not installable, and
+`beforeinstallprompt` could never fire. The Diagnostics panel caught it as
+"Manifest link — Missing", read from the page rather than from config. Both
+injectors now emit the same tags; keep them in step.
+
+**3. The matrix was overclaiming.** Five events only ever wrote an in-app row
+(`transfer_edited`, the three duplicate-transfer alerts, `number_claimable`) and
+chat only ever pushed. Offering a push switch on an event with no push is a
+control that silently does nothing. Each catalog entry now declares the
+`channels` its emitter actually has; defaults, the stored-value clamp and the UI
+all follow it. Measured live: 12 push + 5 in-app-only = 17.
+
+### Four of the 14 events were not in `notificationService`
+
+`callback_due` and `number_claimable` are emitted by `callbackScheduler`,
+`chat_message` by `chatService`, and the three duplicate-transfer alerts write
+their own rows (their dedup key is per-day, not per-hour, so they cannot go
+through `notifyUsers`). Gating only the one file would have left four events
+ungated while the matrix claimed otherwise.
+
+### Decisions worth remembering
+
+- **Role targeting narrows, never adds.** The recipient lists are meaningful —
+  "the assigned closer", "the submitting fronter", "this sale's compliance
+  queue". Replacing one with "everybody holding role X" would turn a private
+  outcome into a broadcast across tenants. Narrowing can only mean fewer people
+  learning something they were already entitled to learn.
+- **Everything fails open.** A missing entry, a missing config row or a failed
+  read all resolve to today's behaviour. A hiccup that silently muted the
+  compliance queue would be far worse than one that ignored a preference for a
+  minute.
+- **Quiet hours mute the device, not the record.** The notification is still in
+  the bell; it just doesn't buzz at 3am. A window crossing midnight reads as
+  overnight, and a zero-width window means off rather than always. Nine boundary
+  cases verified, including both 22:00 and 07:00 edges.
+- **Off does not unregister an existing worker.** Someone who granted
+  notifications has a worker so push can reach them; tearing it down would
+  silently kill their notifications. The worker re-reads the same flag on
+  activate and caches nothing when off.
+
+### Still open
+
+- The service worker is registered at boot only where `enabled` is true; iOS
+  install (Add to Home Screen) has no `beforeinstallprompt`, so the in-app
+  affordance never appears there. An iOS-specific hint is not built.
+- Icons are URL/upload fields with no server-side resize — a non-square or
+  undersized upload is accepted as given.
+- `charge_due` (the post-date charge reminder in `callbackScheduler`) is not in
+  the event catalog and is therefore ungated. Adding it is a catalog decision,
+  not a bug.
