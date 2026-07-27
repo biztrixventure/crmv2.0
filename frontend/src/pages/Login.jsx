@@ -45,7 +45,7 @@ const Login = () => {
       {/* Theme toggle */}
       <button
         onClick={toggleTheme}
-        className="absolute top-5 right-5 z-20 p-2.5 rounded-xl transition-all duration-300 hover:scale-105"
+        className="absolute top-5 right-5 z-20 w-11 h-11 sm:w-10 sm:h-10 flex items-center justify-center rounded-xl transition-all duration-300 hover:scale-105"
         style={{
           backgroundColor: "var(--color-surface)",
           border: "1px solid var(--color-border)",

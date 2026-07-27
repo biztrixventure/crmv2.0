@@ -1400,6 +1400,22 @@ select optgroup {
 .bsx-scrim     { animation: bsx-scrim-in 220ms ease both; }
 .bsx-scrim-out { animation: bsx-scrim-in 200ms ease reverse both; }
 
+/* ── Touch-target floor ─────────────────────────────────────────────────────
+   `pointer: coarse` is the honest test — it asks whether the user is actually
+   using a finger, rather than inferring it from viewport width (a 1024px tablet
+   IS touch; a 700px desktop window is not). So this costs the mouse-driven UI
+   nothing, which matters: this CRM is mostly used all day on a desktop and its
+   tables are tuned for that density.
+
+   .input is shared by every shell including the login page, where the fields
+   measured 42px tall. */
+@media (pointer: coarse) {
+  .input,
+  .btn {
+    min-height: 44px;
+  }
+}
+
 /* ── Sticky first column for scrollable tables (kit/TableScroll) ────────────
    A wide table scrolls inside its own box, but scrolling right then loses the
    column that IDENTIFIES the row (customer, company, user) — which is exactly
