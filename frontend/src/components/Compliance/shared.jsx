@@ -1,66 +1,19 @@
 import { FileText, RefreshCw, Download, ChevronUp, ChevronDown, ChevronsUpDown, Search } from 'lucide-react';
-import { ET_ZONE } from '../../utils/timezone';
 import { useFeatureFlags } from '../../contexts/FeatureFlagsContext';
 import { useAuth } from '../../contexts/AuthContext';
-import client from '../../api/client';
 import ThemedSelect from '../UI/Select';
 import ThemedDate from '../UI/ThemedDate';
 
-// Fetch EVERY page of a paginated compliance list for export — no 5,000 cap.
-// Loops 5,000-row pages until the server's `total` is reached (or a short page
-// signals the end). Returns the full row array. `onProgress(loaded, total)` is
-// optional for a live count.
-//
-// EGRESS GOVERNANCE: the page-1 request carries the __egress + __dataset markers
-// so the server's egressAudit middleware enforces limits + logs the export
-// (row cap checked against `total` before the drain). A blocked export returns
-// 429 on page 1 → we surface the server's message as a typed EgressBlockedError.
-// `dataset` names the surface (defaults to dataKey when they match).
-export async function fetchAllForExport(endpoint, params = {}, dataKey, onProgress, dataset) {
-  const PAGE = 5000;
-  const out = [];
-  const egressMarker = { __egress: 'csv_export', __dataset: dataset || dataKey };
-  try {
-    for (let page = 1; page <= 4000; page++) {   // safety cap (~20M rows)
-      const res = await client.get(endpoint, { params: { ...params, ...egressMarker, limit: PAGE, page } });
-      const rows = res.data?.[dataKey] || [];
-      out.push(...rows);
-      const total = res.data?.total;
-      if (onProgress) onProgress(out.length, typeof total === 'number' ? total : out.length);
-      if (rows.length < PAGE) break;                        // last (short) page
-      if (typeof total === 'number' && out.length >= total) break;
-    }
-  } catch (err) {
-    if (err?.response?.status === 429 && err.response.data?.code === 'EGRESS_LIMIT') {
-      const e = new Error(err.response.data.error || 'Export blocked by your limit.');
-      e.egressBlocked = true;
-      throw e;
-    }
-    throw err;
-  }
-  return out;
-}
-
-// ── Status maps ───────────────────────────────────────────────────────────────
-
-export const STATUS_BADGE = {
-  open: 'info', sold: 'success', closed_won: 'success', closed_lost: 'error',
-  cancelled: 'error', compliance_cancelled: 'error', follow_up: 'warning',
-  dispute: 'warning', chargeback: 'error', pending_review: 'warning',
-  needs_revision: 'error', pending: 'warning', completed: 'success', missed: 'error',
-  accepted: 'success', rejected: 'error',
-  no_answer: 'secondary', answering_machine: 'secondary',
-};
-
-export const STATUS_LABEL = {
-  open: 'Open', sold: 'Sold', closed_won: 'Approved', closed_lost: 'Lost',
-  cancelled: 'Cancelled', compliance_cancelled: 'Comp. Cancelled',
-  follow_up: 'Follow Up', dispute: 'Dispute', chargeback: 'Chargeback',
-  pending_review: 'Pending Review', needs_revision: 'Needs Revision',
-  pending: 'Pending', completed: 'Completed', missed: 'Missed',
-  accepted: 'Accepted', rejected: 'Rejected',
-  no_answer: 'No Answer', answering_machine: 'Ans. Machine',
-};
+// The formatters, the CSV writer and the paged export fetch now live in
+// utils/recordFormat.js + utils/exportSpec.js so every shell shares one copy
+// (there were four separate downloadCSVs). They are re-exported here unchanged,
+// so every `import { fmtDate, downloadCSV, fetchAllForExport } from './shared'`
+// across the compliance tabs keeps working exactly as before.
+export {
+  STATUS_BADGE, STATUS_LABEL, fmtDate, fmtDateTime, timeAgo,
+  customerName, closerName, downloadCSV,
+} from '../../utils/recordFormat';
+export { fetchAllForExport } from '../../utils/exportSpec';
 
 export const ALL_SALE_STATUSES = [
   'open','sold','cancelled','follow_up','closed_won','closed_lost',
@@ -73,57 +26,6 @@ export const COMPLIANCE_EDIT_STATUSES = [
 export const TRANSFER_STATUSES = ['pending','accepted','completed','rejected','cancelled'];
 export const CALLBACK_STATUSES = ['pending','completed','no_answer','answering_machine','cancelled'];
 export const LIMIT = 30;
-
-// ── Formatters ────────────────────────────────────────────────────────────────
-
-export const fmtDate = (d) => {
-  if (!d) return '—';
-  try {
-    return new Intl.DateTimeFormat('en-US', {
-      timeZone: ET_ZONE, month: 'short', day: 'numeric', year: 'numeric',
-    }).format(new Date(d));
-  } catch { return '—'; }
-};
-
-export const fmtDateTime = (d) => {
-  if (!d) return '—';
-  try {
-    return new Intl.DateTimeFormat('en-US', {
-      timeZone: ET_ZONE, month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-    }).format(new Date(d));
-  } catch { return '—'; }
-};
-
-export const timeAgo = (d) => {
-  if (!d) return '—';
-  const m = Math.floor((Date.now() - new Date(d)) / 60000);
-  if (m < 1) return 'just now';
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  return `${Math.floor(h / 24)}d ago`;
-};
-
-export const customerName = (t) => {
-  const fd = t?.form_data || {};
-  if (fd.FirstName || fd.LastName) return [fd.FirstName, fd.LastName].filter(Boolean).join(' ');
-  return fd.customer_name || t?.customer_name || '—';
-};
-
-export const closerName = (s) =>
-  s.closer_name ||
-  (s.user_profiles ? `${s.user_profiles.first_name || ''} ${s.user_profiles.last_name || ''}`.trim() : '') ||
-  '—';
-
-export const downloadCSV = (rows, headers, filename) => {
-  const csv = [headers, ...rows]
-    .map(r => r.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(','))
-    .join('\n');
-  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
-  const a = Object.assign(document.createElement('a'), { href: url, download: filename });
-  a.click();
-  URL.revokeObjectURL(url);
-};
 
 // ── Shared UI atoms ───────────────────────────────────────────────────────────
 
