@@ -19,11 +19,13 @@ import { useComplianceStatuses } from '../../hooks/useComplianceStatuses';
 import { useCancellationReasons } from '../../hooks/useCancellationReasons';
 import { useSaleHighlight } from '../../hooks/useSaleHighlight';
 import { salePaidTenure } from '../../utils/saleTenure';
+import { writeExport } from '../../utils/exportSpec';
+import { useExportColumns } from '../../hooks/useExportColumns';
 import ThemedSelect from '../UI/Select';
 import ThemedDate from '../UI/ThemedDate';
 import {
   STATUS_BADGE, STATUS_LABEL, ALL_SALE_STATUSES as FALLBACK_ALL, COMPLIANCE_EDIT_STATUSES as FALLBACK_EDIT, LIMIT,
-  fmtDate, closerName, downloadCSV,
+  fmtDate, closerName,
   TabHeader, Spinner, Empty, Pagination, Th, SortTh, Filters, FInput, FSelect,
   Overlay, ModalBox, ModalHeader, fetchAllForExport,
 } from './shared';
@@ -53,6 +55,10 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
   const { allStatuses: cfgAll, editStatuses: cfgEdit, labelOf, badgeOf } = useComplianceStatuses();
   const { activeReasons: cancelReasonChoices } = useCancellationReasons();
   const { colorFor: highlightFor } = useSaleHighlight();
+  // Superadmin-configured export columns for this user (Data Egress → Fields,
+  // or the per-user override in the User Control Center). null = keep this
+  // tab's own default column set.
+  const { allowedFor } = useExportColumns(['sales']);
   const ALL_SALE_STATUSES        = cfgAll?.length  ? cfgAll  : FALLBACK_ALL;
   const COMPLIANCE_EDIT_STATUSES = cfgEdit?.length ? cfgEdit : FALLBACK_EDIT;
   const [sales, setSales]       = useState([]);
@@ -254,24 +260,15 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
       { disposition: disposition || undefined, exclude_post_date: disposition ? undefined : 1,
         date_from: df || undefined, date_to: dt || undefined, company_id: co || undefined, user_ids: userIds.length ? userIds.join(',') : undefined },
       'sales');
-    // Cancel date + paid-days belong ONLY to cancelled sales — otherwise leave
-    // the cells blank (a non-cancel sale may carry a stale cancellation_date).
-    const CANCELLED = new Set(['cancelled', 'compliance_cancelled', 'closed_lost', 'chargeback', 'dispute']);
-    const rows = allSales.map(s => {
-      const isCancel = CANCELLED.has(s.status);
-      const t = isCancel ? salePaidTenure(s) : null;
-      return [
-        s.customer_name || '', s.customer_phone || '', s.customer_email || '',
-        s.reference_no || '', labelOf(s.status) || '',
-        s.fronter_name || '', closerName(s), s.companies?.name || '', s.sale_date ? fmtSaleDate(s.sale_date) : fmtDate(s.created_at),
-        (isCancel && s.cancellation_date) ? fmtSaleDate(s.cancellation_date) : '',
-        t ? t.days : '',
-        t ? t.label : '',
-      ];
+    // Columns come from the shared catalog. Unconfigured → the compliance_sales
+    // surface, which is this tab's existing twelve columns unchanged. labelOf is
+    // threaded through so Status keeps the configurable compliance workflow
+    // labels rather than the static fallback map.
+    writeExport({
+      dataset: 'sales', surface: 'compliance_sales', allowed: allowedFor('sales'),
+      rows: allSales, ctx: { labelOf },
+      filename: `sales_${new Date().toISOString().split('T')[0]}.csv`,
     });
-    downloadCSV(rows,
-      ['Customer','Phone','Email','Reference','Status','Fronter','Closer','Company','Sale Date','Cancellation Date','Paid Days','Paid Tenure'],
-      `sales_${new Date().toISOString().split('T')[0]}.csv`);
   };
 
   return (

@@ -13,10 +13,12 @@ import TabStatsStrip from './TabStatsStrip';
 import ThemedSelect from '../UI/Select';
 import {
   STATUS_BADGE, STATUS_LABEL, CALLBACK_STATUSES, LIMIT,
-  fmtDate, fmtDateTime, downloadCSV,
+  fmtDate, fmtDateTime,
   TabHeader, Spinner, Empty, Pagination, Th, Filters, FInput, FSelect,
   Overlay, ModalBox, ModalHeader, InfoTile, fetchAllForExport,
 } from './shared';
+import { writeExport } from '../../utils/exportSpec';
+import { useExportColumns } from '../../hooks/useExportColumns';
 
 // ── Priority config ────────────────────────────────────────────────────────────
 const PRIORITY_CFG = {
@@ -248,6 +250,8 @@ const PriorityStatsBar = ({ callbacks }) => {
 
 // ── Audit Log sub-component ────────────────────────────────────────────────────
 const AuditLogView = ({ companyList }) => {
+  // null = unconfigured → this view keeps its own default column set.
+  const { allowedFor } = useExportColumns(['callback_audit']);
   const { isEnabled } = useFeatureFlags();
   const { canExport } = useAuth();
   const [entries, setEntries]   = useState([]);
@@ -283,15 +287,11 @@ const AuditLogView = ({ companyList }) => {
         { company_id: company || undefined, date_from: dateFrom || undefined, date_to: dateTo || undefined },
         'entries', undefined, 'callback_audit');
     } catch (err) { toast.error(err?.egressBlocked ? err.message : (err?.response?.data?.error || 'Export failed')); return; }
-    const rows = allEntries.map(e => [
-      fmtDateTime(e.created_at), e.actor_name || e.actor_id || '—',
-      e.customer_name_snapshot || '—', e.customer_phone_snapshot || '—',
-      STATUS_LABEL[e.old_status] || e.old_status || '—',
-      STATUS_LABEL[e.new_status] || e.new_status || '—',
-      e.notes || '', e.callback_deleted ? 'Yes' : 'No',
-    ]);
-    downloadCSV(rows, ['Timestamp','Actor','Customer','Phone','From Status','To Status','Notes','Callback Deleted'],
-      `callback_audit_log_${todayET()}.csv`);
+    writeExport({
+      dataset: 'callback_audit', surface: 'compliance_callback_audit',
+      allowed: allowedFor('callback_audit'), rows: allEntries,
+      filename: `callback_audit_log_${todayET()}.csv`,
+    });
   };
 
   return (
@@ -367,6 +367,8 @@ const AuditLogView = ({ companyList }) => {
 
 // ── Main CallbacksTab ──────────────────────────────────────────────────────────
 const CallbacksTab = ({ companyList }) => {
+  // null = unconfigured → this tab keeps its own default column set.
+  const { allowedFor } = useExportColumns(['callbacks']);
   const { user, roControlAllowed, roFlag, isReadOnly, canExport } = useAuth();
   const isSuper = user?.role === 'superadmin';
   const [mgBusy, setMgBusy]     = useState(false);
@@ -506,18 +508,11 @@ const CallbacksTab = ({ companyList }) => {
       search: search || undefined, priority: priority || undefined,
       user_ids: userIds.length ? userIds.join(',') : (selectedUser || undefined),
     }, 'callbacks');
-    const rows = allCallbacks.map(c => [
-      c.customer_name || '', c.customer_phone || '',
-      fmtDateTime(c.callback_at),
-      STATUS_LABEL[c.status] || c.status || '',
-      c.priority || 'Medium',
-      c.notes || '',
-      c.company_type === 'fronter' ? (c.user_name || '') : '',
-      c.company_type === 'closer'  ? (c.user_name || '') : '',
-      c.company_name || '',
-    ]);
-    downloadCSV(rows, ['Customer','Phone','Scheduled At','Status','Priority','Notes','Fronter','Closer','Company'],
-      `callbacks_${cbType}_${todayET()}.csv`);
+    writeExport({
+      dataset: 'callbacks', surface: 'compliance_callbacks', allowed: allowedFor('callbacks'),
+      rows: allCallbacks,
+      filename: `callbacks_${cbType}_${todayET()}.csv`,
+    });
   };
 
   return (

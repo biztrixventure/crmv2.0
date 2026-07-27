@@ -4,7 +4,9 @@ import client from '../../api/client';
 import { TableScroll } from '../UI/kit';
 import ExportModal from './ExportModal';
 import { FilterSelect } from '../UI/FilterBar';
-import { fmtDate, customerName, downloadCSV, TabHeader, Spinner, Empty, Th, fetchAllForExport } from './shared';
+import { fmtDate, customerName, TabHeader, Spinner, Empty, Th, fetchAllForExport } from './shared';
+import { writeExport } from '../../utils/exportSpec';
+import { useExportColumns } from '../../hooks/useExportColumns';
 
 const RATING_COLOR = {
   excellent: '#16a34a', good: '#2563eb', average: '#d97706',
@@ -12,6 +14,8 @@ const RATING_COLOR = {
 };
 
 const ReviewsTab = ({ companyList }) => {
+  // null = unconfigured → this tab keeps its own default column set.
+  const { allowedFor } = useExportColumns(['reviews']);
   const [reviews, setReviews]   = useState([]);
   const [dispos, setDispos]     = useState([]);
   const [loading, setLoading]   = useState(false);
@@ -35,14 +39,14 @@ const ReviewsTab = ({ companyList }) => {
 
   const handleExport = async ({ company: co }) => {
     const allReviews = await fetchAllForExport('reviews', { company_id: co || undefined }, 'reviews');
-    const rows = allReviews.map(r => [
-      customerName(r.transfers) || '',
-      companyList.find(c => c.id === r.company_id)?.name || '',
-      r.user_profiles ? `${r.user_profiles.first_name || ''} ${r.user_profiles.last_name || ''}`.trim() : '',
-      r.rating || '', r.notes || '', fmtDate(r.created_at),
-    ]);
-    downloadCSV(rows, ['Customer','Company','Closer','Rating','Notes','Date'],
-      `reviews_${new Date().toISOString().split('T')[0]}.csv`);
+    writeExport({
+      dataset: 'reviews', surface: 'compliance_reviews', allowed: allowedFor('reviews'),
+      rows: allReviews,
+      // Company is resolved client-side from the loaded list, so the Company
+      // column needs the lookup handed to it.
+      ctx: { companyName: (id) => companyList.find(c => c.id === id)?.name || '' },
+      filename: `reviews_${new Date().toISOString().split('T')[0]}.csv`,
+    });
   };
 
   const companyName = (id) => companyList.find(c => c.id === id)?.name || '—';

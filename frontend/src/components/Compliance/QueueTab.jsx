@@ -2,15 +2,19 @@ import { useState, useCallback, useEffect } from 'react';
 import { Clock, CheckCircle, RotateCcw, Eye, AlertTriangle, User } from 'lucide-react';
 import { Badge, Alert } from '../UI';
 import { FilterSelect } from '../UI/FilterBar';
+import { writeExport } from '../../utils/exportSpec';
+import { useExportColumns } from '../../hooks/useExportColumns';
 import client from '../../api/client';
 import SaleDetailDrawer from '../Shared/SaleDetailDrawer';
 import ExportModal from './ExportModal';
 import {
-  STATUS_LABEL, STATUS_BADGE, LIMIT, fmtDate, timeAgo, closerName, downloadCSV,
+  STATUS_LABEL, STATUS_BADGE, LIMIT, fmtDate, timeAgo, closerName,
   TabHeader, Spinner, Empty, Overlay, ModalBox, ModalHeader, FSelect, fetchAllForExport,
 } from './shared';
 
 const QueueTab = ({ companyList }) => {
+  // null = unconfigured → this tab keeps its own default column set.
+  const { allowedFor } = useExportColumns(['sales']);
   const [queue, setQueue]       = useState([]);
   const [loading, setLoading]   = useState(false);
   const [company, setCompany]   = useState('');
@@ -70,12 +74,11 @@ const QueueTab = ({ companyList }) => {
     const allSales = await fetchAllForExport('compliance/sales',
       { status: 'pending_review', exclude_post_date: 1, date_from: dateFrom || undefined, date_to: dateTo || undefined, company_id: co || undefined, user_ids: userIds.length ? userIds.join(',') : undefined },
       'sales');
-    const rows = allSales.map(s => [
-      s.customer_name || '', s.customer_phone || '', s.reference_no || '',
-      closerName(s), s.companies?.name || '', fmtDate(s.created_at),
-    ]);
-    downloadCSV(rows, ['Customer','Phone','Reference','Closer','Company','Created'],
-      `queue_${new Date().toISOString().split('T')[0]}.csv`);
+    writeExport({
+      dataset: 'sales', surface: 'compliance_queue', allowed: allowedFor('sales'),
+      rows: allSales,
+      filename: `queue_${new Date().toISOString().split('T')[0]}.csv`,
+    });
   };
 
   return (

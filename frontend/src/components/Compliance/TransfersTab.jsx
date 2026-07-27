@@ -7,12 +7,10 @@ import { todayET } from '../../utils/timezone';
 import ThemedSelect from '../UI/Select';
 import { TableScroll } from '../UI/kit';
 
-// Why a transfer is flagged as a duplicate (from transfer_dedup_events.event_type).
-const DUP_REASON_LABEL = {
-  refresh:      'Re-transferred within the dedup window — it updated the existing lead in place, so no separate transfer row was created. Shown here so the count reconciles with VICIDIAL.',
-  reengage:     'Re-engaged after the dedup window (a fresh transfer was created)',
-  sale_overlap: 'A completed sale already existed on the prior lead',
-};
+// DUP_REASON_LABEL moved to utils/exportSpec.js — it only ever fed the export,
+// and the column that uses it now lives there with its accessor.
+import { writeExport } from '../../utils/exportSpec';
+import { useExportColumns } from '../../hooks/useExportColumns';
 
 const SALE_BADGE_MAP  = { open: 'info', pending_review: 'warning', needs_revision: 'error', closed_won: 'success', sold: 'success', closed_lost: 'error', follow_up: 'warning', cancelled: 'error' };
 const SALE_LABEL_MAP  = { open: 'Sale Open', pending_review: 'In Review', needs_revision: 'Needs Revision', closed_won: 'Approved', sold: 'Sold', closed_lost: 'Lost', follow_up: 'Follow Up', cancelled: 'Cancelled' };
@@ -29,7 +27,7 @@ import FetchAllDisposButton from '../Vicidial/FetchAllDisposButton';
 import { useFormFields } from '../../hooks/useFormFields';
 import {
   STATUS_BADGE, STATUS_LABEL, TRANSFER_STATUSES, LIMIT,
-  fmtDate, fmtDateTime, customerName, downloadCSV,
+  fmtDate, fmtDateTime, customerName,
   TabHeader, Spinner, Empty, Pagination, Th, SortTh, Filters, FInput, FSelect,
   Overlay, ModalBox, ModalHeader, InfoTile,
   fetchAllForExport,
@@ -52,6 +50,8 @@ const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
   // shows a spinner instead of an empty form.
   const { fields, fetchFields, loading: fieldsLoading } = useFormFields();
   useEffect(() => { fetchFields(); }, [fetchFields]);
+  // null = unconfigured → this tab keeps its own default column set.
+  const { allowedFor } = useExportColumns(['transfers']);
   const [transfers, setTransfers] = useState([]);
   const [total, setTotal]         = useState(0);
   const [statusCounts, setStatusCounts] = useState(null);
@@ -168,20 +168,15 @@ const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
       { date_from: df || undefined, date_to: dt || undefined, company_id: co || undefined, user_ids: userIds.length ? userIds.join(',') : undefined },
       'transfers');
     const dupCount = all.filter(t => t.is_duplicate).length;
-    const rows = all.map(t => [
-      customerName(t), transferPhone(t),
-      t.created_by_name || '', t.assigned_closer_name || '',
-      t.latest_disposition?.disposition_name || '',
-      t.company_name || '', STATUS_LABEL[t.status] || t.status || '',
-      fmtDate(t.created_at),
-      t.is_duplicate ? 'Yes' : 'No',
-      t.is_duplicate ? (DUP_REASON_LABEL[t.duplicate_reason] || t.duplicate_reason || '') : '',
-    ]);
-    // Trailing summary row so the duplicate count travels with the export.
-    rows.push([]);
-    rows.push([`Total transfers: ${all.length}`, '', '', '', '', '', '', '', `Duplicates: ${dupCount}`, '']);
-    downloadCSV(rows, ['Customer','Phone','Fronter','Closer','Disposition','Company','Status','Transfer Date','Is Duplicate','Duplicate Reason'],
-      `transfers_${todayET()}.csv`);
+    writeExport({
+      dataset: 'transfers', surface: 'compliance_transfers', allowed: allowedFor('transfers'),
+      rows: all,
+      // Trailing summary row so the duplicate count travels with the export.
+      // Keyed by COLUMN, not by position — a configured column list would shift
+      // a positional index and drop the totals into the wrong cells.
+      footer: () => [{}, { customer_name: `Total transfers: ${all.length}`, is_duplicate: `Duplicates: ${dupCount}` }],
+      filename: `transfers_${todayET()}.csv`,
+    });
   };
 
   return (
