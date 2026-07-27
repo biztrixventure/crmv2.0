@@ -39,6 +39,7 @@ import UserControlCenter from "../components/Admin/UserControlCenter";
 import EgressGovernance from "../components/Admin/EgressGovernance/EgressGovernance";
 import BrandingManager from "../components/Admin/Branding/BrandingManager";
 import AppearanceManager from "../components/Admin/Appearance/AppearanceManager";
+import PwaManager from "../components/Admin/Pwa/PwaManager";
 import NumberAssignmentPanel from "../components/Numbers/NumberAssignmentPanel";
 import { useFeatureFlags } from "../contexts/FeatureFlagsContext";
 import EventsCalendar from "../components/Calendar/EventsCalendar";
@@ -153,6 +154,7 @@ const AdminPanel = () => {
     ...(user?.role === 'superadmin'                    ? [{ id: "egress",         label: "Data Egress"          }] : []),
     ...(user?.role === 'superadmin'                    ? [{ id: "branding",       label: "Branding & SEO"       }] : []),
     ...(user?.role === 'superadmin'                    ? [{ id: "appearance",     label: "Appearance"           }] : []),
+    ...(user?.role === 'superadmin'                    ? [{ id: "pwa",            label: "Progressive Web App"  }] : []),
     ...(isSAorRO && isEnabled('number_assignment')     ? [{ id: "number-lists",   label: "Number Assignment"    }] : []),
     // SuperAdmin-only management of readonly_admin users (count, nav config, create/revoke).
     ...(user?.role === 'superadmin'                    ? [{ id: "readonly-admins", label: "Readonly Admins"     }] : []),
@@ -219,6 +221,7 @@ const AdminPanel = () => {
       case 'egress':            return <EgressGovernance />;
       case 'branding':          return <BrandingManager />;
       case 'appearance':        return <AppearanceManager />;
+      case 'pwa':               return <PwaManager />;
       case 'number-lists':      return <NumberAssignmentPanel user={user} />;
       case 'readonly-admins':   return <ReadonlyAdminManager />;
       case 'user-control':      return user?.role === 'superadmin' ? <UserControlCenter /> : null;

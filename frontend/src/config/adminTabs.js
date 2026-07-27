@@ -78,6 +78,10 @@ export const ADMIN_TAB_CATALOG = [
   { id: 'egress',           label: 'Data Egress',          group: 'superadmin',    roEligible: false, defaultForRo: false, gate: null },
   { id: 'branding',         label: 'Branding & SEO',       group: 'superadmin',    roEligible: false, defaultForRo: false, gate: null },
   { id: 'appearance',       label: 'Appearance',           group: 'superadmin',    roEligible: false, defaultForRo: false, gate: null },
+  // PWA install + the push event matrix. Superadmin only: it decides who gets
+  // notified about sales, transfers and compliance across every tenant, which
+  // is not a read-only surface even for a readonly_admin.
+  { id: 'pwa',              label: 'Progressive Web App',  group: 'superadmin',    roEligible: false, defaultForRo: false, gate: null },
   { id: 'readonly-admins',  label: 'Readonly Admins',      group: 'superadmin',    roEligible: false, defaultForRo: false, gate: null },
   { id: 'user-control',     label: 'User Control Center',  group: 'superadmin',    roEligible: false, defaultForRo: false, gate: null },
 ];

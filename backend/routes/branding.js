@@ -98,7 +98,10 @@ const EXT = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/svg+xml': 'svg', '
 
 // base64 JSON upload (avoids a multipart dep). 8mb JSON cap covers a 5MB image.
 adminRouter.post('/upload', express.json({ limit: '8mb' }), superOnly, asyncHandler(async (req, res) => {
-  const kind = ['favicon', 'logo', 'og_image'].includes(req.body?.kind) ? req.body.kind : null;
+  // The PWA icon kinds land in the SAME public bucket on purpose: a manifest
+  // icon must be fetchable by the browser before anyone signs in, exactly like
+  // the favicon, so there is no second storage story to maintain.
+  const kind = ['favicon', 'logo', 'og_image', 'pwa_192', 'pwa_512', 'pwa_maskable'].includes(req.body?.kind) ? req.body.kind : null;
   const contentType = str(req.body?.content_type, 100);
   const dataB64 = req.body?.data_base64;
   if (!kind || !contentType || !dataB64) return res.status(400).json({ error: 'kind, content_type, data_base64 required' });

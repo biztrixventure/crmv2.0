@@ -20,7 +20,7 @@
 import {
   BookOpen, Megaphone, Hash, Paintbrush, Database, Lock,
   HelpCircle, MessageSquareText, Radio, Trophy, Send, Users, Tag, PhoneCall,
-  Eraser, Eye, Download, Palette,
+  Eraser, Eye, Download, Palette, Smartphone,
 } from 'lucide-react';
 
 export const ADMIN_HUBS = [
@@ -62,10 +62,14 @@ export const ADMIN_HUBS = [
     id: 'hub-look',
     label: 'Look & Feel',
     icon: Paintbrush,
-    subtitle: 'How the CRM is named and how it looks.',
+    subtitle: 'How the CRM is named, how it looks, and how it installs.',
     members: [
       { id: 'branding',   label: 'Branding & SEO', icon: Palette },
       { id: 'appearance', label: 'Appearance',     icon: Paintbrush },
+      // The PWA sits here because its manifest IS the branding: name, icon and
+      // theme colour are read from the same place, and an installed app that
+      // disagreed with the site would be a branding bug, not a platform one.
+      { id: 'pwa',        label: 'Progressive Web App', icon: Smartphone },
     ],
   },
   {
