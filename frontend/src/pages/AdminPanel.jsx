@@ -113,6 +113,9 @@ const AdminPanel = () => {
       { id: "cc-sales",     label: "All Sales"     },
       { id: "cc-transfers", label: "All Transfers" },
       { id: "cc-callbacks", label: "All Callbacks" },
+      // The QA Department shortcut was listed in the sidebar but never here, so
+      // the row was filtered out and rendered for nobody.
+      { id: "cc-qa",        label: "QA Department" },
     ] : []),
     ...(isSAorRO                                       ? [{ id: "companies",      label: "Companies"            }] : []),
     ...(isSAorRO                                       ? [{ id: "teams",          label: "Teams"                }] : []),
