@@ -27,6 +27,7 @@
 
 let deferredPrompt = null;
 let installed = false;
+let publicFlags = null;
 const listeners = new Set();
 
 const emit = () => listeners.forEach(fn => { try { fn(); } catch { /* a bad listener is not our problem */ } });
@@ -42,6 +43,25 @@ export function isStandalone() {
 /** Can we offer an install right now? */
 export function canInstall() {
   return Boolean(deferredPrompt) && !installed && !isStandalone();
+}
+
+/**
+ * The public config, fetched once and shared. initPwa() already reads it at
+ * boot, so this hands out that same answer instead of making a second request.
+ * Returns null until it lands — callers treat null as "don't know yet" and show
+ * nothing, which is the right way round for an affordance nobody asked for.
+ */
+export function getFlags() {
+  return publicFlags;
+}
+
+export async function loadFlags() {
+  if (publicFlags) return publicFlags;
+  try {
+    const r = await fetch('/api/pwa/public', { cache: 'no-store' });
+    if (r.ok) { publicFlags = await r.json(); emit(); }
+  } catch { /* stays null — the prompt simply does not appear */ }
+  return publicFlags;
 }
 
 /** Subscribe to install-availability changes. Returns an unsubscribe function. */
@@ -103,16 +123,10 @@ export function initPwa() {
 async function registerIfEnabled() {
   if (!('serviceWorker' in navigator)) return;
 
-  let flags;
-  try {
-    const res = await fetch('/api/pwa/public', { cache: 'no-store' });
-    if (!res.ok) return;
-    flags = await res.json();
-  } catch {
-    // No config, no assumptions. Registering a worker on a failed read would be
-    // choosing the irreversible option on the strength of a network error.
-    return;
-  }
+  // Shared with the install affordance rather than fetched twice.
+  const flags = await loadFlags();
+  // No config, no assumptions. Registering a worker on a failed read would be
+  // choosing the irreversible option on the strength of a network error.
   if (!flags?.enabled) return;
 
   let reg;

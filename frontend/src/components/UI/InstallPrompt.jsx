@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Download, X, Smartphone } from 'lucide-react';
-import { canInstall, subscribeInstall, promptInstall, isInstallDismissed, dismissInstall } from '../../utils/pwa';
+import { canInstall, subscribeInstall, promptInstall, isInstallDismissed, dismissInstall, getFlags, loadFlags } from '../../utils/pwa';
 import { useBranding } from '../../contexts/BrandingContext';
+import { useAuth } from '../../contexts/AuthContext';
 
 // ============================================================================
 // InstallPrompt — the app's own install affordance.
@@ -18,14 +19,22 @@ import { useBranding } from '../../contexts/BrandingContext';
 // ============================================================================
 export default function InstallPrompt() {
   const { siteName } = useBranding();
+  const { user } = useAuth();
   const [visible, setVisible] = useState(false);
   const [busy, setBusy] = useState(false);
 
+  const role = user?.role;
+
   const sync = useCallback(() => {
-    setVisible(canInstall() && !isInstallDismissed());
-  }, []);
+    const flags = getFlags();
+    // Until the config lands, show nothing. An affordance that flashes in and
+    // then disappears once the answer arrives is worse than one that waits.
+    const audienceOk = flags ? (flags.install_audience !== 'superadmin' || role === 'superadmin') : false;
+    setVisible(audienceOk && canInstall() && !isInstallDismissed());
+  }, [role]);
 
   useEffect(() => {
+    loadFlags().then(sync);
     sync();
     return subscribeInstall(sync);
   }, [sync]);

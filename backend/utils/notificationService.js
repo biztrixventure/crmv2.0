@@ -21,7 +21,7 @@
 const { supabaseAdmin } = require('../config/database');
 const logger = require('./logger');
 const { getConfig } = require('./businessConfig');
-const { resolveDelivery, pushNow } = require('./pwaPolicy');
+const { resolveDelivery, pushNow, withSuperadmins } = require('./pwaPolicy');
 
 // Config-driven gate. Returns true when the named notification flag is on.
 // Cached via businessConfig's 60s TTL so each event is a cheap lookup.
@@ -283,7 +283,10 @@ async function onSaleSubmittedForReview({ sale, submitterName }) {
   const refNo        = sale.reference_no  || sale.id.slice(0, 8).toUpperCase();
   const companyId    = sale.company_id;
 
-  const complianceIds = await getUserIdsByLevel(companyId, ['compliance_manager']);
+  const complianceIds = await withSuperadmins(
+    'sale_pending_review',
+    await getUserIdsByLevel(companyId, ['compliance_manager']),
+  );
   await notifyUsers(complianceIds, {
     companyId,
     type:      'sale_pending_review',
@@ -321,7 +324,14 @@ async function onSaleApproved({ sale, reviewerName }) {
     });
   }
 
-  const closerMgrIds = await getUserIdsByLevel(companyId, ['closer_manager', 'operations_manager', 'company_admin']);
+  // Superadmins ride along on the MANAGER notification rather than getting a
+  // send of their own: this call already carries a dedupBase, so one approval
+  // is one row per superadmin no matter how many recipient groups the event
+  // fans out to below.
+  const closerMgrIds = await withSuperadmins(
+    'sale_approved',
+    await getUserIdsByLevel(companyId, ['closer_manager', 'operations_manager', 'company_admin']),
+  );
   await notifyUsers(closerMgrIds, {
     companyId,
     type:      'sale_approved',
@@ -398,7 +408,10 @@ async function onSaleReturned({ sale, reviewerName, note }) {
     });
   }
 
-  const managerIds = await getUserIdsByLevel(companyId, ['closer_manager', 'operations_manager']);
+  const managerIds = await withSuperadmins(
+    'sale_needs_revision',
+    await getUserIdsByLevel(companyId, ['closer_manager', 'operations_manager']),
+  );
   await notifyUsers(managerIds, {
     companyId,
     type:    'sale_needs_revision',

@@ -139,6 +139,69 @@ async function narrowToRoles(userIds, levels, companyId) {
   }
 }
 
+// ─── superadmin oversight ────────────────────────────────────────────────────
+// The ONE control that widens a recipient list. Per-event `roles` only ever
+// subtracts, for the reasons at the top of this file; this is the deliberate
+// exception, because a superadmin sits outside every company's manager list and
+// would otherwise never hear about a sale in a tenant they are not a member of.
+//
+// Cached for a minute: it is a two-query lookup and sale events can arrive in
+// bursts. A newly promoted superadmin starts receiving within that minute.
+let saCache = { ids: null, at: 0 };
+const SA_TTL = 60_000;
+
+async function superadminIds() {
+  if (saCache.ids && Date.now() - saCache.at < SA_TTL) return saCache.ids;
+  const ids = new Set();
+  try {
+    const { data } = await supabaseAdmin
+      .from('user_company_roles')
+      .select('user_id, custom_roles(level)')
+      .eq('is_active', true);
+    for (const r of data || []) if (r.custom_roles?.level === 'superadmin') ids.add(r.user_id);
+  } catch { /* fall through to the env path */ }
+
+  // A system superadmin can have no company assignment at all — isSuperAdmin()
+  // has the same fallback. Without this they would be invisible here.
+  try {
+    const emails = (process.env.SUPERADMIN_EMAIL || '').split(',').map(e => e.trim()).filter(Boolean);
+    if (emails.length) {
+      const { data } = await supabaseAdmin.from('user_profiles').select('id, email').in('email', emails);
+      for (const p of data || []) if (p.id) ids.add(p.id);
+    }
+  } catch { /* best effort */ }
+
+  const out = [...ids];
+  // Never cache an empty result: it is far more likely to be a failed query
+  // than a system with no superadmin, and caching it would mute oversight for
+  // a minute at a time, repeatedly.
+  if (out.length) saCache = { ids: out, at: Date.now() };
+  return out;
+}
+
+/** True when superadmins should be added as recipients for this event type. */
+async function superadminWatches(type) {
+  const s = await readPwa();
+  const list = s && s.push && s.push.superadmin_events;
+  return Array.isArray(list) && list.includes(type);
+}
+
+/**
+ * Union the caller's recipients with the superadmins, when this event is one
+ * the superadmin has opted into watching. Used by the sale events, where the
+ * existing list is company-scoped by construction.
+ */
+async function withSuperadmins(type, userIds) {
+  const base = (userIds || []).filter(Boolean);
+  try {
+    if (!(await superadminWatches(type))) return base;
+    const sa = await superadminIds();
+    return [...new Set([...base, ...sa])];
+  } catch {
+    return base;
+  }
+}
+
 /**
  * The one call every emitter makes: given an event type and the recipients it
  * already computed, say who still gets it and by which channels.
@@ -183,6 +246,8 @@ module.exports = {
   pushMutedNow,
   narrowToRoles,
   resolveDelivery,
+  withSuperadmins,
+  superadminIds,
   pushNow,
   inWindow,          // exported for tests — the midnight-crossing case is the point
   DEFAULT_POLICY,

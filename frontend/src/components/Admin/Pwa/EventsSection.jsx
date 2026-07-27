@@ -73,7 +73,7 @@ const INPUT = 'w-full min-w-0 px-3 py-2 text-sm rounded-lg';
 
 const prettyRole = (r) => r.replace(/_/g, ' ');
 
-function EventRow({ event, value, roles, onChange }) {
+function EventRow({ event, value, roles, onChange, saWatched, onSaToggle }) {
   const [open, setOpen] = useState(false);
   const ch = chOf(event);
   const mode = modeOf(value, ch);
@@ -94,6 +94,7 @@ function EventRow({ event, value, roles, onChange }) {
             {event.legacyKey && <Badge variant="info" size="sm">Also in Business Rules</Badge>}
             {!ch.includes('push')  && <Badge variant="warning" size="sm">No push</Badge>}
             {!ch.includes('inapp') && <Badge variant="warning" size="sm">Push only</Badge>}
+            {saWatched && <Badge variant="success" size="sm">+ Superadmins</Badge>}
           </div>
           <p className="text-[11px] m-0 mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
             {event.detail}
@@ -160,6 +161,23 @@ function EventRow({ event, value, roles, onChange }) {
               )}
             </>
           )}
+
+          {/* The one control that ADDS recipients. Offered only where the
+              emitting code is actually wired for it, so it can never be a
+              switch the backend ignores. */}
+          {event.superadmin && (
+            <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--color-border)' }}>
+              <CheckRow
+                checked={!!saWatched}
+                onChange={onSaToggle}
+                label="Also notify superadmins, in every company"
+              />
+              <p className="text-[11px] m-0 mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
+                Superadmins sit outside a company's manager list, so without this they never hear about a sale in a
+                tenant they are not a member of. {custom && 'Note: the role list above still filters — include superadmin there too, or it will subtract them back out.'}
+              </p>
+            </div>
+          )}
         </div>
       )}
     </Panel>
@@ -197,6 +215,7 @@ export default function EventsSection({
   };
 
   const qh = push.quiet_hours || {};
+  const saEvents = Array.isArray(push.superadmin_events) ? push.superadmin_events : [];
 
   return (
     <div className="space-y-5">
@@ -337,7 +356,12 @@ export default function EventsSection({
             {list.map(e => (
               <EventRow key={e.id} event={e} roles={roles}
                 value={events[e.id] || { inapp: true, push: true, roles: null }}
-                onChange={next => onEventChange(e.id, next)} />
+                onChange={next => onEventChange(e.id, next)}
+                saWatched={saEvents.includes(e.id)}
+                onSaToggle={on => onPushChange(
+                  'superadmin_events',
+                  on ? [...new Set([...saEvents, e.id])] : saEvents.filter(x => x !== e.id),
+                )} />
             ))}
           </div>
         </Panel>

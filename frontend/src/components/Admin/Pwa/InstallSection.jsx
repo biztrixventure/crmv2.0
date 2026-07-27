@@ -175,6 +175,15 @@ export default function InstallSection({ install, branding = {}, onChange }) {
                   className={`${INPUT} font-mono`} style={inputStyle} />
               </Field>
             </div>
+
+            <Field label="Who is offered the install prompt"
+              hint="Our own prompt only. A browser's built-in Install menu item is a browser feature — no app can remove it, whichever option you pick.">
+              <ThemedSelect value={install.audience || 'everyone'} onChange={set('audience')}
+                className={INPUT} style={inputStyle}>
+                <option value="everyone">Everyone signed in</option>
+                <option value="superadmin">Superadmins only — while you are trialling it</option>
+              </ThemedSelect>
+            </Field>
           </div>
         </Panel>
 

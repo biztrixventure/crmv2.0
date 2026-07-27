@@ -62,9 +62,12 @@ const EVENT_CATALOG = [
   { id: 'transfer_reengaged',    group: 'Transfers',  label: 'Duplicate — re-engaged',  detail: 'Old lead transferred again.',               channels: ['inapp'] },
   { id: 'transfer_sale_overlap', group: 'Transfers',  label: 'Duplicate — sale exists', detail: 'New transfer despite a completed sale.',    channels: ['inapp'] },
 
-  { id: 'sale_pending_review',   group: 'Sales',      label: 'Sale submitted',           detail: 'A sale entered the compliance queue.',     channels: ['inapp', 'push'] },
-  { id: 'sale_approved',         group: 'Sales',      label: 'Sale approved',            detail: 'Compliance approved a sale.',              channels: ['inapp', 'push'] },
-  { id: 'sale_needs_revision',   group: 'Sales',      label: 'Sale returned',            detail: 'Compliance sent a sale back.',             channels: ['inapp', 'push'] },
+  // `superadmin: true` = this event can additionally notify superadmins across
+  // every company (push.superadmin_events). Only these three are wired for it,
+  // and the flag is what stops the UI offering a switch the code would ignore.
+  { id: 'sale_pending_review',   group: 'Sales',      label: 'Sale submitted',           detail: 'A sale entered the compliance queue.',     channels: ['inapp', 'push'], superadmin: true },
+  { id: 'sale_approved',         group: 'Sales',      label: 'Sale approved',            detail: 'Compliance approved a sale.',              channels: ['inapp', 'push'], superadmin: true },
+  { id: 'sale_needs_revision',   group: 'Sales',      label: 'Sale returned',            detail: 'Compliance sent a sale back.',             channels: ['inapp', 'push'], superadmin: true },
   { id: 'compliance_updated',    group: 'Sales',      label: 'Compliance edited a sale', detail: 'A sale was changed by compliance.',        channels: ['inapp', 'push'] },
   { id: 'resell_created',        group: 'Sales',      label: 'Resell created',           detail: 'A customer was sold again.',               channels: ['inapp', 'push'], legacyKey: 'resell_notify_compliance' },
   { id: 'disposition_submitted', group: 'Sales',      label: 'Disposition submitted',    detail: 'A non-sale disposition was logged.',       channels: ['inapp', 'push'] },
@@ -115,6 +118,10 @@ const DEFAULTS = {
     icon_192:         '',
     icon_512:         '',
     icon_maskable:    '',
+    // Who is OFFERED the install prompt in-app. 'everyone' | 'superadmin'.
+    // This gates our own affordance only — the browser's own Install menu item
+    // is a browser feature and cannot be taken away by an app.
+    audience:         'everyone',
   },
   sw: {
     cache_enabled:    true,
@@ -128,6 +135,12 @@ const DEFAULTS = {
     vibrate:             true,
     urgency:             'high',
     ttl:                 86400,
+    // Events superadmins are ADDED to, across every company. This is the one
+    // control that widens a recipient list rather than narrowing it, which is
+    // why it is separate from per-event `roles` (those only ever subtract).
+    // Superadmins are oversight: they are not in a company's manager list, so
+    // without this they never hear about a sale in a tenant they don't sit in.
+    superadmin_events:   [],
   },
   events: defaultEvents(),
 };
@@ -138,11 +151,20 @@ function merge(saved) {
   const s = saved && typeof saved === 'object' ? saved : {};
   return {
     ...DEFAULTS, ...s,
-    install: { ...DEFAULTS.install, ...(s.install || {}) },
+    install: {
+      ...DEFAULTS.install, ...(s.install || {}),
+      // Anything unrecognised means 'everyone' — an audience typo must not
+      // silently hide the prompt from the whole company.
+      audience: (s.install || {}).audience === 'superadmin' ? 'superadmin' : 'everyone',
+    },
     sw:      { ...DEFAULTS.sw,      ...(s.sw      || {}) },
     push:    {
       ...DEFAULTS.push, ...(s.push || {}),
       quiet_hours: { ...DEFAULTS.push.quiet_hours, ...((s.push || {}).quiet_hours || {}) },
+      // Only ids that exist in the catalog, so a stale entry from a renamed
+      // event cannot quietly widen some other event's audience.
+      superadmin_events: (Array.isArray((s.push || {}).superadmin_events) ? s.push.superadmin_events : [])
+        .filter(id => EVENT_CATALOG.some(e => e.id === id)),
     },
     // Clamp every stored event to the channels its emitter actually has, so a
     // value saved before `channels` existed (or hand-edited in the table) can
@@ -220,6 +242,9 @@ const publicFlags = asyncHandler(async (req, res) => {
     cache_version:    s.sw.cache_version || 1,
     auto_update:      !!s.sw.auto_update,
     offline_fallback: !!s.sw.offline_fallback,
+    // Not sensitive: it says who is OFFERED the prompt, not who anyone is. The
+    // SPA needs it before it has a token, same as every other flag here.
+    install_audience: s.install.audience,
   });
 });
 
