@@ -3,6 +3,7 @@ import { usePersistedState } from "../hooks/usePersistedState";
 import { toast } from "sonner";
 import { toastError } from "../utils/toast";
 import { useAuth } from "../contexts/AuthContext";
+import StaffExportModal from "../components/Staff/StaffExportModal";
 import { useVersionCheck } from "../hooks/useVersionCheck";
 import UpdateBanner from "../components/UI/UpdateBanner";
 import DotGridBg from "../components/UI/DotGridBg";
@@ -20,7 +21,7 @@ import ThemedDate from '../components/UI/ThemedDate';
 import {
   DollarSign, Send, Phone, Hash, Search, Target, Clock,
   CheckCircle, XCircle, Plus, User, Car, Star, MessageSquare,
-  Users, Shield, FileText, BarChart3, AlertTriangle, RefreshCw, CalendarPlus, Pencil, Trash2,
+  Users, Shield, FileText, BarChart3, AlertTriangle, RefreshCw, CalendarPlus, Pencil, Trash2, Download,
   ChevronLeft, ChevronRight, HelpCircle, CalendarDays, Copy, UserCircle, Database, CreditCard,
 } from "lucide-react";
 
@@ -153,7 +154,8 @@ const STAFF_CLOSER_CARDS  = ['my_sales', 'approved', 'cancelled', 'awaiting_revi
 const STAFF_FRONTER_CARDS = ['total_leads', 'fronter_approved', 'fronter_awaiting_review'];
 
 const StaffShell = () => {
-  const { user, logout, updateUser, hasPermission } = useAuth();
+  const { user, logout, updateUser, hasPermission, canExport } = useAuth();
+  const [exportOpen, setExportOpen] = useState(false);
   const { theme, toggleTheme } = useTheme();
   const { isEnabled, isEnabledStrict } = useFeatureFlags();
   const navigate = useNavigate();
@@ -909,15 +911,26 @@ const StaffShell = () => {
 
         {/* Header row */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8 animate-fade-in">
-          <div>
+          <div className="min-w-0">
             <h2 className="text-3xl font-bold mb-1 text-text">
               Welcome back, {user?.first_name || user?.email}!
             </h2>
-            <p className="text-text-secondary">
+            <p className="text-text-secondary m-0">
               <strong>{user?.role_name || user?.role}</strong> at <strong>{user?.company_name}</strong>
             </p>
           </div>
+          {/* Staff export ships blocked for closer + fronter (migration 215), so
+              canExport is false for both and this renders nothing until a
+              superadmin enables it per role or per person in Data Egress. */}
+          {(canExport('sales') || canExport('transfers') || canExport('callbacks')) && (
+            <button onClick={() => setExportOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-bold border transition-colors self-start sm:self-auto flex-shrink-0"
+              style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)', backgroundColor: 'var(--color-surface)' }}>
+              <Download size={13} /> Export CSV
+            </button>
+          )}
         </div>
+        {exportOpen && <StaffExportModal onClose={() => setExportOpen(false)} />}
 
         {/* Tab bar */}
         <div className="flex items-center justify-between mb-6 gap-3 flex-wrap">
