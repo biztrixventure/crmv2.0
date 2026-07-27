@@ -5,6 +5,7 @@ import { getTransferDisplayStatus } from '../../utils/transferStatus';
 import { transferPhone } from '../../utils/phone';
 import { todayET } from '../../utils/timezone';
 import ThemedSelect from '../UI/Select';
+import { TableScroll } from '../UI/kit';
 
 // Why a transfer is flagged as a duplicate (from transfer_dedup_events.event_type).
 const DUP_REASON_LABEL = {
@@ -260,7 +261,7 @@ const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
         {loading ? <Spinner /> : transfers.length === 0 ? (
           <Empty icon={ArrowRight} msg="No transfers found." />
         ) : (
-          <div className="overflow-x-auto">
+          <TableScroll stickyFirst inheritRowBg label="Transfers">
             <table className="w-full text-sm">
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
@@ -281,12 +282,12 @@ const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
                   <tr key={t.id} className="cursor-pointer"
                     ref={focused ? focusRef : null}
                     style={{ borderBottom: '1px solid var(--color-border)',
-                      backgroundColor: focused ? 'var(--color-primary-50, #eef2ff)' : 'transparent',
+                      backgroundColor: focused ? 'var(--color-primary-50, #eef2ff)' : 'var(--color-surface)',
                       boxShadow: focused ? 'inset 3px 0 0 var(--color-primary-500, #6366f1)' : 'none',
                       transition: 'background-color 0.3s' }}
                     onClick={() => setDetail(t)}
                     onMouseEnter={e => e.currentTarget.style.backgroundColor = focused ? 'var(--color-primary-50, #eef2ff)' : 'var(--color-bg-secondary)'}
-                    onMouseLeave={e => e.currentTarget.style.backgroundColor = focused ? 'var(--color-primary-50, #eef2ff)' : 'transparent'}>
+                    onMouseLeave={e => e.currentTarget.style.backgroundColor = focused ? 'var(--color-primary-50, #eef2ff)' : 'var(--color-surface)'}>
                     <td className="px-3 py-1.5">
                       <p className="font-semibold" style={{ color: 'var(--color-text)' }}>{customerName(t)}</p>
                       <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
@@ -348,7 +349,7 @@ const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
                 })}
               </tbody>
             </table>
-          </div>
+          </TableScroll>
         )}
         <Pagination page={page} total={total} limit={LIMIT} onPage={setPage} />
       </div>

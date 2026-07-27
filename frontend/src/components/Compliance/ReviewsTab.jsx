@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { Star } from 'lucide-react';
 import client from '../../api/client';
+import { TableScroll } from '../UI/kit';
 import ExportModal from './ExportModal';
 import { FilterSelect } from '../UI/FilterBar';
 import { fmtDate, customerName, downloadCSV, TabHeader, Spinner, Empty, Th, fetchAllForExport } from './shared';
@@ -86,7 +87,7 @@ const ReviewsTab = ({ companyList }) => {
         {loading ? <Spinner /> : data.length === 0 ? (
           <Empty icon={Star} msg={`No ${subTab === 'ratings' ? 'ratings' : 'dispositions'} found.`} />
         ) : (
-          <div className="overflow-x-auto">
+          <TableScroll stickyFirst label="Call reviews">
             <table className="w-full text-sm">
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
@@ -139,7 +140,7 @@ const ReviewsTab = ({ companyList }) => {
                 ))}
               </tbody>
             </table>
-          </div>
+          </TableScroll>
         )}
       </div>
 

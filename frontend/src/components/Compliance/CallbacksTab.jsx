@@ -4,6 +4,7 @@ import { PhoneCall, ArrowRight, Trash2, AlertCircle, BarChart3, User, ChevronUp,
 import CallbackPhoneHistoryDrawer from '../Shared/CallbackPhoneHistoryDrawer';
 import { Badge } from '../UI';
 import client from '../../api/client';
+import { TableScroll } from '../UI/kit';
 import { useAuth } from '../../contexts/AuthContext';
 import { useFeatureFlags } from '../../contexts/FeatureFlagsContext';
 import { toast } from 'sonner';
@@ -309,7 +310,7 @@ const AuditLogView = ({ companyList }) => {
         {loading ? <Spinner /> : entries.length === 0 ? (
           <Empty icon={PhoneCall} msg="No audit log entries found." />
         ) : (
-          <div className="overflow-x-auto">
+          <TableScroll label="Callback audit log">
             <table className="w-full text-sm">
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
@@ -347,7 +348,7 @@ const AuditLogView = ({ companyList }) => {
                 ))}
               </tbody>
             </table>
-          </div>
+          </TableScroll>
         )}
         <Pagination page={page} total={total} limit={LIMIT} onPage={setPage} />
       </div>
@@ -638,7 +639,7 @@ const CallbacksTab = ({ companyList }) => {
           {loading ? <Spinner /> : sorted.length === 0 ? (
             <Empty icon={PhoneCall} msg="No callbacks found." />
           ) : (
-            <div className="overflow-x-auto">
+            <TableScroll stickyFirst label="Callbacks">
               <table className="w-full text-sm">
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
@@ -729,7 +730,7 @@ const CallbacksTab = ({ companyList }) => {
                   ))}
                 </tbody>
               </table>
-            </div>
+            </TableScroll>
           )}
           <Pagination page={page} total={total} limit={LIMIT} onPage={setPage} />
         </div>

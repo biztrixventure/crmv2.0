@@ -8,6 +8,7 @@ import client from '../../api/client';
 import SaleDetailDrawer from '../Shared/SaleDetailDrawer';
 import SaleModal from '../Closer/SaleModal';
 import ExportModal from './ExportModal';
+import { TableScroll } from '../UI/kit';
 import FilterBar, { FilterSelect } from '../UI/FilterBar';
 import DateRangePicker from '../UI/DateRangePicker';
 import TabStatsStrip from './TabStatsStrip';
@@ -357,7 +358,10 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
       <div className="rounded-xl overflow-hidden"
         style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
         {loading ? <Spinner /> : sales.length === 0 ? <Empty /> : (
-          <div className="overflow-x-auto">
+          // Customer stays pinned while the rest scrolls — this table measures
+          // 851px inside a 346px phone viewport, and without the pin scrolling
+          // right leaves you reading rows you can no longer identify.
+          <TableScroll stickyFirst inheritRowBg label="Sales">
             <table className="w-full text-sm">
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
@@ -376,7 +380,12 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                 {sales.map(s => {
                   const focused = focusedId && String(focusedId) === String(s.id);
                   const hl = highlightFor(s);                       // config-driven duplicate-sale tint
-                  const baseBg = focused ? 'var(--color-primary-50, #eef2ff)' : (hl || 'transparent');
+                  // Opaque, not transparent: the pinned first column inherits
+                  // the row background, so a see-through row would let the
+                  // scrolled content show through the pinned cell. Surface is
+                  // what the card behind it already paints, so this is a
+                  // no-op visually while keeping the duplicate/focus tints.
+                  const baseBg = focused ? 'var(--color-primary-50, #eef2ff)' : (hl || 'var(--color-surface)');
                   const dupN = s.dupe_sale_count || 0;              // ALL sales on this number (active + cancelled)
                   return (
                   <Fragment key={s.id}>
@@ -542,7 +551,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                 })}
               </tbody>
             </table>
-          </div>
+          </TableScroll>
         )}
         <Pagination page={page} total={total} limit={LIMIT} onPage={setPage} />
       </div>

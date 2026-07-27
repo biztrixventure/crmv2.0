@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { Hash, Phone } from 'lucide-react';
 import { Badge } from '../UI';
 import client from '../../api/client';
+import { TableScroll } from '../UI/kit';
 import {
   LIMIT, fmtDateTime,
   TabHeader, Spinner, Empty, Pagination, Th, Filters, FInput, FSelect,
@@ -87,7 +88,7 @@ const CallbackNumbersTab = ({ companyList }) => {
         {loading ? <Spinner /> : rows.length === 0 ? (
           <Empty icon={Phone} msg="No callback numbers found." />
         ) : (
-          <div className="overflow-x-auto">
+          <TableScroll stickyFirst label="Call numbers">
             <table className="w-full text-sm">
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
@@ -139,7 +140,7 @@ const CallbackNumbersTab = ({ companyList }) => {
                 ))}
               </tbody>
             </table>
-          </div>
+          </TableScroll>
         )}
         <Pagination page={page} total={total} limit={LIMIT} onPage={setPage} />
       </div>
