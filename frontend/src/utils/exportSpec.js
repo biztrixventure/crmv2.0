@@ -90,9 +90,12 @@ export const DATASETS = {
       compliance_queue: { columns: ['customer_name', 'customer_phone', 'reference_no', 'closer_name', 'company_name', 'created_at'] },
       company_sales:    { columns: ['customer_name', 'customer_phone', 'reference_no', 'fronter_name', 'closer_name', 'status', 'plan', 'monthly_payment', 'created_at'] },
       staff_sales:      { columns: ['customer_name', 'customer_phone', 'reference_no', 'status', 'sale_date', 'plan', 'monthly_payment', 'down_payment'] },
-      // manager_sales is DYNAMIC — its columns come from form_fields at runtime
-      // (see ManagerExportModal). Its headers are bulk-uploader field keys, so
-      // an exported file re-uploads without re-mapping.
+      // manager_sales is DYNAMIC: its default columns come from form_fields at
+      // runtime (saleExportColumns), which is why `columns` is empty — an empty
+      // surface list means "use the caller's extraColumns". Its headers are
+      // bulk-uploader field keys, so an exported file re-uploads without any
+      // header re-mapping, hence header: 'key'.
+      manager_sales:    { header: 'key', columns: [] },
     },
   },
 
@@ -308,7 +311,10 @@ export function resolveColumns(dataset, surfaceId, allowed, extraColumns) {
   }
   const surface = ds.surfaces[surfaceId] || { columns: ds.columns.map(c => c.key) };
   const byKey = new Map([...ds.columns, ...extra].map(c => [c.key, c]));
-  const keys = (Array.isArray(allowed) && allowed.length) ? allowed : surface.columns;
+  // An empty surface list means the surface is dynamic — its default IS whatever
+  // columns the caller supplied (Manager sales, built from form_fields).
+  const base = surface.columns.length ? surface.columns : extra.map(c => c.key);
+  const keys = (Array.isArray(allowed) && allowed.length) ? allowed : base;
   return {
     columns: keys.map(k => byKey.get(k)).filter(Boolean),
     header: surface.header === 'key' ? 'key' : 'label',
@@ -326,8 +332,12 @@ export const headerFor = (col, mode) => (mode === 'key' ? (col.headerKey || col.
 // so the server's egressAudit middleware enforces the limits and WRITES THE
 // AUDIT ROW (the row cap is checked against `total` before the drain). A blocked
 // export returns 429 on page 1 → surfaced as a typed EgressBlockedError.
-export async function fetchAllForExport(endpoint, params = {}, dataKey, onProgress, dataset) {
-  const PAGE = 5000;
+// `opts.pageSize` matters: the drain stops on a SHORT page, so asking for more
+// rows than an endpoint will return truncates the export silently. The
+// compliance endpoints serve 5,000; the manager /sales and /transfers lists cap
+// near 1,000 and /callbacks at 200, so those callers pass their real page size.
+export async function fetchAllForExport(endpoint, params = {}, dataKey, onProgress, dataset, opts = {}) {
+  const PAGE = opts.pageSize || 5000;
   const out = [];
   const egressMarker = { __egress: 'csv_export', __dataset: dataset || dataKey };
   try {

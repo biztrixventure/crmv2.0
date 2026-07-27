@@ -3,20 +3,12 @@ import { createPortal } from 'react-dom';
 import { X, Download, Loader2, FileSpreadsheet, DollarSign, Send, PhoneCall, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import client from '../../api/client';
-import { saleExportColumns, saleToRow } from '../Admin/BulkSaleUploader/saleColumnMapping';
+import { saleExportColumns, saleToValue } from '../Admin/BulkSaleUploader/saleColumnMapping';
 import ThemedSelect from '../UI/Select';
 import ThemedDate from '../UI/ThemedDate';
 import { useAuth } from '../../contexts/AuthContext';
-
-// CSV download (client-side, no row cap).
-function downloadCSV(rows, headers, filename) {
-  const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-  const csv = [headers, ...rows].map(r => r.map(esc).join(',')).join('\n');
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = Object.assign(document.createElement('a'), { href: url, download: filename });
-  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-}
+import { fetchAllForExport, writeExport } from '../../utils/exportSpec';
+import { useExportColumns } from '../../hooks/useExportColumns';
 
 const SALE_STATUS = [['','All'],['open','Open'],['pending_review','In Review'],['needs_revision','Needs Revision'],['closed_won','Approved'],['closed_lost','Lost'],['cancelled','Cancelled'],['follow_up','Follow Up']];
 const XFER_STATUS = [['','All'],['pending','Pending'],['assigned','Assigned'],['completed','Completed'],['rejected','Rejected'],['cancelled','Cancelled']];
@@ -31,22 +23,18 @@ const TYPES = [
 const fmtD  = (d) => d ? new Date(d).toLocaleDateString() : '';
 const fmtDT = (d) => d ? new Date(d).toLocaleString() : '';
 
-// Page through an endpoint in batches until every matching record is collected
-// (PostgREST caps each response near 1000 rows, so a single big limit isn't enough).
-async function fetchAll(endpoint, baseParams, key, pageSize = 1000) {
-  let page = 1; const all = [];
-  for (;;) {
-    const r = await client.get(endpoint, { params: { ...baseParams, page, limit: pageSize } });
-    const batch = r.data[key] || [];
-    all.push(...batch);
-    if (batch.length < pageSize || page >= 200) break;
-    page++;
-  }
-  return all;
-}
+// These four exports used to page through the list endpoints with a plain
+// client.get and no __egress marker, so they were the one export surface with
+// no row cap and no audit row. They go through fetchAllForExport now, which
+// carries the marker. pageSize is per-endpoint on purpose: the drain stops on a
+// short page, and PostgREST caps these responses near 1000 (200 for callbacks),
+// so asking for more would silently truncate the file.
+const PAGE_SIZE = { sales: 1000, transfers: 1000, callbacks: 200, users: 1000 };
 
 const ManagerExportModal = ({ onClose, agents = [] }) => {
   const { canExport } = useAuth();
+  // null per dataset = unconfigured → each tab keeps its own default columns.
+  const { allowedFor } = useExportColumns(['sales', 'transfers', 'callbacks', 'users']);
   const [type, setType] = useState('sales');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -62,52 +50,54 @@ const ManagerExportModal = ({ onClose, agents = [] }) => {
     setBusy(true);
     try {
       const dateParams = cfg.date ? { ...(dateFrom && { date_from: dateFrom }), ...(dateTo && { date_to: dateTo }) } : {};
-      let rows = [], headers = [], data = [];
+      const drain = (endpoint, params, key) =>
+        fetchAllForExport(endpoint, params, key, undefined, key, { pageSize: PAGE_SIZE[key] });
+      let data = [], write = null;
 
       if (type === 'sales') {
-        // Headers + per-row values are derived from the same schema the bulk
-        // sale uploader expects, so an exported file round-trips through the
-        // uploader without manual header re-mapping. snake_case keys = bulk-
-        // upload field keys = export headers.
+        // Values are derived from the same schema the bulk sale uploader
+        // expects, so an exported file round-trips through the uploader without
+        // manual header re-mapping — hence the manager_sales surface emits raw
+        // keys as headers instead of friendly labels.
         const [salesData, ffRes] = await Promise.all([
-          fetchAll('sales', { ...dateParams, ...(status && { status }), ...(agent && { user_id: agent }) }, 'sales'),
+          drain('sales', { ...dateParams, ...(status && { status }), ...(agent && { user_id: agent }) }, 'sales'),
           client.get('forms/fields').catch(() => ({ data: { fields: [] } })),
         ]);
         data = salesData;
-        const cols = saleExportColumns(ffRes.data.fields || []);
-        headers = cols.map(c => c.key);
-        rows = data.map(s => saleToRow(s, cols));
+        const cols = saleExportColumns(ffRes.data.fields || [])
+          .map(c => ({ key: c.key, label: c.key, get: (s) => saleToValue(s, c) }));
+        write = () => writeExport({
+          dataset: 'sales', surface: 'manager_sales', allowed: allowedFor('sales'),
+          extraColumns: cols, rows: data, filename: `${type}_export_${today}.csv`,
+        });
       } else if (type === 'transfers') {
-        data = await fetchAll('transfers', { ...dateParams, ...(status && { status }), ...(agent && { user_id: agent }) }, 'transfers');
-        headers = ['Customer','Phone','Transfer Status','Fronter','Closer','Sale Ref','Created'];
-        rows = data.map(t => {
-          const fd = t.form_data || {};
-          const name = fd.customer_name || (fd.FirstName ? `${fd.FirstName} ${fd.LastName || ''}`.trim() : '') || '';
-          const phone = fd.customer_phone || fd.Phone || '';
-          return [name, phone, t.status || '', t.created_by_name || '', t.assigned_closer_name || '', t.sale_reference_no || '', fmtD(t.created_at)];
+        data = await drain('transfers', { ...dateParams, ...(status && { status }), ...(agent && { user_id: agent }) }, 'transfers');
+        write = () => writeExport({
+          dataset: 'transfers', surface: 'manager_transfers', allowed: allowedFor('transfers'),
+          rows: data, filename: `${type}_export_${today}.csv`,
         });
       } else if (type === 'callbacks') {
-        data = await fetchAll('callbacks', { ...dateParams }, 'callbacks', 200);
-        headers = ['Customer','Phone','Scheduled At','Status','Priority','Notes','Agent','Created'];
-        rows = data.map(c => [
-          c.customer_name || '', c.customer_phone || '', fmtDT(c.callback_at), c.status || '',
-          c.priority || '', c.notes || '', c.user_name || '', fmtD(c.created_at),
-        ]);
+        data = await drain('callbacks', { ...dateParams }, 'callbacks');
+        write = () => writeExport({
+          dataset: 'callbacks', surface: 'manager_callbacks', allowed: allowedFor('callbacks'),
+          rows: data, filename: `${type}_export_${today}.csv`,
+        });
       } else {
-        data = await fetchAll('users', { ...(includeInactive && { include_inactive: true }) }, 'users');
-        headers = ['Name','Email','Role','Status','Joined'];
-        rows = data.map(u => [
-          `${u.first_name || ''} ${u.last_name || ''}`.trim(), u.email || '', u.role || '',
-          u.is_active ? 'Active' : 'Inactive', fmtD(u.created_at),
-        ]);
+        data = await drain('users', { ...(includeInactive && { include_inactive: true }) }, 'users');
+        write = () => writeExport({
+          dataset: 'users', surface: 'manager_users', allowed: allowedFor('users'),
+          rows: data, filename: `${type}_export_${today}.csv`,
+        });
       }
 
-      if (!rows.length) { toast.warning('No records match these filters.'); return; }
-      downloadCSV(rows, headers, `${type}_export_${today}.csv`);
-      toast.success(`Exported ${rows.length.toLocaleString()} ${type}.`);
+      // Checked BEFORE writing, so an empty result still downloads nothing.
+      if (!data.length) { toast.warning('No records match these filters.'); return; }
+      write();
+      toast.success(`Exported ${data.length.toLocaleString()} ${type}.`);
       onClose();
     } catch (e) {
-      toast.error(e.response?.data?.error || 'Export failed.');
+      // A daily/row cap now returns 429 on page 1 → typed egressBlocked error.
+      toast.error(e?.egressBlocked ? e.message : (e.response?.data?.error || 'Export failed.'));
     } finally { setBusy(false); }
   };
 

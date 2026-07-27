@@ -4,12 +4,15 @@ import { PhoneCall, AlertCircle, BarChart3, User, ChevronUp, ChevronDown, Chevro
 import CallbackPhoneHistoryDrawer from '../Shared/CallbackPhoneHistoryDrawer';
 import { Badge } from '../UI';
 import client from '../../api/client';
+import { toast } from 'sonner';
 import {
   STATUS_BADGE, STATUS_LABEL, CALLBACK_STATUSES, LIMIT,
-  fmtDate, fmtDateTime, downloadCSV,
+  fmtDate, fmtDateTime,
   TabHeader, Spinner, Empty, Pagination, Filters, FInput, FSelect,
   Overlay, ModalBox, ModalHeader, InfoTile,
 } from '../Compliance/shared';
+import { fetchAllForExport, writeExport } from '../../utils/exportSpec';
+import { useExportColumns } from '../../hooks/useExportColumns';
 
 const PRIORITY_CFG = {
   High:   { dot: '#ef4444', bg: '#fef2f2', border: '#fecaca', text: '#dc2626' },
@@ -229,6 +232,8 @@ const PriorityStatsBar = ({ callbacks }) => {
 };
 
 const ManagerCallbacksTab = ({ user }) => {
+  // null = unconfigured → this tab keeps its own default column set.
+  const { allowedFor } = useExportColumns(['callbacks']);
   const companyId = user?.company_id;
 
   const [callbacks,    setCallbacks]    = useState([]);
@@ -316,8 +321,12 @@ const ManagerCallbacksTab = ({ user }) => {
   const isTodayActive = createdFrom === today && createdTo === today;
 
   const handleExport = async () => {
-    const res = await client.get('callbacks', {
-      params: {
+    // Was a bare client.get with no __egress marker — the team callback export
+    // was uncapped and never written to the audit log. Same first request as
+    // before (limit 5000, page 1), now carrying the marker.
+    let rows;
+    try {
+      rows = await fetchAllForExport('callbacks', {
         company_id:   companyId,
         status:       status       || undefined,
         priority:     priority     || undefined,
@@ -327,21 +336,15 @@ const ManagerCallbacksTab = ({ user }) => {
         created_from: createdFrom  || undefined,
         created_to:   createdTo    || undefined,
         user_id:      selectedUser || undefined,
-        limit: 5000, page: 1,
-      },
+      }, 'callbacks', undefined, 'callbacks');
+    } catch (err) {
+      toast.error(err?.egressBlocked ? err.message : (err?.response?.data?.error || 'Export failed'));
+      return;
+    }
+    writeExport({
+      dataset: 'callbacks', surface: 'manager_team_callbacks', allowed: allowedFor('callbacks'),
+      rows, filename: `callbacks_${todayET()}.csv`,
     });
-    const rows = (res.data.callbacks || []).map(c => [
-      c.customer_name  || '',
-      c.customer_phone || '',
-      fmtDateTime(c.callback_at),
-      STATUS_LABEL[c.status] || c.status || '',
-      c.priority || 'Medium',
-      c.notes    || '',
-      c.company_type === 'fronter' ? (c.user_name || '') : '',
-      c.company_type === 'closer'  ? (c.user_name || '') : '',
-    ]);
-    downloadCSV(rows, ['Customer', 'Phone', 'Scheduled At', 'Status', 'Priority', 'Notes', 'Fronter', 'Closer'],
-      `callbacks_${todayET()}.csv`);
   };
 
   return (
