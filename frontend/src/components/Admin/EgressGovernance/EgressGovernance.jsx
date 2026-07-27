@@ -491,7 +491,10 @@ function FieldsTab() {
         ) : (
           <>
             <p className="text-xs mb-2" style={{ color: 'var(--color-text-secondary)' }}>Checked = included in the exported file for {scopeType === 'user' ? (colUser?.name || 'the user') : 'this role'}. {cols == null && <b>Unconfigured — showing the columns this export writes today.</b>}</p>
-            <div className="grid grid-cols-2 gap-1.5 max-h-64 overflow-y-auto mb-3">
+            {/* One column below sm: at 390 two cells cannot hold checkbox +
+                label + the raw key, and the key clipped mid-word into the
+                neighbouring cell. */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-64 overflow-y-auto mb-3">
               {cat.fields.map(field => {
                 const on = isOn(field);
                 const sens = /uuid|phone|email|vin|payment/i.test(field) || field === 'customer_name';
@@ -502,9 +505,9 @@ function FieldsTab() {
                 // is, so the selection reads in both themes.
                 return (
                   <label key={field} title={`Column key: ${field}`} className="flex items-center gap-2 text-xs px-2 py-1.5 rounded-lg cursor-pointer" style={{ background: on ? 'color-mix(in srgb, var(--color-primary-600) 18%, transparent)' : 'transparent', border: `1px solid ${on ? 'color-mix(in srgb, var(--color-primary-600) 45%, transparent)' : 'var(--color-border)'}` }}>
-                    <input type="checkbox" checked={on} onChange={() => toggleCol(field)} />
-                    <span className="flex-1">{labelFor(dataset, field)}{sens && <span title="Sensitive / PII — think before including in an export" style={{ color: '#d97706', marginLeft: 3 }}>•</span>}</span>
-                    <code className="text-[11px] sm:text-[9px]" style={{ color: 'var(--color-text-tertiary)' }}>{field}</code>
+                    <input type="checkbox" checked={on} onChange={() => toggleCol(field)} className="flex-shrink-0" />
+                    <span className="flex-1 min-w-0 truncate leading-none">{labelFor(dataset, field)}{sens && <span title="Sensitive / PII — think before including in an export" style={{ color: '#d97706', marginLeft: 3 }}>•</span>}</span>
+                    <code className="text-[11px] sm:text-[9px] leading-none truncate max-w-[45%] flex-shrink-0" style={{ color: 'var(--color-text-tertiary)' }}>{field}</code>
                   </label>
                 );
               })}
