@@ -9,6 +9,7 @@ import AudienceTargetPicker from './AudienceTargetPicker';
 import ThemedSelect from '../../UI/Select';
 import ThemedDate from '../../UI/ThemedDate';
 import { Loading, SectionHeader } from '../../UI/kit';
+import { TableScroll } from "../../UI/kit";
 
 // Plain-text preview for compact UI surfaces (table cells, lists). Mirrors
 // RichView's "has tags?" heuristic so legacy plain-text descriptions stay
@@ -236,7 +237,7 @@ const SpiffManager = () => {
       {loading ? <Loading variant="rows" rows={4} />
       : rows.length === 0 ? <div className="rounded-2xl p-12 text-center" style={{ backgroundColor: 'var(--color-surface)', border: '1px dashed var(--color-border)' }}><Trophy size={40} className="mx-auto mb-3" style={{ color: 'var(--color-text-tertiary)', opacity: 0.5 }} /><p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>No campaigns yet.</p></div>
       : (
-        <div className="rounded-2xl overflow-hidden" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+        <TableScroll stickyFirst label="SPIFF" className="rounded-2xl" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
           <table className="w-full text-sm">
             <thead><tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
               {['Title', 'Metric', 'Target', 'Reward', 'Status', 'Dates', 'Players', ''].map(h => <th key={h} className="px-4 py-2.5 text-left text-xs font-bold uppercase" style={{ color: 'var(--color-text-secondary)' }}>{h}</th>)}
@@ -287,7 +288,7 @@ const SpiffManager = () => {
               ))}
             </tbody>
           </table>
-        </div>
+        </TableScroll>
       )}
 
       {modal && <Modal row={modal.row} reference={reference} onClose={() => setModal(null)} onSave={save} viewer={user} />}

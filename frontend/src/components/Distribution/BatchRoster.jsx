@@ -6,6 +6,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import FilterBar from '../UI/FilterBar';
 import ThemedSelect from '../UI/Select';
 import { Lineage } from './BatchInbox';
+import { TableScroll } from "../UI/kit";
 
 const PAGE = 100;
 const CROSS_COMPANY = new Set(['superadmin', 'readonly_admin', 'compliance_manager']);
@@ -96,7 +97,7 @@ export default function BatchRoster() {
         onClearAll={() => { setOffset(0); setStatus(''); setCompanyId(''); }}
       />
 
-      <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
+      <TableScroll stickyFirst label="Assigned numbers" className="rounded-xl" style={{ border: '1px solid var(--color-border)' }}>
         <table className="w-full text-sm">
           <thead>
             <tr style={{ background: 'var(--color-surface)', color: 'var(--color-text-secondary)' }}>
@@ -140,7 +141,7 @@ export default function BatchRoster() {
                 })}
           </tbody>
         </table>
-      </div>
+      </TableScroll>
 
       {total > PAGE && (
         <div className="flex items-center justify-between text-xs" style={{ color: 'var(--color-text-secondary)' }}>

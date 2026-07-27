@@ -13,6 +13,7 @@ import { useAuth } from '../../../contexts/AuthContext';
 import Composer from '../../Chat/Composer';
 import ClientPortalTab from './ClientPortalTab';
 import { Loading, SectionHeader, PillTabs } from '../../UI/kit';
+import { TableScroll } from "../../UI/kit";
 
 // ── shared bits ───────────────────────────────────────────────────────────────
 const fmt = (s) => s ? new Date(s).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
@@ -323,7 +324,7 @@ const ConversationsTab = ({ openId, setOpenId }) => {
       </div>
 
       {loading && convs.length === 0 ? <Spinner /> : convs.length === 0 ? <p className="text-sm py-8 text-center" style={{ color: 'var(--color-text-tertiary)' }}>No conversations</p> : (
-        <div className="rounded-2xl overflow-hidden" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+        <TableScroll stickyFirst label="Chat records" className="rounded-2xl" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
           <table className="w-full text-sm">
             <thead><tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
               {['Conversation', 'Type', 'Members', 'Messages', 'Last activity', ''].map(h => <th key={h} className="px-4 py-2.5 text-left text-xs font-bold uppercase" style={{ color: 'var(--color-text-secondary)' }}>{h}</th>)}
@@ -341,7 +342,7 @@ const ConversationsTab = ({ openId, setOpenId }) => {
               ))}
             </tbody>
           </table>
-        </div>
+        </TableScroll>
       )}
 
       {/* Count + lazy "Load more" — the list pages 50 at a time instead of
@@ -426,7 +427,7 @@ const UsersTab = () => {
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search people…" className="input" style={{ paddingLeft: 34 }} />
       </div>
       {loading ? <Spinner /> : (
-        <div className="rounded-2xl overflow-hidden" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+        <TableScroll stickyFirst label="Chat records" className="rounded-2xl" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
           <table className="w-full text-sm">
             <thead><tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
               {['Name', 'Role', 'Company', 'Status', ''].map(h => <th key={h} className="px-4 py-2.5 text-left text-xs font-bold uppercase" style={{ color: 'var(--color-text-secondary)' }}>{h}</th>)}
@@ -445,7 +446,7 @@ const UsersTab = () => {
               ))}
             </tbody>
           </table>
-        </div>
+        </TableScroll>
       )}
     </div>
   );
@@ -629,7 +630,7 @@ const ModerationTab = () => {
         ))}
       </div>
       {shown.length === 0 ? <p className="text-sm py-8 text-center" style={{ color: 'var(--color-text-tertiary)' }}>No moderation actions.</p> : (
-        <div className="rounded-2xl overflow-hidden" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+        <TableScroll stickyFirst label="Chat records" className="rounded-2xl" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
           <table className="w-full text-sm">
             <thead><tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
               {['When', 'Moderator', 'Action', 'Target'].map(h => <th key={h} className="px-4 py-2.5 text-left text-xs font-bold uppercase" style={{ color: 'var(--color-text-secondary)' }}>{h}</th>)}
@@ -645,7 +646,7 @@ const ModerationTab = () => {
               ))}
             </tbody>
           </table>
-        </div>
+        </TableScroll>
       )}
     </div>
   );
@@ -673,7 +674,7 @@ const CompaniesTab = () => {
   return (
     <div className="space-y-3">
       <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>Chat is enabled for <strong>{onCount}</strong> of <strong>{companies.length}</strong> companies.</p>
-      <div className="rounded-2xl overflow-hidden" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+      <TableScroll stickyFirst label="Chat records" className="rounded-2xl" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
         <table className="w-full text-sm">
           <thead><tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
             {['Company', 'Type', 'Chat', ''].map(h => <th key={h} className="px-4 py-2.5 text-left text-xs font-bold uppercase" style={{ color: 'var(--color-text-secondary)' }}>{h}</th>)}
@@ -692,7 +693,7 @@ const CompaniesTab = () => {
             })}
           </tbody>
         </table>
-      </div>
+      </TableScroll>
     </div>
   );
 };

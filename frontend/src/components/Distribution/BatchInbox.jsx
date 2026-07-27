@@ -10,6 +10,7 @@ import UserPicker from './UserPicker';
 import RulePreview from './RulePreview';
 import FilterBar from '../UI/FilterBar';
 import ThemedSelect from '../UI/Select';
+import { TableScroll } from "../UI/kit";
 
 const SENDER_ROLES = new Set(['superadmin', 'compliance_manager', 'fronter_manager', 'closer_manager', 'operations_manager', 'company_admin']);
 const EX_REASON = { already_assigned: 'already assigned', transferred_by_you: 'they transferred it', transferred_by_anyone: 'transferred by someone' };
@@ -87,7 +88,7 @@ export default function BatchInbox() {
         onClearAll={() => { setBox('received'); setCompanyId(''); }}
       />
 
-      <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
+      <TableScroll stickyFirst label="Batches" className="rounded-xl" style={{ border: '1px solid var(--color-border)' }}>
         <table className="w-full text-sm">
           <thead>
             <tr style={{ background: 'var(--color-surface)', color: 'var(--color-text-secondary)' }}>
@@ -112,7 +113,7 @@ export default function BatchInbox() {
                 ))}
           </tbody>
         </table>
-      </div>
+      </TableScroll>
 
       {active && <BatchDetail batch={active} me={user} canSend={canSend} isSuper={isSuper} onClose={() => setActive(null)} onChanged={() => { setActive(null); load(); }} />}
     </div>

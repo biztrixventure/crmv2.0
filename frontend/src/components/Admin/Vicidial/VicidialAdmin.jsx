@@ -5,6 +5,7 @@ import { Button, Alert } from '../../UI';
 import client from '../../../api/client';
 import ThemedSelect from '../../UI/Select';
 import { Loading, SectionHeader, PillTabs } from '../../UI/kit';
+import { TableScroll } from "../../UI/kit";
 
 // Superadmin config for the VICIdial integration: the per-company prefix
 // registry (makes the correlation code globally unique) and the VICIdial-agent
@@ -288,7 +289,7 @@ const Prefixes = () => {
       </div>
 
       {rows.length === 0 ? <p className="text-sm py-6 text-center" style={{ color: 'var(--color-text-tertiary)' }}>No prefixes yet.</p> : (
-        <div className="rounded-2xl overflow-hidden" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+        <TableScroll stickyFirst label="VICIdial" className="rounded-2xl" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
           <table className="w-full text-sm">
             <thead><tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
               {['Prefix', 'Company', 'Transfer dispos', 'Active', ''].map(h => <th key={h} className="px-4 py-2.5 text-left text-xs font-bold uppercase" style={{ color: 'var(--color-text-secondary)' }}>{h}</th>)}
@@ -307,7 +308,7 @@ const Prefixes = () => {
               ))}
             </tbody>
           </table>
-        </div>
+        </TableScroll>
       )}
     </div>
   );
@@ -542,7 +543,7 @@ const DispoMap = () => {
           </div>
 
           {rows.length === 0 ? <p className="text-sm py-6 text-center" style={{ color: 'var(--color-text-tertiary)' }}>No codes yet.</p> : (
-            <div className="rounded-2xl overflow-hidden" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+            <TableScroll stickyFirst label="VICIdial" className="rounded-2xl" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
               <table className="w-full text-sm">
                 <thead><tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
                   {['Dialer code', 'CRM disposition', 'Hits', ''].map(h => <th key={h} className="px-4 py-2.5 text-left text-xs font-bold uppercase" style={{ color: 'var(--color-text-secondary)' }}>{h}</th>)}
@@ -572,7 +573,7 @@ const DispoMap = () => {
                   })}
                 </tbody>
               </table>
-            </div>
+            </TableScroll>
           )}
         </>
       )}

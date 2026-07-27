@@ -9,6 +9,7 @@ import ThemedSelect from '../../UI/Select';
 import ThemedDate from '../../UI/ThemedDate';
 import { useAuth } from '../../../contexts/AuthContext';
 import { Loading, SectionHeader } from '../../UI/kit';
+import { TableScroll } from "../../UI/kit";
 
 const PRIORITY = { normal: { label: 'Normal', variant: 'secondary' }, high: { label: 'High', variant: 'warning' }, urgent: { label: 'Urgent', variant: 'error' } };
 const blank = { title: '', body: '', priority: 'normal', reshow_hours: '', target_type: 'global', target_roles: [], target_user_ids: [], target_company_ids: [], expires_at: '', is_active: true };
@@ -120,7 +121,7 @@ const AnnouncementsManager = () => {
       {loading ? <Loading variant="rows" rows={4} />
       : rows.length === 0 ? <div className="rounded-2xl p-12 text-center" style={{ backgroundColor: 'var(--color-surface)', border: '1px dashed var(--color-border)' }}><Megaphone size={40} className="mx-auto mb-3" style={{ color: 'var(--color-text-tertiary)', opacity: 0.5 }} /><p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>No announcements yet.</p></div>
       : (
-        <div className="rounded-2xl overflow-hidden" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+        <TableScroll stickyFirst label="Announcements" className="rounded-2xl" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
           <table className="w-full text-sm">
             <thead><tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
               {['Title', 'Audience', 'Priority', 'Reads', 'Status', ''].map(h => <th key={h} className="px-4 py-2.5 text-left text-xs font-bold uppercase" style={{ color: 'var(--color-text-secondary)' }}>{h}</th>)}
@@ -146,7 +147,7 @@ const AnnouncementsManager = () => {
               ))}
             </tbody>
           </table>
-        </div>
+        </TableScroll>
       )}
 
       {modal && <Modal row={modal.row} reference={reference} onClose={() => setModal(null)} onSave={save} />}
