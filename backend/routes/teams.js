@@ -11,7 +11,7 @@ const express = require('express');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
-const { isSuperAdmin, getUserRole, isCompanyMember, isCloserSideScope } = require('../models/helpers');
+const { isSuperAdmin, getUserRole, isCompanyMember, isCloserSideScope, getCompanyType } = require('../models/helpers');
 const { resolveTeamMemberIds, teamMetrics } = require('../utils/teamMetrics');
 const { attachAttainment } = require('../utils/quotaMetrics');
 
@@ -214,7 +214,14 @@ router.get('/:id/report', asyncHandler(async (req, res) => {
   // Attainment is measured over each QUOTA's own window, never the report's
   // date filter — a monthly quota stays monthly while you look at a 7-day view,
   // otherwise the ring would read 12% every Monday morning and mean nothing.
-  const closerSide = await isCloserSideScope(req.user.role, team.company_id);
+  // Company type decides the side, not the viewer's role: a superadmin matches
+  // no closer role, so a role-based answer told them a CLOSER company was
+  // fronter-side and credited the wrong column. Role is only the fallback when
+  // the company row can't be read.
+  const coType = await getCompanyType(team.company_id);
+  const closerSide = (coType === 'closer' || coType === 'fronter')
+    ? coType === 'closer'
+    : await isCloserSideScope(req.user.role, team.company_id);
 
   // ── Credited output, by SIDE. teamMetrics credits `sales`/`gross` through
   // closer_id and a fronter is never a sale's closer — so on a fronter company

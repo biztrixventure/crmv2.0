@@ -23,8 +23,24 @@ const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
 const {
-  isSuperAdmin, getUserRole, isCompanyMember, isCloserSideScope, resolveScopedCompanyId,
+  isSuperAdmin, getUserRole, isCompanyMember, isCloserSideScope, resolveScopedCompanyId, getCompanyType,
 } = require('../models/helpers');
+
+// Which column is this COMPANY judged on — leads sent, or deals closed?
+//
+// isCloserSideScope answers that from the VIEWER's role, which is right for
+// scoping a list ("show me my rows") but wrong for a company report. A
+// superadmin matches no closer role, so viewing a closer company they were told
+// "fronter" and the report would have counted fronter_id — the wrong column, on
+// the wrong side, reported as fact. A fronter company is judged on transfers no
+// matter who is looking, so company type wins and the viewer's role is only the
+// fallback when the company row can't be read.
+async function sideIsCloser(req, companyId) {
+  if (!companyId) return false;
+  const type = await getCompanyType(companyId);
+  if (type === 'closer' || type === 'fronter') return type === 'closer';
+  return isCloserSideScope(req.user.role, companyId);
+}
 const { resolveTeamMemberIds } = require('../utils/teamMetrics');
 const { getCatalog, attachAttainment, periodBounds, activitySeries } = require('../utils/quotaMetrics');
 const cache = require('../utils/cache');
@@ -90,7 +106,7 @@ const memberIds = (teamId, companyId) =>
 async function decorate(rows, { team, req }) {
   if (!rows.length) return [];
   const ids = await memberIds(team.id, team.company_id);
-  const closerSide = await isCloserSideScope(req.user.role, team.company_id);
+  const closerSide = await sideIsCloser(req,team.company_id);
   return attachAttainment(rows, {
     companyId: team.company_id, closerSide, memberIdsByTeam: { [team.id]: ids },
   });
@@ -184,7 +200,7 @@ router.get('/company', asyncHandler(async (req, res) => {
   // rows sharing a (metric, window, team) collapse into a single count.
   const byTeam = {};
   for (const id of teamIds) byTeam[id] = await memberIds(id, companyId);
-  const closerSide = await isCloserSideScope(req.user.role, companyId);
+  const closerSide = await sideIsCloser(req,companyId);
   const decorated = await attachAttainment(rows || [], { companyId, closerSide, memberIdsByTeam: byTeam });
 
   const teamName = Object.fromEntries((teams || []).map(t => [t.id, t]));
@@ -215,7 +231,7 @@ router.get('/mine', asyncHandler(async (req, res) => {
     if (!team) continue;
     const mine = rows.filter(r => r.team_id === tid);
     const ids = await memberIds(tid, team.company_id);
-    const closerSide = await isCloserSideScope(req.user.role, team.company_id);
+    const closerSide = await sideIsCloser(req,team.company_id);
 
     // The parent team quota rides along so the card can show "team at 61%" —
     // context for why this number matters, the same way a SPIFF shows the
@@ -282,7 +298,7 @@ router.get('/report', asyncHandler(async (req, res) => {
   const to   = req.query.to   || today;
 
   const manager = superadmin || (await canManageCompany(req, companyId));
-  const closerSide = await isCloserSideScope(req.user.role, companyId);
+  const closerSide = await sideIsCloser(req,companyId);
 
   const { data: allTeams } = await supabaseAdmin.from('teams')
     .select('id, name, team_type, lead_user_id, color, lead_can_edit, lead_can_allocate')
