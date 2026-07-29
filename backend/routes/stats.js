@@ -446,11 +446,29 @@ router.get('/team-trends', asyncHandler(async (req, res) => {
     ? 'fronter'
     : (isCloserSide ? 'closer' : 'both');
 
-  const [{ data: trs }, { data: sls }] = await Promise.all([
-    scopeT(supabaseAdmin.from('transfers').select('created_at, created_by')
-      .gte('created_at', windowStart).lte('created_at', windowEnd)).limit(20000),
-    scopeS(supabaseAdmin.from('sales').select('sale_date, created_at, status, closer_id, fronter_id')
-      .gte('created_at', windowStart).lte('created_at', windowEnd)).limit(20000),
+  // PostgREST enforces a HARD server-side row cap (5,000 on this project) and
+  // silently truncates past it — .limit(20000) is simply ignored, no error, no
+  // warning. A 30-day window on 1-Vertex is 5,199 transfers and this endpoint
+  // returned exactly 5,000, so the panel under-reported by 199 and looked
+  // plausible while doing it. Every "fetch rows, count them in JS" path has
+  // this ceiling; the only safe read is paging under the cap.
+  const PAGE = 1000, MAX_PAGES = 60;         // 60k rows, far past any window here
+  const pageAll = async (build) => {
+    const out = [];
+    for (let p = 0; p < MAX_PAGES; p++) {
+      const { data, error } = await build().range(p * PAGE, p * PAGE + PAGE - 1);
+      if (error) { logger.warn('TEAM_TRENDS', error.message); break; }
+      out.push(...(data || []));
+      if (!data || data.length < PAGE) break;
+    }
+    return out;
+  };
+
+  const [trs, sls] = await Promise.all([
+    pageAll(() => scopeT(supabaseAdmin.from('transfers').select('created_at, created_by')
+      .gte('created_at', windowStart).lte('created_at', windowEnd)).order('created_at', { ascending: true })),
+    pageAll(() => scopeS(supabaseAdmin.from('sales').select('sale_date, created_at, status, closer_id, fronter_id')
+      .gte('created_at', windowStart).lte('created_at', windowEnd)).order('created_at', { ascending: true })),
   ]);
 
   const dayOf = (d) => String(d || '').slice(0, 10);
