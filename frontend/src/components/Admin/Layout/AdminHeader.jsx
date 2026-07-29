@@ -34,8 +34,13 @@ const AdminHeader = ({
 
   return (
     <>
+      {/* Tighter padding + gaps below `sm` ONLY. Measured at 390 with the back
+          control in the row: 44+44 left, 278 right, 24 padding = 398 needed in
+          a 390 box, so the clusters overlapped by 8px. Trimming padding and
+          gaps buys 24px back without dropping a single control — every one of
+          these is a 44px touch target and none of them can shrink. */}
       <header
-        className="h-16 px-3 sm:px-4 lg:px-6 flex items-center justify-between gap-2 sticky top-0 z-40"
+        className="h-16 px-2 sm:px-4 lg:px-6 flex items-center justify-between gap-1 sm:gap-2 sticky top-0 z-40"
         style={{
           backgroundColor: 'var(--color-surface)',
           borderBottom: '1px solid var(--color-border)',
@@ -44,7 +49,7 @@ const AdminHeader = ({
         }}
       >
         {/* Left: Sidebar toggle + Logo + Title */}
-        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+        <div className="flex items-center gap-1.5 sm:gap-3 min-w-0">
           {/* Installed-PWA only, and only when there is somewhere to go back to.
               A home-screen app has no browser chrome, so without this the only
               back is an invisible edge swipe. Renders null everywhere else. */}
@@ -113,7 +118,7 @@ const AdminHeader = ({
         </div>
 
         {/* Right */}
-        <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
+        <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
           <MailLauncher />
           <ChatLauncher />
           <NotificationBell

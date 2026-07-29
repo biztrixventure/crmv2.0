@@ -100,11 +100,11 @@ const AppHeader = ({
       <div className="sticky top-0 z-50">
         {/* Main header bar */}
         <header
-          className={`header h-16 px-3 sm:px-5 lg:px-8 flex items-center justify-between gap-3 ${className}`}
+          className={`header h-16 px-2 sm:px-5 lg:px-8 flex items-center justify-between gap-1.5 sm:gap-3 ${className}`}
           {...props}
         >
           {/* Left: Logo & Title */}
-          <div className="flex items-center gap-3 min-w-0">
+          <div className="flex items-center gap-1.5 sm:gap-3 min-w-0">
             {/* Installed-PWA only, and only when there is somewhere to go back
                 to. A home-screen app has no browser chrome, so without this the
                 only back is an invisible edge swipe. Null everywhere else. */}
@@ -145,7 +145,10 @@ const AppHeader = ({
           )}
 
           {/* Right: Chat + Notifications + Theme · Profile · Logout */}
-          <div className="flex items-center gap-1.5 flex-shrink-0">
+          {/* Below `sm` these gaps are the only slack in the row once the
+              standalone back control is present — see AdminHeader for the
+              measurement. Unchanged from `sm` up. */}
+          <div className="flex items-center gap-1 sm:gap-1.5 flex-shrink-0">
             {/* Control cluster */}
             <MailLauncher />
             <ChatLauncher />
