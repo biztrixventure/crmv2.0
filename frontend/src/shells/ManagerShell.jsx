@@ -20,9 +20,30 @@ import {
   Search, Star, Shield, FileText, RefreshCw, AlertCircle, Plus,
   MessageSquare, Trash2, Activity, ChevronLeft, ChevronRight, CalendarDays, HelpCircle, FileSpreadsheet, Trophy, Copy,
   UserCircle, Database, Settings2, Zap, Building2, CreditCard,
+  LayoutGrid,
 } from "lucide-react";
-import { Card, Badge, Alert } from "../components/UI";
-import { TableScroll, PillTabs, Loading, EmptyState } from "../components/UI/kit";
+import { Badge, Alert } from "../components/UI";
+import { Panel, TableScroll, Loading, EmptyState, SectionHeader } from "../components/UI/kit";
+import ChromeTabs from "../components/UI/ChromeTabs";
+
+// ── Two-tier nav, the ComplianceShell pattern (docs/ui-design-system.md) ─────
+// This shell had grown to ~20 sibling tabs on one strip, which is a scroll bar
+// pretending to be navigation: you cannot see where you are, and half the set
+// is always off-screen. Compliance solves it with task GROUPS on top and the
+// active group's tabs below, so the second row is never longer than ~5.
+//
+// Groups reference tab KEYS ONLY — no key is renamed, moved out of CODE_TABS,
+// or invented here, because readonly-admin governance stores those ids. A tab
+// that matches no group still renders, under "More", so adding a tab to
+// CODE_TABS later can never make it silently disappear.
+const TAB_GROUPS = [
+  { id: 'g_overview',  label: 'Overview',  icon: TrendingUp, tabs: ['overview'] },
+  { id: 'g_records',   label: 'Records',   icon: Database,   tabs: ['transfers', 'team_sales', 'my_sales', 'search', 'activity_log'] },
+  { id: 'g_callbacks', label: 'Callbacks', icon: Phone,      tabs: ['callbacks', 'numbers', 'batches', 'roster'] },
+  { id: 'g_team',      label: 'Team',      icon: Users,      tabs: ['my_team', 'teams', 'spiffs'] },
+  { id: 'g_resources', label: 'Resources', icon: HelpCircle, tabs: ['faqs', 'scripts', 'note_shortcodes'] },
+  { id: 'g_tools',     label: 'Tools',     icon: Shield,     tabs: ['tool_customer_profiles', 'tool_data_analyzer', 'tool_chat_control', 'dnc', 'card_validator'] },
+];
 import DateRangePicker, { getPresetRange } from "../components/UI/DateRangePicker";
 import { AppHeader } from "../components/Layout";
 import { useSales } from "../hooks/useSales";
@@ -320,6 +341,21 @@ const ManagerShell = ({ workspaceMode = false }) => {
     () => applyManagerLayout(CODE_TABS).filter(t => sideAllowsTab(t.key)),
     [applyManagerLayout, CODE_TABS, sideAllowsTab],
   );
+
+  // Groups, resolved against the tabs this user ACTUALLY has. An empty group
+  // never renders, so a fronter admin sees no "Tools" chrome tab just because
+  // the catalog defines one.
+  const navGroups = useMemo(() => {
+    const out = TAB_GROUPS
+      .map(g => ({ ...g, items: TABS.filter(t => g.tabs.includes(t.key)) }))
+      .filter(g => g.items.length > 0);
+    const claimed = new Set(TAB_GROUPS.flatMap(g => g.tabs));
+    const orphans = TABS.filter(t => !claimed.has(t.key));
+    if (orphans.length) out.push({ id: 'g_more', label: 'More', icon: LayoutGrid, items: orphans });
+    return out;
+  }, [TABS]);
+
+  const activeGroup = navGroups.find(g => g.items.some(t => t.key === activeTab)) || navGroups[0];
 
   const tabKeys = useMemo(() => new Set(TABS.map(t => t.key)), [TABS]);
 
@@ -673,16 +709,20 @@ const ManagerShell = ({ workspaceMode = false }) => {
 
       <EngagementBanners />
       {activeNav !== 'dashboard' && <CrossRoleContent section={activeNav} user={user} />}
-      <main className="w-full px-4 sm:px-6 lg:px-8 py-6 relative z-10"
+      {/* Compliance's shell padding — full width, no max-w cap. */}
+      <main className="w-full px-4 sm:px-6 lg:px-8 xl:px-10 py-6 sm:py-8 relative z-10"
         style={{ display: activeNav !== 'dashboard' ? 'none' : undefined }}>
 
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8 animate-fade-in">
-          <div className="min-w-0">
-            <h2 className="text-2xl sm:text-3xl font-bold mb-1 text-text break-words">Welcome back, {user?.first_name || user?.email}!</h2>
-            <p className="m-0 text-sm sm:text-base text-text-secondary break-words"><strong>{user?.role_name || user?.role}</strong> at <strong>{user?.company_name}</strong></p>
-          </div>
-          <div className="flex items-center gap-2 flex-wrap flex-shrink-0">
+        {/* Page identity — SectionHeader level="page", the same treatment every
+            migrated surface uses. The gradient survives only as the 9x9 icon
+            chip; the hairline baseline under it is what makes the nav below
+            read as belonging to this page instead of floating. */}
+        <SectionHeader
+          level="page"
+          icon={TrendingUp}
+          title={workspaceMode ? 'Custom Access Workspace' : (user?.company_name || 'Dashboard')}
+          subtitle={`${user?.role_name || user?.role}${user?.first_name ? ` · ${user.first_name}` : ''}`}
+          actions={<div className="flex items-center gap-2 flex-wrap flex-shrink-0">
             {/* Export gated ONLY by Data Egress (canExport). We deliberately do
                 NOT also gate on the shell-layout action toggle: that config
                 loads async (~2s after mount) so it made the button flash in then
@@ -699,30 +739,41 @@ const ManagerShell = ({ workspaceMode = false }) => {
               style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
               <RefreshCw size={16} /> Refresh
             </button>
-          </div>
-        </div>
+          </div>}
+        />
 
         {exportOpen && <ManagerExportModal onClose={() => setExportOpen(false)} agents={companyAgents} />}
         {dupOpen && <DuplicateRecordsModal onClose={() => setDupOpen(false)} title="Duplicate Transfer Records" />}
 
-        {/* Tab bar */}
-        <div className="flex items-center justify-between mb-6 gap-3 flex-wrap">
-          {/* The kit's segmented control — the same sub-nav the Compliance
-              shell uses (docs/ui-design-system.md). It owns the recessed track,
-              the lifted active tab, and an overflow fade that appears only when
-              the track actually clips, so this shell stops carrying its own
-              hand-rolled version of all three. min-w-0 is still what keeps the
-              overflow inside the track instead of handing it to the page. */}
-          <PillTabs
-            items={TABS.map(t => ({ key: t.key, label: t.label, icon: t.icon }))}
-            value={activeTab}
-            onChange={setActiveTab}
-            className="min-w-0 w-full sm:w-auto sm:flex-1"
-          />
+        {/* Tier 1 — task groups. basis-full below sm puts the date picker on its
+            own line rather than letting it eat ~180px out of the strip on a
+            phone; with flex-1 the tabs shrank instead of the picker wrapping.
+            Clicking a group jumps to its first tab, so there are no dead clicks. */}
+        <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+          <ChromeTabs variant="chrome" className="basis-full sm:basis-0 sm:flex-1 min-w-0"
+            items={navGroups.map(g => ({
+              key: g.id, label: g.label, icon: g.icon,
+              count: g.items.length > 1 ? g.items.length : null,
+            }))}
+            value={activeGroup?.id}
+            onChange={gid => {
+              const g = navGroups.find(x => x.id === gid);
+              if (g?.items[0]) setActiveTab(g.items[0].key);
+            }} />
           {isMgrFilterVisible('date_range') && (
             <DateRangePicker onChange={handleDateChange} defaultPreset="today" />
           )}
         </div>
+
+        {/* Tier 2 — the active group's tabs. A one-tab group shows no second
+            row at all; it still needs the bottom margin the row would have
+            provided, or the content jumps up against the chrome tabs. */}
+        {activeGroup && activeGroup.items.length > 1 ? (
+          <ChromeTabs variant="pill" size="sm" className="mt-4 mb-6"
+            items={activeGroup.items.map(t => ({ key: t.key, label: t.label, icon: t.icon }))}
+            value={activeTab}
+            onChange={setActiveTab} />
+        ) : <div className="mb-6" />}
 
         {/* ── OVERVIEW TAB ── */}
         {activeTab === 'overview' && (
@@ -750,7 +801,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
 
             {/* ── Conversion funnel ── */}
             {!loading && overviewTotals.transfers > 0 && (
-              <Card className="px-4 sm:px-6 py-4">
+              <Panel pad="none" className="px-4 sm:px-6 py-4">
                 <div className="flex items-center gap-4 flex-wrap sm:flex-nowrap">
                   <p className="m-0 text-xs font-bold uppercase tracking-widest whitespace-nowrap" style={{ color: 'var(--color-text-tertiary)' }}>
                     Funnel
@@ -812,7 +863,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
                     )}
                   </div>
                 </div>
-              </Card>
+              </Panel>
             )}
 
             {/* ── Leaderboards ── */}
@@ -825,7 +876,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
                   their leads closed. company_admin only; every other role keeps
                   the existing fronter-then-closer order. */}
               {hasPermission('view_fronter_stats') && (
-                <Card className="p-4 sm:p-6" style={{ order: closerBoardFirst ? 1 : 0 }}>
+                <Panel pad="lg" style={{ order: closerBoardFirst ? 1 : 0 }}>
                   <div className="flex items-center justify-between mb-5">
                     <h3 className="text-base font-bold text-text flex items-center gap-2">
                       <BarChart3 size={16} /> Fronter Leaderboard
@@ -882,12 +933,12 @@ const ManagerShell = ({ workspaceMode = false }) => {
                           );
                         })
                   }
-                </Card>
+                </Panel>
               )}
 
               {/* Closer leaderboard */}
               {hasPermission('view_closer_stats') && (
-                <Card className="p-4 sm:p-6" style={{ order: closerBoardFirst ? 0 : 1 }}>
+                <Panel pad="lg" style={{ order: closerBoardFirst ? 0 : 1 }}>
                   <div className="flex items-center justify-between mb-5">
                     <h3 className="text-base font-bold text-text flex items-center gap-2">
                       <TrendingUp size={16} /> Closer Leaderboard
@@ -932,7 +983,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
                                 </div>
                                 <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--color-border)' }}>
                                   <div className="h-full rounded-full transition-all duration-500"
-                                    style={{ width: `${pct}%`, background: 'linear-gradient(135deg,#16a34a,#15803d)' }} />
+                                    style={{ width: `${pct}%`, background: 'linear-gradient(135deg, var(--color-success-600), var(--color-success-700))' }} />
                                 </div>
                               </div>
                               {/* Stats */}
@@ -947,7 +998,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
                           );
                         })
                   }
-                </Card>
+                </Panel>
               )}
             </div>
           </div>
@@ -955,7 +1006,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
 
         {/* ── TEAM TRANSFERS TAB ── */}
         {activeTab === 'transfers' && (
-          <Card className="p-4 sm:p-6">
+          <Panel pad="lg">
             <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
               <h3 className="text-xl font-bold text-text flex items-center gap-2"><Send size={20} /> Team Transfers</h3>
               <span className="text-sm text-text-secondary">{xferTabTotal} total</span>
@@ -966,16 +1017,22 @@ const ManagerShell = ({ workspaceMode = false }) => {
               <button
                 onClick={() => { setXferTodayOnly(v => !v); setXferPage(1); }}
                 className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all"
+                /* The active state was three baked-in blues (#eff6ff fill,
+                   #2563eb text, #bfdbfe border). A near-white fill stays
+                   near-white in dark mode while the text around it flips to
+                   near-white too, so the pressed state read as an unreadable
+                   1.15:1 smear. color-mix keeps the tint tied to the theme's
+                   own info color at both ends. */
                 style={{
-                  backgroundColor: xferTodayOnly ? '#eff6ff' : 'var(--color-bg-secondary)',
-                  color:            xferTodayOnly ? '#2563eb' : 'var(--color-text-secondary)',
-                  borderColor:      xferTodayOnly ? '#bfdbfe' : 'var(--color-border)',
+                  backgroundColor: xferTodayOnly ? 'color-mix(in srgb, var(--color-info-600) 18%, transparent)' : 'var(--color-bg-secondary)',
+                  color:            xferTodayOnly ? 'var(--color-info-600)' : 'var(--color-text-secondary)',
+                  borderColor:      xferTodayOnly ? 'color-mix(in srgb, var(--color-info-600) 40%, transparent)' : 'var(--color-border)',
                 }}>
                 <CalendarDays size={12} />
                 Created Today
                 {xferTodayCount !== null && (
                   <span className="px-1.5 py-0.5 rounded-md text-[10px] font-bold"
-                    style={{ backgroundColor: xferTodayOnly ? '#bfdbfe' : 'var(--color-border)', color: xferTodayOnly ? '#1d4ed8' : 'var(--color-text-secondary)' }}>
+                    style={{ backgroundColor: xferTodayOnly ? 'color-mix(in srgb, var(--color-info-600) 30%, transparent)' : 'var(--color-border)', color: xferTodayOnly ? 'var(--color-info-600)' : 'var(--color-text-secondary)' }}>
                     {xferTodayCount}
                   </span>
                 )}
@@ -1099,12 +1156,12 @@ const ManagerShell = ({ workspaceMode = false }) => {
                 <Pagination page={xferPage} total={xferTabTotal} pageSize={PAGE_SIZE} onChange={setXferPage} />
               </>
             )}
-          </Card>
+          </Panel>
         )}
 
         {/* ── TEAM SALES TAB ── */}
         {activeTab === 'team_sales' && (
-          <Card className="p-4 sm:p-6">
+          <Panel pad="lg">
             <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
               <h3 className="text-xl font-bold text-text flex items-center gap-2"><DollarSign size={20} /> Team Sales</h3>
               <span className="text-sm text-text-secondary">{salesTabTotal} total</span>
@@ -1186,7 +1243,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
                 <Pagination page={salesPage} total={salesTabTotal} pageSize={PAGE_SIZE} onChange={setSalesPage} />
               </>
             )}
-          </Card>
+          </Panel>
         )}
 
         {/* ── MY SALES TAB (closer-manager who also closes) ── */}
@@ -1204,7 +1261,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
                 </button>
               )}
             </div>
-            <Card className="p-4 sm:p-6">
+            <Panel pad="lg">
               {salesLoading ? <Loading variant="table" rows={5} />
                 : sales.filter(s => s.closer_id === user?.id).length === 0 ? <EmptyState compact icon={DollarSign} title="No personal sales yet" />
                 : (
@@ -1243,13 +1300,13 @@ const ManagerShell = ({ workspaceMode = false }) => {
                     ))}
                   </div>
                 )}
-            </Card>
+            </Panel>
           </div>
         )}
 
         {/* ── ACTIVITY LOG TAB ── */}
         {activeTab === 'activity_log' && (
-          <Card className="p-4 sm:p-6">
+          <Panel pad="lg">
             <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
               <h3 className="text-xl font-bold text-text flex items-center gap-2"><Activity size={20} /> Activity Log</h3>
               {companyAgents.length > 0 && (
@@ -1308,7 +1365,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
                 <Pagination page={activityPage} total={activityTotal} pageSize={PAGE_SIZE} onChange={setActivityPage} />
               </>
             )}
-          </Card>
+          </Panel>
         )}
 
         {/* ── PANEL TABS (reuse existing components) ── */}
