@@ -587,14 +587,25 @@ const ManagerShell = ({ workspaceMode = false }) => {
   const mgrMetrics = {
     transfers_today: { value: stats?.todayTransfers || 0, onClick: goXfer('today'), title: 'Transfers today' },
     transfers_month: { value: stats?.monthTransfers || 0, onClick: goXfer('month'), title: 'Transfers this month' },
-    transfers_total: { value: overviewTotals.transfers,   onClick: goXfer('all'),   title: 'All transfers' },
+    // ── "Total" means ALL TIME, not "whatever the date picker says" ─────────
+    // overviewTotals comes from loadOverview, which passes date_from/date_to,
+    // so with the default "Today" preset the segment labelled Total showed the
+    // same number as the Today segment beside it — measured live as Transfers
+    // Today 0 / Total 0 on a company holding 17,459, and Sales Today 1 /
+    // Total 1 on 6,474. /stats/dashboard is already all-time AND role-scoped
+    // server-side, so read the totals from there and keep overviewTotals for
+    // the funnel + leaderboards, which SHOULD follow the picker.
+    transfers_total: { value: stats?.totalTransfers ?? overviewTotals.transfers, onClick: goXfer('all'),   title: 'All transfers' },
     sales_today:     { value: stats?.todaySales || 0,     onClick: goSales('', 'today'),  title: 'Sales today' },
     sales_month:     { value: stats?.monthSales || 0,     onClick: goSales('', 'month'),  title: 'Sales this month' },
-    sales_total:     { value: overviewTotals.sales,       onClick: goSales('', 'all'),    title: 'All sales' },
+    sales_total:     { value: stats?.totalSales ?? overviewTotals.sales, onClick: goSales('', 'all'),    title: 'All sales' },
     approved_today:  { value: stats?.todayClosedWon || 0, onClick: goSales('closed_won', 'today') },
     approved_month:  { value: stats?.monthClosedWon || 0, onClick: goSales('closed_won', 'month') },
-    approved_total:  { value: overviewTotals.approved,    onClick: goSales('closed_won', 'all') },
-    pending_total:   { value: overviewTotals.pendingReview, onClick: () => { setSalesStatus('pending_review'); setSalesPage(1); setActiveTab('team_sales'); }, title: 'Show pending-review sales' },
+    // closedWon only: overviewTotals.approved summed status 'sold' + 'closed_won',
+    // and 'sold' is 0 in every company in this database — the extra term bought
+    // nothing but a second round-trip and a number that moved with the picker.
+    approved_total:  { value: stats?.closedWon ?? overviewTotals.approved,    onClick: goSales('closed_won', 'all') },
+    pending_total:   { value: stats?.awaitingCompliance ?? overviewTotals.pendingReview, onClick: () => { setSalesStatus('pending_review'); setSalesPage(1); setActiveTab('team_sales'); }, title: 'Show pending-review sales' },
     returned:        { value: stats?.needsRevision || 0, onClick: () => { setSalesStatus('needs_revision'); setSalesPage(1); setActiveTab('team_sales'); }, title: 'Sales compliance returned for revision' },
     cancelled_today: { value: stats?.todayCancelled || 0, onClick: goSales('cancelled', 'today') },
     cancelled_month: { value: stats?.monthCancelled || 0, onClick: goSales('cancelled', 'month') },

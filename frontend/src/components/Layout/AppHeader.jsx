@@ -237,7 +237,11 @@ const AppHeader = ({
         {navItems.length > 0 && (
           <nav className="px-3 sm:px-5 lg:px-8 flex items-center h-11 overflow-x-auto"
             style={{ backgroundColor: 'var(--color-surface)', borderBottom: '1px solid var(--color-border)', boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}>
-            <div className="max-w-7xl w-full mx-auto flex items-center gap-0.5">
+            {/* w-max/min-w-full, not w-full: inside the overflow-x-auto nav a
+                w-full row is capped at the container, so the tabs (which have
+                no flex-shrink-0) were squeezed until their padding collapsed
+                and the labels ran together — "CalendarTeam Roles" at 390. */}
+            <div className="max-w-7xl w-max min-w-full mx-auto flex items-center gap-0.5">
               <NavTab active={activeNav === 'dashboard'} onClick={() => onNavChange('dashboard')} icon={LayoutGrid} label="My Dashboard" />
               <div className="w-px h-5 mx-1.5 flex-shrink-0" style={{ backgroundColor: 'var(--color-border)' }} />
               {navItems.map(item => (
@@ -265,7 +269,7 @@ const AppHeader = ({
 const NavTab = ({ active, onClick, icon: Icon, label }) => (
   <button
     onClick={onClick}
-    className="relative flex items-center gap-2 px-3.5 h-11 text-sm font-semibold whitespace-nowrap transition-colors duration-150"
+    className="relative flex items-center gap-2 px-3.5 h-11 text-sm font-semibold whitespace-nowrap flex-shrink-0 transition-colors duration-150"
     style={{ color: active ? 'var(--color-primary-700)' : 'var(--color-text-secondary)' }}
     onMouseEnter={e => { if (!active) e.currentTarget.style.color = 'var(--color-text)'; }}
     onMouseLeave={e => { if (!active) e.currentTarget.style.color = 'var(--color-text-secondary)'; }}
