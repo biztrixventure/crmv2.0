@@ -22,6 +22,7 @@ import {
   UserCircle, Database, Settings2, Zap, Building2, CreditCard,
 } from "lucide-react";
 import { Card, Badge, Alert } from "../components/UI";
+import { TableScroll } from "../components/UI/kit";
 import DateRangePicker, { getPresetRange } from "../components/UI/DateRangePicker";
 import { AppHeader } from "../components/Layout";
 import { useSales } from "../hooks/useSales";
@@ -616,11 +617,11 @@ const ManagerShell = ({ workspaceMode = false }) => {
 
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8 animate-fade-in">
-          <div>
-            <h2 className="text-3xl font-bold mb-1 text-text">Welcome back, {user?.first_name || user?.email}!</h2>
-            <p className="text-text-secondary"><strong>{user?.role_name || user?.role}</strong> at <strong>{user?.company_name}</strong></p>
+          <div className="min-w-0">
+            <h2 className="text-2xl sm:text-3xl font-bold mb-1 text-text break-words">Welcome back, {user?.first_name || user?.email}!</h2>
+            <p className="m-0 text-sm sm:text-base text-text-secondary break-words"><strong>{user?.role_name || user?.role}</strong> at <strong>{user?.company_name}</strong></p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap flex-shrink-0">
             {/* Export gated ONLY by Data Egress (canExport). We deliberately do
                 NOT also gate on the shell-layout action toggle: that config
                 loads async (~2s after mount) so it made the button flash in then
@@ -645,7 +646,11 @@ const ManagerShell = ({ workspaceMode = false }) => {
 
         {/* Tab bar */}
         <div className="flex items-center justify-between mb-6 gap-3 flex-wrap">
-          <div className="flex gap-1 p-1 rounded-xl overflow-x-auto"
+          {/* min-w-0 is what makes overflow-x-auto actually work here: as a flex
+              child this strip inherits min-width:auto, sizes itself to all ~20
+              tabs, and hands the overflow to the PAGE — which is why the whole
+              shell scrolled sideways at 390 instead of the tab strip doing it. */}
+          <div className="flex gap-1 p-1 rounded-xl overflow-x-auto min-w-0 w-full sm:w-auto sm:flex-1"
             style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
             {TABS.map(tab => (
               <button key={tab.key} onClick={() => setActiveTab(tab.key)}
@@ -690,20 +695,23 @@ const ManagerShell = ({ workspaceMode = false }) => {
 
             {/* ── Conversion funnel ── */}
             {!loading && overviewTotals.transfers > 0 && (
-              <Card className="px-6 py-4">
+              <Card className="px-4 sm:px-6 py-4">
                 <div className="flex items-center gap-4 flex-wrap sm:flex-nowrap">
-                  <p className="text-xs font-bold uppercase tracking-widest whitespace-nowrap" style={{ color: 'var(--color-text-tertiary)' }}>
+                  <p className="m-0 text-xs font-bold uppercase tracking-widest whitespace-nowrap" style={{ color: 'var(--color-text-tertiary)' }}>
                     Funnel
                   </p>
-                  <div className="flex-1 flex items-center">
+                  {/* At 390 five steps + four arrows cannot fit; let the funnel
+                      scroll inside its own box rather than squeezing each step
+                      to an unreadable sliver (or pushing the page wide). */}
+                  <div className="flex-1 min-w-0 flex items-center overflow-x-auto">
                     {/* Step: Transfers */}
-                    <div className="flex flex-col items-center flex-1">
+                    <div className="flex flex-col items-center flex-1 min-w-[58px]">
                       <p className="text-xl font-black text-info-600">{overviewTotals.transfers}</p>
-                      <p className="text-[11px] text-text-secondary font-medium">Transfers</p>
+                      <p className="m-0 text-[11px] leading-none text-text-secondary font-medium">Transfers</p>
                     </div>
                     {/* Arrow 1 */}
                     <div className="flex flex-col items-center px-1">
-                      <span className="text-[10px] font-bold" style={{ color: 'var(--color-text-tertiary)' }}>
+                      <span className="text-[11px] sm:text-[10px] leading-none font-bold" style={{ color: 'var(--color-text-tertiary)' }}>
                         {overviewTotals.transfers > 0 ? `${Math.round((overviewTotals.sales / overviewTotals.transfers) * 100)}%` : '—'}
                       </span>
                       <div className="flex items-center gap-0.5">
@@ -712,13 +720,13 @@ const ManagerShell = ({ workspaceMode = false }) => {
                       </div>
                     </div>
                     {/* Step: Sales */}
-                    <div className="flex flex-col items-center flex-1">
+                    <div className="flex flex-col items-center flex-1 min-w-[58px]">
                       <p className="text-xl font-black text-success-600">{overviewTotals.sales}</p>
-                      <p className="text-[11px] text-text-secondary font-medium">Sales</p>
+                      <p className="m-0 text-[11px] leading-none text-text-secondary font-medium">Sales</p>
                     </div>
                     {/* Arrow 2 */}
                     <div className="flex flex-col items-center px-1">
-                      <span className="text-[10px] font-bold" style={{ color: 'var(--color-text-tertiary)' }}>
+                      <span className="text-[11px] sm:text-[10px] leading-none font-bold" style={{ color: 'var(--color-text-tertiary)' }}>
                         {overviewTotals.sales > 0 ? `${Math.round((overviewTotals.approved / overviewTotals.sales) * 100)}%` : '—'}
                       </span>
                       <div className="flex items-center gap-0.5">
@@ -727,23 +735,23 @@ const ManagerShell = ({ workspaceMode = false }) => {
                       </div>
                     </div>
                     {/* Step: Approved */}
-                    <div className="flex flex-col items-center flex-1">
+                    <div className="flex flex-col items-center flex-1 min-w-[58px]">
                       <p className="text-xl font-black" style={{ color: 'var(--color-success-700, #15803d)' }}>{overviewTotals.approved}</p>
-                      <p className="text-[11px] text-text-secondary font-medium">Approved</p>
+                      <p className="m-0 text-[11px] leading-none text-text-secondary font-medium">Approved</p>
                     </div>
                     {/* Pending wedge */}
                     {overviewTotals.pendingReview > 0 && (
                       <>
                         <div className="flex flex-col items-center px-1">
-                          <span className="text-[10px] font-bold text-warning-500">+{overviewTotals.pendingReview}</span>
+                          <span className="text-[11px] sm:text-[10px] leading-none font-bold text-warning-500">+{overviewTotals.pendingReview}</span>
                           <div className="flex items-center gap-0.5">
                             <div className="h-px w-6 sm:w-10" style={{ backgroundColor: 'var(--color-warning-200)' }} />
                             <ArrowRight size={12} className="text-warning-400" />
                           </div>
                         </div>
-                        <div className="flex flex-col items-center flex-1">
+                        <div className="flex flex-col items-center flex-1 min-w-[58px]">
                           <p className="text-xl font-black text-warning-600">{overviewTotals.pendingReview}</p>
-                          <p className="text-[11px] text-text-secondary font-medium">In Review</p>
+                          <p className="m-0 text-[11px] leading-none text-text-secondary font-medium">In Review</p>
                         </div>
                       </>
                     )}
@@ -757,7 +765,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
 
               {/* Fronter leaderboard */}
               {hasPermission('view_fronter_stats') && (
-                <Card className="p-6">
+                <Card className="p-4 sm:p-6">
                   <div className="flex items-center justify-between mb-5">
                     <h3 className="text-base font-bold text-text flex items-center gap-2">
                       <BarChart3 size={16} /> Fronter Leaderboard
@@ -819,7 +827,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
 
               {/* Closer leaderboard */}
               {hasPermission('view_closer_stats') && (
-                <Card className="p-6">
+                <Card className="p-4 sm:p-6">
                   <div className="flex items-center justify-between mb-5">
                     <h3 className="text-base font-bold text-text flex items-center gap-2">
                       <TrendingUp size={16} /> Closer Leaderboard
@@ -887,7 +895,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
 
         {/* ── TEAM TRANSFERS TAB ── */}
         {activeTab === 'transfers' && (
-          <Card className="p-6">
+          <Card className="p-4 sm:p-6">
             <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
               <h3 className="text-xl font-bold text-text flex items-center gap-2"><Send size={20} /> Team Transfers</h3>
               <span className="text-sm text-text-secondary">{xferTabTotal} total</span>
@@ -943,10 +951,10 @@ const ManagerShell = ({ workspaceMode = false }) => {
             {xferTabLoading ? (
               <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" /></div>
             ) : xferTabRows.length === 0 ? (
-              <p className="text-text-secondary text-center py-8">No transfers found.</p>
+              <p className="m-0 text-text-secondary text-center py-8">No transfers found.</p>
             ) : (
               <>
-                <div className="overflow-x-auto">
+                <TableScroll stickyFirst label="Team transfers">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-border">
@@ -1026,7 +1034,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
                       ))}
                     </tbody>
                   </table>
-                </div>
+                </TableScroll>
                 <Pagination page={xferPage} total={xferTabTotal} pageSize={PAGE_SIZE} onChange={setXferPage} />
               </>
             )}
@@ -1035,7 +1043,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
 
         {/* ── TEAM SALES TAB ── */}
         {activeTab === 'team_sales' && (
-          <Card className="p-6">
+          <Card className="p-4 sm:p-6">
             <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
               <h3 className="text-xl font-bold text-text flex items-center gap-2"><DollarSign size={20} /> Team Sales</h3>
               <span className="text-sm text-text-secondary">{salesTabTotal} total</span>
@@ -1068,10 +1076,10 @@ const ManagerShell = ({ workspaceMode = false }) => {
             {salesTabLoading ? (
               <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" /></div>
             ) : salesTabRows.length === 0 ? (
-              <p className="text-text-secondary text-center py-8">No sales found.</p>
+              <p className="m-0 text-text-secondary text-center py-8">No sales found.</p>
             ) : (
               <>
-                <div className="overflow-x-auto">
+                <TableScroll stickyFirst label="Team sales">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-border">
@@ -1112,7 +1120,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
                       ))}
                     </tbody>
                   </table>
-                </div>
+                </TableScroll>
                 <Pagination page={salesPage} total={salesTabTotal} pageSize={PAGE_SIZE} onChange={setSalesPage} />
               </>
             )}
@@ -1134,7 +1142,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
                 </button>
               )}
             </div>
-            <Card className="p-6">
+            <Card className="p-4 sm:p-6">
               {salesLoading ? <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" /></div>
                 : sales.filter(s => s.closer_id === user?.id).length === 0 ? <p className="text-text-secondary text-center py-8">No personal sales yet.</p>
                 : (
@@ -1179,7 +1187,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
 
         {/* ── ACTIVITY LOG TAB ── */}
         {activeTab === 'activity_log' && (
-          <Card className="p-6">
+          <Card className="p-4 sm:p-6">
             <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
               <h3 className="text-xl font-bold text-text flex items-center gap-2"><Activity size={20} /> Activity Log</h3>
               {companyAgents.length > 0 && (
@@ -1199,10 +1207,10 @@ const ManagerShell = ({ workspaceMode = false }) => {
             {activityLoading ? (
               <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" /></div>
             ) : activityLogs.length === 0 ? (
-              <p className="text-text-secondary text-center py-8">No activity yet.</p>
+              <p className="m-0 text-text-secondary text-center py-8">No activity yet.</p>
             ) : (
               <>
-                <div className="overflow-x-auto">
+                <TableScroll stickyFirst label="Activity log">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-border">
@@ -1233,7 +1241,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
                       ))}
                     </tbody>
                   </table>
-                </div>
+                </TableScroll>
                 <Pagination page={activityPage} total={activityTotal} pageSize={PAGE_SIZE} onChange={setActivityPage} />
               </>
             )}
