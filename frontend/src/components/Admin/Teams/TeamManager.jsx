@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Users, Plus, Pencil, Trash2, Save, X, Crown, UserPlus, BarChart3, Target,
   RefreshCw, TrendingUp, Phone, DollarSign,
@@ -79,7 +79,15 @@ export default function TeamManager() {
 
   const TeamCard = ({ t, depth = 0 }) => (
     <div style={{ marginLeft: depth * 20 }}>
-      <div className="rounded-2xl p-4 mb-2" style={{ ...box, borderLeft: `4px solid ${t.color || TYPE_COLOR[t.team_type] || '#6b7280'}` }}>
+      <div className="rounded-2xl p-4 mb-2" style={{
+        ...box,
+        borderLeft: `4px solid ${t.color || TYPE_COLOR[t.team_type] || '#6b7280'}`,
+        // The card whose analytics are on screen is marked, so on a long list it
+        // is obvious which team the report above belongs to.
+        ...(reportTeam?.id === t.id
+          ? { boxShadow: `0 0 0 2px ${accent('primary').fg}`, background: accent('primary').soft }
+          : null),
+      }}>
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
@@ -94,7 +102,14 @@ export default function TeamManager() {
             )}
           </div>
           <div className="flex items-center gap-1 flex-shrink-0">
-            <button onClick={() => setReportTeam(t)} title="Team report" className="p-1.5 rounded-lg" style={{ border: '1px solid var(--color-border)', color: 'var(--color-primary-600)' }}><BarChart3 size={14} /></button>
+            {/* Toggle, not open: the report is on the page now, so tapping the
+                same team again closes it instead of doing nothing. */}
+            <button onClick={() => setReportTeam(cur => (cur?.id === t.id ? null : t))}
+              title={reportTeam?.id === t.id ? 'Hide analytics' : 'Team analytics'}
+              className="p-1.5 rounded-lg"
+              style={reportTeam?.id === t.id
+                ? { border: '1px solid transparent', background: accent('primary').fg, color: '#fff' }
+                : { border: '1px solid var(--color-border)', color: 'var(--color-primary-600)' }}><BarChart3 size={14} /></button>
             <button onClick={() => setEditTeam(t)} title="Edit" className="p-1.5 rounded-lg" style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}><Pencil size={14} /></button>
             <button onClick={() => delTeam(t)} title="Delete" className="p-1.5 rounded-lg" style={{ border: '1px solid var(--color-border)', color: '#ef4444' }}><Trash2 size={14} /></button>
           </div>
@@ -137,6 +152,19 @@ export default function TeamManager() {
 
       {err && <div className="rounded-xl p-3 text-xs" style={{ backgroundColor: 'var(--color-error-50)', color: 'var(--color-error-700)', border: '1px solid var(--color-error-200)' }}>{err}</div>}
 
+      {/* Analytics open INLINE, on this page, not in a dialog. A modal capped the
+          charts at its own width, forced a scroll inside a scroll on a phone, and
+          hid the team list you need in order to compare teams. Inline lets the
+          report use the full column and keeps the roster visible underneath. */}
+      {reportTeam && (
+        <TeamReport
+          team={reportTeam}
+          teams={teams}
+          onPick={(t) => setReportTeam(t)}
+          onClose={() => setReportTeam(null)}
+        />
+      )}
+
       {loading ? <Loading variant="cards" cards={3} label="Loading teams…" /> : (
         <>
           {roots.length === 0 ? (
@@ -159,7 +187,6 @@ export default function TeamManager() {
       )}
 
       {editTeam && <TeamModal team={editTeam} teams={teams} members={members} onSave={saveTeam} onClose={() => setEditTeam(null)} />}
-      {reportTeam && <TeamReport team={reportTeam} onClose={() => setReportTeam(null)} />}
     </div>
   );
 }
@@ -220,7 +247,8 @@ function TeamModal({ team, teams, members, onSave, onClose }) {
   );
 }
 
-function TeamReport({ team, onClose }) {
+function TeamReport({ team, teams, onPick, onClose }) {
+  const boxRef = useRef(null);
   const [rep, setRep] = useState(null);
   const [qErr, setQErr] = useState('');            // quota panel errors (its own window, own failures)
   const [range, setRange] = useState(30);          // 7 | 30 | 90 | 'custom'
@@ -238,37 +266,61 @@ function TeamReport({ team, onClose }) {
     setRep(null);
     client.get(`teams/${team.id}/report`, { params: { from, to } }).then(r => setRep(r.data)).catch(() => setRep({ error: true }));
   }, [team.id, range, cFrom, cTo]);
+  // Bring the panel into view when it opens or the team changes — on a phone it
+  // renders above the fold of a long list and would otherwise be missed.
+  useEffect(() => { boxRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, [team.id]);
+
+  // The ref lives on a plain wrapper, not on Panel: Panel is not a forwardRef
+  // component, so a ref handed to it would silently never attach and the scroll
+  // above would quietly do nothing.
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={onClose}>
-      <div className="rounded-2xl p-5 w-full max-w-5xl max-h-[90vh] overflow-auto space-y-4" style={{ backgroundColor: 'var(--color-surface)' }} onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between gap-2 flex-wrap">
-          <h3 className="font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}><BarChart3 size={18} /> {team.name} — analytics</h3>
-          <div className="flex items-center gap-2">
-            <ThemedSelect value={range} onChange={e => setRange(e.target.value === 'custom' ? 'custom' : +e.target.value)} variant="pill" style={{ fontSize: 12 }}>
-              <option value={7}>Last 7 days</option><option value={30}>Last 30 days</option><option value={90}>Last 90 days</option>
-              <option value="custom">Custom / single day…</option>
-            </ThemedSelect>
-            {range === 'custom' && (
-              <>
-                <ThemedDate value={cFrom} max={cTo || undefined} onChange={e => setCFrom(e.target.value)} title="From (same date twice = one day)" placeholder="From" style={{ fontSize: 12, minWidth: 140 }} />
-                <ThemedDate value={cTo} min={cFrom || undefined} onChange={e => setCTo(e.target.value)} title="To" placeholder="To" style={{ fontSize: 12, minWidth: 140 }} />
-              </>
-            )}
-            <button onClick={onClose}><X size={18} /></button>
-          </div>
+    <div ref={boxRef} style={{ scrollMarginTop: 12 }}>
+    <Panel className="space-y-4">
+      <div className="flex items-start justify-between gap-2 flex-wrap">
+        <div className="min-w-0">
+          <h3 className="m-0 font-bold flex items-center gap-2 text-sm sm:text-base" style={{ color: 'var(--color-text)' }}>
+            <BarChart3 size={16} className="flex-shrink-0" /> <span className="truncate">{team.name}</span>
+            <span className="hidden sm:inline" style={{ color: 'var(--color-text-tertiary)' }}>— analytics</span>
+          </h3>
         </div>
-        {qErr && <div className="rounded-xl p-3 text-xs" style={{ backgroundColor: accent('danger').soft, color: accent('danger').fg }}>{qErr}</div>}
-
-        {/* Quotas sit ABOVE the analytics: the target is the question the report
-            answers, so reading "1,500 by the 31st" first makes the numbers below
-            it mean something. Independent of the date filter — a quota owns its
-            own window. */}
-        <QuotaPanel teamId={team.id} onError={setQErr} compact />
-
-        {!rep ? <Loading variant="rows" rows={5} label="Loading report…" />
-          : rep.error ? <p className="text-sm text-center py-6" style={{ color: accent('danger').fg }}>Failed to load report.</p>
-          : <TeamAnalytics report={rep} team={rep.team || team} />}
+        {/* Everything wraps: at 390 the switcher, the range and the close button
+            stack instead of overflowing the panel. */}
+        <div className="flex items-center gap-2 flex-wrap justify-end">
+          {/* Switch team without leaving the report. A superadmin comparing four
+              teams was previously closing and reopening a dialog each time. */}
+          {(teams || []).length > 1 && (
+            <ThemedSelect value={team.id} onChange={e => onPick?.((teams || []).find(t => t.id === e.target.value))}
+              variant="pill" style={{ fontSize: 12, minWidth: 150 }} title="Switch team">
+              {(teams || []).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </ThemedSelect>
+          )}
+          <ThemedSelect value={range} onChange={e => setRange(e.target.value === 'custom' ? 'custom' : +e.target.value)} variant="pill" style={{ fontSize: 12 }}>
+            <option value={7}>Last 7 days</option><option value={30}>Last 30 days</option><option value={90}>Last 90 days</option>
+            <option value="custom">Custom / single day…</option>
+          </ThemedSelect>
+          {range === 'custom' && (
+            <>
+              <ThemedDate value={cFrom} max={cTo || undefined} onChange={e => setCFrom(e.target.value)} title="From (same date twice = one day)" placeholder="From" style={{ fontSize: 12, minWidth: 130 }} />
+              <ThemedDate value={cTo} min={cFrom || undefined} onChange={e => setCTo(e.target.value)} title="To" placeholder="To" style={{ fontSize: 12, minWidth: 130 }} />
+            </>
+          )}
+          <button onClick={onClose} title="Close analytics" className="p-1.5 rounded-lg"
+            style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}><X size={15} /></button>
+        </div>
       </div>
+
+      {qErr && <div className="rounded-xl p-3 text-xs" style={{ backgroundColor: accent('danger').soft, color: accent('danger').fg }}>{qErr}</div>}
+
+      {/* Quotas sit ABOVE the analytics: the target is the question the report
+          answers, so reading "1,500 by the 31st" first makes the numbers below
+          it mean something. Independent of the date filter — a quota owns its
+          own window. */}
+      <QuotaPanel teamId={team.id} onError={setQErr} compact />
+
+      {!rep ? <Loading variant="rows" rows={5} label="Loading report…" />
+        : rep.error ? <p className="text-sm text-center py-6 m-0" style={{ color: accent('danger').fg }}>Failed to load report.</p>
+        : <TeamAnalytics report={rep} team={rep.team || team} />}
+    </Panel>
     </div>
   );
 }
