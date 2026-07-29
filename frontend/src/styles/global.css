@@ -1429,7 +1429,15 @@ select optgroup {
 
      Inline-flex + centering so the icon stays optically centred in the larger
      box instead of pinned to the top-left. */
-  button:has(> svg:only-child) {
+     `:not(.hidden)` is load-bearing, and leaving it out was a real bug. This
+     selector's specificity (0,1,2) outranks Tailwind's `.hidden` (0,1,0), so
+     `display: inline-flex` was UN-HIDING every icon-only button Tailwind had
+     hidden — on touch devices only, which is why it survived desktop review.
+     Measured on a 390 touch viewport: AdminHeader's `hidden lg:flex` DESKTOP
+     sidebar toggle rendered 44px wide, which pushed the brand chip underneath
+     the mail icon and overflowed the header row. A rule about how BIG a target
+     is has no business deciding WHETHER it exists. */
+  button:has(> svg:only-child):not(.hidden) {
     min-width: 44px;
     min-height: 44px;
     display: inline-flex;
@@ -1439,8 +1447,8 @@ select optgroup {
 
   /* Inside a table cell the same rule would stretch every row, so there the
      target grows only horizontally and the row keeps its height. */
-  td button:has(> svg:only-child),
-  th button:has(> svg:only-child) {
+  td button:has(> svg:only-child):not(.hidden),
+  th button:has(> svg:only-child):not(.hidden) {
     min-height: 36px;
   }
 }
