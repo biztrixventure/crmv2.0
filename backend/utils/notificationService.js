@@ -293,16 +293,32 @@ async function onSaleSubmittedForReview({ sale, submitterName }) {
   const refNo        = sale.reference_no  || sale.id.slice(0, 8).toUpperCase();
   const companyId    = sale.company_id;
 
-  const complianceIds = await withSuperadmins(
+  // company_admin rides along with compliance on the SAME call rather than
+  // getting a send of its own. Both groups are being told the identical fact
+  // ("this sale is waiting"), and this call already carries a dedupBase, so one
+  // submit is one row per recipient however many levels resolve into the list —
+  // including someone who holds both roles.
+  //
+  // Deliberately not a new module-level role constant: MANAGER_LEVELS is far
+  // too wide here (it would page fronter managers about a closer's paperwork)
+  // and FLOOR_MANAGER_LEVELS excludes compliance, who are the primary
+  // audience. This event's audience is exactly these two levels.
+  const reviewerIds = await withSuperadmins(
     'sale_pending_review',
-    await getUserIdsByLevel(companyId, ['compliance_manager']),
+    await getUserIdsByLevel(companyId, ['compliance_manager', 'company_admin']),
   );
-  await notifyUsers(complianceIds, {
+  await notifyUsers(reviewerIds, {
     companyId,
     type:      'sale_pending_review',
     title:     'Sale awaiting compliance review',
     message:   `${submitterName} submitted ${customerName} (Ref: ${refNo}) for review.`,
-    data:      { sale_id: sale.id, reference_no: refNo, customer_name: customerName },
+    // `open: 'drawer'` is an INTENT, not a destination. Every other sale
+    // notification still resolves to "switch to the sales tab and ring the
+    // row"; this one says "put the record itself on screen", because a review
+    // request is actionable and the recipient is usually on a phone where the
+    // row is a sliver. Opt-in per event so nothing else changes behaviour, and
+    // absent on every notification written before today — those keep the ring.
+    data:      { sale_id: sale.id, reference_no: refNo, customer_name: customerName, open: 'drawer' },
     dedupBase: `sale_pending_${sale.id}`,
   });
 }

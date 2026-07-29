@@ -843,7 +843,40 @@ router.get(
     const isManager = ['superadmin', 'readonly_admin', 'company_admin', 'manager', 'fronter_manager', 'operations_manager', 'closer_manager', 'compliance_manager'].includes(userRole);
     if (!isOwner && !isManager) return res.status(403).json({ error: 'Access denied' });
 
-    res.json({ sale });
+    // Enrich with the display names the LIST route already attaches. Without
+    // this, the single-record response is the only place in the app where a
+    // sale arrives with no closer, no fronter and no company name — and this
+    // endpoint is what BOTH the drawer's multi-sale tab strip and the
+    // notification deep-link fetch from, so both showed those rows blank.
+    // Three small lookups on one row; a failure in any leaves the field null
+    // rather than failing the read.
+    const uids = [sale.closer_id, sale.fronter_id].filter(Boolean);
+    const [profilesRes, companyRes] = await Promise.all([
+      uids.length
+        ? supabaseAdmin.from('user_profiles').select('user_id,first_name,last_name').in('user_id', uids)
+        : Promise.resolve({ data: [] }),
+      sale.company_id
+        ? supabaseAdmin.from('companies').select('id,name').eq('id', sale.company_id).maybeSingle()
+        : Promise.resolve({ data: null }),
+    ]);
+    const byUid = {};
+    (profilesRes.data || []).forEach(p => { byUid[p.user_id] = p; });
+    const nameOf = (uid) => {
+      const p = uid ? byUid[uid] : null;
+      return p ? (`${p.first_name || ''} ${p.last_name || ''}`.trim() || null) : null;
+    };
+
+    res.json({
+      sale: {
+        ...sale,
+        closer_name:  nameOf(sale.closer_id),
+        fronter_name: nameOf(sale.fronter_id),
+        // Both shapes on purpose: `companies` is what the list route emits and
+        // what some grids read; `company_name` is the flat one the drawer wants.
+        companies:    companyRes.data || null,
+        company_name: companyRes.data?.name || null,
+      },
+    });
   })
 );
 
