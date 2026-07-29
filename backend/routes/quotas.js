@@ -477,10 +477,26 @@ router.post('/', asyncHandler(async (req, res) => {
   if (!bounds.starts_at || !bounds.ends_at) return res.status(400).json({ error: 'starts_at and ends_at required for a custom range' });
   if (bounds.ends_at < bounds.starts_at) return res.status(400).json({ error: 'End date is before the start date' });
 
+  // Adopt the matching team quota automatically when the lead didn't pick one.
+  // The parent is what puts "your team is at 61%" on the member's own card, and
+  // an optional dropdown means that context is missing exactly when someone is
+  // in a hurry. Same team, same metric, same window is unambiguous — there can
+  // only ever be one (the partial unique index guarantees it) — so inferring it
+  // is safe. A parent passed explicitly always wins, and a member target for a
+  // metric the team has no quota for stays standalone rather than inventing a link.
+  let parentId = isMemberTier ? (b.parent_quota_id || null) : null;
+  if (isMemberTier && !parentId) {
+    const { data: parent } = await supabaseAdmin.from('team_quotas')
+      .select('id').eq('team_id', team.id).eq('metric', b.metric)
+      .eq('starts_at', bounds.starts_at).eq('ends_at', bounds.ends_at)
+      .is('user_id', null).eq('status', 'active').maybeSingle();
+    parentId = parent?.id || null;
+  }
+
   const row = {
     company_id: team.company_id, team_id: team.id,
     user_id: isMemberTier ? b.user_id : null,
-    parent_quota_id: isMemberTier ? (b.parent_quota_id || null) : null,
+    parent_quota_id: parentId,
     metric: b.metric, target_value: target, period_kind: kind,
     starts_at: bounds.starts_at, ends_at: bounds.ends_at,
     label: b.label ? String(b.label).slice(0, 120) : null,
