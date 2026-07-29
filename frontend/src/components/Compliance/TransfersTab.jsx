@@ -10,6 +10,8 @@ import { TableScroll } from '../UI/kit';
 // DUP_REASON_LABEL moved to utils/exportSpec.js — it only ever fed the export,
 // and the column that uses it now lives there with its accessor.
 import { writeExport } from '../../utils/exportSpec';
+import { useTableQuery, useAbortable, isCanceled } from '../../hooks/useTableQuery';
+import { useFilterOptions } from '../../hooks/useFilterOptions';
 import { useExportColumns } from '../../hooks/useExportColumns';
 
 const SALE_BADGE_MAP  = { open: 'info', pending_review: 'warning', needs_revision: 'error', closed_won: 'success', sold: 'success', closed_lost: 'error', follow_up: 'warning', cancelled: 'error' };
@@ -28,7 +30,7 @@ import { useFormFields } from '../../hooks/useFormFields';
 import {
   STATUS_BADGE, STATUS_LABEL, TRANSFER_STATUSES, LIMIT,
   fmtDate, fmtDateTime, customerName,
-  TabHeader, Spinner, Empty, Pagination, Th, SortTh, Filters, FInput, FSelect,
+  TabHeader, Spinner, Empty, Pagination, Th, TqTh, Filters, FInput, FSelect,
   Overlay, ModalBox, ModalHeader, InfoTile,
   fetchAllForExport,
 } from './shared';
@@ -65,7 +67,17 @@ const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
   const [search, setSearch]       = useState('');
   const [dateFrom, setDateFrom]   = useState('');
   const [dateTo, setDateTo]       = useState('');
-  const [sort, setSort]           = useState({ col: 'created_at', dir: 'desc' });
+  // Sort + per-column filters. Default unchanged: newest transfer first.
+  // `columns` is what /compliance/transfers advertised for THIS caller.
+  const [columns, setColumns] = useState({});
+  const tq = useTableQuery({
+    scope: 'compliance:transfers',
+    columns,
+    defaultSort: { by: 'created_at', dir: 'desc' },
+  });
+  const abortable = useAbortable();
+  const { userOptions, companyOptions } = useFilterOptions({ companyList });
+  const statusOptions = TRANSFER_STATUSES.map(s => ({ value: s, label: STATUS_LABEL[s] || s }));
 
   const [detail, setDetail]         = useState(null);
   const [exportOpen, setExportOpen] = useState(false);
@@ -102,23 +114,31 @@ const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
           status: status || undefined, company_id: company || undefined,
           search: search.trim() || undefined,
           date_from: dateFrom || undefined, date_to: dateTo || undefined,
-          sort_by: sort.col, sort_dir: sort.dir,
+          // sort_by / sort_dir / filters — all resolved by useTableQuery.
+          ...tq.params,
           page, limit: LIMIT,
         },
+        // One in-flight list request at a time; typing supersedes rather than queues.
+        signal: abortable(),
       });
       setTransfers(res.data.transfers || []);
       setTotal(res.data.total || 0);
+      if (res.data.columns) setColumns(res.data.columns);
       setStatusCounts(prev => status ? null : (res.data.status_counts ?? prev));
-    } catch { /* non-critical */ } finally { setLoading(false); }
-  }, [status, company, search, dateFrom, dateTo, page, sort]);
+    } catch (e) {
+      if (isCanceled(e)) return;   // superseded, not failed
+    } finally { setLoading(false); }
+  }, [status, company, search, dateFrom, dateTo, page, tq.version, tq.params, abortable]);
 
   useEffect(() => { load(); }, [load]);
 
-  // Server-side sort across the whole dataset; reset to page 1 on sort change.
-  const toggleSort = (col) => {
+  // A new sort or filter re-windows the whole dataset, so page 2 of the old
+  // result is meaningless — go back to page 1.
+  const firstQuery = useRef(true);
+  useEffect(() => {
+    if (firstQuery.current) { firstQuery.current = false; return; }
     setPage(1);
-    setSort(s => s.col === col ? { col, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: 'asc' });
-  };
+  }, [tq.version]);
 
   // Superadmin cross-company management (backend allows superadmin to bypass scope).
   useEffect(() => { setMgStatus(detail?.status || ''); }, [detail]);
@@ -262,14 +282,14 @@ const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
             <table className="w-full text-sm">
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
-                  <SortTh col="customer"   sort={sort} onSort={toggleSort}>Customer</SortTh>
-                  <SortTh col="fronter"    sort={sort} onSort={toggleSort}>Fronter</SortTh>
-                  <SortTh col="closer"     sort={sort} onSort={toggleSort}>Closer</SortTh>
-                  <Th>Disposition</Th>
-                  <Th>Company</Th>
-                  <SortTh col="status"     sort={sort} onSort={toggleSort}>Transfer Status</SortTh>
+                  <TqTh tq={tq} col="customer">Customer</TqTh>
+                  <TqTh tq={tq} col="fronter" options={userOptions}>Fronter</TqTh>
+                  <TqTh tq={tq} col="closer"  options={userOptions}>Closer</TqTh>
+                  <TqTh tq={tq} col="disposition">Disposition</TqTh>
+                  <TqTh tq={tq} col="company" options={companyOptions}>Company</TqTh>
+                  <TqTh tq={tq} col="status" options={statusOptions}>Transfer Status</TqTh>
                   <Th>Sale Status</Th>
-                  <SortTh col="created_at" sort={sort} onSort={toggleSort}>Transfer Date</SortTh>
+                  <TqTh tq={tq} col="created_at">Transfer Date</TqTh>
                 </tr>
               </thead>
               <tbody>

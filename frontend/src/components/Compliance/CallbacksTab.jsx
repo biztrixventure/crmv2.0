@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { todayET } from '../../utils/timezone';
 import { PhoneCall, ArrowRight, Trash2, AlertCircle, BarChart3, User, ChevronUp, ChevronDown, ChevronsUpDown, X, CalendarDays } from 'lucide-react';
 import CallbackPhoneHistoryDrawer from '../Shared/CallbackPhoneHistoryDrawer';
@@ -19,6 +19,9 @@ import {
 } from './shared';
 import { writeExport } from '../../utils/exportSpec';
 import { useExportColumns } from '../../hooks/useExportColumns';
+import ColumnHeader from '../UI/ColumnHeader';
+import { useTableQuery, useAbortable, isCanceled } from '../../hooks/useTableQuery';
+import { useFilterOptions } from '../../hooks/useFilterOptions';
 
 // ── Priority config ────────────────────────────────────────────────────────────
 const PRIORITY_CFG = {
@@ -64,6 +67,18 @@ const SortTh = ({ col, sort, onSort, children }) => (
     style={{ color: sort.col === col ? 'var(--color-primary-600)' : 'var(--color-text-secondary)' }}>
     {children}<SortIcon col={col} sort={sort} />
   </th>
+);
+
+// Sort caret + per-column filter, in this tab's slightly larger header type
+// (px-4 / text-xs, where the shared TqTh is px-3 / text-[11px]). SortTh above
+// stays for the callback-audit-log sub-table — it reads a different endpoint
+// that has no column catalog.
+const CbTh = ({ tq, col, children, options }) => (
+  <ColumnHeader
+    tq={tq} colKey={col} label={children} options={options}
+    className="px-4 py-2.5 text-xs font-bold uppercase tracking-wide select-none"
+    style={{ color: tq?.sort?.by === col ? 'var(--color-primary-600)' : 'var(--color-text-secondary)' }}
+  />
 );
 
 // ── Agent stats modal ─────────────────────────────────────────────────────────
@@ -389,6 +404,18 @@ const CallbacksTab = ({ companyList }) => {
   const [createdFrom, setCreatedFrom] = useState('');
   const [createdTo,   setCreatedTo]   = useState('');
   const [sort,        setSort]        = useState({ col: 'callback_at', dir: 'asc' });
+  // Sort + per-column filters for the MAIN callbacks table. Default unchanged:
+  // soonest scheduled first. (`sort` above still drives the audit-log
+  // sub-table, which reads a catalog-less endpoint.)
+  const [columns, setColumns] = useState({});
+  const tq = useTableQuery({
+    scope: 'compliance:callbacks',
+    columns,
+    defaultSort: { by: 'callback_at', dir: 'asc' },
+  });
+  const abortable = useAbortable();
+  const { userOptions, companyOptions } = useFilterOptions({ companyList });
+  const statusOptions = CALLBACK_STATUSES.map(s => ({ value: s, label: STATUS_LABEL[s] || s }));
   const [todayCount,  setTodayCount]  = useState(null);
 
   const today = todayET();
@@ -441,18 +468,31 @@ const CallbacksTab = ({ companyList }) => {
           created_from: createdFrom  || undefined,
           created_to:   createdTo    || undefined,
           user_ids:     selectedUser || undefined,
-          sort_by:      sort.col,
-          sort_dir:     sort.dir,
+          // sort_by / sort_dir / filters — all resolved by useTableQuery.
+          ...tq.params,
           page, limit: LIMIT,
         },
+        // One in-flight list request at a time; typing supersedes rather than queues.
+        signal: abortable(),
       });
       setCallbacks(res.data.callbacks || []);
       setTotal(res.data.total || 0);
+      if (res.data.columns) setColumns(res.data.columns);
       setStatusCounts(prev => status ? null : (res.data.status_counts ?? prev));
-    } catch { } finally { setLoading(false); }
-  }, [cbType, company, status, priority, search, dateFrom, dateTo, createdFrom, createdTo, page, selectedUser, sort]);
+    } catch (e) {
+      if (isCanceled(e)) return;   // superseded, not failed
+    } finally { setLoading(false); }
+  }, [cbType, company, status, priority, search, dateFrom, dateTo, createdFrom, createdTo, page, selectedUser, tq.version, tq.params, abortable]);
 
   useEffect(() => { if (view === 'callbacks') load(); }, [load, view]);
+
+  // A new sort or filter re-windows the whole dataset, so page 2 of the old
+  // result is meaningless — go back to page 1.
+  const firstQuery = useRef(true);
+  useEffect(() => {
+    if (firstQuery.current) { firstQuery.current = false; return; }
+    setPage(1);
+  }, [tq.version]);
 
   const switchType = (t) => { setCbType(t); setCompany(''); setSearch(''); setSelectedUser(''); setCreatedFrom(''); setCreatedTo(''); setPage(1); };
 
@@ -638,15 +678,15 @@ const CallbacksTab = ({ companyList }) => {
               <table className="w-full text-sm">
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
-                    <SortTh col="customer"    sort={sort} onSort={toggleSort}>Customer</SortTh>
-                    <SortTh col="priority"    sort={sort} onSort={toggleSort}>Priority</SortTh>
-                    <SortTh col="callback_at" sort={sort} onSort={toggleSort}>Scheduled At</SortTh>
-                    <SortTh col="created_at"  sort={sort} onSort={toggleSort}>Created</SortTh>
-                    <SortTh col="fronter"     sort={sort} onSort={toggleSort}>Fronter</SortTh>
-                    <SortTh col="closer"      sort={sort} onSort={toggleSort}>Closer</SortTh>
-                    <th className="px-4 py-2.5 text-left text-xs font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>Company</th>
-                    <SortTh col="status"      sort={sort} onSort={toggleSort}>Status</SortTh>
-                    <th className="px-4 py-2.5 text-left text-xs font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>Notes</th>
+                    <CbTh tq={tq} col="customer">Customer</CbTh>
+                    <CbTh tq={tq} col="priority">Priority</CbTh>
+                    <CbTh tq={tq} col="callback_at">Scheduled At</CbTh>
+                    <CbTh tq={tq} col="created_at">Created</CbTh>
+                    <CbTh tq={tq} col="fronter" options={userOptions}>Fronter</CbTh>
+                    <CbTh tq={tq} col="closer"  options={userOptions}>Closer</CbTh>
+                    <CbTh tq={tq} col="company" options={companyOptions}>Company</CbTh>
+                    <CbTh tq={tq} col="status" options={statusOptions}>Status</CbTh>
+                    <CbTh tq={tq} col="notes">Notes</CbTh>
                   </tr>
                 </thead>
                 <tbody>

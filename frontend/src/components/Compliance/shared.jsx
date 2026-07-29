@@ -3,6 +3,7 @@ import { useFeatureFlags } from '../../contexts/FeatureFlagsContext';
 import { useAuth } from '../../contexts/AuthContext';
 import ThemedSelect from '../UI/Select';
 import ThemedDate from '../UI/ThemedDate';
+import ColumnHeader from '../UI/ColumnHeader';
 
 // The formatters, the CSV writer and the paged export fetch now live in
 // utils/recordFormat.js + utils/exportSpec.js so every shell shares one copy
@@ -84,6 +85,18 @@ export const SortTh = ({ col, sort, onSort, children, className = '' }) => (
     style={{ color: sort.col === col ? 'var(--color-primary-600)' : 'var(--color-text-secondary)' }}>
     {children}<SortIcon col={col} sort={sort} />
   </th>
+);
+
+// SortTh's successor: same look, but it also carries the per-column filter
+// popover and takes its sort state from a useTableQuery instance instead of a
+// hand-rolled { col, dir } pair. SortTh stays for the tabs not migrated yet, so
+// the two can coexist without a flag day.
+export const TqTh = ({ tq, col, children, options, align = 'left', className = '' }) => (
+  <ColumnHeader
+    tq={tq} colKey={col} label={children} options={options} align={align}
+    className={`px-3 py-2.5 text-[11px] font-bold uppercase tracking-wider select-none ${className}`}
+    style={{ color: tq?.sort?.by === col ? 'var(--color-primary-600)' : 'var(--color-text-secondary)' }}
+  />
 );
 
 export const TabHeader = ({ title, subtitle, onRefresh, onExport, extra, exportArea }) => {

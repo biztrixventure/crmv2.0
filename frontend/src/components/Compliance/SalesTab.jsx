@@ -27,9 +27,11 @@ import ThemedDate from '../UI/ThemedDate';
 import {
   STATUS_BADGE, STATUS_LABEL, ALL_SALE_STATUSES as FALLBACK_ALL, COMPLIANCE_EDIT_STATUSES as FALLBACK_EDIT, LIMIT,
   fmtDate, closerName,
-  TabHeader, Spinner, Empty, Pagination, Th, SortTh, Filters, FInput, FSelect,
+  TabHeader, Spinner, Empty, Pagination, Th, TqTh, Filters, FInput, FSelect,
   Overlay, ModalBox, ModalHeader, fetchAllForExport,
 } from './shared';
+import { useTableQuery, useAbortable, isCanceled } from '../../hooks/useTableQuery';
+import { useFilterOptions } from '../../hooks/useFilterOptions';
 
 // When the sale's status was last changed. The edit_history audit trail records
 // every status transition with its timestamp — the latest one is the "status
@@ -78,9 +80,25 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo]     = useState('');
   const [expanded, setExpanded] = useState(null);
-  // Default: newest SALE first (by the Sale Date column the list shows), so the
-  // latest sales lead. sale_date nulls sort last; created_at is the tiebreaker.
-  const [sort, setSort]         = useState({ col: 'sale_date', dir: 'desc' });
+  // Sort + per-column filters. Default is unchanged: newest SALE first (by the
+  // Sale Date column the list shows), so the latest sales lead. sale_date nulls
+  // sort last; created_at is the tiebreaker.
+  //
+  // `columns` is whatever /compliance/sales advertised for THIS caller — the
+  // server decides what may be sorted and filtered, so a column a readonly
+  // admin has masked never gets a header control.
+  const [columns, setColumns] = useState({});
+  const tq = useTableQuery({
+    scope: 'compliance:sales',
+    columns,
+    defaultSort: { by: 'sale_date', dir: 'desc' },
+  });
+  const abortable = useAbortable();
+  // Dropdown vocabularies for the uuid/enum headers. Companies come from the
+  // prop the shell already holds; users are one cached fetch per session.
+  // Statuses use the compliance label overrides, not the raw enum keys.
+  const { userOptions, companyOptions } = useFilterOptions({ companyList });
+  const statusOptions = ALL_SALE_STATUSES.map(s => ({ value: s, label: labelOf(s) }));
 
   const [approving, setApproving]   = useState(null);
   const [detailSale, setDetailSale] = useState(null);
@@ -147,25 +165,36 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
           exclude_post_date: disposition ? undefined : 1,
           charge_from: chargeFrom || undefined, charge_to: chargeTo || undefined,
           date_from: dateFrom || undefined, date_to: dateTo || undefined,
-          sort_by: sort.col, sort_dir: sort.dir,
+          // sort_by / sort_dir / filters — all resolved by useTableQuery.
+          ...tq.params,
           page, limit: LIMIT,
         },
+        // Typing in a header filter must not queue a request per keystroke;
+        // each load cancels the one before it.
+        signal: abortable(),
       });
       setSales(res.data.sales || []);
       setTotal(res.data.total || 0);
+      if (res.data.columns) setColumns(res.data.columns);
       // Keep page-1 totals across pages; clear when a status filter is active
       // (then the page-derived breakdown — the one filtered status — is correct).
       setStatusCounts(prev => status ? null : (res.data.status_counts ?? prev));
-    } catch { /* non-critical */ } finally { setLoading(false); }
-  }, [search, status, company, disposition, chargeFrom, chargeTo, dateFrom, dateTo, page, sort]);
+    } catch (e) {
+      // A cancelled request is a superseded one, not a failure — leaving
+      // `loading` on would freeze the table on every keystroke.
+      if (isCanceled(e)) return;
+    } finally { setLoading(false); }
+  }, [search, status, company, disposition, chargeFrom, chargeTo, dateFrom, dateTo, page, tq.version, tq.params, abortable]);
 
   useEffect(() => { load(); }, [load]);
 
-  // Server-side sort across the whole dataset; reset to page 1 on sort change.
-  const toggleSort = (col) => {
+  // A new sort or filter re-windows the whole dataset, so page 2 of the old
+  // result is meaningless — go back to page 1.
+  const firstQuery = useRef(true);
+  useEffect(() => {
+    if (firstQuery.current) { firstQuery.current = false; return; }
     setPage(1);
-    setSort(s => s.col === col ? { col, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: 'asc' });
-  };
+  }, [tq.version]);
 
   const approve = async (sale) => {
     setApproving(sale.id);
@@ -373,13 +402,13 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
             <table className="w-full text-sm">
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
-                  <SortTh col="customer"   sort={sort} onSort={toggleSort}>Customer</SortTh>
-                  <SortTh col="status"     sort={sort} onSort={toggleSort}>Status</SortTh>
-                  <SortTh col="fronter"    sort={sort} onSort={toggleSort}>Fronter</SortTh>
-                  <SortTh col="closer"     sort={sort} onSort={toggleSort}>Closer</SortTh>
-                  <Th>Company</Th>
-                  <SortTh col="sale_date" sort={sort} onSort={toggleSort}>Sale Date</SortTh>
-                  <SortTh col="status_updated" sort={sort} onSort={toggleSort}>Status Updated</SortTh>
+                  <TqTh tq={tq} col="customer">Customer</TqTh>
+                  <TqTh tq={tq} col="status" options={statusOptions}>Status</TqTh>
+                  <TqTh tq={tq} col="fronter" options={userOptions}>Fronter</TqTh>
+                  <TqTh tq={tq} col="closer"  options={userOptions}>Closer</TqTh>
+                  <TqTh tq={tq} col="company" options={companyOptions}>Company</TqTh>
+                  <TqTh tq={tq} col="sale_date">Sale Date</TqTh>
+                  <TqTh tq={tq} col="status_updated">Status Updated</TqTh>
                   {isPostDate && <Th>Charge Date</Th>}
                   <Th>Actions</Th>
                 </tr>
