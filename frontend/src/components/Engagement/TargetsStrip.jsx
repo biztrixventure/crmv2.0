@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Target, Clock, Users } from 'lucide-react';
+import { Target, Clock, Users, Gift } from 'lucide-react';
 import client from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 import { SpiffCard } from './SpiffWidget';
@@ -67,6 +67,47 @@ function QuotaCard({ q, now }) {
             {q.pct != null && <span className="opacity-70"> · {q.pct}%</span>}
           </p>
         </div>
+
+        {/* The reward ladder. "40 more and you hit the $100" is a different and
+            far more actionable sentence than "you are at 61%", so the NEXT rung
+            leads and the earned ones sit behind it as a quiet tally. */}
+        {(q.next_milestone || q.milestones_earned > 0) && (
+          <div className="pt-1" style={{ borderTop: '1px solid var(--color-border)' }}>
+            {q.next_milestone ? (
+              <div className="pt-2">
+                <div className="flex items-center justify-between text-[11px] gap-2">
+                  <span className="inline-flex items-center gap-1 min-w-0" style={{ color: 'var(--color-text-secondary)' }}>
+                    <Gift size={11} className="flex-shrink-0" style={{ color: accent('warning').fg }} />
+                    <span className="truncate">
+                      {q.next_milestone.label || `${fmt(q.next_milestone.at, q.metric_unit)} milestone`}
+                      {(q.next_milestone.reward_description || q.next_milestone.reward_amount != null) && (
+                        <b style={{ color: accent('warning').fg }}>
+                          {' · '}{q.next_milestone.reward_description || `$${q.next_milestone.reward_amount}`}
+                        </b>
+                      )}
+                    </span>
+                  </span>
+                  <span className="font-bold tabular-nums flex-shrink-0" style={{ color: 'var(--color-text)' }}>
+                    {fmt(q.next_milestone.remaining, q.metric_unit)} to go
+                  </span>
+                </div>
+                <div className="h-1.5 rounded-full overflow-hidden mt-1" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
+                  <div className="h-full rounded-full transition-all duration-500"
+                    style={{ width: `${Math.min(100, Math.max(0, q.next_milestone.pct || 0))}%`, background: accent('warning').fg }} />
+                </div>
+              </div>
+            ) : (
+              <p className="m-0 pt-2 text-[11px] font-semibold inline-flex items-center gap-1" style={{ color: accent('success').fg }}>
+                <Gift size={11} /> Every milestone earned
+              </p>
+            )}
+            {q.milestones_earned > 0 && q.next_milestone && (
+              <p className="m-0 mt-1 text-[11px]" style={{ color: accent('success').fg }}>
+                {q.milestones_earned} milestone{q.milestones_earned === 1 ? '' : 's'} already earned
+              </p>
+            )}
+          </div>
+        )}
 
         {/* Why this number matters: the team's own progress on the quota this
             allocation was carved out of. Same role the SPIFF leaderboard plays —

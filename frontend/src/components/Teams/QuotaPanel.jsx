@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Target, Plus, Pencil, Trash2, Save, X, Crown, AlertTriangle, Check } from 'lucide-react';
+import { useState, useEffect, useCallback, useMemo, Fragment } from 'react';
+import { Target, Plus, Pencil, Trash2, Save, X, Crown, AlertTriangle, Check, Gift } from 'lucide-react';
 import client from '../../api/client';
 import ThemedSelect from '../UI/Select';
 import ThemedDate from '../UI/ThemedDate';
@@ -55,6 +55,7 @@ export default function QuotaPanel({ teamId, onError, compact = false }) {
   const [metrics, setMetrics] = useState([]);
   const [loading, setLoading] = useState(true);
   const [edit, setEdit] = useState(null);       // { tier:'team'|'member', quota? }
+  const [ladderFor, setLadderFor] = useState(null);   // member-quota id whose ladder is open
 
   const load = useCallback(async () => {
     if (!teamId) return;
@@ -172,6 +173,8 @@ export default function QuotaPanel({ teamId, onError, compact = false }) {
                   </span>
                 )}
               </div>
+              <MilestoneLadder quota={q} canEdit={!!can.team} unit={q.metric_unit}
+                onChanged={load} onError={onError} />
             </Panel>
           );
         })}
@@ -216,7 +219,8 @@ export default function QuotaPanel({ teamId, onError, compact = false }) {
                 {memberQuotas.map(q => {
                   const left = daysLeft(q.ends_at);
                   return (
-                    <tr key={q.id} style={{ borderTop: '1px solid var(--color-border)' }}>
+                    <Fragment key={q.id}>
+                    <tr style={{ borderTop: '1px solid var(--color-border)' }}>
                       <td className="py-2 px-2 font-semibold" style={{ color: 'var(--color-text)' }}>{q.member_name}</td>
                       <td className="py-2 px-2" style={{ color: 'var(--color-text-secondary)' }}>{q.metric_label}</td>
                       <td className="py-2 px-2 whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>
@@ -236,16 +240,44 @@ export default function QuotaPanel({ teamId, onError, compact = false }) {
                         <div className="mt-1"><Bar pct={q.pct} /></div>
                       </td>
                       <td className="py-2 px-2">
-                        {can.member && (
-                          <div className="flex items-center gap-1 justify-end">
-                            <button onClick={() => setEdit({ tier: 'member', quota: q })} title="Edit allocation"
-                              className="p-1.5 rounded-lg" style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}><Pencil size={12} /></button>
-                            <button onClick={() => remove(q)} title="Remove allocation"
-                              className="p-1.5 rounded-lg" style={{ border: '1px solid var(--color-border)', color: accent('danger').fg }}><Trash2 size={12} /></button>
-                          </div>
-                        )}
+                        <div className="flex items-center gap-1 justify-end">
+                          {/* The ladder is per-allocation, so it opens under its
+                              own row rather than in a modal that would hide the
+                              number it is measured against. */}
+                          <button onClick={() => setLadderFor(id => (id === q.id ? null : q.id))}
+                            title={ladderFor === q.id ? 'Hide milestones' : 'Milestones'}
+                            className="p-1.5 rounded-lg inline-flex items-center gap-1"
+                            style={{
+                              border: '1px solid var(--color-border)',
+                              color: (q.milestones || []).length ? accent('warning').fg : 'var(--color-text-tertiary)',
+                            }}>
+                            <Gift size={12} />
+                            {(q.milestones || []).length > 0 && (
+                              <span className="text-[11px] font-bold tabular-nums">
+                                {q.milestones_earned || 0}/{q.milestones.length}
+                              </span>
+                            )}
+                          </button>
+                          {can.member && (
+                            <>
+                              <button onClick={() => setEdit({ tier: 'member', quota: q })} title="Edit allocation"
+                                className="p-1.5 rounded-lg" style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}><Pencil size={12} /></button>
+                              <button onClick={() => remove(q)} title="Remove allocation"
+                                className="p-1.5 rounded-lg" style={{ border: '1px solid var(--color-border)', color: accent('danger').fg }}><Trash2 size={12} /></button>
+                            </>
+                          )}
+                        </div>
                       </td>
                     </tr>
+                    {ladderFor === q.id && (
+                      <tr>
+                        <td colSpan={5} className="px-2 pb-2" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
+                          <MilestoneLadder quota={q} canEdit={!!can.member} unit={q.metric_unit}
+                            onChanged={load} onError={onError} />
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
                   );
                 })}
               </tbody>
@@ -258,6 +290,120 @@ export default function QuotaPanel({ teamId, onError, compact = false }) {
         <QuotaModal
           tier={edit.tier} quota={edit.quota} metrics={metrics} teamQuotas={teamQuotas}
           teamId={teamId} onSave={save} onClose={() => setEdit(null)} />
+      )}
+    </div>
+  );
+}
+
+// ── milestone ladder (mig 218) ──────────────────────────────────────────────
+// The rungs inside a quota. Rendered read-only for anyone who may see the quota
+// and editable for whoever may edit that tier — the server already decided that
+// and says so in `can_edit`, so this never re-derives it from a role.
+//
+// A percent rung shows its resolved absolute value too ("50% · 750"), because
+// the lead thinks in percentages when handing out ten allocations and the member
+// thinks in transfers when working.
+function MilestoneLadder({ quota, canEdit, unit, onChanged, onError }) {
+  const [adding, setAdding] = useState(false);
+  const [f, setF] = useState({ threshold_kind: 'value', threshold: '', label: '', reward_amount: '', reward_description: '' });
+  const [busy, setBusy] = useState(false);
+  const list = quota.milestones || [];
+
+  const inp = { backgroundColor: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text)', borderRadius: 8, padding: '5px 8px', fontSize: 12, width: '100%' };
+  const set = (k, v) => setF(s => ({ ...s, [k]: v }));
+
+  const add = async () => {
+    if (!(Number(f.threshold) > 0)) return;
+    setBusy(true);
+    try {
+      await client.post(`quotas/${quota.id}/milestones`, f);
+      setF({ threshold_kind: 'value', threshold: '', label: '', reward_amount: '', reward_description: '' });
+      setAdding(false); onChanged();
+    } catch (e) { onError?.(e.response?.data?.error || 'Could not add that milestone'); }
+    finally { setBusy(false); }
+  };
+  const remove = async (m) => {
+    if (!window.confirm(`Remove the milestone at ${m.at}${m.label ? ` (${m.label})` : ''}?`)) return;
+    try { await client.delete(`quotas/milestones/${m.id}`); onChanged(); }
+    catch (e) { onError?.(e.response?.data?.error || 'Remove failed'); }
+  };
+
+  if (!list.length && !canEdit) return null;
+
+  return (
+    <div className="pt-2 mt-1" style={{ borderTop: '1px solid var(--color-border)' }}>
+      <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
+        <p className="m-0 text-[11px] font-bold uppercase tracking-widest inline-flex items-center gap-1.5"
+          style={{ color: 'var(--color-text-tertiary)' }}>
+          <Gift size={11} /> Milestones{list.length ? ` (${list.filter(m => m.earned).length}/${list.length} earned)` : ''}
+        </p>
+        {canEdit && !adding && (
+          <button onClick={() => setAdding(true)}
+            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-bold border"
+            style={{ borderColor: 'var(--color-border)', color: 'var(--color-primary-600)' }}>
+            <Plus size={11} /> Add milestone
+          </button>
+        )}
+      </div>
+
+      {list.length === 0 ? (
+        <p className="m-0 text-[11px] italic" style={{ color: 'var(--color-text-tertiary)' }}>
+          No milestones yet — add one to reward progress before the full target lands.
+        </p>
+      ) : (
+        <div className="space-y-1">
+          {list.map(m => (
+            <div key={m.id} className="flex items-center gap-2 text-[11px]">
+              <span className="flex-shrink-0" style={{ color: m.earned ? accent('success').fg : 'var(--color-text-tertiary)' }}>
+                {m.earned ? <Check size={12} /> : <span className="inline-block w-3 text-center">○</span>}
+              </span>
+              <span className="tabular-nums font-bold flex-shrink-0" style={{ color: 'var(--color-text)', minWidth: 52 }}>
+                {fmt(m.at, unit)}
+              </span>
+              <span className="truncate flex-1 min-w-0" style={{ color: 'var(--color-text-secondary)' }}>
+                {m.threshold_kind === 'percent' && <span className="opacity-70">{m.threshold}% · </span>}
+                {m.label || '—'}
+                {(m.reward_description || m.reward_amount != null) && (
+                  <b style={{ color: accent('warning').fg }}>
+                    {' · '}{m.reward_description || `$${m.reward_amount}`}
+                  </b>
+                )}
+              </span>
+              <span className="flex-shrink-0 tabular-nums" style={{ color: m.earned ? accent('success').fg : 'var(--color-text-tertiary)' }}>
+                {m.earned ? 'earned' : `${fmt(m.remaining, unit)} to go`}
+              </span>
+              {canEdit && (
+                <button onClick={() => remove(m)} title="Remove milestone"
+                  className="flex-shrink-0 p-1 rounded" style={{ color: accent('danger').fg }}><Trash2 size={11} /></button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {adding && (
+        <div className="mt-2 rounded-xl p-2 space-y-1.5" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
+          <div className="grid grid-cols-2 gap-1.5">
+            <ThemedSelect value={f.threshold_kind} onChange={e => set('threshold_kind', e.target.value)} className="w-full" style={{ fontSize: 12 }}>
+              <option value="value">At a number</option>
+              <option value="percent">At a % of target</option>
+            </ThemedSelect>
+            <input type="number" min="1" value={f.threshold} onChange={e => set('threshold', e.target.value)}
+              placeholder={f.threshold_kind === 'percent' ? 'e.g. 50' : 'e.g. 750'} style={inp} />
+          </div>
+          <input value={f.label} onChange={e => set('label', e.target.value)} placeholder="Name (e.g. Halfway push)" style={inp} />
+          <div className="grid grid-cols-2 gap-1.5">
+            <input type="number" min="0" value={f.reward_amount} onChange={e => set('reward_amount', e.target.value)} placeholder="Reward $" style={inp} />
+            <input value={f.reward_description} onChange={e => set('reward_description', e.target.value)} placeholder="or describe the prize" style={inp} />
+          </div>
+          <div className="flex justify-end gap-1.5">
+            <button onClick={() => setAdding(false)} className="px-2 py-1 rounded-lg text-[11px] font-semibold border"
+              style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>Cancel</button>
+            <button onClick={add} disabled={busy || !(Number(f.threshold) > 0)}
+              className="px-2 py-1 rounded-lg text-[11px] font-bold text-white inline-flex items-center gap-1 disabled:opacity-40"
+              style={{ background: 'var(--color-primary-600)' }}><Save size={11} /> {busy ? 'Saving…' : 'Add'}</button>
+          </div>
+        </div>
       )}
     </div>
   );
