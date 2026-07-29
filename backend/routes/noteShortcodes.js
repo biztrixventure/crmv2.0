@@ -8,6 +8,7 @@ const express = require('express');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { isSuperAdmin, resolveScopedCompanyId } = require('../models/helpers');
+const logger = require('../utils/logger');
 
 const router = express.Router();
 
@@ -28,9 +29,27 @@ router.get('/', asyncHandler(async (req, res) => {
   orParts.push(companyId
     ? `and(owner_user_id.is.null,or(company_id.is.null,company_id.eq.${companyId}))`
     : `and(owner_user_id.is.null,company_id.is.null)`);
-  const { data, error } = await supabaseAdmin.from('note_shortcodes')
-    .select('*').or(orParts.join(',')).order('sort_order', { ascending: true }).order('code', { ascending: true });
+  const base = () => supabaseAdmin.from('note_shortcodes')
+    .select('*').order('sort_order', { ascending: true }).order('code', { ascending: true });
+
+  let { data, error } = await base().or(orParts.join(','));
+
+  // Production is running a note_shortcodes table WITHOUT owner_user_id —
+  // migration 155 adds it, and the ALTER never landed there, so every caller
+  // got a 500 ("column note_shortcodes.owner_user_id does not exist") and the
+  // Note Shortcuts tab was dead for every role. Personal shortcodes simply do
+  // not exist on that schema, so fall back to the company + global tiers rather
+  // than failing the whole surface. Re-running 155 restores the personal tier
+  // with no code change — this branch just stops being taken.
+  if (error && /owner_user_id/.test(error.message || '')) {
+    logger.warn('NOTE_SHORTCODES', 'owner_user_id missing — migration 155 not applied; serving company + global tiers only');
+    const fallback = companyId
+      ? await base().or(`company_id.is.null,company_id.eq.${companyId}`)
+      : await base().is('company_id', null);
+    data = fallback.data; error = fallback.error;
+  }
   if (error) return res.status(500).json({ error: error.message });
+
   const tierOf = (r) => (r.owner_user_id ? 'mine' : (r.company_id ? 'company' : 'global'));
   res.json({ shortcodes: (data || []).map(r => ({ ...r, tier: tierOf(r) })) });
 }));

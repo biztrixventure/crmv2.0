@@ -22,7 +22,7 @@ import {
   UserCircle, Database, Settings2, Zap, Building2, CreditCard,
 } from "lucide-react";
 import { Card, Badge, Alert } from "../components/UI";
-import { TableScroll } from "../components/UI/kit";
+import { TableScroll, PillTabs, Loading, EmptyState } from "../components/UI/kit";
 import DateRangePicker, { getPresetRange } from "../components/UI/DateRangePicker";
 import { AppHeader } from "../components/Layout";
 import { useSales } from "../hooks/useSales";
@@ -164,6 +164,18 @@ const MGR_CARD_META = {
 };
 const MGR_CARD_ORDER = ['transfers', 'sales', 'approved', 'awaiting_review', 'returned', 'cancelled', 'resells', 'dup_attempts'];
 
+// A company_admin's KPI strip leads with the metric their room is judged on and
+// drops the cards belonging to the other side of the pipeline:
+//   dup_attempts counts duplicate TRANSFER submissions, and /stats only computes
+//     it for fronter-side callers — a closer company's admin read a hard 0.
+//   returned + resells are closer-desk states. Resells belong to the closer's
+//     company and are hidden from fronters by resell.hide_from_fronter anyway,
+//     so a fronter admin's card was 0 by construction too.
+// Both lists are subsets of MGR_CARD_ORDER — no new card keys, so the
+// superadmin card config keeps deciding visibility and content of each one.
+const FRONTER_CARD_ORDER = ['transfers', 'sales', 'approved', 'awaiting_review', 'cancelled', 'dup_attempts'];
+const CLOSER_CARD_ORDER  = ['sales', 'approved', 'awaiting_review', 'returned', 'cancelled', 'resells', 'transfers'];
+
 const ManagerShell = ({ workspaceMode = false }) => {
   const { user, logout, updateUser, hasPermission, canExport } = useAuth();
   const { theme, toggleTheme } = useTheme();
@@ -296,6 +308,13 @@ const ManagerShell = ({ workspaceMode = false }) => {
   // weren't on them. Previously only fronter_manager was excluded, which left a
   // fronter company's admin with Rate / Dispo buttons on every transfer row.
   const isFronterSideViewer = user?.role === 'fronter_manager' || (isCoAdmin && coType === 'fronter');
+
+  // Same rule for the KPI strip. Any role other than company_admin — and an
+  // admin whose company_type hasn't loaded — keeps the full default order.
+  const cardOrder = (!isCoAdmin || !coType)
+    ? MGR_CARD_ORDER
+    : (coType === 'fronter' ? FRONTER_CARD_ORDER : CLOSER_CARD_ORDER);
+  const closerBoardFirst = isCoAdmin && coType === 'closer';
 
   const TABS = useMemo(
     () => applyManagerLayout(CODE_TABS).filter(t => sideAllowsTab(t.key)),
@@ -688,24 +707,18 @@ const ManagerShell = ({ workspaceMode = false }) => {
 
         {/* Tab bar */}
         <div className="flex items-center justify-between mb-6 gap-3 flex-wrap">
-          {/* min-w-0 is what makes overflow-x-auto actually work here: as a flex
-              child this strip inherits min-width:auto, sizes itself to all ~20
-              tabs, and hands the overflow to the PAGE — which is why the whole
-              shell scrolled sideways at 390 instead of the tab strip doing it. */}
-          <div className="flex gap-1 p-1 rounded-xl overflow-x-auto min-w-0 w-full sm:w-auto sm:flex-1"
-            style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-            {TABS.map(tab => (
-              <button key={tab.key} onClick={() => setActiveTab(tab.key)}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-150 whitespace-nowrap flex-shrink-0"
-                style={{
-                  background: activeTab === tab.key ? 'var(--gradient-sidebar)' : 'transparent',
-                  color: activeTab === tab.key ? 'white' : 'var(--color-text-secondary)',
-                  boxShadow: activeTab === tab.key ? 'var(--shadow-sm)' : 'none',
-                }}>
-                <tab.icon size={15} />{tab.label}
-              </button>
-            ))}
-          </div>
+          {/* The kit's segmented control — the same sub-nav the Compliance
+              shell uses (docs/ui-design-system.md). It owns the recessed track,
+              the lifted active tab, and an overflow fade that appears only when
+              the track actually clips, so this shell stops carrying its own
+              hand-rolled version of all three. min-w-0 is still what keeps the
+              overflow inside the track instead of handing it to the page. */}
+          <PillTabs
+            items={TABS.map(t => ({ key: t.key, label: t.label, icon: t.icon }))}
+            value={activeTab}
+            onChange={setActiveTab}
+            className="min-w-0 w-full sm:w-auto sm:flex-1"
+          />
           {isMgrFilterVisible('date_range') && (
             <DateRangePicker onChange={handleDateChange} defaultPreset="today" />
           )}
@@ -729,7 +742,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
                 pre-existing overviewTotals so the manager's company-scoped
                 aggregate stays correct even before stats hook loads. */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-              {MGR_CARD_ORDER.map(renderMgrCard)}
+              {cardOrder.map(renderMgrCard)}
             </div>
 
             {/* ── Team performance charts (trends + top agents, with tooltips) ── */}
@@ -805,9 +818,14 @@ const ManagerShell = ({ workspaceMode = false }) => {
             {/* ── Leaderboards ── */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
-              {/* Fronter leaderboard */}
+              {/* Fronter leaderboard.
+                  A closer company's admin runs closers, so their board leads
+                  with closers; a fronter company's admin leads with fronters.
+                  Ordered, never hidden — a fronter admin still wants to see how
+                  their leads closed. company_admin only; every other role keeps
+                  the existing fronter-then-closer order. */}
               {hasPermission('view_fronter_stats') && (
-                <Card className="p-4 sm:p-6">
+                <Card className="p-4 sm:p-6" style={{ order: closerBoardFirst ? 1 : 0 }}>
                   <div className="flex items-center justify-between mb-5">
                     <h3 className="text-base font-bold text-text flex items-center gap-2">
                       <BarChart3 size={16} /> Fronter Leaderboard
@@ -869,7 +887,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
 
               {/* Closer leaderboard */}
               {hasPermission('view_closer_stats') && (
-                <Card className="p-4 sm:p-6">
+                <Card className="p-4 sm:p-6" style={{ order: closerBoardFirst ? 0 : 1 }}>
                   <div className="flex items-center justify-between mb-5">
                     <h3 className="text-base font-bold text-text flex items-center gap-2">
                       <TrendingUp size={16} /> Closer Leaderboard
@@ -991,9 +1009,10 @@ const ManagerShell = ({ workspaceMode = false }) => {
             />
 
             {xferTabLoading ? (
-              <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" /></div>
+              <Loading variant="table" rows={5} />
             ) : xferTabRows.length === 0 ? (
-              <p className="m-0 text-text-secondary text-center py-8">No transfers found.</p>
+              <EmptyState icon={Send} title="No transfers found"
+                hint="Nothing matches the current date range and filters." />
             ) : (
               <>
                 <TableScroll stickyFirst label="Team transfers">
@@ -1116,9 +1135,10 @@ const ManagerShell = ({ workspaceMode = false }) => {
             />
 
             {salesTabLoading ? (
-              <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" /></div>
+              <Loading variant="table" rows={5} />
             ) : salesTabRows.length === 0 ? (
-              <p className="m-0 text-text-secondary text-center py-8">No sales found.</p>
+              <EmptyState icon={DollarSign} title="No sales found"
+                hint="Nothing matches the current date range and filters." />
             ) : (
               <>
                 <TableScroll stickyFirst label="Team sales">
@@ -1185,8 +1205,8 @@ const ManagerShell = ({ workspaceMode = false }) => {
               )}
             </div>
             <Card className="p-4 sm:p-6">
-              {salesLoading ? <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" /></div>
-                : sales.filter(s => s.closer_id === user?.id).length === 0 ? <p className="text-text-secondary text-center py-8">No personal sales yet.</p>
+              {salesLoading ? <Loading variant="table" rows={5} />
+                : sales.filter(s => s.closer_id === user?.id).length === 0 ? <EmptyState compact icon={DollarSign} title="No personal sales yet" />
                 : (
                   <div className="space-y-3">
                     {sales.filter(s => s.closer_id === user?.id).map(s => (
@@ -1247,9 +1267,10 @@ const ManagerShell = ({ workspaceMode = false }) => {
               )}
             </div>
             {activityLoading ? (
-              <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" /></div>
+              <Loading variant="table" rows={5} />
             ) : activityLogs.length === 0 ? (
-              <p className="m-0 text-text-secondary text-center py-8">No activity yet.</p>
+              <EmptyState icon={Activity} title="No activity yet"
+                hint="Actions taken on this company's records will appear here." />
             ) : (
               <>
                 <TableScroll stickyFirst label="Activity log">
@@ -1313,49 +1334,49 @@ const ManagerShell = ({ workspaceMode = false }) => {
         {activeTab === 'reports'   && <ReportsPanel companyId={companyId} />}
         {activeTab === 'forms'     && (
           <div className="animate-fade-in">
-            <Suspense fallback={<div className="flex justify-center py-16"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" /></div>}>
+            <Suspense fallback={<Loading variant="block" height={200} />}>
               <FormBuilder />
             </Suspense>
           </div>
         )}
         {activeTab === 'spiffs'    && (
-          <Suspense fallback={<div className="flex justify-center py-16"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" /></div>}>
+          <Suspense fallback={<Loading variant="block" height={200} />}>
             <SpiffManager />
           </Suspense>
         )}
         {/* Delegated superadmin tools — gated by the tool flag on the nav side. */}
         {activeTab === 'tool_customer_profiles' && isEnabledStrict('tool_customer_profiles') && (
-          <Suspense fallback={<div className="flex justify-center py-16"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" /></div>}>
+          <Suspense fallback={<Loading variant="block" height={200} />}>
             <CustomerProfile />
           </Suspense>
         )}
         {activeTab === 'tool_data_analyzer' && isEnabledStrict('tool_data_analyzer') && (
-          <Suspense fallback={<div className="flex justify-center py-16"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" /></div>}>
+          <Suspense fallback={<Loading variant="block" height={200} />}>
             <DataAnalyzer />
           </Suspense>
         )}
         {activeTab === 'tool_chat_control' && isEnabledStrict('tool_chat_control') && (
-          <Suspense fallback={<div className="flex justify-center py-16"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" /></div>}>
+          <Suspense fallback={<Loading variant="block" height={200} />}>
             <ChatAdmin />
           </Suspense>
         )}
         {activeTab === 'tool_compliance_review' && isEnabledStrict('tool_compliance_review') && (
-          <Suspense fallback={<div className="flex justify-center py-16"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" /></div>}>
+          <Suspense fallback={<Loading variant="block" height={200} />}>
             <ComplianceReviewPanel />
           </Suspense>
         )}
         {activeTab === 'tool_business_rules' && isEnabledStrict('tool_business_rules') && (
-          <Suspense fallback={<div className="flex justify-center py-16"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" /></div>}>
+          <Suspense fallback={<Loading variant="block" height={200} />}>
             <BusinessRulesHub />
           </Suspense>
         )}
         {activeTab === 'tool_feature_admin' && isEnabledStrict('tool_feature_admin') && (
-          <Suspense fallback={<div className="flex justify-center py-16"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" /></div>}>
+          <Suspense fallback={<Loading variant="block" height={200} />}>
             <FeatureFlagsManager />
           </Suspense>
         )}
         {activeTab === 'tool_company_admin' && isEnabledStrict('tool_company_admin') && (
-          <Suspense fallback={<div className="flex justify-center py-16"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" /></div>}>
+          <Suspense fallback={<Loading variant="block" height={200} />}>
             <CompanyManagement />
           </Suspense>
         )}

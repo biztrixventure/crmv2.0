@@ -3,7 +3,7 @@ const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { etDateToUtcStart, etDateToUtcEnd, todayEt } = require('../utils/etUtils');
 const { getConfig } = require('../utils/businessConfig');
-const { isCloserSideScope } = require('../models/helpers');
+const { isCloserSideScope, getCompanyType } = require('../models/helpers');
 const logger = require('../utils/logger');
 
 const router = express.Router();
@@ -417,7 +417,15 @@ router.get('/team-trends', asyncHandler(async (req, res) => {
 
   // Whose leaderboard matters: a fronter manager wants top fronters (by leads);
   // closer-side wants top closers (by sales); operations/admin default to closers.
-  const side = role === 'fronter_manager' ? 'fronter' : (isCloserSide ? 'closer' : 'both');
+  //
+  // A FRONTER company's admin runs a room of fronters, so ranking their people
+  // by closer metrics ranked nobody — every closer on the board belongs to the
+  // partner company. Resolve it from the company type, company_admin only.
+  const isFronterCoAdmin = role === 'company_admin'
+    && (await getCompanyType(companyId)) === 'fronter';
+  const side = (role === 'fronter_manager' || isFronterCoAdmin)
+    ? 'fronter'
+    : (isCloserSide ? 'closer' : 'both');
 
   const [{ data: trs }, { data: sls }] = await Promise.all([
     scopeT(supabaseAdmin.from('transfers').select('created_at, created_by').gte('created_at', sinceUtc)).limit(8000),
