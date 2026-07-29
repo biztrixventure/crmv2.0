@@ -654,7 +654,82 @@ async function onResellCreated({ newSale, oldSale, closerName, intent }) {
   }
 }
 
+// ── quota milestone earned (mig 218) ────────────────────────────────────────
+// Fired when a quota's live actual crosses one of its ladder thresholds.
+//
+// FOUR independent gates decide who actually hears about it, and every one can
+// only ever REMOVE a recipient:
+//   1. the milestone's own notify_earner / notify_lead / notify_managers
+//   2. the per-company kill switch  notifications.quota_milestone
+//   3. the global PWA event matrix  (routes/pwa.js → resolveDelivery)
+//   4. per-user overrides + quiet hours (also inside resolveDelivery)
+// Superadmins are added only when they have opted into this event type, via the
+// same withSuperadmins() the sale events use.
+//
+// The dedup key is PERMANENT per (milestone, audience). Milestones are scored
+// live, so a cancelled sale can drop someone back under a threshold and a later
+// sale can push them over it again — without this key that would congratulate
+// them twice for one prize.
+async function onQuotaMilestoneEarned({ quota, milestone, earnerId, leadId, companyId, actual, earnerName }) {
+  if (!milestone || !quota) return;
+  if (!(await shouldNotify(companyId, 'quota_milestone'))) return;
+
+  const metric  = quota.metric_label || quota.metric || 'target';
+  const prize   = milestone.reward_description
+    || (milestone.reward_amount != null ? `$${milestone.reward_amount}` : null);
+  const name    = milestone.label || `${milestone.at} ${metric}`;
+  const reached = `${actual} / ${milestone.at}`;
+
+  const data = {
+    quota_id: quota.id, milestone_id: milestone.id, team_id: quota.team_id,
+    metric: quota.metric, threshold: milestone.at, reward: prize,
+  };
+
+  // 1. the person who earned it
+  if (milestone.notify_earner && earnerId) {
+    await notifyUsers([earnerId], {
+      companyId, type: 'quota_milestone',
+      title:   `Milestone reached — ${name}`,
+      message: prize
+        ? `You hit ${reached} ${metric}. Your reward: ${prize}.`
+        : `You hit ${reached} ${metric}.`,
+      data, dedupBase: `quota_ms_${milestone.id}_earner`,
+    });
+  }
+
+  // 2. the lead who has to hand the reward over (never twice if they ARE the earner)
+  if (milestone.notify_lead && leadId && leadId !== earnerId) {
+    await notifyUsers([leadId], {
+      companyId, type: 'quota_milestone',
+      title:   `${earnerName || 'A member'} reached ${name}`,
+      message: prize
+        ? `${earnerName || 'A member'} hit ${reached} ${metric} and earned ${prize}.`
+        : `${earnerName || 'A member'} hit ${reached} ${metric}.`,
+      data, dedupBase: `quota_ms_${milestone.id}_lead`,
+    });
+  }
+
+  // 3. management — off by default, because on a large floor this fires once
+  //    per member per milestone and would drown the bell.
+  if (milestone.notify_managers) {
+    const ids = await withSuperadmins(
+      'quota_milestone',
+      await getUserIdsByLevel(companyId, ['company_admin', 'operations_manager']),
+    );
+    const others = ids.filter(id => id !== earnerId && id !== leadId);
+    if (others.length) {
+      await notifyUsers(others, {
+        companyId, type: 'quota_milestone',
+        title:   `Milestone earned — ${name}`,
+        message: `${earnerName || 'A member'} hit ${reached} ${metric}${prize ? ` (${prize})` : ''}.`,
+        data, dedupBase: `quota_ms_${milestone.id}_mgr`,
+      });
+    }
+  }
+}
+
 module.exports = {
+  onQuotaMilestoneEarned,
   onTransferCreated,
   onFronterDuplicateEvent,
   onTransferRejected,

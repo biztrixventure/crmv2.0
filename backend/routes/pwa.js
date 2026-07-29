@@ -72,6 +72,12 @@ const EVENT_CATALOG = [
   { id: 'resell_created',        group: 'Sales',      label: 'Resell created',           detail: 'A customer was sold again.',               channels: ['inapp', 'push'], legacyKey: 'resell_notify_compliance' },
   { id: 'disposition_submitted', group: 'Sales',      label: 'Disposition submitted',    detail: 'A non-sale disposition was logged.',       channels: ['inapp', 'push'] },
 
+  // Quota reward ladder (mig 218). superadmin:true so the operator can watch
+  // every company's milestones from one switch; the per-milestone notify_*
+  // flags and the per-company notifications.quota_milestone key narrow it
+  // further, and none of them can add a recipient this event did not compute.
+  { id: 'quota_milestone',       group: 'Quotas',     label: 'Quota milestone earned',  detail: 'Someone crossed a milestone on their quota.', channels: ['inapp', 'push'], superadmin: true },
+
   { id: 'callback_due',          group: 'Callbacks',  label: 'Callback due',            detail: 'A scheduled callback came due.',            channels: ['inapp', 'push'] },
   { id: 'number_claimable',      group: 'Numbers',    label: 'Number claimable',        detail: 'An assigned number became claimable.',      channels: ['inapp'] },
   // Chat has its own unread badge, so it has never written a bell notification.

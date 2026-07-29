@@ -42,7 +42,7 @@ async function sideIsCloser(req, companyId) {
   return isCloserSideScope(req.user.role, companyId);
 }
 const { resolveTeamMemberIds, MEMBER_CACHE_NS } = require('../utils/teamMetrics');
-const { getCatalog, attachAttainment, periodBounds, activitySeries } = require('../utils/quotaMetrics');
+const { getCatalog, attachAttainment, attachMilestones, periodBounds, activitySeries } = require('../utils/quotaMetrics');
 const cache = require('../utils/cache');
 
 const router = express.Router();
@@ -110,9 +110,12 @@ async function decorate(rows, { team, req }) {
   if (!rows.length) return [];
   const ids = await memberIds(team.id, team.company_id);
   const closerSide = await sideIsCloser(req,team.company_id);
-  return attachAttainment(rows, {
+  const scored = await attachAttainment(rows, {
     companyId: team.company_id, closerSide, memberIdsByTeam: { [team.id]: ids },
   });
+  // The ladder is resolved AFTER attainment because "earned" is a comparison
+  // against the live actual attainment just computed.
+  return attachMilestones(scored);
 }
 
 // Names for the member tier — a raw uuid must never reach the UI.
@@ -245,9 +248,9 @@ router.get('/mine', asyncHandler(async (req, res) => {
       const { data: p } = await supabaseAdmin.from('team_quotas').select('*').in('id', parentIds);
       parents = p || [];
     }
-    const decorated = await attachAttainment([...mine, ...parents], {
+    const decorated = await attachMilestones(await attachAttainment([...mine, ...parents], {
       companyId: team.company_id, closerSide, memberIdsByTeam: { [tid]: ids },
-    });
+    }));
     const parentById = Object.fromEntries(decorated.filter(d => !d.user_id).map(d => [d.id, d]));
     decorated.filter(d => d.user_id).forEach(d => {
       const p = d.parent_quota_id ? parentById[d.parent_quota_id] : null;
@@ -258,6 +261,107 @@ router.get('/mine', asyncHandler(async (req, res) => {
     });
   }
   res.json({ quotas: out });
+}));
+
+// ── milestones: the reward ladder inside a quota (mig 218) ──────────────────
+// Permission is the quota's own: a TEAM-tier ladder is a company-manager
+// decision (can.team), a MEMBER-tier ladder belongs to whoever may allocate
+// (can.member — the lead, once the team grants it). No new permission concept.
+async function quotaById(id) {
+  const { data } = await supabaseAdmin.from('team_quotas').select('*').eq('id', id).maybeSingle();
+  return data;
+}
+async function mayEditLadder(req, quota) {
+  if (!quota) return false;
+  const team = await teamById(quota.team_id);
+  const scope = await writeScope(req, team);
+  return quota.user_id ? !!scope.member : !!scope.team;
+}
+
+router.get('/:id/milestones', asyncHandler(async (req, res) => {
+  const q = await quotaById(req.params.id);
+  if (!q) return res.status(404).json({ error: 'Quota not found' });
+  const team = await teamById(q.team_id);
+  if (!(await canRead(req, team))) return res.status(403).json({ error: 'Not allowed' });
+  const { data } = await supabaseAdmin.from('quota_milestones').select('*')
+    .eq('quota_id', q.id).eq('is_active', true).order('threshold', { ascending: true });
+  res.json({ milestones: data || [], can_edit: await mayEditLadder(req, q) });
+}));
+
+router.post('/:id/milestones', asyncHandler(async (req, res) => {
+  const q = await quotaById(req.params.id);
+  if (!q) return res.status(404).json({ error: 'Quota not found' });
+  if (!(await mayEditLadder(req, q))) {
+    return res.status(403).json({
+      error: q.user_id
+        ? 'Not allowed to set milestones on this allocation'
+        : 'Only a company manager can set milestones on a team target',
+    });
+  }
+  const b = req.body || {};
+  const kind = b.threshold_kind === 'percent' ? 'percent' : 'value';
+  const threshold = Number(b.threshold);
+  if (!Number.isFinite(threshold) || threshold <= 0) return res.status(400).json({ error: 'threshold must be greater than 0' });
+  // A milestone at or past the target is a stretch prize when expressed as a
+  // percent, but as an absolute it is almost always a typo — worth saying so
+  // rather than silently accepting a prize nobody can reach.
+  if (kind === 'value' && threshold > Number(q.target_value) * 3) {
+    return res.status(400).json({ error: `That milestone (${threshold}) is far beyond the quota target (${q.target_value}). Use a percentage if you meant a stretch goal.` });
+  }
+  const row = {
+    quota_id: q.id, threshold_kind: kind, threshold,
+    label: b.label ? String(b.label).slice(0, 120) : null,
+    reward_amount: b.reward_amount === '' || b.reward_amount == null ? null : Number(b.reward_amount),
+    reward_description: b.reward_description ? String(b.reward_description).slice(0, 300) : null,
+    notify_earner:   b.notify_earner   === undefined ? true  : !!b.notify_earner,
+    notify_lead:     b.notify_lead     === undefined ? true  : !!b.notify_lead,
+    notify_managers: b.notify_managers === undefined ? false : !!b.notify_managers,
+    created_by: req.user.id,
+  };
+  const { data, error } = await supabaseAdmin.from('quota_milestones').insert(row).select().single();
+  if (error) {
+    if (error.code === '23505') return res.status(409).json({ error: 'A milestone already exists at that threshold. Edit it instead.' });
+    return res.status(500).json({ error: error.message });
+  }
+  logger.success('QUOTAS', `Milestone ${kind}=${threshold} on quota ${q.id}`);
+  res.json({ milestone: data });
+}));
+
+router.put('/milestones/:mid', asyncHandler(async (req, res) => {
+  const { data: m } = await supabaseAdmin.from('quota_milestones').select('*').eq('id', req.params.mid).maybeSingle();
+  if (!m) return res.status(404).json({ error: 'Milestone not found' });
+  const q = await quotaById(m.quota_id);
+  if (!(await mayEditLadder(req, q))) return res.status(403).json({ error: 'Not allowed to edit this milestone' });
+  const b = req.body || {};
+  const patch = { updated_at: new Date().toISOString() };
+  if (b.threshold !== undefined) {
+    const t = Number(b.threshold);
+    if (!Number.isFinite(t) || t <= 0) return res.status(400).json({ error: 'threshold must be greater than 0' });
+    patch.threshold = t;
+  }
+  if (b.threshold_kind && ['value', 'percent'].includes(b.threshold_kind)) patch.threshold_kind = b.threshold_kind;
+  if (b.label !== undefined) patch.label = b.label ? String(b.label).slice(0, 120) : null;
+  if (b.reward_amount !== undefined) patch.reward_amount = b.reward_amount === '' || b.reward_amount == null ? null : Number(b.reward_amount);
+  if (b.reward_description !== undefined) patch.reward_description = b.reward_description ? String(b.reward_description).slice(0, 300) : null;
+  for (const k of ['notify_earner', 'notify_lead', 'notify_managers']) if (b[k] !== undefined) patch[k] = !!b[k];
+  const { data, error } = await supabaseAdmin.from('quota_milestones').update(patch).eq('id', m.id).select().single();
+  if (error) {
+    if (error.code === '23505') return res.status(409).json({ error: 'A milestone already exists at that threshold.' });
+    return res.status(500).json({ error: error.message });
+  }
+  res.json({ milestone: data });
+}));
+
+router.delete('/milestones/:mid', asyncHandler(async (req, res) => {
+  const { data: m } = await supabaseAdmin.from('quota_milestones').select('*').eq('id', req.params.mid).maybeSingle();
+  if (!m) return res.status(404).json({ error: 'Milestone not found' });
+  const q = await quotaById(m.quota_id);
+  if (!(await mayEditLadder(req, q))) return res.status(403).json({ error: 'Not allowed to remove this milestone' });
+  // Soft: the partial unique index only covers active rows, so the same
+  // threshold can be re-created later without colliding with this one.
+  await supabaseAdmin.from('quota_milestones')
+    .update({ is_active: false, updated_at: new Date().toISOString() }).eq('id', m.id);
+  res.json({ ok: true });
 }));
 
 // ── the reporting surface (all three tiers, one endpoint) ───────────────────
@@ -337,7 +441,9 @@ router.get('/report', asyncHandler(async (req, res) => {
 
   const memberIdsByTeam = {};
   for (const t of teams) memberIdsByTeam[t.id] = await memberIds(t.id, companyId);
-  const quotas = await attachAttainment(quotaRows || [], { companyId, closerSide, memberIdsByTeam });
+  const quotas = await attachMilestones(
+    await attachAttainment(quotaRows || [], { companyId, closerSide, memberIdsByTeam }),
+  );
 
   // One activity pass over every member in scope, reused by every chart.
   const everyone = [...new Set(Object.values(memberIdsByTeam).flat())];
@@ -365,6 +471,8 @@ router.get('/report', asyncHandler(async (req, res) => {
         id: q.id, metric: q.metric, metric_label: q.metric_label, metric_unit: q.metric_unit,
         target_value: Number(q.target_value), actual: q.actual, pct: q.pct, remaining: q.remaining,
         starts_at: q.starts_at, ends_at: q.ends_at, label: q.label,
+        milestones: q.milestones || [], milestones_earned: q.milestones_earned || 0,
+        next_milestone: q.next_milestone || null,
       })),
     }));
 
@@ -389,6 +497,8 @@ router.get('/report', asyncHandler(async (req, res) => {
           target_value: target, actual: q.actual, pct: q.pct, remaining: q.remaining,
           starts_at: q.starts_at, ends_at: q.ends_at, label: q.label,
           allocated, unallocated: target - allocated, allocated_to: kids.length,
+          milestones: q.milestones || [], milestones_earned: q.milestones_earned || 0,
+          next_milestone: q.next_milestone || null,
           // Pace: what fraction of the window has elapsed vs what fraction of the
           // target is done. Ahead/behind is the question a manager actually asks,
           // and "61% done" means nothing without "and 80% of the month is gone".

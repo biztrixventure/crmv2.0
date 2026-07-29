@@ -216,6 +216,76 @@ async function attachAttainment(quotas, { companyId, closerSide, memberIdsByTeam
   return rows.map(r => byId[r.id]).filter(Boolean);
 }
 
+// ── Milestone ladder (mig 218) ──────────────────────────────────────────────
+// Attach each quota's reward ladder, resolved against its LIVE actual. One
+// query for every quota in the batch — a company report with 40 quotas costs
+// one read, not 40.
+//
+// Earned is deliberately live (`actual >= threshold`), not a stored award: the
+// operator chose that. It means a cancelled sale can drop someone back below a
+// line they had crossed, which is why the notifier keys on a permanent dedup
+// key — the prize can un-earn on screen, but nobody is congratulated twice.
+//
+// `next_milestone` is the ladder's real job: not "you are at 61%" but "40 more
+// and you hit the $100". That is the number that changes what someone does today.
+async function attachMilestones(quotas) {
+  const rows = quotas || [];
+  if (!rows.length) return rows;
+  const ids = [...new Set(rows.map(q => q.id).filter(Boolean))];
+  if (!ids.length) return rows;
+
+  let all = [];
+  try {
+    const { data, error } = await supabaseAdmin.from('quota_milestones')
+      .select('*').in('quota_id', ids).eq('is_active', true)
+      .order('threshold', { ascending: true });
+    if (error) throw new Error(error.message);
+    all = data || [];
+  } catch (e) {
+    // A missing table (migration not yet applied) or a failed read must never
+    // take the quota report down with it — the ladder is an enhancement.
+    logger.warn('QUOTA_METRICS', `milestones unavailable: ${e.message}`);
+    return rows.map(q => ({ ...q, milestones: [], milestones_earned: 0, next_milestone: null }));
+  }
+
+  const byQuota = {};
+  all.forEach(m => { (byQuota[m.quota_id] = byQuota[m.quota_id] || []).push(m); });
+
+  return rows.map(q => {
+    const target = Number(q.target_value) || 0;
+    const actual = Number(q.actual) || 0;
+    const list = (byQuota[q.id] || []).map(m => {
+      // Percent resolves against THIS quota's target, so one "50%" milestone
+      // means the right number on every member allocation it is copied to.
+      const at = m.threshold_kind === 'percent'
+        ? (target * Number(m.threshold)) / 100
+        : Number(m.threshold);
+      const resolved = Math.round(at * 100) / 100;
+      return {
+        id: m.id,
+        threshold_kind: m.threshold_kind,
+        threshold: Number(m.threshold),
+        at: resolved,                                  // absolute, whatever the kind
+        label: m.label || null,
+        reward_amount: m.reward_amount == null ? null : Number(m.reward_amount),
+        reward_description: m.reward_description || null,
+        notify_earner: m.notify_earner, notify_lead: m.notify_lead, notify_managers: m.notify_managers,
+        earned: resolved > 0 && actual >= resolved,
+        remaining: Math.max(0, Math.round((resolved - actual) * 100) / 100),
+        pct: resolved > 0 ? Math.round((actual / resolved) * 1000) / 10 : null,
+      };
+    }).sort((a, b) => a.at - b.at);
+
+    const next = list.find(m => !m.earned) || null;
+    return {
+      ...q,
+      milestones: list,
+      milestones_earned: list.filter(m => m.earned).length,
+      next_milestone: next,
+    };
+  });
+}
+
 // Period helpers — 'day' | 'week' | 'month' collapse to explicit date bounds so
 // the stored row is always an unambiguous window and nothing re-derives "this
 // month" at read time (which would silently move an old quota's goalposts).
@@ -344,4 +414,4 @@ async function activitySeries({ userIds, companyId, closerSide, from, to }) {
   return { days: [...days.values()], members, totals };
 }
 
-module.exports = { BUILT_IN, WON_STATUSES, getCatalog, resolveMetric, countWindow, attachAttainment, periodBounds, activitySeries };
+module.exports = { BUILT_IN, WON_STATUSES, getCatalog, resolveMetric, countWindow, attachAttainment, attachMilestones, periodBounds, activitySeries };

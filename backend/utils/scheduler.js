@@ -14,12 +14,15 @@ const cache = require('./cache');
 const logger = require('./logger');
 const { runPaymentReminderScan } = require('./paymentReminders');
 const { runQaMaterialization } = require('./qaMaterializer');
+const { sweepMilestones } = require('./quotaMilestoneWatcher');
 
 const REFRESH_SEGMENTS_MS = 10 * 60 * 1000;     // every 10 min
 const CACHE_SWEEP_MS      = 5  * 60 * 1000;      // every 5 min
 const INITIAL_REFRESH_MS  = 60 * 1000;          // one refresh ~1 min after boot
 const PAYMENT_SCAN_MS     = 3 * 60 * 60 * 1000; // monthly-payment scan every 3h
 const PAYMENT_SCAN_INIT   = 90 * 1000;          // first scan ~90s after boot
+const MILESTONE_SWEEP_MS   = 10 * 60 * 1000;    // quota milestone ladder, every 10 min
+const MILESTONE_SWEEP_INIT = 2 * 60 * 1000;     // first sweep ~2 min after boot
 // QA worklist materialization. Hourly: TRA coverage should track new transfers
 // within ~an hour (review work, not real-time), and RCM only acts once per
 // completed period (frozen guard makes the extra ticks cheap no-ops). Raise to
@@ -70,7 +73,17 @@ function startBackgroundJobs() {
   _timers.push(setTimeout(qa, QA_MATERIALIZE_INIT));
   _timers.push(setInterval(qa, QA_MATERIALIZE_MS));
 
-  logger.info('JOBS', `background jobs started — segments refresh ${REFRESH_SEGMENTS_MS / 60000}m, cache sweep ${CACHE_SWEEP_MS / 60000}m, payment scan ${PAYMENT_SCAN_MS / 3600000}h, qa materialize ${QA_MATERIALIZE_MS / 60000}m`);
+  // Quota milestone ladder (mig 218). Milestones are scored live, so this
+  // re-detects the same earned milestone every run — the permanent dedup key in
+  // onQuotaMilestoneEarned is what makes that a no-op after the first crossing.
+  // 10 minutes is the useful resolution: a prize that lands within ten minutes
+  // of the sale being approved still feels immediate, and a tighter loop would
+  // re-count every live quota for nothing.
+  const ms = () => sweepMilestones().catch(e => logger.warn('JOBS', `milestone sweep error: ${e.message}`));
+  _timers.push(setTimeout(ms, MILESTONE_SWEEP_INIT));
+  _timers.push(setInterval(ms, MILESTONE_SWEEP_MS));
+
+  logger.info('JOBS', `background jobs started — segments refresh ${REFRESH_SEGMENTS_MS / 60000}m, cache sweep ${CACHE_SWEEP_MS / 60000}m, payment scan ${PAYMENT_SCAN_MS / 3600000}h, qa materialize ${QA_MATERIALIZE_MS / 60000}m, milestone sweep ${MILESTONE_SWEEP_MS / 60000}m`);
 }
 
 function stopBackgroundJobs() {
