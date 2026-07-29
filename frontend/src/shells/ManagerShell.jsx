@@ -20,7 +20,7 @@ import {
   Search, Star, Shield, FileText, RefreshCw, AlertCircle, Plus,
   MessageSquare, Trash2, Activity, ChevronLeft, ChevronRight, CalendarDays, HelpCircle, FileSpreadsheet, Trophy, Copy,
   UserCircle, Database, Settings2, Zap, Building2, CreditCard,
-  LayoutGrid,
+  LayoutGrid, ChevronUp, ChevronDown, ChevronsUpDown,
 } from "lucide-react";
 import { Badge, Alert } from "../components/UI";
 import { Panel, TableScroll, Loading, EmptyState, SectionHeader } from "../components/UI/kit";
@@ -184,6 +184,33 @@ const MGR_CARD_META = {
   dup_attempts:    { icon: Copy,        color: 'warning' },
 };
 const MGR_CARD_ORDER = ['transfers', 'sales', 'approved', 'awaiting_review', 'returned', 'cancelled', 'resells', 'dup_attempts'];
+
+// ── Record-table header cells, matching the Compliance record tabs ──────────
+// Function declarations, not const arrows: this file sits in an import cycle
+// through Compliance/shared (via ManagerCallbacksTab), and a const in a cycle
+// is a temporal-dead-zone blank page waiting on the next bundler reshuffle.
+function Th({ children, className = '' }) {
+  return (
+    <th className={`px-3 py-2 text-left text-xs font-bold uppercase tracking-wide whitespace-nowrap ${className}`}
+      style={{ color: 'var(--color-text-secondary)' }}>{children}</th>
+  );
+}
+
+function SortTh({ col, sort, onSort, children }) {
+  const active = sort.col === col;
+  return (
+    <th onClick={() => onSort(col)}
+      className="px-3 py-2 text-left text-xs font-bold uppercase tracking-wide cursor-pointer select-none whitespace-nowrap transition-colors"
+      style={{ color: active ? 'var(--color-primary-600)' : 'var(--color-text-secondary)' }}>
+      {children}
+      {active
+        ? (sort.dir === 'asc'
+            ? <ChevronUp size={10} className="ml-0.5 inline-block" />
+            : <ChevronDown size={10} className="ml-0.5 inline-block" />)
+        : <ChevronsUpDown size={10} className="ml-0.5 inline-block opacity-30" />}
+    </th>
+  );
+}
 
 // A company_admin's KPI strip leads with the metric their room is judged on and
 // drops the cards belonging to the other side of the pipeline:
@@ -413,6 +440,12 @@ const ManagerShell = ({ workspaceMode = false }) => {
   // ── Pagination ────────────────────────────────────────────────────────────
   const [xferPage, setXferPage]           = useState(1);
   const [salesPage, setSalesPage]         = useState(1);
+  // Server-side sort, the same shape the Compliance record tabs use. Both
+  // endpoints already accepted sort_by/sort_dir (TRANSFER_SORT / SALE_SORT) —
+  // this shell simply never sent them, so its records were stuck on newest
+  // first and you could not, say, pull the biggest monthly payments to the top.
+  const [xferSort,  setXferSort]  = useState({ col: 'created_at', dir: 'desc' });
+  const [salesSort, setSalesSort] = useState({ col: 'sale_date',  dir: 'desc' });
   const [activityPage,    setActivityPage]    = useState(1);
   const [activityLogs,    setActivityLogs]    = useState([]);
   const [activityTotal,   setActivityTotal]   = useState(0);
@@ -521,6 +554,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
         company_id: companyId, page: xferPage, limit: PAGE_SIZE,
         date_from: xferTodayOnly ? xferToday : date_from,
         date_to:   xferTodayOnly ? xferToday : date_to,
+        sort_by: xferSort.col, sort_dir: xferSort.dir,
       };
       if (xferStatus) params.status  = xferStatus;
       if (xferAgent)  params.user_id = xferAgent;
@@ -529,13 +563,13 @@ const ManagerShell = ({ workspaceMode = false }) => {
       setXferTabRows(res.data.transfers || []);
       setXferTabTotal(res.data.total    || 0);
     } catch {} finally { setXferTabLoading(false); }
-  }, [companyId, xferPage, xferStatus, xferAgent, xferSearch, date_from, date_to, xferTodayOnly, xferToday]);
+  }, [companyId, xferPage, xferStatus, xferAgent, xferSearch, date_from, date_to, xferTodayOnly, xferToday, xferSort]);
 
   const fetchSalesTab = useCallback(async () => {
     if (!companyId) return;
     setSalesTabLoading(true);
     try {
-      const params = { company_id: companyId, page: salesPage, limit: PAGE_SIZE, date_from, date_to };
+      const params = { company_id: companyId, page: salesPage, limit: PAGE_SIZE, date_from, date_to, sort_by: salesSort.col, sort_dir: salesSort.dir };
       if (salesStatus) params.status  = salesStatus;
       if (salesAgent)  params.user_id = salesAgent;
       if (salesSearch) params.search  = salesSearch;
@@ -543,7 +577,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
       setSalesTabRows(res.data.sales || []);
       setSalesTabTotal(res.data.total || 0);
     } catch {} finally { setSalesTabLoading(false); }
-  }, [companyId, salesPage, salesStatus, salesAgent, salesSearch, date_from, date_to]);
+  }, [companyId, salesPage, salesStatus, salesAgent, salesSearch, date_from, date_to, salesSort]);
 
   const loadOverview = useCallback(async () => {
     if (!companyId) return;
@@ -612,6 +646,19 @@ const ManagerShell = ({ workspaceMode = false }) => {
       .then(r => setXferTodayCount(r.data.total ?? 0))
       .catch(() => {});
   }, [companyId]);
+
+  // Clicking the active column flips direction; a new column starts descending,
+  // because for every column here (newest date, biggest payment, latest status)
+  // the interesting end is the top. Page resets to 1 — sorting while on page 4
+  // of the old order lands you somewhere meaningless.
+  const toggleXferSort = useCallback((col) => {
+    setXferSort(s => ({ col, dir: s.col === col && s.dir === 'desc' ? 'asc' : 'desc' }));
+    setXferPage(1);
+  }, []);
+  const toggleSalesSort = useCallback((col) => {
+    setSalesSort(s => ({ col, dir: s.col === col && s.dir === 'desc' ? 'asc' : 'desc' }));
+    setSalesPage(1);
+  }, []);
 
   const handleLogout = () => { logout(); navigate('/login'); };
 
@@ -889,29 +936,46 @@ const ManagerShell = ({ workspaceMode = false }) => {
                 hint="Nothing matches the current date range and filters." />
             ) : (
               <>
-                <TableScroll stickyFirst label="Team transfers">
+                {/* Compliance record-tab treatment: a bordered surface holding
+                    a condensed table, first column pinned so scrolling right
+                    never leaves you reading an unidentifiable row, and the
+                    customer's phone stacked under their name instead of eating
+                    a whole column — that one change takes ~90px off the width
+                    a phone has to scroll through. */}
+                <div className="rounded-xl overflow-hidden"
+                  style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+                <TableScroll stickyFirst inheritRowBg label="Team transfers">
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="border-b border-border">
-                        {['Customer', 'Phone', 'Fronter', 'Closer', 'Status', 'Disposition', 'Date', 'Action'].map(h => (
-                          <th key={h} className="text-left py-3 px-3 text-xs font-semibold text-text-secondary uppercase tracking-wide">
-                            <Tooltip text={TRANSFER_COL_TIPS[h]} side="bottom"><span className="cursor-help">{h}</span></Tooltip>
-                          </th>
-                        ))}
+                      <tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
+                        <SortTh col="customer"   sort={xferSort} onSort={toggleXferSort}>Customer</SortTh>
+                        <SortTh col="fronter"    sort={xferSort} onSort={toggleXferSort}>Fronter</SortTh>
+                        <SortTh col="closer"     sort={xferSort} onSort={toggleXferSort}>Closer</SortTh>
+                        <SortTh col="status"     sort={xferSort} onSort={toggleXferSort}>Status</SortTh>
+                        <Th>Disposition</Th>
+                        <SortTh col="created_at" sort={xferSort} onSort={toggleXferSort}>Date</SortTh>
+                        <Th>Action</Th>
                       </tr>
                     </thead>
                     <tbody>
                       {xferTabRows.map(t => (
                         <tr key={t.id} onClick={() => setDetailTransfer(t)}
-                          className="border-b border-border hover:bg-bg-secondary transition-colors cursor-pointer">
-                          <td className="py-3 px-3 font-semibold text-text">
-                            {t.form_data?.customer_name || t.form_data?.FirstName || 'Lead'}
+                          className="cursor-pointer transition-colors"
+                          style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-surface)' }}
+                          onMouseEnter={e => { e.currentTarget.style.backgroundColor = 'var(--color-bg-secondary)'; }}
+                          onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'var(--color-surface)'; }}>
+                          <td className="px-3 py-1.5">
+                            <p className="m-0 font-semibold" style={{ color: 'var(--color-text)' }}>
+                              {t.form_data?.customer_name || t.form_data?.FirstName || 'Lead'}
+                            </p>
+                            <p className="m-0 mt-0.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                              {transferPhone(t) || '—'}
+                            </p>
                           </td>
-                          <td className="py-3 px-3 text-text-secondary text-xs">{transferPhone(t) || '—'}</td>
-                          <td className="py-3 px-3 text-text-secondary text-xs">{t.fronter_name || '—'}</td>
-                          <td className="py-3 px-3 text-text-secondary text-xs">{t.closer ? `${t.closer.first_name || ''} ${t.closer.last_name || ''}`.trim() || '—' : '—'}</td>
-                          <td className="py-3 px-3">{(() => { const ds = getTransferDisplayStatus(t); return <Badge variant={ds.variant} size="sm">{ds.label}</Badge>; })()}</td>
-                          <td className="py-3 px-3">
+                          <td className="px-3 py-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{t.fronter_name || '—'}</td>
+                          <td className="px-3 py-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{t.closer ? `${t.closer.first_name || ''} ${t.closer.last_name || ''}`.trim() || '—' : '—'}</td>
+                          <td className="px-3 py-1.5">{(() => { const ds = getTransferDisplayStatus(t); return <Badge variant={ds.variant} size="sm">{ds.label}</Badge>; })()}</td>
+                          <td className="px-3 py-1.5">
                             {(t.latest_disposition || t.sale_closer_disposition) ? (() => {
                               const d = t.latest_disposition;
                               const name  = d?.disposition_name || t.sale_closer_disposition;
@@ -937,8 +1001,8 @@ const ManagerShell = ({ workspaceMode = false }) => {
                               );
                             })() : <span className="text-text-tertiary text-xs">—</span>}
                           </td>
-                          <td className="py-3 px-3 text-text-secondary text-xs">{fmtDateET(t.created_at)}</td>
-                          <td className="py-3 px-3">
+                          <td className="px-3 py-1.5 text-xs whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>{fmtDateET(t.created_at)}</td>
+                          <td className="px-3 py-1.5">
                             <div className="flex flex-wrap gap-1">
                               {!isFronterSideViewer && hasPermission('submit_call_review') && (
                                 <button onClick={e => { e.stopPropagation(); setRateTarget(t); setRatingVal('good'); setRatingNotes(''); setRatingMsg(''); }}
@@ -970,6 +1034,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
                     </tbody>
                   </table>
                 </TableScroll>
+                </div>
                 <Pagination page={xferPage} total={xferTabTotal} pageSize={PAGE_SIZE} onChange={setXferPage} />
               </>
             )}
@@ -1015,36 +1080,53 @@ const ManagerShell = ({ workspaceMode = false }) => {
                 hint="Nothing matches the current date range and filters." />
             ) : (
               <>
-                <TableScroll stickyFirst label="Team sales">
+                <div className="rounded-xl overflow-hidden"
+                  style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+                <TableScroll stickyFirst inheritRowBg label="Team sales">
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="border-b border-border">
-                        {['Customer', 'Reference', 'Status', 'Fronter', 'Closer', hasPermission('view_financial_data') ? 'Monthly' : null, 'Sale Date', hasPermission('delete_sale') ? 'Action' : null].filter(Boolean).map(h => (
-                          <th key={h} className="text-left py-3 px-3 text-xs font-semibold text-text-secondary uppercase tracking-wide">
-                            <Tooltip text={SALE_COL_TIPS[h]} side="bottom"><span className="cursor-help">{h}</span></Tooltip>
-                          </th>
-                        ))}
+                      <tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
+                        <SortTh col="customer"  sort={salesSort} onSort={toggleSalesSort}>Customer</SortTh>
+                        <SortTh col="status"    sort={salesSort} onSort={toggleSalesSort}>Status</SortTh>
+                        <SortTh col="fronter"   sort={salesSort} onSort={toggleSalesSort}>Fronter</SortTh>
+                        <SortTh col="closer"    sort={salesSort} onSort={toggleSalesSort}>Closer</SortTh>
+                        {hasPermission('view_financial_data') && (
+                          <SortTh col="monthly_payment" sort={salesSort} onSort={toggleSalesSort}>Monthly</SortTh>
+                        )}
+                        <SortTh col="sale_date" sort={salesSort} onSort={toggleSalesSort}>Sale Date</SortTh>
+                        {hasPermission('delete_sale') && <Th>Action</Th>}
                       </tr>
                     </thead>
                     <tbody>
                       {salesTabRows.map(s => (
                         <tr key={s.id} onClick={() => setDetailSale(s)}
-                          className="border-b border-border hover:bg-bg-secondary transition-colors cursor-pointer">
-                          <td className="py-3 px-3 font-semibold text-text">{s.customer_name || '—'}</td>
-                          <td className="py-3 px-3 text-xs font-mono text-text-tertiary">{s.reference_no || '—'}</td>
-                          <td className="py-3 px-3"><div className="flex items-center gap-1.5 flex-wrap"><SaleStatusBadge sale={s} size="sm" />{s.is_resell && <span title={`Resell · ${s.resell_intent || ''}`} className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded whitespace-nowrap" style={{ backgroundColor: '#ddd6fe', color: '#5b21b6' }}>↻ {(s.resell_intent || 'resell').replace(/_/g, ' ')}</span>}</div></td>
-                          <td className="py-3 px-3 text-text-secondary text-xs">{s.fronter_name || '—'}</td>
-                          <td className="py-3 px-3 text-text-secondary text-xs">{s.closer_name || '—'}</td>
-                          {hasPermission('view_financial_data') && <td className="py-3 px-3 text-xs font-semibold text-success-600">{s.monthly_payment ? `$${s.monthly_payment}/mo` : '—'}</td>}
+                          className="cursor-pointer transition-colors"
+                          style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-surface)' }}
+                          onMouseEnter={e => { e.currentTarget.style.backgroundColor = 'var(--color-bg-secondary)'; }}
+                          onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'var(--color-surface)'; }}>
+                          {/* Reference moves under the name, the way the
+                              Compliance sales tab stacks it — it was a whole
+                              column for a value you only ever read alongside
+                              the customer anyway. */}
+                          <td className="px-3 py-1.5">
+                            <p className="m-0 font-semibold" style={{ color: 'var(--color-text)' }}>{s.customer_name || '—'}</p>
+                            {s.reference_no && (
+                              <p className="m-0 mt-0.5 text-xs font-mono" style={{ color: 'var(--color-text-tertiary)' }}>#{s.reference_no}</p>
+                            )}
+                          </td>
+                          <td className="px-3 py-1.5"><div className="flex items-center gap-1.5 flex-wrap"><SaleStatusBadge sale={s} size="sm" />{s.is_resell && <span title={`Resell · ${s.resell_intent || ''}`} className="inline-flex items-center gap-1 text-[11px] sm:text-[10px] leading-none font-bold uppercase tracking-wide px-1.5 py-0.5 rounded whitespace-nowrap" style={{ backgroundColor: 'color-mix(in srgb, var(--color-primary-600) 20%, transparent)', color: 'var(--color-primary-600)' }}>↻ {(s.resell_intent || 'resell').replace(/_/g, ' ')}</span>}</div></td>
+                          <td className="px-3 py-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{s.fronter_name || '—'}</td>
+                          <td className="px-3 py-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{s.closer_name || '—'}</td>
+                          {hasPermission('view_financial_data') && <td className="px-3 py-1.5 text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--color-success-600)' }}>{s.monthly_payment ? `$${s.monthly_payment}/mo` : '—'}</td>}
                           {/* Show the actual sale_date (carried in the bulk upload) rather
                               than the row's created_at — created_at reflects when the row
                               was inserted/updated, which is misleading for back-filled sales. */}
                           {/* sale_date is a date-only column ("YYYY-MM-DD"). fmtSaleDate
                               prints it as the calendar day stored, never shifting one
                               day backward in US timezones the way fmtDateET would. */}
-                          <td className="py-3 px-3 text-text-secondary text-xs">{s.sale_date ? fmtSaleDate(s.sale_date) : fmtDateET(s.created_at)}</td>
+                          <td className="px-3 py-1.5 text-xs whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>{s.sale_date ? fmtSaleDate(s.sale_date) : fmtDateET(s.created_at)}</td>
                           {hasPermission('delete_sale') && (
-                            <td className="py-3 px-3">
+                            <td className="px-3 py-1.5">
                               <button onClick={e => { e.stopPropagation(); if (window.confirm('Delete this sale?')) { deleteSale(s.id).then(() => fetchSalesTab()); } }}
                                 className="p-1.5 rounded-lg border transition-colors hover:bg-error-50"
                                 style={{ borderColor: 'var(--color-error-300)', color: 'var(--color-error-600)' }}>
@@ -1057,6 +1139,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
                     </tbody>
                   </table>
                 </TableScroll>
+                </div>
                 <Pagination page={salesPage} total={salesTabTotal} pageSize={PAGE_SIZE} onChange={setSalesPage} />
               </>
             )}
