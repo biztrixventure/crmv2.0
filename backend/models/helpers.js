@@ -304,6 +304,44 @@ const getCompanyTypeLevels = (companyType) =>
     ? ['fronter', 'fronter_manager', 'operations_manager', 'company_admin', 'qa_manager', 'qa_agent']
     : ['closer', 'closer_manager', 'compliance_manager', 'operations_manager', 'company_admin', 'qa_manager', 'qa_agent'];
 
+// ============================================================================
+// Company type, cached. Every list route used to re-query companies.company_type
+// inline; the value never changes in practice, so one cached resolver serves
+// them all.
+// ============================================================================
+const COMPANY_TYPE_TTL_MS = 60_000;
+const getCompanyType = async (companyId) => {
+  if (!companyId) return null;
+  return cache.remember('companyType', companyId, COMPANY_TYPE_TTL_MS, async () => {
+    const { data } = await supabaseAdmin
+      .from('companies').select('company_type').eq('id', companyId).maybeSingle();
+    return data?.company_type || null;
+  });
+};
+
+// Which side of the fronter→closer pipeline does this caller read from?
+//
+// Transfers and sales are STORED under the fronter company's company_id, so
+// closer-side users can't be scoped by company_id at all — they are scoped by
+// assigned_closer_id / closer_id across their company's members.
+//
+// closer / closer_manager / compliance_manager are closer-side by ROLE. But
+// company_admin exists at BOTH company types, and treating it as fronter-side
+// everywhere is what made a closer company's admin read 0 sales while the
+// closer_manager beneath them read 6,478. For that one role the side depends on
+// the COMPANY TYPE.
+//
+// Deliberately `=== 'closer'`, not `!== 'fronter'`: if the company row is
+// missing or the lookup fails we fall back to fronter-side company_id scoping,
+// which is the narrower, already-correct behaviour. No other role's answer
+// changes — manager / closer_manager / fronter_manager / operations_manager all
+// resolve exactly as before.
+const isCloserSideScope = async (role, companyId) => {
+  if (role === 'closer' || role === 'closer_manager' || role === 'compliance_manager') return true;
+  if (role === 'company_admin' && companyId) return (await getCompanyType(companyId)) === 'closer';
+  return false;
+};
+
 // Is this user an ACTIVE member of this company? Used to stop a non-superadmin
 // from scoping a list to a company they don't belong to (cross-tenant leak).
 const isCompanyMember = async (userId, companyId) => {
@@ -319,6 +357,23 @@ const isCompanyMember = async (userId, companyId) => {
   return !!data;
 };
 
+// Resolve the company a LIST request should be scoped to.
+//
+// GET /sales and GET /transfers already had this rule inline: a non-admin who
+// passes a ?company_id= they are not an active member of silently falls back to
+// their own company rather than 403-ing (a stale company_id in a bookmarked URL
+// should degrade, not break). Lifted here so the endpoints that took the param
+// with NO check at all can adopt it in one line. Superadmin / readonly_admin
+// keep their existing cross-company bypass.
+const resolveScopedCompanyId = async (req) => {
+  const asked = req.query?.company_id;
+  const own   = req.user?.company_id || null;
+  if (!asked) return own;
+  if (['superadmin', 'readonly_admin'].includes(req.user?.role)) return asked;
+  if (asked === own) return asked;
+  return (await isCompanyMember(req.user?.id, asked)) ? asked : own;
+};
+
 module.exports = {
   getUserRole,
   hasPermission,
@@ -329,6 +384,9 @@ module.exports = {
   canAssignRole,
   getUserCompanies,
   isCompanyMember,
+  getCompanyType,
+  isCloserSideScope,
+  resolveScopedCompanyId,
   createRole,
   assignUserToCompany,
   isSuperAdmin,

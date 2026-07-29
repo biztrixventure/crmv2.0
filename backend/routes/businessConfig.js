@@ -1,6 +1,6 @@
 const express = require('express');
 const { asyncHandler } = require('../middleware/errorHandler');
-const { isSuperAdmin } = require('../models/helpers');
+const { isSuperAdmin, resolveScopedCompanyId } = require('../models/helpers');
 const { isFeatureEnabled } = require('../utils/featureGate');
 const { supabaseAdmin } = require('../config/database');
 const { getAllConfig, setConfig, resetConfig } = require('../utils/businessConfig');
@@ -47,7 +47,11 @@ const canWriteConfig = async (req, key, sa) => {
 // GET /business-config?company_id=<uuid>   — resolved values (global + override)
 // Open to any authenticated user so the UI can render config-driven sections.
 router.get('/', asyncHandler(async (req, res) => {
-  const config = await getAllConfig(req.query.company_id || null);
+  // The UI only ever asks for its own company, but the param was trusted
+  // outright, so any authenticated user could read another company's overrides.
+  // Non-members now resolve to their own scope (global keys still resolve for
+  // everyone, which is what makes config-driven sections render).
+  const config = await getAllConfig(await resolveScopedCompanyId(req));
   res.json({ config });
 }));
 

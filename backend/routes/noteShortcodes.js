@@ -7,7 +7,7 @@
 const express = require('express');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
-const { isSuperAdmin } = require('../models/helpers');
+const { isSuperAdmin, resolveScopedCompanyId } = require('../models/helpers');
 
 const router = express.Router();
 
@@ -22,7 +22,8 @@ const canManage = (req) => MANAGER_ROLES.has(req.user.role);
 // company/global rows. One call so callers don't round-trip twice.
 router.get('/', asyncHandler(async (req, res) => {
   const me = req.user.id;
-  const companyId = req.query.company_id || req.user.company_id || null;
+  // Non-members can no longer read another company's shared shortcode set.
+  const companyId = await resolveScopedCompanyId(req);
   const orParts = [`owner_user_id.eq.${me}`];
   orParts.push(companyId
     ? `and(owner_user_id.is.null,or(company_id.is.null,company_id.eq.${companyId}))`

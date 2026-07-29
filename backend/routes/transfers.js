@@ -10,7 +10,7 @@ const { applySort } = require('../utils/sortHelper');
 const { titleCaseFormData } = require('../utils/titleCase');
 const { reconcileQueuedDispoForTransfer } = require('./vicidial');
 const { getConfig } = require('../utils/businessConfig');
-const { isCompanyMember, hasPermission } = require('../models/helpers');
+const { isCompanyMember, hasPermission, isCloserSideScope } = require('../models/helpers');
 
 // Global master switch for duplicate handling. When OFF, the CRM stops detecting
 // /flagging duplicates entirely — transfers are created plainly, no dup warnings,
@@ -132,35 +132,34 @@ router.get('/', asyncHandler(async (req, res) => {
       query = query.in('assigned_closer_id', assignedIds);
     }
   } else {
-    const isCloserSide = userRole === 'closer' || userRole === 'closer_manager' || userRole === 'compliance_manager';
+    // Closer-side by role, plus a CLOSER company's company_admin (their side is
+    // decided by company type — see isCloserSideScope). Transfers are stored
+    // under the FRONTER company's company_id, so closer-side callers can never
+    // be scoped by company_id; they scope by the closers who worked the lead.
+    const isCloserSide = await isCloserSideScope(userRole, companyId);
     if (!isCloserSide && companyId) query = query.eq('company_id', companyId);
 
-    switch (userRole) {
-      case 'fronter':
-        query = query.eq('created_by', userId);
-        break;
-      case 'closer':
-        query = query.eq('assigned_closer_id', userId);
-        break;
-      case 'closer_manager':
-      case 'compliance_manager': {
-        const { data: companyUsers } = await supabaseAdmin
-          .from('user_company_roles')
-          .select('user_id')
-          .eq('company_id', companyId)
-          .eq('is_active', true);
-        const closerIds = (companyUsers || []).map(u => u.user_id);
-        if (closerIds.length === 0) {
-          return res.json({ transfers: [], total: 0, page: parseInt(page), limit: parseInt(limit) });
-        }
-        query = query.in('assigned_closer_id', closerIds);
-        break;
+    if (userRole === 'fronter') {
+      query = query.eq('created_by', userId);
+    } else if (userRole === 'closer') {
+      query = query.eq('assigned_closer_id', userId);
+    } else if (isCloserSide) {
+      // closer_manager / compliance_manager / closer-company company_admin
+      const { data: companyUsers } = await supabaseAdmin
+        .from('user_company_roles')
+        .select('user_id')
+        .eq('company_id', companyId)
+        .eq('is_active', true);
+      const closerIds = (companyUsers || []).map(u => u.user_id);
+      if (closerIds.length === 0) {
+        return res.json({ transfers: [], total: 0, page: parseInt(page), limit: parseInt(limit) });
       }
-      // fronter_manager, operations_manager, company_admin — see all transfers for company
+      query = query.in('assigned_closer_id', closerIds);
     }
-    // Company-wide manager roles rely solely on the company_id filter above — a
-    // missing company_id must NOT produce an unscoped (global) query.
-    if (!['fronter', 'closer', 'closer_manager', 'compliance_manager'].includes(userRole) && !companyId) {
+    // fronter_manager, operations_manager, fronter-company company_admin — the
+    // company_id filter above is their ONLY scope, so a missing company_id must
+    // NOT produce an unscoped (global) query.
+    if (!isCloserSide && userRole !== 'fronter' && !companyId) {
       return res.json({ transfers: [], total: 0, page: parseInt(page), limit: parseInt(limit) });
     }
   }

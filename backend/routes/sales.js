@@ -5,7 +5,7 @@ const { asyncHandler } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
 const { etDateToUtcStart, etDateToUtcEnd } = require('../utils/etUtils');
 const notifications = require('../utils/notificationService');
-const { hasPermission, isSuperAdmin, isCompanyMember } = require('../models/helpers');
+const { hasPermission, isSuperAdmin, isCompanyMember, isCloserSideScope } = require('../models/helpers');
 const { requireFeature } = require('../utils/featureGate');
 const { escapeOrValue, safeUuid } = require('../utils/searchSanitize');
 const { applySort } = require('../utils/sortHelper');
@@ -65,8 +65,18 @@ function generateReferenceNo() {
 // ============================================================================
 router.get('/search', requireFeature('search_sales'), asyncHandler(async (req, res) => {
   const userId    = req.user.id;
-  const companyId = req.query.company_id || req.user.company_id;
+  const userRole  = req.user.role;
+  let companyId   = req.query.company_id || req.user.company_id;
   const q         = (req.query.q || '').trim();
+
+  // Cross-tenant guard — the same one GET /sales applies. Without it this
+  // endpoint took ?company_id= from anyone and only failed shut by accident
+  // (hasPermission against a foreign company happens to return false).
+  if (req.query.company_id && req.query.company_id !== req.user.company_id
+      && !['superadmin', 'readonly_admin'].includes(userRole)
+      && !(await isCompanyMember(userId, req.query.company_id))) {
+    companyId = req.user.company_id;
+  }
 
   if (!q || q.length < 2) return res.json({ sales: [], total: 0 });
 
@@ -92,7 +102,29 @@ router.get('/search', requireFeature('search_sales'), asyncHandler(async (req, r
   let searchQuery = supabaseAdmin
     .from('sales')
     .select('id,customer_name,customer_phone,customer_email,reference_no,car_year,car_make,car_model,car_vin,status,monthly_payment,sale_date,closer_id,fronter_id,plan,client_name,created_at,closer_disposition,charge_at,sale_group_id', { count: 'exact' });
-  if (companyId) searchQuery = searchQuery.eq('company_id', companyId);
+
+  // Search must return exactly the rows GET /sales would return for this caller
+  // — no more (a leak) and no fewer (this used to filter closer-side callers by
+  // company_id, which sales never carry for a closer company, so every search
+  // came back empty).
+  if (['superadmin', 'readonly_admin'].includes(userRole)) {
+    if (req.query.company_id) searchQuery = searchQuery.eq('company_id', req.query.company_id);
+  } else if (userRole === 'closer') {
+    searchQuery = searchQuery.eq('closer_id', userId);
+  } else if (userRole === 'fronter') {
+    searchQuery = searchQuery.eq('fronter_id', userId);
+  } else if (await isCloserSideScope(userRole, companyId)) {
+    const { data: coUsers } = await supabaseAdmin
+      .from('user_company_roles').select('user_id')
+      .eq('company_id', companyId).eq('is_active', true);
+    const closerUserIds = (coUsers || []).map(u => u.user_id);
+    if (!closerUserIds.length) return res.json({ sales: [], total: 0 });
+    searchQuery = searchQuery.in('closer_id', closerUserIds);
+  } else if (companyId) {
+    searchQuery = searchQuery.eq('company_id', companyId);
+  } else {
+    return res.json({ sales: [], total: 0 });   // never fall through unscoped
+  }
   const { data, error, count } = await searchQuery
     .or(filter)
     .order('created_at', { ascending: false })

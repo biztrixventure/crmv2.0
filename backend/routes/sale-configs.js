@@ -2,7 +2,7 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
-const { isSuperAdmin, hasPermission } = require('../models/helpers');
+const { isSuperAdmin, hasPermission, resolveScopedCompanyId } = require('../models/helpers');
 
 const router = express.Router();
 
@@ -11,8 +11,10 @@ const router = express.Router();
 // Returns company-specific + global defaults merged, deduped.
 // ============================================================================
 router.get('/', asyncHandler(async (req, res) => {
-  const { type, company_id } = req.query;
-  const companyId = company_id || req.user.company_id;
+  const { type } = req.query;
+  // A foreign ?company_id= no longer surfaces another company's plan / client
+  // option list; non-members fall back to their own.
+  const companyId = await resolveScopedCompanyId(req);
 
   let query = supabaseAdmin
     .from('sale_configs')

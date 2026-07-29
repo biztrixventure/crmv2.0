@@ -3,6 +3,7 @@ const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { etDateToUtcStart, etDateToUtcEnd, todayEt } = require('../utils/etUtils');
 const { getConfig } = require('../utils/businessConfig');
+const { isCloserSideScope } = require('../models/helpers');
 const logger = require('../utils/logger');
 
 const router = express.Router();
@@ -23,7 +24,10 @@ router.get(
       const stats = {};
 
       const ZERO_UUID = '00000000-0000-0000-0000-000000000000';
-      const isCloserSide = userRole === 'closer' || userRole === 'closer_manager' || userRole === 'compliance_manager';
+      // company_admin resolves its side from the COMPANY TYPE (helpers), so a
+      // closer company's admin now counts the same rows its Team Sales tab
+      // lists. Every other role answers exactly as it did before.
+      const isCloserSide = await isCloserSideScope(userRole, companyId);
 
       // Closer-side company user ids (for assigned_closer_id / closer_id scoping).
       let coUserIds = [];
@@ -386,7 +390,9 @@ router.get('/team-trends', asyncHandler(async (req, res) => {
   const userId = req.user.id, companyId = req.user.company_id, role = req.user.role;
   const days = Math.min(Math.max(parseInt(req.query.days, 10) || 14, 7), 60);
   const ZERO = '00000000-0000-0000-0000-000000000000';
-  const isCloserSide = ['closer_manager', 'compliance_manager'].includes(role);
+  // Same company-type rule as /dashboard, minus 'closer': a lone closer has no
+  // team here and must not be widened to their whole company's numbers.
+  const isCloserSide = role !== 'closer' && await isCloserSideScope(role, companyId);
   const isGlobal = ['superadmin', 'readonly_admin'].includes(role);
   const sinceUtc = new Date(Date.now() - days * 86400000).toISOString();
 

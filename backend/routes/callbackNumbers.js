@@ -5,7 +5,7 @@ const { asyncHandler } = require('../middleware/errorHandler');
 const { notifyManagers } = require('../utils/notificationService');
 const logger = require('../utils/logger');
 const { requireFeature } = require('../utils/featureGate');
-const { hasPermission } = require('../models/helpers');
+const { hasPermission, resolveScopedCompanyId } = require('../models/helpers');
 const { escapeOrValue } = require('../utils/searchSanitize');
 const { titleCase } = require('../utils/titleCase');
 const { stampActor } = require('../utils/auditColumnGuard');
@@ -91,7 +91,9 @@ async function enrichWithAttemptSummary(numbers) {
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/', asyncHandler(async (req, res) => {
   const userId    = req.user.id;
-  const companyId = req.query.company_id || req.user.company_id;
+  // ?company_id= used to be trusted outright — a manager in company A could read
+  // company B's numbers (phone + customer name). Now a non-member falls back.
+  const companyId = await resolveScopedCompanyId(req);
   const status    = req.query.status;
   const ownerId   = req.query.owner_id;
   const search    = req.query.search;
@@ -127,7 +129,7 @@ router.get('/', asyncHandler(async (req, res) => {
 // GET /callback-numbers/claimable — numbers available to claim in this company
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/claimable', asyncHandler(async (req, res) => {
-  const companyId = req.query.company_id || req.user.company_id;
+  const companyId = await resolveScopedCompanyId(req);
   if (!companyId) return res.status(400).json({ error: 'company_id required' });
 
   const { data, error } = await supabaseAdmin
