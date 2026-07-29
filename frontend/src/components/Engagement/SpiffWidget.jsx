@@ -21,10 +21,66 @@ const fmtCountdown = (ends, now) => {
   return `${m}m ${s}s`;
 };
 
+// One SPIFF card. Extracted so TargetsStrip can render SPIFFs and team quotas
+// in a SINGLE grid — same card shape, one place the user looks for "what am I
+// being measured on". A SPIFF is a prize (trophy, gradient header) and a quota
+// is a duty (target, flat primary); shared layout, different tone, so the two
+// never blur into each other.
+export function SpiffCard({ c, now, userId }) {
+  const target = Number(c.target_value) || 1;
+  const pct = Math.min(100, Math.round((Number(c.my_value) / target) * 100));
+  const left = fmtCountdown(c.ends_at, now);
+  return (
+    <div className="rounded-2xl overflow-hidden" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-sm)' }}>
+      <div className="px-4 py-3 flex items-center justify-between" style={{ background: 'var(--gradient-sidebar)' }}>
+        <div className="flex items-center gap-2 min-w-0">
+          <Trophy size={18} className="text-white flex-shrink-0" />
+          <p className="font-bold text-white truncate m-0">{c.title}</p>
+        </div>
+        {left && <span className="flex items-center gap-1 text-xs font-semibold text-white/90 flex-shrink-0 tabular-nums"><Clock size={12} /> {left} left</span>}
+      </div>
+      <div className="p-4 space-y-3">
+        {(c.reward_description || c.reward_amount) && (
+          <p className="text-sm font-semibold m-0" style={{ color: 'var(--color-success-600)' }}>
+            🎁 {c.reward_description || `$${c.reward_amount}`}
+          </p>
+        )}
+        {c.description && <RichView html={c.description} className="text-xs" style={{ color: 'var(--color-text-secondary)' }} />}
+        <div>
+          <div className="flex items-center justify-between text-xs mb-1">
+            <span style={{ color: 'var(--color-text-secondary)' }}>Your progress</span>
+            <span className="font-bold" style={{ color: 'var(--color-text)' }}>{c.my_value} / {target}</span>
+          </div>
+          <div className="h-2.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
+            <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, background: 'var(--gradient-sidebar)' }} />
+          </div>
+        </div>
+        {c.leaderboard?.length > 0 && (
+          <div className="space-y-1 pt-1">
+            <p className="text-[11px] sm:text-[10px] font-bold uppercase tracking-widest m-0" style={{ color: 'var(--color-text-tertiary)' }}>Leaderboard</p>
+            {c.leaderboard.slice(0, 5).map(e => (
+              <div key={e.user_id || e.id} className="flex items-center justify-between text-sm">
+                <span className="flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                  {e.rank <= 3 ? <Medal size={13} style={{ color: MEDAL[e.rank - 1] }} /> : <span className="w-3.5 text-center text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{e.rank}</span>}
+                  <span className={e.user_id === userId ? 'font-bold' : ''}>{e.name}{e.user_id === userId ? ' (you)' : ''}</span>
+                </span>
+                <span className="font-semibold" style={{ color: 'var(--color-text-secondary)' }}>{e.value}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // User-facing SPIFF card: the viewer's active campaigns with their progress,
 // reward, a live countdown, and a top-5 leaderboard. A campaign disappears the
 // instant its countdown hits zero (local filter) and the next poll confirms it
 // server-side; ended campaigns stay in the admin Spiff manager for reporting.
+//
+// Kept as a standalone widget for any surface that wants SPIFFs alone; the
+// staff/manager shells render TargetsStrip, which merges these with quotas.
 const SpiffWidget = () => {
   const { user } = useAuth();
   const [campaigns, setCampaigns] = useState([]);
@@ -59,53 +115,7 @@ const SpiffWidget = () => {
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
-      {live.map(c => {
-        const target = Number(c.target_value) || 1;
-        const pct = Math.min(100, Math.round((Number(c.my_value) / target) * 100));
-        const left = fmtCountdown(c.ends_at, now);
-        return (
-          <div key={c.id} className="rounded-2xl overflow-hidden" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-sm)' }}>
-            <div className="px-4 py-3 flex items-center justify-between" style={{ background: 'var(--gradient-sidebar)' }}>
-              <div className="flex items-center gap-2 min-w-0">
-                <Trophy size={18} className="text-white flex-shrink-0" />
-                <p className="font-bold text-white truncate">{c.title}</p>
-              </div>
-              {left && <span className="flex items-center gap-1 text-xs font-semibold text-white/90 flex-shrink-0 tabular-nums"><Clock size={12} /> {left} left</span>}
-            </div>
-            <div className="p-4 space-y-3">
-              {(c.reward_description || c.reward_amount) && (
-                <p className="text-sm font-semibold" style={{ color: 'var(--color-success-600)' }}>
-                  🎁 {c.reward_description || `$${c.reward_amount}`}
-                </p>
-              )}
-              {c.description && <RichView html={c.description} className="text-xs" style={{ color: 'var(--color-text-secondary)' }} />}
-              <div>
-                <div className="flex items-center justify-between text-xs mb-1">
-                  <span style={{ color: 'var(--color-text-secondary)' }}>Your progress</span>
-                  <span className="font-bold" style={{ color: 'var(--color-text)' }}>{c.my_value} / {target}</span>
-                </div>
-                <div className="h-2.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
-                  <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, background: 'var(--gradient-sidebar)' }} />
-                </div>
-              </div>
-              {c.leaderboard?.length > 0 && (
-                <div className="space-y-1 pt-1">
-                  <p className="text-[11px] sm:text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-tertiary)' }}>Leaderboard</p>
-                  {c.leaderboard.slice(0, 5).map(e => (
-                    <div key={e.user_id || e.id} className="flex items-center justify-between text-sm">
-                      <span className="flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-                        {e.rank <= 3 ? <Medal size={13} style={{ color: MEDAL[e.rank - 1] }} /> : <span className="w-3.5 text-center text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{e.rank}</span>}
-                        <span className={e.user_id === user?.id ? 'font-bold' : ''}>{e.name}{e.user_id === user?.id ? ' (you)' : ''}</span>
-                      </span>
-                      <span className="font-semibold" style={{ color: 'var(--color-text-secondary)' }}>{e.value}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        );
-      })}
+      {live.map(c => <SpiffCard key={c.id} c={c} now={now} userId={user?.id} />)}
     </div>
   );
 };

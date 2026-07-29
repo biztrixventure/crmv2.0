@@ -6,6 +6,7 @@ import {
 import client from '../../../api/client';
 import { useAuth } from '../../../contexts/AuthContext';
 import TeamAnalytics from './TeamAnalytics';
+import QuotaPanel from '../../Teams/QuotaPanel';
 import ThemedSelect from '../../UI/Select';
 import ThemedDate from '../../UI/ThemedDate';
 import { SectionHeader, accent } from '../../UI/kit';
@@ -138,6 +139,10 @@ export default function MyTeam() {
       {report?.error ? <p className="text-sm text-center py-4" style={{ color: accent('danger').fg }}>Failed to load progress.</p> : (
         <>
           <TeamAnalytics report={report} team={team} />
+
+          {/* Quotas — the lead's other job. Read-only for a plain member, who
+              still needs to see the number their own allocation came out of. */}
+          <QuotaPanel teamId={team.id} onError={setErr} />
 
           {/* Lead-only roster management — UNMASKED management UI (not analysis),
               so a lead can see/remove their real members and add unassigned ones. */}

@@ -86,7 +86,7 @@ import PendingFromDialer from "../components/Vicidial/PendingFromDialer";
 import CloserPendingDispos from "../components/Vicidial/CloserPendingDispos";
 import ComboInput from "../components/UI/ComboInput";
 import { canonicalizeFormData } from "../utils/canonicalizeOption";
-import SpiffWidget from "../components/Engagement/SpiffWidget";
+import TargetsStrip from "../components/Engagement/TargetsStrip";
 import CrossRoleContent from "../components/Navigation/CrossRoleContent";
 import TransferDetailDrawer from "../components/Shared/TransferDetailDrawer";
 import SaleDetailDrawer from "../components/Shared/SaleDetailDrawer";
@@ -907,7 +907,7 @@ const StaffShell = () => {
       {activeNav !== 'dashboard' && <CrossRoleContent section={activeNav} user={user} />}
       <main className="w-full px-4 sm:px-6 lg:px-8 py-6 relative z-10"
         style={{ display: activeNav !== 'dashboard' ? 'none' : undefined }}>
-        <SpiffWidget />
+        <TargetsStrip />
 
         {/* VICIdial: transfers captured from the dialer on XFER, awaiting confirm.
             Shown by ownership, not role — /pending only returns transfers THIS

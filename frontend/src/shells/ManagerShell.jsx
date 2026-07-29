@@ -90,7 +90,7 @@ import ScriptPanel from "../components/FAQ/ScriptPanel";
 import FAQManager from "../components/Admin/FAQManager/FAQManager";
 import ScriptManager from "../components/Admin/ScriptManager/ScriptManager";
 import EngagementBanners from "../components/Engagement/EngagementBanners";
-import SpiffWidget from "../components/Engagement/SpiffWidget";
+import TargetsStrip from "../components/Engagement/TargetsStrip";
 import SaleModal from "../components/Closer/SaleModal";
 import CrossRoleContent from "../components/Navigation/CrossRoleContent";
 import { transferPhone } from "../utils/phone";
@@ -832,7 +832,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
         {activeTab === 'overview' && (
           <div className="space-y-6">
 
-            <SpiffWidget />
+            <TargetsStrip />
 
             {/* ── Stat cards ── */}
             {/* Drill-down: each card's onClick now ALSO synchronizes the

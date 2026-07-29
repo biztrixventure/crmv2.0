@@ -6,6 +6,7 @@ import {
 import client from '../../../api/client';
 import { useAuth } from '../../../contexts/AuthContext';
 import TeamAnalytics from './TeamAnalytics';
+import QuotaPanel from '../../Teams/QuotaPanel';
 import ThemedSelect from '../../UI/Select';
 import ThemedDate from '../../UI/ThemedDate';
 import { Panel, SectionHeader, Loading, EmptyState, Field, accent } from '../../UI/kit';
@@ -221,6 +222,7 @@ function TeamModal({ team, teams, members, onSave, onClose }) {
 
 function TeamReport({ team, onClose }) {
   const [rep, setRep] = useState(null);
+  const [qErr, setQErr] = useState('');            // quota panel errors (its own window, own failures)
   const [range, setRange] = useState(30);          // 7 | 30 | 90 | 'custom'
   const [cFrom, setCFrom] = useState('');
   const [cTo, setCTo] = useState('');
@@ -255,6 +257,14 @@ function TeamReport({ team, onClose }) {
             <button onClick={onClose}><X size={18} /></button>
           </div>
         </div>
+        {qErr && <div className="rounded-xl p-3 text-xs" style={{ backgroundColor: accent('danger').soft, color: accent('danger').fg }}>{qErr}</div>}
+
+        {/* Quotas sit ABOVE the analytics: the target is the question the report
+            answers, so reading "1,500 by the 31st" first makes the numbers below
+            it mean something. Independent of the date filter — a quota owns its
+            own window. */}
+        <QuotaPanel teamId={team.id} onError={setQErr} compact />
+
         {!rep ? <Loading variant="rows" rows={5} label="Loading report…" />
           : rep.error ? <p className="text-sm text-center py-6" style={{ color: accent('danger').fg }}>Failed to load report.</p>
           : <TeamAnalytics report={rep} team={rep.team || team} />}
