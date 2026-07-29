@@ -25,7 +25,7 @@ import {
 import { Badge, Alert } from "../components/UI";
 import { Panel, TableScroll, Loading, EmptyState, SectionHeader } from "../components/UI/kit";
 import ChromeTabs from "../components/UI/ChromeTabs";
-import AgentPerformance from "../components/Manager/AgentPerformance";
+import CompanyPerformance from "../components/Manager/CompanyPerformance";
 
 // ── Two-tier nav, the ComplianceShell pattern (docs/ui-design-system.md) ─────
 // This shell had grown to ~20 sibling tabs on one strip, which is a scroll bar
@@ -54,7 +54,6 @@ import { useNavFocus } from "../contexts/FocusContext";
 import { useDashboardStats } from "../hooks/useDashboardStats";
 import { useShellLayout } from "../hooks/useShellLayout";
 import StatCardTriple from "../components/UI/StatCardTriple";
-import TeamPerformance from "../components/Manager/TeamPerformance";
 import Tooltip from "../components/UI/Tooltip";
 
 // Column-header explanations — hover any header to learn what it means.
@@ -803,221 +802,22 @@ const ManagerShell = ({ workspaceMode = false }) => {
               {cardOrder.map(renderMgrCard)}
             </div>
 
-            {/* ── Team performance charts (trends + top agents, with tooltips) ── */}
-            <TeamPerformance />
-
-            {/* ── Conversion funnel ── */}
-            {!loading && overviewTotals.transfers > 0 && (
-              <Panel pad="none" className="px-4 sm:px-6 py-4">
-                <div className="flex items-center gap-4 flex-wrap sm:flex-nowrap">
-                  <p className="m-0 text-xs font-bold uppercase tracking-widest whitespace-nowrap" style={{ color: 'var(--color-text-tertiary)' }}>
-                    Funnel
-                  </p>
-                  {/* At 390 five steps + four arrows cannot fit; let the funnel
-                      scroll inside its own box rather than squeezing each step
-                      to an unreadable sliver (or pushing the page wide). */}
-                  <div className="flex-1 min-w-0 flex items-center overflow-x-auto">
-                    {/* Step: Transfers */}
-                    <div className="flex flex-col items-center flex-1 min-w-[58px]">
-                      <p className="text-xl font-black text-info-600">{overviewTotals.transfers}</p>
-                      <p className="m-0 text-[11px] leading-none text-text-secondary font-medium">Transfers</p>
-                    </div>
-                    {/* Arrow 1 */}
-                    <div className="flex flex-col items-center px-1">
-                      <span className="text-[11px] sm:text-[10px] leading-none font-bold" style={{ color: 'var(--color-text-tertiary)' }}>
-                        {overviewTotals.transfers > 0 ? `${Math.round((overviewTotals.sales / overviewTotals.transfers) * 100)}%` : '—'}
-                      </span>
-                      <div className="flex items-center gap-0.5">
-                        <div className="h-px w-6 sm:w-10" style={{ backgroundColor: 'var(--color-border)' }} />
-                        <ArrowRight size={12} style={{ color: 'var(--color-text-tertiary)' }} />
-                      </div>
-                    </div>
-                    {/* Step: Sales */}
-                    <div className="flex flex-col items-center flex-1 min-w-[58px]">
-                      <p className="text-xl font-black text-success-600">{overviewTotals.sales}</p>
-                      <p className="m-0 text-[11px] leading-none text-text-secondary font-medium">Sales</p>
-                    </div>
-                    {/* Arrow 2 */}
-                    <div className="flex flex-col items-center px-1">
-                      <span className="text-[11px] sm:text-[10px] leading-none font-bold" style={{ color: 'var(--color-text-tertiary)' }}>
-                        {overviewTotals.sales > 0 ? `${Math.round((overviewTotals.approved / overviewTotals.sales) * 100)}%` : '—'}
-                      </span>
-                      <div className="flex items-center gap-0.5">
-                        <div className="h-px w-6 sm:w-10" style={{ backgroundColor: 'var(--color-border)' }} />
-                        <ArrowRight size={12} style={{ color: 'var(--color-text-tertiary)' }} />
-                      </div>
-                    </div>
-                    {/* Step: Approved */}
-                    <div className="flex flex-col items-center flex-1 min-w-[58px]">
-                      <p className="text-xl font-black" style={{ color: 'var(--color-success-700, #15803d)' }}>{overviewTotals.approved}</p>
-                      <p className="m-0 text-[11px] leading-none text-text-secondary font-medium">Approved</p>
-                    </div>
-                    {/* Pending wedge */}
-                    {overviewTotals.pendingReview > 0 && (
-                      <>
-                        <div className="flex flex-col items-center px-1">
-                          <span className="text-[11px] sm:text-[10px] leading-none font-bold text-warning-500">+{overviewTotals.pendingReview}</span>
-                          <div className="flex items-center gap-0.5">
-                            <div className="h-px w-6 sm:w-10" style={{ backgroundColor: 'var(--color-warning-200)' }} />
-                            <ArrowRight size={12} className="text-warning-400" />
-                          </div>
-                        </div>
-                        <div className="flex flex-col items-center flex-1 min-w-[58px]">
-                          <p className="text-xl font-black text-warning-600">{overviewTotals.pendingReview}</p>
-                          <p className="m-0 text-[11px] leading-none text-text-secondary font-medium">In Review</p>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                </div>
-              </Panel>
-            )}
-
-            {/* ── Who is doing what ──
-                Server-side, one row per agent, with the real transfers→sales
-                conversion. This replaces counting a 1,000-row page in the
-                browser, which ranked a sample on any company past that size and
-                called a transfer STATUS "conversion". The two boards below stay
-                for their per-agent detail, but this is the number to trust. */}
+            {/* ── One performance surface ──
+                Five stacked panels used to live here: Team Performance, the
+                funnel, the agent table and two leaderboards. Each answered an
+                overlapping slice of the same question, each fetched its own
+                window, and they disagreed with each other at the edges — the
+                leaderboards ranked a 1,000-row sample while the funnel counted
+                the full range. One panel, one request, one date range, one
+                agent selector, so nothing on screen can contradict its
+                neighbour. */}
+            {/* Deliberately NOT seeded from the shell's date picker: that
+                defaults to "Today", and a performance panel opening on a single
+                day shows zeros and reads as broken. It owns its own window and
+                opens on 30 days. */}
             {(hasPermission('view_fronter_stats') || hasPermission('view_closer_stats')) && (
-              <AgentPerformance dateFrom={date_from} dateTo={date_to} />
+              <CompanyPerformance />
             )}
-
-            {/* ── Leaderboards ── */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-
-              {/* Fronter leaderboard.
-                  A closer company's admin runs closers, so their board leads
-                  with closers; a fronter company's admin leads with fronters.
-                  Ordered, never hidden — a fronter admin still wants to see how
-                  their leads closed. company_admin only; every other role keeps
-                  the existing fronter-then-closer order. */}
-              {hasPermission('view_fronter_stats') && (
-                <Panel pad="lg" style={{ order: closerBoardFirst ? 1 : 0 }}>
-                  <div className="flex items-center justify-between mb-5">
-                    <h3 className="text-base font-bold text-text flex items-center gap-2">
-                      <BarChart3 size={16} /> Fronter Leaderboard
-                    </h3>
-                    {!loading && fronterLb.length > 0 && (
-                      <span className="text-xs text-text-tertiary">{fronterLb.length} agents</span>
-                    )}
-                  </div>
-                  {loading
-                    ? <div className="space-y-1">{[1,2,3,4].map(i => <SkeletonLeaderRow key={i} />)}</div>
-                    : fronterLb.length === 0
-                      ? (
-                        <div className="flex flex-col items-center py-8 gap-2">
-                          <Send size={28} className="text-text-tertiary opacity-40" />
-                          <p className="text-sm text-text-secondary">No transfers in this period.</p>
-                        </div>
-                      )
-                      : fronterLb.slice(0, 8).map((f, i) => {
-                          const maxT    = fronterLb[0]?.transfers || 1;
-                          const pct     = Math.round((f.transfers / maxT) * 100);
-                          const convPct = f.transfers > 0 ? Math.round((f.completed / f.transfers) * 100) : 0;
-                          return (
-                            <div key={f.id} className="flex items-center gap-3 py-2.5 border-b last:border-0" style={{ borderColor: 'var(--color-border)' }}>
-                              {/* Rank badge */}
-                              <div className="w-5 flex-shrink-0 flex items-center justify-center">
-                                {i < 3
-                                  ? <div className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black text-white"
-                                      style={{ backgroundColor: MEDAL_COLORS[i] }}>{i + 1}</div>
-                                  : <span className="text-xs font-bold text-text-tertiary">{i + 1}</span>
-                                }
-                              </div>
-                              {/* Avatar */}
-                              <div className="w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-bold text-white flex-shrink-0"
-                                style={{ backgroundColor: getAvatarColor(f.name) }}>
-                                {getInitials(f.name)}
-                              </div>
-                              {/* Name + bar */}
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center justify-between mb-1">
-                                  <span className="text-sm font-semibold text-text truncate">{f.name}</span>
-                                  <span className="text-xs text-text-secondary ml-2 flex-shrink-0">{f.transfers} leads</span>
-                                </div>
-                                <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--color-border)' }}>
-                                  <div className="h-full rounded-full transition-all duration-500"
-                                    style={{ width: `${pct}%`, background: 'var(--gradient-sidebar)' }} />
-                                </div>
-                              </div>
-                              {/* Stats */}
-                              <div className="text-right flex-shrink-0 w-16">
-                                <p className="text-xs font-bold text-success-600">{f.completed} <span className="font-normal text-text-tertiary">closed</span></p>
-                                <p className="text-[10px] text-text-tertiary">{convPct}% conv</p>
-                              </div>
-                            </div>
-                          );
-                        })
-                  }
-                </Panel>
-              )}
-
-              {/* Closer leaderboard */}
-              {hasPermission('view_closer_stats') && (
-                <Panel pad="lg" style={{ order: closerBoardFirst ? 0 : 1 }}>
-                  <div className="flex items-center justify-between mb-5">
-                    <h3 className="text-base font-bold text-text flex items-center gap-2">
-                      <TrendingUp size={16} /> Closer Leaderboard
-                    </h3>
-                    {!loading && closerLb.length > 0 && (
-                      <span className="text-xs text-text-tertiary">{closerLb.length} closers</span>
-                    )}
-                  </div>
-                  {loading
-                    ? <div className="space-y-1">{[1,2,3,4].map(i => <SkeletonLeaderRow key={i} />)}</div>
-                    : closerLb.length === 0
-                      ? (
-                        <div className="flex flex-col items-center py-8 gap-2">
-                          <DollarSign size={28} className="text-text-tertiary opacity-40" />
-                          <p className="text-sm text-text-secondary">No sales in this period.</p>
-                        </div>
-                      )
-                      : closerLb.slice(0, 8).map((c, i) => {
-                          const maxW   = closerLb[0]?.won || 1;
-                          const pct    = Math.round((c.won / maxW) * 100);
-                          const winPct = c.sales > 0 ? Math.round((c.won / c.sales) * 100) : 0;
-                          return (
-                            <div key={c.id} className="flex items-center gap-3 py-2.5 border-b last:border-0" style={{ borderColor: 'var(--color-border)' }}>
-                              {/* Rank badge */}
-                              <div className="w-5 flex-shrink-0 flex items-center justify-center">
-                                {i < 3
-                                  ? <div className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black text-white"
-                                      style={{ backgroundColor: MEDAL_COLORS[i] }}>{i + 1}</div>
-                                  : <span className="text-xs font-bold text-text-tertiary">{i + 1}</span>
-                                }
-                              </div>
-                              {/* Avatar */}
-                              <div className="w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-bold text-white flex-shrink-0"
-                                style={{ backgroundColor: getAvatarColor(c.name) }}>
-                                {getInitials(c.name)}
-                              </div>
-                              {/* Name + bar */}
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center justify-between mb-1">
-                                  <span className="text-sm font-semibold text-text truncate">{c.name}</span>
-                                  <span className="text-xs text-text-secondary ml-2 flex-shrink-0">{c.sales} sales</span>
-                                </div>
-                                <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--color-border)' }}>
-                                  <div className="h-full rounded-full transition-all duration-500"
-                                    style={{ width: `${pct}%`, background: 'linear-gradient(135deg, var(--color-success-600), var(--color-success-700))' }} />
-                                </div>
-                              </div>
-                              {/* Stats */}
-                              <div className="text-right flex-shrink-0 w-20">
-                                {hasPermission('view_financial_data') && c.monthly > 0
-                                  ? <p className="text-xs font-bold text-primary-600">${c.monthly.toLocaleString()}<span className="text-[10px] text-text-tertiary font-normal">/mo</span></p>
-                                  : <p className="text-xs font-bold text-success-600">{c.won} <span className="font-normal text-text-tertiary">won</span></p>
-                                }
-                                <p className="text-[10px] text-text-tertiary">{winPct}% win rate</p>
-                              </div>
-                            </div>
-                          );
-                        })
-                  }
-                </Panel>
-              )}
-            </div>
           </div>
         )}
 

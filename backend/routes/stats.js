@@ -4,6 +4,7 @@ const { asyncHandler } = require('../middleware/errorHandler');
 const { etDateToUtcStart, etDateToUtcEnd, todayEt } = require('../utils/etUtils');
 const { getConfig } = require('../utils/businessConfig');
 const { isCloserSideScope, getCompanyType } = require('../models/helpers');
+const { safeUuid } = require('../utils/searchSanitize');
 const logger = require('../utils/logger');
 
 const router = express.Router();
@@ -657,8 +658,9 @@ router.get('/agent-performance', asyncHandler(async (req, res) => {
 
   const transfers = await fetchAll(() => {
     let q = supabaseAdmin.from('transfers')
-      .select('created_by, assigned_closer_id')
-      .neq('vicidial_pending', true);
+      .select('created_by, assigned_closer_id, created_at')
+      .neq('vicidial_pending', true)
+      .order('created_at', { ascending: true });
     if (closerSide) q = q.in('assigned_closer_id', memberIds);
     else if (companyId) q = q.eq('company_id', companyId);
     if (tFrom) q = q.gte('created_at', tFrom);
@@ -668,7 +670,8 @@ router.get('/agent-performance', asyncHandler(async (req, res) => {
 
   const sales = await fetchAll(() => {
     let q = supabaseAdmin.from('sales')
-      .select('fronter_id, closer_id, status, monthly_payment');
+      .select('fronter_id, closer_id, status, monthly_payment, sale_date, created_at')
+      .order('created_at', { ascending: true });
     if (closerSide) q = q.in('closer_id', memberIds);
     else if (companyId) q = q.eq('company_id', companyId);
     if (date_from) q = q.gte('sale_date', date_from);
@@ -741,10 +744,61 @@ router.get('/agent-performance', asyncHandler(async (req, res) => {
   const scopeT = transfers.length, scopeS = sales.length;
   const scopeA = sales.filter(s => s.status === 'closed_won').length;
 
+  // ── Daily series ─────────────────────────────────────────────────────────
+  // Buckets span the REQUESTED range, not whatever the data happens to cover,
+  // so a quiet day renders as a gap in the chart instead of vanishing and
+  // making the line look continuous. Capped so a year-long range can't return
+  // 365 buckets to a phone.
+  const MAX_DAYS = 120;
+  const dayOf = (v) => String(v || '').slice(0, 10);
+  const allDates = [
+    ...transfers.map(t => dayOf(t.created_at)),
+    ...sales.map(s => dayOf(s.sale_date || s.created_at)),
+  ].filter(Boolean).sort();
+  const firstDay = date_from || allDates[0] || null;
+  const lastDay  = date_to   || allDates[allDates.length - 1] || firstDay;
+  const dayKeys = [];
+  if (firstDay && lastDay) {
+    let cur = Date.parse(`${firstDay}T00:00:00Z`);
+    const end = Date.parse(`${lastDay}T00:00:00Z`);
+    while (cur <= end && dayKeys.length < MAX_DAYS) {
+      dayKeys.push(new Date(cur).toISOString().slice(0, 10));
+      cur += 86400000;
+    }
+  }
+  // One pass builds the company series and, when a specific agent is asked
+  // for, that agent's series too — same buckets, so the two are comparable.
+  const focusId = safeUuid(req.query.user_id) || null;
+  const mkSeries = () => {
+    const m = {};
+    dayKeys.forEach(d => { m[d] = { date: d, transfers: 0, sales: 0, approved: 0 }; });
+    return m;
+  };
+  const coSeries = mkSeries();
+  const fcSeries = focusId ? mkSeries() : null;
+
+  transfers.forEach(t => {
+    const d = dayOf(t.created_at);
+    if (coSeries[d]) coSeries[d].transfers++;
+    if (fcSeries && fcSeries[d] && t[tKey] === focusId) fcSeries[d].transfers++;
+  });
+  sales.forEach(s => {
+    const d = dayOf(s.sale_date || s.created_at);
+    const won = s.status === 'closed_won';
+    if (coSeries[d]) { coSeries[d].sales++; if (won) coSeries[d].approved++; }
+    if (fcSeries && fcSeries[d] && s[sKey] === focusId) { fcSeries[d].sales++; if (won) fcSeries[d].approved++; }
+  });
+
+  const focus = focusId
+    ? { user_id: focusId, ...(agents.find(a => a.user_id === focusId) || { name: 'Unknown', transfers: 0, sales: 0, approved: 0, cancelled: 0, pending: 0, revenue: 0, conversion: null, approval: null }), daily: Object.values(fcSeries) }
+    : null;
+
   res.json({
     side,
     agent_metric: side === 'fronter' ? 'transfers' : 'sales',
     range: { from: date_from || null, to: date_to || null },
+    daily: Object.values(coSeries),
+    focus,
     agents,
     totals: {
       agents: agents.length,
