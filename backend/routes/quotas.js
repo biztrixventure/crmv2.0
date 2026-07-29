@@ -255,8 +255,22 @@ router.get('/mine', asyncHandler(async (req, res) => {
 // ("Your team" vs "EasyTech Communications") instead of guessing.
 router.get('/report', asyncHandler(async (req, res) => {
   const superadmin = await isSuperAdmin(req.user.id);
-  const companyId = await resolveScopedCompanyId(req);
-  if (!companyId) return res.json({ scope: 'none', teams: [], members: [], series: [], totals: null });
+
+  // A superadmin usually has no primary company of their own. resolveScopedCompanyId
+  // then returns null and, without this, the page rendered empty with no company
+  // picker — the picker only draws once the payload says who you are, so the
+  // operator was locked out of every company at once. Fall back to the first
+  // active company and always ship the list so they can switch.
+  const companyList = superadmin
+    ? ((await supabaseAdmin.from('companies').select('id, name, company_type')
+        .eq('is_active', true).order('name')).data || [])
+    : [];
+  let companyId = await resolveScopedCompanyId(req);
+  if (!companyId && superadmin) companyId = companyList[0]?.id || null;
+
+  if (!companyId) {
+    return res.json({ scope: 'none', superadmin, companies: superadmin ? companyList : undefined, teams: [], members: [], series: [], totals: null, unallocated_count: 0 });
+  }
   if (!superadmin && !(await isCompanyMember(req.user.id, companyId))) {
     return res.status(403).json({ error: 'Not a member of this company' });
   }
@@ -289,7 +303,13 @@ router.get('/report', asyncHandler(async (req, res) => {
     }
   }
   if (!teams.length) {
-    return res.json({ scope, side: closerSide ? 'closer' : 'fronter', company_id: companyId, teams: [], members: [], series: [], totals: null, unassigned_count: 0 });
+    // Still hand back the company list and the flags — otherwise a superadmin
+    // who lands on a company with no teams loses the switcher and is stranded.
+    return res.json({
+      scope, side: closerSide ? 'closer' : 'fronter', company_id: companyId,
+      can_manage: manager, superadmin, companies: superadmin ? companyList : undefined,
+      range: { from, to }, teams: [], members: [], series: [], totals: null, unallocated_count: 0,
+    });
   }
 
   const teamIds = teams.map(t => t.id);
@@ -368,7 +388,7 @@ router.get('/report', asyncHandler(async (req, res) => {
     scope, side: closerSide ? 'closer' : 'fronter', company_id: companyId,
     range: { from, to },
     can_manage: manager, superadmin,
-    companies: superadmin ? ((await supabaseAdmin.from('companies').select('id, name, company_type').eq('is_active', true).order('name')).data || []) : undefined,
+    companies: superadmin ? companyList : undefined,
     teams: teamRows,
     members: memberRows.sort((a, b) => (b.transfers - a.transfers) || (b.sales_won - a.sales_won)),
     series: activity.days,
