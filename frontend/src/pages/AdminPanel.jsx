@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, lazy, Suspense } from "react";
-import { usePersistedState } from "../hooks/usePersistedState";
+import { useHistoryTab } from "../hooks/useHistoryTab";
 import { useAuth } from "../contexts/AuthContext";
 import { useCopyGuard } from "../hooks/useCopyGuard";
 import { roBeacon } from "../utils/roActivityBeacon";
@@ -65,7 +65,11 @@ const AdminPanel = () => {
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
   const updateAvailable = useVersionCheck();
-  const [activeTab, setActiveTab]     = usePersistedState("biztrix.adminTab", "dashboard");
+  // Same localStorage key it always used — the tab choice still survives a
+  // reload. What is new is that changing tabs now leaves a history entry, so
+  // the iOS edge swipe has somewhere to go back to instead of dismissing the
+  // installed app. See useHistoryTab for the measurement behind this.
+  const [activeTab, setActiveTab]     = useHistoryTab("biztrix.adminTab", "dashboard");
   // Two separate things, deliberately. `sidebarOpen` is the DESKTOP collapse
   // toggle (lg+). `mobileNavOpen` is the off-canvas drawer below lg and always
   // starts closed — it used to share one flag defaulting to true, which is why
@@ -92,7 +96,9 @@ const AdminPanel = () => {
   // removed — the render switch below isn't nav-gated, so bounce a disallowed
   // tab back to the dashboard (the backend still enforces the data separately).
   useEffect(() => {
-    if (isReadOnly && activeTab && !roTabAllowed(activeTab)) setActiveTab('dashboard');
+    // `replace`: a bounce is a correction, not a place the user went, so it must
+    // not leave a history entry that swiping back would land on and re-bounce.
+    if (isReadOnly && activeTab && !roTabAllowed(activeTab)) setActiveTab('dashboard', { replace: true });
   }, [isReadOnly, activeTab, roTabAllowed, setActiveTab]);
 
   // Allow AdminAnalyticsDashboard quick-action buttons to navigate

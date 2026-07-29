@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { usePersistedState } from "../hooks/usePersistedState";
+import { useHistoryTab } from "../hooks/useHistoryTab";
 import { toast } from "sonner";
 import { toastError } from "../utils/toast";
 import { useAuth } from "../contexts/AuthContext";
@@ -169,8 +170,13 @@ const StaffShell = () => {
   const tabKey = `biztrix.staffTab.${user?.role || 'default'}`;
   const navKey = `biztrix.staffNav.${user?.role || 'default'}`;
   const secKey = `biztrix.closerSection.${user?.role || 'default'}`;
-  const [activeTab, setActiveTab] = usePersistedState(tabKey, defaultTab);
-  const [activeNav, setActiveNav] = usePersistedState(navKey, 'dashboard');
+  // Same storage keys as before — a reload still restores the tab. What is new
+  // is that each switch pushes a history entry, so the iOS edge swipe goes back
+  // a tab instead of falling through and dismissing the installed app.
+  // closerSection below stays on usePersistedState deliberately: it is a toggle
+  // INSIDE a tab, not a navigation step, so it should not be a back target.
+  const [activeTab, setActiveTab] = useHistoryTab(tabKey, defaultTab);
+  const [activeNav, setActiveNav] = useHistoryTab(navKey, 'dashboard', { param: 'nav' });
 
   const { stats, loading: statsLoading, fetchStats } = useDashboardStats();
   const { transfers, total: transferTotal, loading: tLoading, fetchTransfers, createTransfer, deleteTransfer } = useTransfers(user?.company_id);

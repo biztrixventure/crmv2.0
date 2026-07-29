@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo, lazy, Suspense } from "react";
-import { usePersistedState } from "../hooks/usePersistedState";
+import { useHistoryTab } from "../hooks/useHistoryTab";
 import { useListLayout } from "../hooks/useListLayout";
 import { useAuth } from "../contexts/AuthContext";
 import { useVersionCheck } from "../hooks/useVersionCheck";
@@ -276,8 +276,11 @@ const ManagerShell = ({ workspaceMode = false }) => {
   // distinct from any other role using the same machine.
   const mgrTabKey = `biztrix.managerTab.${user?.role || 'default'}`;
   const mgrNavKey = `biztrix.managerNav.${user?.role || 'default'}`;
-  const [activeTab, setActiveTab] = usePersistedState(mgrTabKey, 'overview');
-  const [activeNav, setActiveNav] = usePersistedState(mgrNavKey, 'dashboard');
+  // Same storage keys as before — a reload still restores the tab. The change
+  // is that each switch now pushes a history entry, so the iOS edge swipe goes
+  // back a tab instead of falling through and dismissing the installed app.
+  const [activeTab, setActiveTab] = useHistoryTab(mgrTabKey, 'overview');
+  const [activeNav, setActiveNav] = useHistoryTab(mgrNavKey, 'dashboard', { param: 'nav' });
   const [exportOpen, setExportOpen] = useState(false);
   const [dupOpen, setDupOpen] = useState(false);
 
@@ -287,7 +290,9 @@ const ManagerShell = ({ workspaceMode = false }) => {
   useEffect(() => {
     if (TABS.length && !TABS.some(t => t.key === activeTab)) {
       const fallback = managerDefaultTab(TABS) || TABS[0]?.key;
-      if (fallback) setActiveTab(fallback);
+      // `replace`: reconciling away a tab the admin hid is a correction, not a
+      // place the user navigated to, so it must not become a back-stack entry.
+      if (fallback) setActiveTab(fallback, { replace: true });
     }
   }, [TABS, activeTab, managerDefaultTab, setActiveTab]);
 

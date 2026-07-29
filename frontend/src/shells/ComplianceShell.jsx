@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { usePersistedState } from '../hooks/usePersistedState';
+import { useHistoryTab } from '../hooks/useHistoryTab';
 import { useShellLayout } from '../hooks/useShellLayout';
 import { Shield, Building2, Clock, FileText, ArrowRight, PhoneCall, Star, Hash, CalendarDays, Info, ListChecks, ScrollText, HelpCircle, ClipboardCheck, CreditCard, Headphones } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
@@ -117,7 +117,12 @@ const ComplianceShell = () => {
     || complianceDefaultTab(TABS)
     || TABS[0]?.key
     || 'companies';
-  const [activeTab, setActiveTab]   = useState(initialTab);
+  // `persist: false` on purpose: this shell's tab has never been remembered
+  // across reloads, and this change is about the back stack, not about quietly
+  // giving it a restore behaviour it never had. What it DOES gain is a real
+  // history entry per tab switch, so an installed-PWA edge swipe goes back a
+  // tab instead of dismissing the app.
+  const [activeTab, setActiveTab]   = useHistoryTab(null, initialTab, { persist: false });
 
   // Reconcile activeTab when admin layout hides the persisted tab key.
   // Dynamic disposition tabs (dispo:*) are exempt — they aren't in TABS.
@@ -125,7 +130,9 @@ const ComplianceShell = () => {
     if (activeTab.startsWith('dispo:')) return;
     if (TABS.length && !TABS.some(t => t.key === activeTab)) {
       const fallback = complianceDefaultTab(TABS) || TABS[0]?.key;
-      if (fallback) setActiveTab(fallback);
+      // `replace`: a reconcile is a correction, not a place the user went, so
+      // it must not become an entry that swiping back lands on and re-bounces.
+      if (fallback) setActiveTab(fallback, { replace: true });
     }
   }, [TABS, activeTab, complianceDefaultTab]);
   const [tabInit, setTabInit]       = useState({});
