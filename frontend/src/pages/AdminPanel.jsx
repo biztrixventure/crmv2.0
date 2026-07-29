@@ -162,6 +162,10 @@ const AdminPanel = () => {
     ] : []),
     ...(isSAorRO                                       ? [{ id: "companies",      label: "Companies"            }] : []),
     ...(isSAorRO                                       ? [{ id: "teams",          label: "Teams"                }] : []),
+    // Must be listed HERE as well as in AdminSidebar — the sidebar is filtered
+    // against navItems, so a row present only there renders for nobody (the
+    // exact bug the QA Department shortcut hit). Read-only, so RO gets it too.
+    ...(isSAorRO                                       ? [{ id: "quota_report",   label: "Quotas"               }] : []),
     ...(isSAorRO && hasPermission('manage_forms')      ? [{ id: "forms",          label: "Form Builder"         }] : []),
     ...(hasPermission('search_sales')                  ? [{ id: "sale-search",    label: "Lead Search"          }] : []),
     ...(isSAorRO                                       ? [{ id: "customer-profiles", label: "Customer Profiles"  }] : []),
