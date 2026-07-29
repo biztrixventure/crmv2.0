@@ -164,10 +164,11 @@ export default function DrawerShell({
           </div>
 
           <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
-            {/* Header actions are the first thing worth moving at phone widths —
-                the copy bar is a convenience, the close button is not. They are
-                not dropped, only relocated to their own row below. */}
-            {headerActions && <div className="hidden sm:flex items-center gap-2">{headerActions}</div>}
+            {/* headerActions are NOT rendered here, at any width — see the row
+                below. They used to sit in this group on desktop, and because
+                the group is flex-shrink-0 a copy bar wider than the panel
+                pushed the icon, the title and the subtitle clean off the left
+                edge and clipped the close button off the right one. */}
 
             {showToggle && (
               <button
@@ -192,12 +193,16 @@ export default function DrawerShell({
           </div>
         </div>
 
-        {/* The relocated header actions. Hidden above at phone widths, they
-            come back as their own row rather than disappearing — the copy bar
-            is how staff get a record into a spreadsheet, so it must not become
-            a desktop-only feature. */}
+        {/* Header actions get their OWN row, at every width.
+            Not a mobile concession — a correctness one. The number of copy
+            presets is configured per company and is unbounded, so there is no
+            panel width at which "title + N buttons + toggle + close" reliably
+            fits on one line; at three presets it already overran a 480px panel
+            and hid the record's own name. A full-width row scrolls instead of
+            colliding, and the header keeps the two controls that must never be
+            unreachable. */}
         {headerActions && (
-          <div className="flex sm:hidden items-center gap-2 px-3 py-2 flex-shrink-0 overflow-x-auto"
+          <div className="flex items-center gap-2 px-3 sm:px-5 py-2 flex-shrink-0 overflow-x-auto"
             style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
             {headerActions}
           </div>

@@ -36,19 +36,35 @@ export default function SaleCopyBar({ sale, canFinancial, canManage }) {
 
   const list = presets || [DEFAULT_PRESET];
   return (
+    /* This bar no longer sits on the drawer's gradient header — DrawerShell
+       gives it its own row on the secondary surface, because the preset count
+       is company-configurable and unbounded, so it could never be sized to fit
+       beside a title. That move is why the colours below are TOKENS rather than
+       the old bg-white/20 + text-white: white-on-gradient was legible, but
+       white-on-surface would be invisible in light mode.
+       flex-shrink-0 keeps each button at its natural size so the row scrolls
+       instead of squashing every preset into an unreadable sliver. */
     <div className="flex items-center gap-1.5">
       {list.map(p => (
         <button key={p.id} onClick={() => doCopy(p)}
           title={`Copy ${p.name} — ${p.fields.length} fields (${(COPY_SEPARATORS.find(s => s.key === p.sep) || {}).label || p.sep})`}
-          className="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-xl bg-white/20 hover:bg-white/30 transition-colors text-white text-xs font-bold">
+          className="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-xl transition-colors text-xs font-bold flex-shrink-0 whitespace-nowrap"
+          style={{
+            backgroundColor: copiedId === p.id
+              ? 'color-mix(in srgb, var(--color-success-500) 18%, transparent)'
+              : 'var(--color-surface)',
+            color: copiedId === p.id ? 'var(--color-success-700)' : 'var(--color-text)',
+            border: '1px solid var(--color-border)',
+          }}>
           {copiedId === p.id ? <Check size={15} /> : <Copy size={15} />}
           <span className="max-w-[90px] truncate">{p.name}</span>
         </button>
       ))}
       {canManage && (
         <button onClick={() => setEditing(true)} title="Customize copy buttons"
-          className="p-2 rounded-xl bg-white/20 hover:bg-white/30 transition-colors">
-          <SlidersHorizontal size={16} className="text-white" />
+          className="p-2 rounded-xl transition-colors flex-shrink-0"
+          style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+          <SlidersHorizontal size={16} style={{ color: 'var(--color-text-secondary)' }} />
         </button>
       )}
       {editing && (
