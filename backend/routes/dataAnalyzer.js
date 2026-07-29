@@ -488,6 +488,24 @@ router.post('/export', asyncHandler(async (req, res) => {
     }
   }
 
+  // A TRANSFER has no customer_name column — the name lives in form_data, under
+  // whichever keys the form used (VICIDIAL rows carry FirstName/LastName, CRM
+  // rows carry customer_name). The JSON-column pass cannot recover it either:
+  // EXTRA_SKIP drops firstname/lastname/fullname as duplicates of a typed
+  // customer_name that only the SALES dataset has, so the transfers file came
+  // out with no customer name at all — agent names only. Derive one column here,
+  // resolved the same way customerName() resolves it everywhere else in the app.
+  if (dataset === 'transfers') {
+    fieldLabel.set('customer_name', 'Customer Name');
+    for (const r of enriched) {
+      const fd = (r.form_data && typeof r.form_data === 'object') ? r.form_data : {};
+      const joined = [fd.FirstName || fd.first_name, fd.LastName || fd.last_name]
+        .filter(Boolean).map(v => String(v).trim()).filter(Boolean).join(' ');
+      // Blank, never an em dash: this is a CSV cell, not a table cell.
+      r.customer_name = joined || fd.customer_name || fd.Name || fd.name || fd.FullName || fd.fullname || '';
+    }
+  }
+
   const esc = (v) => {
     // Always quote so embedded commas / newlines / quotes survive Excel + Sheets.
     // Re-serialize booleans/numbers as plain strings; objects (rare leaf in form_data)
@@ -504,7 +522,11 @@ router.post('/export', asyncHandler(async (req, res) => {
     'car_year', 'car_make', 'car_model', 'car_vin', 'car_miles',
     'plan', 'down_payment', 'monthly_payment', 'reference_no', 'client_name',
     'closer_name', 'fronter_name', 'company_name', 'created_at'];
-  const TYPED_TRANSFERS = ['id', 'status', 'latest_disposition', 'created_by_name', 'assigned_closer_name', 'company_name',
+  // customer_name is DERIVED for transfers (computed above). A transfer keeps
+  // the customer's name in form_data, never in a column, so without this the
+  // name was absent from the file entirely — EXTRA_SKIP drops FirstName /
+  // LastName as duplicates of a typed customer_name that only sales has.
+  const TYPED_TRANSFERS = ['id', 'customer_name', 'status', 'latest_disposition', 'created_by_name', 'assigned_closer_name', 'company_name',
     'normalized_phone', 'rejection_reason', 'rejection_count', 'sale_reference_no',
     'created_at', 'updated_at'];
 
