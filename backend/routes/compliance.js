@@ -7,6 +7,8 @@ const { listCandidatesForSale, listCandidatesByPhone, listCandidatesByLeadId, lo
 const { etDateToUtcStart, etDateToUtcEnd } = require('../utils/etUtils');
 const { escapeOrValue } = require('../utils/searchSanitize');
 const { applySort } = require('../utils/sortHelper');
+const { applyColumnFilters, resolveColumnAccess } = require('../utils/columnFilter');
+const { COMPLIANCE_SALE_COLUMNS, TRANSFER_COLUMNS, CALLBACK_COLUMNS } = require('../config/recordColumns');
 const { onSalesActivityChanged: spiffOnSalesChanged } = require('../utils/spiffMetrics');
 const { readonlyAllowedCompanyIds, scopeToCompanies, companyInScope, maskForReadonly, canViewRecordings } = require('../utils/readonlyGovernance');
 
@@ -73,22 +75,17 @@ async function searchRecordIds(table, term, limit = 150) {
 
 // Client sort key -> real column. Name columns sort by underlying id so an
 // agent's records group together across pages.
-const SALE_SORT = {
-  customer: 'customer_name', status: 'status', created_at: 'created_at',
-  sale_date: 'sale_date', reference: 'reference_no', monthly_payment: 'monthly_payment',
-  fronter: 'fronter_id', closer: 'closer_id', plan: 'plan',
-  // "Status Updated" column → sort by the row's last-change timestamp (a status
-  // change bumps updated_at; the displayed value comes from edit_history).
-  status_updated: 'updated_at', updated_at: 'updated_at',
-};
-const TRANSFER_SORT = {
-  customer: 'form_data->>customer_name', status: 'status', created_at: 'created_at',
-  fronter: 'created_by', closer: 'assigned_closer_id',
-};
-const CALLBACK_SORT = {
-  customer: 'customer_name', priority: 'priority_rank', callback_at: 'callback_at',
-  created_at: 'created_at', status: 'status', fronter: 'user_id', closer: 'user_id',
-};
+//
+// These are DERIVED from config/recordColumns.js rather than declared here, so
+// the sortable set and the per-column filter set are the same list and cannot
+// drift apart. applySort is still the one sorter; it just reads a map computed
+// from the catalog instead of a literal. "Status Updated" → updated_at (a
+// status change bumps it; the displayed value comes from edit_history).
+//
+// resolveColumnAccess() narrows both halves for a readonly_admin whose PII or
+// financial fields are redacted — see blockedForHide().
+// (No module-level sort maps any more — each handler asks resolveColumnAccess
+// for a map narrowed to what that caller may actually order by.)
 
 // compliance_manager / superadmin / readonly_admin always; plus any user a
 // superadmin has granted the 'tool_compliance_review' flag (Custom Access
@@ -903,7 +900,10 @@ router.get('/users', asyncHandler(async (req, res) => {
 
 // ── GET /compliance/sales ─────────────────────────────────────────────────────
 router.get('/sales', asyncHandler(async (req, res) => {
-  const { company_id, user_ids, status, disposition, exclude_post_date, charge_from, charge_to, date_from, date_to, search, page = 1, limit = 50, sort_by, sort_dir } = req.query;
+  const { company_id, user_ids, status, disposition, exclude_post_date, charge_from, charge_to, date_from, date_to, search, page = 1, limit = 50, sort_by, sort_dir, filters } = req.query;
+
+  // Which columns THIS caller may sort/filter on (narrowed for a masked RO).
+  const access = await resolveColumnAccess(req, COMPLIANCE_SALE_COLUMNS);
 
   // "Search anything": resolve the term to matching sale ids (full id + every
   // form_data cell + key columns). null = RPC missing → legacy column search.
@@ -936,7 +936,7 @@ router.get('/sales', asyncHandler(async (req, res) => {
     ? supabaseAdmin.from('sales').select('*, transfers!inner(company_id)', { count: 'exact' }).eq('transfers.company_id', company_id)
     : supabaseAdmin.from('sales').select('*', { count: 'exact' });
 
-  query = applySort(query, sort_by, sort_dir, SALE_SORT, { col: 'created_at', asc: false });
+  query = applySort(query, sort_by, sort_dir, access.sortMap, { col: 'created_at', asc: false });
 
   if (company_id && companyType !== 'fronter') query = query.eq('company_id', company_id);
 
@@ -977,6 +977,11 @@ router.get('/sales', asyncHandler(async (req, res) => {
   if (date_from) query = query.gte('sale_date', date_from);
   if (date_to)   query = query.lte('sale_date', date_to);
   query = applySaleSearch(query);
+
+  // Per-column header filters LAST, so they narrow inside the company scope and
+  // the readonly allow-list rather than around them. access.blocked keeps a
+  // masked column out of the filter path entirely.
+  query = applyColumnFilters(query, filters, COMPLIANCE_SALE_COLUMNS, access.blocked);
 
   const offset = (parseInt(page) - 1) * parseInt(limit);
   query = query.range(offset, offset + parseInt(limit) - 1);
@@ -1073,6 +1078,10 @@ router.get('/sales', asyncHandler(async (req, res) => {
       if (charge_to)   q = q.lte('charge_at', charge_to);
       if (date_from)   q = q.gte('sale_date', date_from);
       if (date_to)     q = q.lte('sale_date', date_to);
+      // Header filters count too — otherwise the strip totals describe a wider
+      // set than the rows on screen, which reads as a bug the moment somebody
+      // filters one column and the tab counts don't move.
+      q = applyColumnFilters(q, filters, COMPLIANCE_SALE_COLUMNS, access.blocked);
       return applySaleSearch(q);
     };
     status_counts = await statusCountsExact(makeSaleBase, SALE_STATUSES);
@@ -1080,12 +1089,14 @@ router.get('/sales', asyncHandler(async (req, res) => {
 
   // Mask PII / financial for a readonly_admin whose superadmin turned those off.
   const sales = await maskForReadonly(enriched, 'sales', req);
-  res.json({ sales, total: count || 0, page: parseInt(page), limit: parseInt(limit), status_counts });
+  res.json({ sales, total: count || 0, page: parseInt(page), limit: parseInt(limit), status_counts, columns: access.catalog });
 }));
 
 // ── GET /compliance/transfers ─────────────────────────────────────────────────
 router.get('/transfers', asyncHandler(async (req, res) => {
-  const { company_id, user_ids, closer_id, status, date_from, date_to, search, page = 1, limit = 50, sort_by, sort_dir } = req.query;
+  const { company_id, user_ids, closer_id, status, date_from, date_to, search, page = 1, limit = 50, sort_by, sort_dir, filters } = req.query;
+
+  const access = await resolveColumnAccess(req, TRANSFER_COLUMNS);
 
   // "Search anything" → matching transfer ids (full id + every form_data cell +
   // normalized_phone). null = RPC missing → legacy column search.
@@ -1124,7 +1135,7 @@ router.get('/transfers', asyncHandler(async (req, res) => {
   const buildQuery = (from) => {
     let q = applySort(
       supabaseAdmin.from(from).select('*', { count: 'exact' }),
-      sort_by, sort_dir, TRANSFER_SORT, { col: 'created_at', asc: false },
+      sort_by, sort_dir, access.sortMap, { col: 'created_at', asc: false },
     );
     if (company_id) q = q.eq('company_id', company_id);
     if (!company_id && Array.isArray(roAllowed)) q = scopeToCompanies(q, roAllowed);
@@ -1137,6 +1148,7 @@ router.get('/transfers', asyncHandler(async (req, res) => {
     if (date_from) q = q.gte('created_at', etDateToUtcStart(date_from));
     if (date_to)   q = q.lte('created_at', etDateToUtcEnd(date_to));
     q = applyTransferSearch(q);
+    q = applyColumnFilters(q, filters, TRANSFER_COLUMNS, access.blocked);
     // Hide UNCONFIRMED pending-from-dialer rows (lead_id + phone only) — they are
     // not real transfers until the fronter confirms. Mirrors transfers.js. The
     // view exposes the flag after migration 142; before that, the view query
@@ -1158,6 +1170,7 @@ router.get('/transfers', asyncHandler(async (req, res) => {
     if (date_from) q = q.gte('created_at', etDateToUtcStart(date_from));
     if (date_to)   q = q.lte('created_at', etDateToUtcEnd(date_to));
     q = applyTransferSearch(q);
+    q = applyColumnFilters(q, filters, TRANSFER_COLUMNS, access.blocked);
     return q.neq('vicidial_pending', true);   // exclude unconfirmed pending-from-dialer
   };
 
@@ -1358,13 +1371,15 @@ router.get('/transfers', asyncHandler(async (req, res) => {
   });
 
   const transfers = await maskForReadonly(enriched, 'transfers', req);
-  res.json({ transfers, total: count || 0, page: parseInt(page), limit: parseInt(limit), status_counts, dedup_enabled: dedupEnabled });
+  res.json({ transfers, total: count || 0, page: parseInt(page), limit: parseInt(limit), status_counts, dedup_enabled: dedupEnabled, columns: access.catalog });
 }));
 
 // ── GET /compliance/callbacks ─────────────────────────────────────────────────
 // company_type=fronter|closer filters callbacks from companies of that type
 router.get('/callbacks', asyncHandler(async (req, res) => {
-  const { company_id, user_ids, status, priority, date_from, date_to, created_from, created_to, company_type, search, page = 1, limit = 50, sort_by, sort_dir } = req.query;
+  const { company_id, user_ids, status, priority, date_from, date_to, created_from, created_to, company_type, search, page = 1, limit = 50, sort_by, sort_dir, filters } = req.query;
+
+  const access = await resolveColumnAccess(req, CALLBACK_COLUMNS);
 
   let scopeCompanyIds = null;
   if (company_type) {
@@ -1387,7 +1402,7 @@ router.get('/callbacks', asyncHandler(async (req, res) => {
 
   let query = applySort(
     supabaseAdmin.from('callbacks').select('*', { count: 'exact' }),
-    sort_by, sort_dir, CALLBACK_SORT, { col: 'callback_at', asc: false },
+    sort_by, sort_dir, access.sortMap, { col: 'callback_at', asc: false },
   );
 
   if (company_id) {
@@ -1407,6 +1422,7 @@ router.get('/callbacks', asyncHandler(async (req, res) => {
   if (created_from) query = query.gte('created_at',  etDateToUtcStart(created_from));
   if (created_to)   query = query.lte('created_at',  etDateToUtcEnd(created_to));
   if (search)     { const s = escapeOrValue(search); query = query.or(`customer_name.ilike.%${s}%,customer_phone.ilike.%${s}%`); }
+  query = applyColumnFilters(query, filters, CALLBACK_COLUMNS, access.blocked);
 
   const offset = (parseInt(page) - 1) * parseInt(limit);
   query = query.range(offset, offset + parseInt(limit) - 1);
@@ -1429,7 +1445,7 @@ router.get('/callbacks', asyncHandler(async (req, res) => {
       if (created_from) q = q.gte('created_at',  etDateToUtcStart(created_from));
       if (created_to)   q = q.lte('created_at',  etDateToUtcEnd(created_to));
       if (search) { const s = escapeOrValue(search); q = q.or(`customer_name.ilike.%${s}%,customer_phone.ilike.%${s}%`); }
-      return q;
+      return applyColumnFilters(q, filters, CALLBACK_COLUMNS, access.blocked);
     };
     status_counts = await statusCountsExact(makeCallbackBase, CALLBACK_STATUSES);
   }
@@ -1447,7 +1463,7 @@ router.get('/callbacks', asyncHandler(async (req, res) => {
   }));
 
   const callbacks = await maskForReadonly(enriched, 'callbacks', req);
-  res.json({ callbacks, total: count || 0, page: parseInt(page), limit: parseInt(limit), status_counts });
+  res.json({ callbacks, total: count || 0, page: parseInt(page), limit: parseInt(limit), status_counts, columns: access.catalog });
 }));
 
 // ── GET /compliance/callbacks/phone-history ──────────────────────────────────

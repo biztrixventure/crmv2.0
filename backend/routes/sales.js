@@ -9,6 +9,8 @@ const { hasPermission, isSuperAdmin, isCompanyMember, isCloserSideScope } = requ
 const { requireFeature } = require('../utils/featureGate');
 const { escapeOrValue, safeUuid } = require('../utils/searchSanitize');
 const { applySort } = require('../utils/sortHelper');
+const { applyColumnFilters, resolveColumnAccess } = require('../utils/columnFilter');
+const { SALE_COLUMNS } = require('../config/recordColumns');
 const { titleCase, titleCaseFormData } = require('../utils/titleCase');
 const { expandStateInFormData } = require('../utils/stateMap');
 const { stampActor } = require('../utils/auditColumnGuard');
@@ -37,18 +39,10 @@ async function shouldHideResellsForUser(userRole, companyId, companyType) {
   return false;
 }
 
-// Client sort key -> real column. Name columns sort by underlying user id.
-const SALE_SORT = {
-  customer:        'customer_name',
-  status:          'status',
-  created_at:      'created_at',
-  sale_date:       'sale_date',
-  reference:       'reference_no',
-  monthly_payment: 'monthly_payment',
-  fronter:         'fronter_id',
-  closer:          'closer_id',
-  plan:            'plan',
-};
+// Client sort key -> real column lives in the shared catalog now
+// (config/recordColumns.js SALE_COLUMNS). resolveColumnAccess derives the map
+// applySort needs, per caller, so the sortable set and the per-column filter
+// set are the same list and cannot drift — see utils/columnFilter.js.
 
 // Generate a reference number like "MBH4220SBN"
 function generateReferenceNo() {
@@ -160,7 +154,7 @@ router.get(
         && !(await isCompanyMember(userId, req.query.company_id))) {
       companyId = req.user.company_id;
     }
-    const { status, disposition, charge_from, charge_to, search, page = 1, limit = 50, date_from, date_to, user_id, sort_by, sort_dir } = req.query;
+    const { status, disposition, charge_from, charge_to, search, page = 1, limit = 50, date_from, date_to, user_id, sort_by, sort_dir, filters } = req.query;
 
     logger.info('GET_SALES', `user=${userId}, role=${userRole}, company=${companyId}`);
 
@@ -168,9 +162,12 @@ router.get(
     // a large JSONB the list view never reads (the drawer uses the sale's own
     // form_data), so shipping it per row was pure egress waste. Keep the cheap
     // id/status/created_by in case a caller needs the linkage.
+    // Which columns THIS caller may sort/filter on (narrowed for a masked RO).
+    const access = await resolveColumnAccess(req, SALE_COLUMNS);
+
     let query = applySort(
       supabaseAdmin.from('sales').select(`*, transfers(id, status, created_by)`, { count: 'exact' }),
-      sort_by, sort_dir, SALE_SORT, { col: 'created_at', asc: false },
+      sort_by, sort_dir, access.sortMap, { col: 'created_at', asc: false },
     );
 
     if (['superadmin', 'readonly_admin'].includes(userRole)) {
@@ -265,6 +262,9 @@ router.get(
         `client_name.ilike.%${s}%`
       );
     }
+    // Per-column header filters LAST, so they narrow inside the role/company
+    // scope established above rather than around it.
+    query = applyColumnFilters(query, filters, SALE_COLUMNS, access.blocked);
 
     const offset = (page - 1) * limit;
     query = query.range(offset, offset + parseInt(limit) - 1);
@@ -309,6 +309,8 @@ router.get(
       total: count || 0,
       page: parseInt(page),
       limit: parseInt(limit),
+      // What the header menu may offer — resolved server-side per caller.
+      columns: access.catalog,
     });
   })
 );

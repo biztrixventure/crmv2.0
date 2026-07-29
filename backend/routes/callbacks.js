@@ -8,23 +8,18 @@ const { etDateToUtcStart, etDateToUtcEnd } = require('../utils/etUtils');
 const { requireFeature } = require('../utils/featureGate');
 const { escapeOrValue, safeUuid } = require('../utils/searchSanitize');
 const { applySort } = require('../utils/sortHelper');
+const { applyColumnFilters, resolveColumnAccess } = require('../utils/columnFilter');
+const { CALLBACK_COLUMNS } = require('../config/recordColumns');
 const { titleCase } = require('../utils/titleCase');
 const { expandState } = require('../utils/stateMap');
 const { stampActor } = require('../utils/auditColumnGuard');
 
 const router = express.Router();
 
-// Client sort key -> real column. Name columns sort by the underlying user id
-// so an agent's callbacks group together across pages.
-const CALLBACK_SORT = {
-  customer:    'customer_name',
-  priority:    'priority_rank',
-  callback_at: 'callback_at',
-  created_at:  'created_at',
-  status:      'status',
-  fronter:     'user_id',
-  closer:      'user_id',
-};
+// Client sort key -> real column lives in the shared catalog now
+// (config/recordColumns.js CALLBACK_COLUMNS), so the sortable set and the
+// per-column filter set are one list. Name columns still sort by the underlying
+// user id so an agent's callbacks group together across pages.
 
 // Role levels that can see all company callbacks
 const MANAGER_LEVELS = [
@@ -66,9 +61,12 @@ router.get('/', asyncHandler(async (req, res) => {
   // Permission-based company scope: users with view_team_callbacks can see all company callbacks
   const canViewTeam = isManager || await hasPermission(userId, companyId, 'view_team_callbacks');
 
+  // Which columns THIS caller may sort/filter on (narrowed for a masked RO).
+  const access = await resolveColumnAccess(req, CALLBACK_COLUMNS);
+
   let query = applySort(
     supabaseAdmin.from('callbacks').select('*', { count: 'exact' }),
-    sort_by, sort_dir, CALLBACK_SORT, { col: 'callback_at', asc: true },
+    sort_by, sort_dir, access.sortMap, { col: 'callback_at', asc: true },
   );
 
   if (canViewTeam && companyId) {
@@ -107,6 +105,9 @@ router.get('/', asyncHandler(async (req, res) => {
     if (agentUserIds.length > 0) orParts.push(`user_id.in.(${agentUserIds.join(',')})`);
     query = query.or(orParts.join(','));
   }
+  // Per-column header filters LAST, so they narrow inside the role/company
+  // scope established above rather than around it.
+  query = applyColumnFilters(query, req.query.filters, CALLBACK_COLUMNS, access.blocked);
 
   query = query.range(offset, offset + limit - 1);
 
@@ -142,7 +143,7 @@ router.get('/', asyncHandler(async (req, res) => {
     });
   }
 
-  res.json({ callbacks, total: count || 0, page, limit });
+  res.json({ callbacks, total: count || 0, page, limit, columns: access.catalog });
 }));
 
 // ============================================================================

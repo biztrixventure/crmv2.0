@@ -7,6 +7,8 @@ const { etDateToUtcStart, etDateToUtcEnd } = require('../utils/etUtils');
 const notifications = require('../utils/notificationService');
 const { escapeOrValue, safeUuid } = require('../utils/searchSanitize');
 const { applySort } = require('../utils/sortHelper');
+const { applyColumnFilters, resolveColumnAccess } = require('../utils/columnFilter');
+const { TRANSFER_COLUMNS } = require('../config/recordColumns');
 const { titleCaseFormData } = require('../utils/titleCase');
 const { reconcileQueuedDispoForTransfer } = require('./vicidial');
 const { getConfig } = require('../utils/businessConfig');
@@ -77,14 +79,11 @@ async function priorContext(t) {
   return { closerName, disposition: disp?.[0]?.disposition_name || 'no disposition' };
 }
 
-// Client sort key -> real column / json path. Name columns sort by underlying id.
-const TRANSFER_SORT = {
-  customer:   'form_data->>customer_name',
-  status:     'status',
-  created_at: 'created_at',
-  fronter:    'created_by',
-  closer:     'assigned_closer_id',
-};
+// Client sort key -> real column / json path lives in the shared catalog now
+// (config/recordColumns.js TRANSFER_COLUMNS), so the sortable set and the
+// per-column filter set are one list. That is also where the long-standing
+// `form_data->>customer_name` bug is fixed: no transfer row has ever carried
+// that key — the real ones are FirstName / LastName.
 
 // ============================================================================
 // GET /transfers
@@ -100,11 +99,14 @@ router.get('/', asyncHandler(async (req, res) => {
       && !(await isCompanyMember(userId, req.query.company_id))) {
     companyId = req.user.company_id;
   }
-  const { status, page = 1, limit = 50, search, date_from, date_to, user_id, sort_by, sort_dir } = req.query;
+  const { status, page = 1, limit = 50, search, date_from, date_to, user_id, sort_by, sort_dir, filters } = req.query;
+
+  // Which columns THIS caller may sort/filter on (narrowed for a masked RO).
+  const access = await resolveColumnAccess(req, TRANSFER_COLUMNS);
 
   let query = applySort(
     supabaseAdmin.from('transfers').select('*', { count: 'exact' }),
-    sort_by, sort_dir, TRANSFER_SORT, { col: 'created_at', asc: false },
+    sort_by, sort_dir, access.sortMap, { col: 'created_at', asc: false },
   );
 
   // VICIdial "pending from dialer" rows are not real transfers yet — they only
@@ -184,6 +186,9 @@ router.get('/', asyncHandler(async (req, res) => {
       `form_data->>FirstName.ilike.%${s}%`
     );
   }
+  // Per-column header filters LAST, so they narrow inside the role/company
+  // scope established above rather than around it.
+  query = applyColumnFilters(query, filters, TRANSFER_COLUMNS, access.blocked);
 
   const offset = (parseInt(page) - 1) * parseInt(limit);
   query = query.range(offset, offset + parseInt(limit) - 1);
@@ -269,7 +274,7 @@ router.get('/', asyncHandler(async (req, res) => {
     };
   });
 
-  res.json({ transfers, total: count || 0, page: parseInt(page), limit: parseInt(limit) });
+  res.json({ transfers, total: count || 0, page: parseInt(page), limit: parseInt(limit), columns: access.catalog });
 }));
 
 // ============================================================================
