@@ -692,6 +692,17 @@ router.get('/agent-performance', asyncHandler(async (req, res) => {
   const sum = (k) => agents.reduce((n, a) => n + a[k], 0);
   const totT = sum('transfers'), totS = sum('sales'), totA = sum('approved');
 
+  // Rows in scope that no agent owns — a sale with no fronter_id, or a transfer
+  // with no creator. They are real records and they DO count on the KPI cards,
+  // so if the scoreboard silently omitted them the two would disagree by a few
+  // and neither number would be believed. Reported explicitly instead, and the
+  // company-level rates use the full in-scope figures, not just the attributed
+  // ones, so the funnel here matches the funnel above it.
+  const unattributedSales     = sales.filter(s => !s[sKey]).length;
+  const unattributedTransfers = transfers.filter(t => !t[tKey]).length;
+  const scopeT = transfers.length, scopeS = sales.length;
+  const scopeA = sales.filter(s => s.status === 'closed_won').length;
+
   res.json({
     side,
     agent_metric: side === 'fronter' ? 'transfers' : 'sales',
@@ -699,11 +710,17 @@ router.get('/agent-performance', asyncHandler(async (req, res) => {
     agents,
     totals: {
       agents: agents.length,
-      transfers: totT, sales: totS, approved: totA,
-      cancelled: sum('cancelled'), pending: sum('pending'),
+      // company-wide, every row in scope
+      transfers: scopeT, sales: scopeS, approved: scopeA,
+      cancelled: sales.filter(s => s.status === 'cancelled').length,
+      pending:   sales.filter(s => s.status === 'pending_review').length,
       revenue: Math.round(sum('revenue') * 100) / 100,
-      conversion: rate(totS, totT),
-      approval:   rate(totA, totS),
+      conversion: rate(scopeS, scopeT),
+      approval:   rate(scopeA, scopeS),
+      // what the rows above actually add up to, and the gap
+      attributed_transfers: totT, attributed_sales: totS, attributed_approved: totA,
+      unattributed_transfers: unattributedTransfers,
+      unattributed_sales: unattributedSales,
     },
   });
 }));

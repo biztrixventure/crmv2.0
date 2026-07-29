@@ -25,6 +25,7 @@ import {
 import { Badge, Alert } from "../components/UI";
 import { Panel, TableScroll, Loading, EmptyState, SectionHeader } from "../components/UI/kit";
 import ChromeTabs from "../components/UI/ChromeTabs";
+import AgentPerformance from "../components/Manager/AgentPerformance";
 
 // ── Two-tier nav, the ComplianceShell pattern (docs/ui-design-system.md) ─────
 // This shell had grown to ~20 sibling tabs on one strip, which is a scroll bar
@@ -870,6 +871,16 @@ const ManagerShell = ({ workspaceMode = false }) => {
                   </div>
                 </div>
               </Panel>
+            )}
+
+            {/* ── Who is doing what ──
+                Server-side, one row per agent, with the real transfers→sales
+                conversion. This replaces counting a 1,000-row page in the
+                browser, which ranked a sample on any company past that size and
+                called a transfer STATUS "conversion". The two boards below stay
+                for their per-agent detail, but this is the number to trust. */}
+            {(hasPermission('view_fronter_stats') || hasPermission('view_closer_stats')) && (
+              <AgentPerformance dateFrom={date_from} dateTo={date_to} />
             )}
 
             {/* ── Leaderboards ── */}
