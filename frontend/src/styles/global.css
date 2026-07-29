@@ -1428,7 +1428,8 @@ select optgroup {
      selector reads narrower than it behaves.
 
      Inline-flex + centering so the icon stays optically centred in the larger
-     box instead of pinned to the top-left. */
+     box instead of pinned to the top-left.
+
      `:not(.hidden)` is load-bearing, and leaving it out was a real bug. This
      selector's specificity (0,1,2) outranks Tailwind's `.hidden` (0,1,0), so
      `display: inline-flex` was UN-HIDING every icon-only button Tailwind had
