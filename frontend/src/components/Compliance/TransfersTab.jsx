@@ -72,9 +72,11 @@ const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
   const [todayCount, setTodayCount] = useState(null);
 
   // Notification deep-link → scroll + highlight the matching transfer row 5s.
-  const { focus } = useFocus();
+  // `hot` gates the ring + scroll: the focus target outlives it now so a slow
+  // cold start still lands, but the highlight must still fade after ~6s.
+  const { focus, hot } = useFocus();
   const focusRef = useRef(null);
-  const focusedId = focus?.kind === 'transfer' ? focus.id : null;
+  const focusedId = hot && focus?.kind === 'transfer' ? focus.id : null;
   useEffect(() => {
     if (focusedId && focusRef.current) {
       try { focusRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch { /* noop */ }

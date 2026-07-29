@@ -3,7 +3,7 @@ import { MessageSquare } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useFeatureFlags } from '../../contexts/FeatureFlagsContext';
 import { useChatUnread } from '../../hooks/useChatUnread';
-import { useFocus } from '../../contexts/FocusContext';
+import { useNavFocus } from '../../contexts/FocusContext';
 import ChatPanel from './ChatPanel';
 
 // Header chat trigger + total-unread badge (mirrors NotificationBell styling).
@@ -21,7 +21,7 @@ const ChatLauncher = () => {
 
   // A clicked chat notification (bell or OS push) → open the panel on that
   // conversation. focus.ts changes per click, so each one re-opens.
-  const { focus } = useFocus();
+  const focus = useNavFocus();
   const [focusConv, setFocusConv] = useState(null);
   useEffect(() => {
     if (focus?.kind === 'chat') { setOpen(true); setFocusConv(focus.id || null); }

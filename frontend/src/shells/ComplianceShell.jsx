@@ -13,7 +13,7 @@ import { AppHeader } from '../components/Layout';
 import EngagementBanners from '../components/Engagement/EngagementBanners';
 import { useNotifications } from '../hooks/useNotifications';
 import { useFormFields } from '../hooks/useFormFields';
-import { useFocus } from '../contexts/FocusContext';
+import { useNavFocus } from '../contexts/FocusContext';
 import { dispositionTabs, isPostDateDispo } from '../utils/dispositions';
 import client from '../api/client';
 import DevCredit from '../components/DevCredit';
@@ -168,7 +168,7 @@ const ComplianceShell = () => {
   // Notification deep-link: a clicked notification (bell or OS push) sets a
   // focus target → jump to the matching tab so the record is in view + the row
   // self-highlights (useFocusHighlight) for ~5s.
-  const { focus } = useFocus();
+  const focus = useNavFocus();
   useEffect(() => {
     if (!focus) return;
     const KIND_TAB = { sale: 'sales', transfer: 'transfers', callback: 'callbacks', number: 'numbers' };

@@ -66,7 +66,7 @@ import { useShellLayout } from "../hooks/useShellLayout";
 import { useTransfers } from "../hooks/useTransfers";
 import { useSales } from "../hooks/useSales";
 import { useNotifications } from "../hooks/useNotifications";
-import { useFocus } from "../contexts/FocusContext";
+import { useFocus, useNavFocus } from "../contexts/FocusContext";
 import { useFormFields } from "../hooks/useFormFields";
 import { dispositionTabs, isPostDateDispo, prettyDispo } from "../utils/dispositions";
 import { useSaleConfigs } from "../hooks/useSaleConfigs";
@@ -325,24 +325,30 @@ const StaffShell = () => {
 
   // Notification deep-link → jump to the right tab/section so the record shows
   // and self-highlights for ~5s (the lists read useFocus()).
-  const { focus } = useFocus();
+  // useNavFocus (not useFocus) for the JUMP: the target now outlives the 6s
+  // ring so a slow cold start still lands, and useNavFocus is what bounds it to
+  // "recent enough to act on".
+  const { focus, hot } = useFocus();
+  const navFocus = useNavFocus();
   useEffect(() => {
-    if (!focus) return;
+    if (!navFocus) return;
     setActiveNav('dashboard');
-    if (focus.kind === 'callback') setActiveTab('callbacks');
-    else if (focus.kind === 'number') setActiveTab('numbers');
-    else if (focus.kind === 'transfer') {
+    if (navFocus.kind === 'callback') setActiveTab('callbacks');
+    else if (navFocus.kind === 'number') setActiveTab('numbers');
+    else if (navFocus.kind === 'transfer') {
       if (isCloser) { setActiveTab('sales'); setCloserSection('assigned'); }
       else setActiveTab('transfers');
-    } else if (focus.kind === 'sale') {
+    } else if (navFocus.kind === 'sale') {
       if (isCloser) { setActiveTab('sales'); setCloserSection('sales'); }
       else setActiveTab('transfers');
     }
-  }, [focus]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [navFocus]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Scroll the focused card into view + a helper the cards use to ring 5s.
   const focusCardRef = useRef(null);
-  const isFocused = (kind, id) => !!focus && focus.kind === kind && id != null && String(focus.id) === String(id);
+  // `hot` gates the RING: the target itself is long-lived now, so without this
+  // the card would stay ringed for the rest of the session.
+  const isFocused = (kind, id) => hot && !!focus && focus.kind === kind && id != null && String(focus.id) === String(id);
   const focusRing = (on) => on
     ? { boxShadow: '0 0 0 2px var(--color-primary-500, #6366f1), 0 0 0 6px rgba(99,102,241,0.13)' }
     : null;

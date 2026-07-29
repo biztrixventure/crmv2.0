@@ -85,9 +85,12 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
   const [detailSale, setDetailSale] = useState(null);
 
   // Notification deep-link → scroll + highlight the matching sale row 5s.
-  const { focus } = useFocus();
+  // `hot` gates the ring + scroll. The focus TARGET is long-lived now, so a
+  // slow cold start still lands on the record; the highlight itself must still
+  // fade after ~6s instead of staying lit for the rest of the session.
+  const { focus, hot } = useFocus();
   const focusRef = useRef(null);
-  const focusedId = focus?.kind === 'sale' ? focus.id : null;
+  const focusedId = hot && focus?.kind === 'sale' ? focus.id : null;
   useEffect(() => {
     if (focusedId && focusRef.current) {
       try { focusRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch { /* noop */ }

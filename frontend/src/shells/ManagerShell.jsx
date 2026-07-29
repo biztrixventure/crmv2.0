@@ -27,7 +27,7 @@ import { AppHeader } from "../components/Layout";
 import { useSales } from "../hooks/useSales";
 import { useTransfers } from "../hooks/useTransfers";
 import { useNotifications } from "../hooks/useNotifications";
-import { useFocus } from "../contexts/FocusContext";
+import { useNavFocus } from "../contexts/FocusContext";
 import { useDashboardStats } from "../hooks/useDashboardStats";
 import { useShellLayout } from "../hooks/useShellLayout";
 import StatCardTriple from "../components/UI/StatCardTriple";
@@ -297,7 +297,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
   }, [TABS, activeTab, managerDefaultTab, setActiveTab]);
 
   // Notification deep-link → jump to the matching tab.
-  const { focus } = useFocus();
+  const focus = useNavFocus();
   useEffect(() => {
     if (!focus) return;
     const KIND_TAB = { transfer: 'transfers', sale: 'sales', callback: 'callbacks' };

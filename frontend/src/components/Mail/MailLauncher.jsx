@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Mail } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useFeatureFlags } from '../../contexts/FeatureFlagsContext';
+import { useNavFocus } from '../../contexts/FocusContext';
 import { supabase } from '../../api/supabase';
 import client from '../../api/client';
 import MailPanel from './MailPanel';
@@ -57,6 +58,15 @@ const MailLauncher = () => {
       channelRef.current = null;
     };
   }, [enabled, user?.id, refresh]);
+
+  // A tapped mail notification (bell or OS push) opens the panel — mirrors what
+  // ChatLauncher already does for chat. Until this existed, `email_received`
+  // resolved to no target at all, so tapping one of the most frequent
+  // notifications in the app was a genuine no-op.
+  const focus = useNavFocus();
+  useEffect(() => {
+    if (focus?.kind === 'email') setOpen(true);
+  }, [focus]);
 
   if (!enabled) return null;
 

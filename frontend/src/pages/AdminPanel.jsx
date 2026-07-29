@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, lazy, Suspense } from "react";
 import { useHistoryTab } from "../hooks/useHistoryTab";
+import { useNavFocus } from "../contexts/FocusContext";
 import { useAuth } from "../contexts/AuthContext";
 import { useCopyGuard } from "../hooks/useCopyGuard";
 import { roBeacon } from "../utils/roActivityBeacon";
@@ -100,6 +101,35 @@ const AdminPanel = () => {
     // not leave a history entry that swiping back would land on and re-bounce.
     if (isReadOnly && activeTab && !roTabAllowed(activeTab)) setActiveTab('dashboard', { replace: true });
   }, [isReadOnly, activeTab, roTabAllowed, setActiveTab]);
+
+  // ── Notification deep-link ────────────────────────────────────────────────
+  // THIS WAS THE BIGGEST HALF OF "tapping a notification shows nothing".
+  // AdminHeader has always called openFromNotification, which sets a focus
+  // target — but this panel never read it. Every other shell (Staff, Manager,
+  // Compliance) has had a target→tab effect for ages; the admin shell did not,
+  // so for a superadmin a tapped notification set some state that nothing in
+  // the tree was listening to. Bell and OS push were equally dead.
+  //
+  // An admin's RECORDS live in the Compliance shell (that is what the sidebar's
+  // cross-company rows open), so a record target routes there and lets
+  // ComplianceShell pick the tab — its own focus effect already does that, and
+  // the router state gives it the right initial tab without waiting a frame.
+  // chat + email are deliberately absent: their header launchers open a drawer
+  // in place, so switching tabs underneath them would be wrong.
+  const navFocus = useNavFocus();
+  useEffect(() => {
+    if (!navFocus) return;
+    const CC_TAB  = { sale: 'sales', transfer: 'transfers', callback: 'callbacks', number: 'numbers', qa: 'qa_admin' };
+    // The readonly-admin nav id that governs each destination, so a target the
+    // SuperAdmin took away from this RO does not become a back door into it.
+    const CC_NAV  = { sale: 'cc-sales', transfer: 'cc-transfers', callback: 'cc-callbacks', number: 'cc-callbacks', qa: 'cc-qa' };
+    const ccTab = CC_TAB[navFocus.kind];
+    if (ccTab) {
+      if (roTabAllowed(CC_NAV[navFocus.kind])) navigate('/compliance', { state: { tab: ccTab } });
+      return;
+    }
+    if (navFocus.kind === 'batch' && roTabAllowed('batches')) setActiveTab('batches');
+  }, [navFocus]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Allow AdminAnalyticsDashboard quick-action buttons to navigate
   useEffect(() => {
