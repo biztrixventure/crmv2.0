@@ -268,7 +268,7 @@ router.post(
           role_id,
           company_id,
           custom_roles (id, name, level),
-          companies (name, logo_url)
+          companies (name, company_type, logo_url)
         `
         )
         .eq("user_id", data.user.id)
@@ -335,6 +335,12 @@ router.post(
           role_name: roleData.name,
           company_id: userRole.company_id,
           company_name: companyData.name,
+          // This is the branch POST /auth/login actually returns from — it
+          // builds the user from `companyData`, not the `ur.companies` shape
+          // /auth/me uses. Adding company_type only there left a fresh login
+          // with company_type undefined until /auth/me happened to refresh it,
+          // so the shell fell back to the shared card order.
+          company_type: companyData.company_type || null,
           company_logo_url: companyData.logo_url || null,
           first_name: profile?.first_name,
           last_name: profile?.last_name,
