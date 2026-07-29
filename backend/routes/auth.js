@@ -91,7 +91,7 @@ router.get('/me', authMiddleware, asyncHandler(async (req, res) => {
   const [{ data: userRoles }, { data: profile }] = await Promise.all([
     supabaseAdmin
       .from('user_company_roles')
-      .select('role_id, company_id, custom_roles(id, name, level), companies(name, logo_url, logo_light_url, logo_dark_url, internal_timezone)')
+      .select('role_id, company_id, custom_roles(id, name, level), companies(name, company_type, logo_url, logo_light_url, logo_dark_url, internal_timezone)')
       .eq('user_id', userId)
       .eq('is_active', true)
       .order('created_at', { ascending: false })
@@ -150,6 +150,10 @@ router.get('/me', authMiddleware, asyncHandler(async (req, res) => {
     role_name: ur.custom_roles.name,
     company_id: ur.company_id,
     company_name: ur.companies?.name,
+    // 'fronter' | 'closer'. The shell needs it to show a company_admin the
+    // surfaces their side of the pipeline actually owns — a fronter company
+    // admin runs lead distribution, a closer company admin runs sale tooling.
+    company_type: ur.companies?.company_type || null,
     company_logo_url: ur.companies?.logo_url || null,
     company_logo_light_url: ur.companies?.logo_light_url || null,
     company_logo_dark_url:  ur.companies?.logo_dark_url  || null,
@@ -722,7 +726,7 @@ router.post('/exchange', asyncHandler(async (req, res) => {
   const [{ data: userRoles }, { data: profile }] = await Promise.all([
     supabaseAdmin
       .from('user_company_roles')
-      .select('role_id, company_id, custom_roles(id, name, level), companies(name, logo_url, logo_light_url, logo_dark_url, internal_timezone)')
+      .select('role_id, company_id, custom_roles(id, name, level), companies(name, company_type, logo_url, logo_light_url, logo_dark_url, internal_timezone)')
       .eq('user_id', userId).eq('is_active', true)
       .order('created_at', { ascending: false }).limit(1),
     supabaseAdmin.from('user_profiles').select('first_name, last_name').eq('user_id', userId).single(),
@@ -756,6 +760,7 @@ router.post('/exchange', asyncHandler(async (req, res) => {
     user: {
       id: userId, email, role: roleLevel, role_name: ur.custom_roles.name,
       company_id: ur.company_id, company_name: ur.companies?.name,
+      company_type: ur.companies?.company_type || null,
       company_logo_url: ur.companies?.logo_url || null,
     company_logo_light_url: ur.companies?.logo_light_url || null,
     company_logo_dark_url:  ur.companies?.logo_dark_url  || null,

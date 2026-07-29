@@ -269,7 +269,38 @@ const ManagerShell = ({ workspaceMode = false }) => {
     isActionVisible: isMgrActionVisible,
     cardConfig: mgrCardConfig,
   } = useShellLayout('manager');
-  const TABS = useMemo(() => applyManagerLayout(CODE_TABS), [applyManagerLayout, CODE_TABS]);
+  // ── Which side of the pipeline is this company_admin on? ──────────────────
+  // A fronter company's admin and a closer company's admin were handed the
+  // IDENTICAL tab set, so each carried half a shell belonging to the other
+  // side: the closer company's admin got lead-distribution surfaces (Numbers,
+  // Batches, Assigned Numbers) its agents never touch, and a fronter company's
+  // admin got sale-desk tooling (Sale Search, DNC Check, Card Validator) that
+  // only makes sense while a closer is on a call.
+  //
+  // Narrowing ONLY applies to company_admin, and only when the company type is
+  // known — every other manager role, and any admin whose company_type has not
+  // loaded yet, sees exactly what it saw before. Tab ids are untouched (hidden,
+  // never renamed or deleted) because readonly-admin governance stores them.
+  const coType    = user?.company_type || null;
+  const isCoAdmin = user?.role === 'company_admin';
+  const FRONTER_SIDE_TABS = ['numbers', 'batches', 'roster'];
+  const CLOSER_SIDE_TABS  = ['search', 'dnc', 'card_validator'];
+  const sideAllowsTab = useCallback((key) => {
+    if (!isCoAdmin || !coType) return true;
+    if (coType === 'closer'  && FRONTER_SIDE_TABS.includes(key)) return false;
+    if (coType === 'fronter' && CLOSER_SIDE_TABS.includes(key))  return false;
+    return true;
+  }, [isCoAdmin, coType]);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fronter-side viewers don't rate or disposition closer calls — their agents
+  // weren't on them. Previously only fronter_manager was excluded, which left a
+  // fronter company's admin with Rate / Dispo buttons on every transfer row.
+  const isFronterSideViewer = user?.role === 'fronter_manager' || (isCoAdmin && coType === 'fronter');
+
+  const TABS = useMemo(
+    () => applyManagerLayout(CODE_TABS).filter(t => sideAllowsTab(t.key)),
+    [applyManagerLayout, CODE_TABS, sideAllowsTab],
+  );
 
   const tabKeys = useMemo(() => new Set(TABS.map(t => t.key)), [TABS]);
 
@@ -1005,14 +1036,14 @@ const ManagerShell = ({ workspaceMode = false }) => {
                           <td className="py-3 px-3 text-text-secondary text-xs">{fmtDateET(t.created_at)}</td>
                           <td className="py-3 px-3">
                             <div className="flex flex-wrap gap-1">
-                              {user?.role !== 'fronter_manager' && hasPermission('submit_call_review') && (
+                              {!isFronterSideViewer && hasPermission('submit_call_review') && (
                                 <button onClick={e => { e.stopPropagation(); setRateTarget(t); setRatingVal('good'); setRatingNotes(''); setRatingMsg(''); }}
                                   className="px-2 py-1.5 rounded-lg text-xs font-semibold border"
                                   style={{ borderColor: 'var(--color-primary-300)', color: 'var(--color-primary-600)' }}>
                                   <Star size={11} className="inline mr-1" />Rate
                                 </button>
                               )}
-                              {user?.role !== 'fronter_manager' && hasPermission('submit_call_dispo') && (
+                              {!isFronterSideViewer && hasPermission('submit_call_dispo') && (
                                 <button onClick={e => { e.stopPropagation(); setDispoTarget(t); setDispoVal('sale'); setDispoNotes(''); setDispoMsg(''); }}
                                   className="px-2 py-1.5 rounded-lg text-xs font-semibold border"
                                   style={{ borderColor: 'var(--color-info-300)', color: 'var(--color-info-600)' }}>
