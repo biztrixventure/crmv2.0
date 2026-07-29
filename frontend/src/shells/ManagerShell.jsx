@@ -11,6 +11,7 @@ import NoteShortcodesManager from "../components/Numbers/NoteShortcodesManager";
 import ThemedSelect from '../components/UI/Select';
 import TeamManager from '../components/Admin/Teams/TeamManager';
 import MyTeam from '../components/Admin/Teams/MyTeam';
+import QuotaReport from '../components/Teams/QuotaReport';
 import { useTheme } from "../contexts/ThemeContext";
 import { useFeatureFlags } from "../contexts/FeatureFlagsContext";
 import { useNavigate } from "react-router-dom";
@@ -20,7 +21,7 @@ import {
   Search, Star, Shield, FileText, RefreshCw, AlertCircle, Plus,
   MessageSquare, Trash2, Activity, ChevronLeft, ChevronRight, CalendarDays, HelpCircle, FileSpreadsheet, Trophy, Copy,
   UserCircle, Database, Settings2, Zap, Building2, CreditCard,
-  LayoutGrid, ChevronUp, ChevronDown, ChevronsUpDown,
+  LayoutGrid, ChevronUp, ChevronDown, ChevronsUpDown, Target,
 } from "lucide-react";
 import { Badge, Alert } from "../components/UI";
 import { Panel, TableScroll, Loading, EmptyState, SectionHeader } from "../components/UI/kit";
@@ -41,7 +42,7 @@ const TAB_GROUPS = [
   { id: 'g_overview',  label: 'Overview',  icon: TrendingUp, tabs: ['overview'] },
   { id: 'g_records',   label: 'Records',   icon: Database,   tabs: ['transfers', 'team_sales', 'my_sales', 'search', 'activity_log'] },
   { id: 'g_callbacks', label: 'Callbacks', icon: Phone,      tabs: ['callbacks', 'numbers', 'batches', 'roster'] },
-  { id: 'g_team',      label: 'Team',      icon: Users,      tabs: ['my_team', 'teams', 'spiffs'] },
+  { id: 'g_team',      label: 'Team',      icon: Users,      tabs: ['my_team', 'teams', 'quota_report', 'spiffs'] },
   { id: 'g_resources', label: 'Resources', icon: HelpCircle, tabs: ['faqs', 'scripts', 'note_shortcodes'] },
   { id: 'g_tools',     label: 'Tools',     icon: Shield,     tabs: ['tool_customer_profiles', 'tool_data_analyzer', 'tool_chat_control', 'dnc', 'card_validator'] },
 ];
@@ -303,6 +304,12 @@ const ManagerShell = ({ workspaceMode = false }) => {
     // the "My Team" tab above.
     ...(['company_admin', 'operations_manager'].includes(user?.role)
       ? [{ key: 'teams',      label: 'Teams',          icon: UserCircle }] : []),
+    // Quota performance. Shown to every manager role, because the SERVER scopes
+    // it: a company_admin gets every team, a fronter/closer manager who leads a
+    // team gets only that team. Gating it here by role as well would hide the
+    // page from the lead it was built for.
+    ...(['company_admin', 'operations_manager', 'closer_manager', 'fronter_manager', 'manager'].includes(user?.role)
+      ? [{ key: 'quota_report', label: 'Quotas',       icon: Target     }] : []),
     { key: 'activity_log', label: 'Activity Log', icon: Activity },
     { key: 'batches',      label: 'Batches',      icon: Send },
     { key: 'roster',       label: 'Assigned Numbers', icon: Hash },
@@ -1271,6 +1278,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
         {/* ── PANEL TABS (reuse existing components) ── */}
         {activeTab === 'my_team'   && <MyTeam />}
         {activeTab === 'teams'     && <TeamManager />}
+        {activeTab === 'quota_report' && <QuotaReport />}
         {activeTab === 'callbacks' && <ManagerCallbacksTab user={user} />}
         {activeTab === 'numbers'   && (
           <div className="space-y-6">

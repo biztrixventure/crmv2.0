@@ -234,4 +234,114 @@ function periodBounds(kind, anchorIso) {
   return { starts_at: iso(s), ends_at: iso(e) };
 }
 
-module.exports = { BUILT_IN, WON_STATUSES, getCatalog, resolveMetric, countWindow, attachAttainment, periodBounds };
+// ── Daily activity series + per-member roll-up ──────────────────────────────
+// One pass per source table for the WHOLE member set, bucketed by day AND by
+// member. Feeds every chart from the same rows the quota counter uses, so a
+// bar and the number above it can never disagree.
+//
+// Side-aware for the same reason attainment is: on a fronter company a person's
+// sale credit is fronter_id (the lead they sent that closed), on a closer
+// company it is closer_id (the deal they closed). Measured on production, all
+// four existing teams are fronter teams, and reading sales through closer_id
+// made every one of them report 0 sales / $0 gross while they had in fact
+// produced 73 approved deals — which is exactly why half the charts were blank.
+//
+// `sales_submitted` is every sale written in the window; `sales_won` is the
+// compliance-approved subset. Both are returned so a chart can show the
+// approval funnel rather than implying one number is "the" sales figure.
+async function activitySeries({ userIds, companyId, closerSide, from, to }) {
+  const ids = [...new Set((userIds || []).filter(Boolean))];
+  const blankDay = (date) => ({ date, transfers: 0, sales_submitted: 0, sales_won: 0, sales_cancelled: 0, revenue: 0, gross: 0, callbacks: 0 });
+  const blankMember = (id) => ({ user_id: id, transfers: 0, sales_submitted: 0, sales_won: 0, sales_cancelled: 0, revenue: 0, gross: 0, callbacks: 0 });
+
+  // Buckets span the REQUESTED range, not whatever the data covers, so a quiet
+  // day is a visible gap instead of vanishing and making the line look smooth.
+  const days = new Map();
+  if (from && to) {
+    let cur = Date.parse(`${from}T00:00:00Z`);
+    const end = Date.parse(`${to}T00:00:00Z`);
+    let guard = 0;
+    while (cur <= end && guard++ < 400) {
+      const k = new Date(cur).toISOString().slice(0, 10);
+      days.set(k, blankDay(k));
+      cur += 86400000;
+    }
+  }
+  const byMember = {};
+  ids.forEach(id => { byMember[id] = blankMember(id); });
+  if (!ids.length) return { days: [...days.values()], members: [], totals: blankMember(null) };
+
+  const tCol = closerSide ? 'assigned_closer_id' : 'created_by';
+  const sCol = closerSide ? 'closer_id' : 'fronter_id';
+  const hit = (dayKey, member, field, amount = 1) => {
+    const d = days.get(dayKey); if (d) d[field] += amount;
+    const m = byMember[member]; if (m) m[field] += amount;
+  };
+
+  try {
+    const transfers = await fetchAll(() => {
+      let q = supabaseAdmin.from('transfers').select(`${tCol}, created_at`)
+        .neq('vicidial_pending', true).in(tCol, ids);
+      if (!closerSide && companyId) q = q.eq('company_id', companyId);
+      if (from) q = q.gte('created_at', etDateToUtcStart(from));
+      if (to)   q = q.lte('created_at', etDateToUtcEnd(to));
+      return q;
+    });
+    transfers.forEach(r => hit(String(r.created_at || '').slice(0, 10), r[tCol], 'transfers'));
+
+    const sales = await fetchAll(() => {
+      let q = supabaseAdmin.from('sales')
+        .select(`${sCol}, status, sale_date, monthly_payment, down_payment`).in(sCol, ids);
+      if (!closerSide && companyId) q = q.eq('company_id', companyId);
+      if (from) q = q.gte('sale_date', from);
+      if (to)   q = q.lte('sale_date', to);
+      return q;
+    });
+    sales.forEach(r => {
+      const day = String(r.sale_date || '').slice(0, 10);
+      hit(day, r[sCol], 'sales_submitted');
+      if (WON_STATUSES.includes(r.status)) {
+        hit(day, r[sCol], 'sales_won');
+        hit(day, r[sCol], 'revenue', Number(r.monthly_payment) || 0);
+        hit(day, r[sCol], 'gross',   Number(r.down_payment)    || 0);
+      } else if (r.status === 'cancelled') {
+        hit(day, r[sCol], 'sales_cancelled');
+      }
+    });
+
+    const callbacks = await fetchAll(() => {
+      let q = supabaseAdmin.from('callbacks').select('user_id, callback_at')
+        .eq('status', 'completed').in('user_id', ids);
+      if (companyId) q = q.eq('company_id', companyId);
+      if (from) q = q.gte('callback_at', etDateToUtcStart(from));
+      if (to)   q = q.lte('callback_at', etDateToUtcEnd(to));
+      return q;
+    });
+    callbacks.forEach(r => hit(String(r.callback_at || '').slice(0, 10), r.user_id, 'callbacks'));
+  } catch (e) {
+    logger.warn('QUOTA_METRICS', `activitySeries failed: ${e.message}`);
+  }
+
+  const members = Object.values(byMember);
+  const totals = members.reduce((t, m) => {
+    for (const k of ['transfers', 'sales_submitted', 'sales_won', 'sales_cancelled', 'revenue', 'gross', 'callbacks']) t[k] += m[k];
+    return t;
+  }, blankMember(null));
+  const round = (o) => { o.revenue = Math.round(o.revenue * 100) / 100; o.gross = Math.round(o.gross * 100) / 100; return o; };
+  members.forEach(round); round(totals);
+  [...days.values()].forEach(round);
+
+  // A rate with a zero denominator is undefined, not 0 — "0% approval" for
+  // someone with no sales yet reads as failure rather than "nothing to judge".
+  const rate = (n, d) => (d > 0 ? Math.round((n / d) * 1000) / 10 : null);
+  totals.conversion = rate(totals.sales_won, totals.transfers);
+  totals.approval   = rate(totals.sales_won, totals.sales_submitted);
+  members.forEach(m => {
+    m.conversion = rate(m.sales_won, m.transfers);
+    m.approval   = rate(m.sales_won, m.sales_submitted);
+  });
+
+  return { days: [...days.values()], members, totals };
+}
+
+module.exports = { BUILT_IN, WON_STATUSES, getCatalog, resolveMetric, countWindow, attachAttainment, periodBounds, activitySeries };

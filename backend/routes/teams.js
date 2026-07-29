@@ -215,6 +215,34 @@ router.get('/:id/report', asyncHandler(async (req, res) => {
   // date filter — a monthly quota stays monthly while you look at a 7-day view,
   // otherwise the ring would read 12% every Monday morning and mean nothing.
   const closerSide = await isCloserSideScope(req.user.role, team.company_id);
+
+  // ── Credited output, by SIDE. teamMetrics credits `sales`/`gross` through
+  // closer_id and a fronter is never a sale's closer — so on a fronter company
+  // every one of those fields is structurally zero. Measured on production:
+  // all four live teams are fronter teams and every one reported 0 sales / $0
+  // gross while between them having produced 73 approved deals worth $9,259.
+  // That is why half the dashboard rendered empty.
+  //
+  // The raw fields stay exactly as they were (nothing downstream breaks); a
+  // `credited_*` pair is added that resolves to the side this company is
+  // actually judged on, and the UI reads those.
+  const creditSales = (r) => (closerSide ? r.sales : r.fronted);
+  const creditGross = (r) => (closerSide ? r.gross : r.fronted_gross);
+  report.members = (report.members || []).map(r => ({
+    ...r,
+    credited_sales: creditSales(r),
+    credited_gross: creditGross(r),
+    credited_avg_deal: creditSales(r) ? +(creditGross(r) / creditSales(r)).toFixed(2) : null,
+  }));
+  report.totals = {
+    ...report.totals,
+    credited_sales: creditSales(report.totals),
+    credited_gross: creditGross(report.totals),
+    credited_avg_deal: creditSales(report.totals) ? +(creditGross(report.totals) / creditSales(report.totals)).toFixed(2) : null,
+    credited_conversion: report.totals.transfers > 0
+      ? +(100 * creditSales(report.totals) / report.totals.transfers).toFixed(1) : null,
+  };
+
   const { data: quotaRows } = await supabaseAdmin.from('team_quotas').select('*')
     .eq('team_id', team.id).eq('status', 'active')
     .order('starts_at', { ascending: false });
@@ -244,6 +272,9 @@ router.get('/:id/report', asyncHandler(async (req, res) => {
   res.json({
     team: { id: team.id, name: team.name, team_type: team.team_type, lead_user_id: team.lead_user_id, lead_can_edit: team.lead_can_edit },
     ...report, goal, quotas: teamQuotas, member_quotas: memberQuotas,
+    // The UI must not re-derive this from team_type: a team may be typed
+    // 'general' while sitting in a closer company. Company type is the truth.
+    side: closerSide ? 'closer' : 'fronter',
     previous, momentum, range: { from, to }, member_count: ids.length,
   });
 }));

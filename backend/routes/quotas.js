@@ -26,7 +26,7 @@ const {
   isSuperAdmin, getUserRole, isCompanyMember, isCloserSideScope, resolveScopedCompanyId,
 } = require('../models/helpers');
 const { resolveTeamMemberIds } = require('../utils/teamMetrics');
-const { getCatalog, attachAttainment, periodBounds } = require('../utils/quotaMetrics');
+const { getCatalog, attachAttainment, periodBounds, activitySeries } = require('../utils/quotaMetrics');
 const cache = require('../utils/cache');
 
 const router = express.Router();
@@ -46,13 +46,32 @@ async function teamById(id) {
   return data;
 }
 // May this caller WRITE quotas on this team, and at which tier?
-//   manager → both tiers.  lead (+lead_can_edit) → member tier only.
+//
+//   superadmin            → both tiers, every company, always. It overrides the
+//                           per-team switches rather than reading them, so a
+//                           team can never lock the operator out of its own data.
+//   company_admin /
+//   operations_manager    → both tiers, own company.
+//   team lead             → MEMBER tier only, on their own team, and only while
+//                           the team grants it. lead_can_allocate (mig 217) is
+//                           the narrow switch; lead_can_edit (mig 212) implies
+//                           it, because a lead trusted to rename the team is
+//                           certainly trusted to hand out numbers.
+//   everyone else         → read only.
+//
+// A team-level TARGET is never a lead's to set. The whole shape of the feature
+// is that the number comes down from the company and the lead decides how to
+// spend it; letting the lead set their own target would erase that.
 async function writeScope(req, team) {
   if (!team) return { team: false, member: false };
+  if (await isSuperAdmin(req.user.id)) {
+    return { team: true, member: true, manager: true, superadmin: true };
+  }
   if (await canManageCompany(req, team.company_id)) return { team: true, member: true, manager: true };
   const isLead = team.lead_user_id === req.user.id;
-  if (isLead && team.lead_can_edit) return { team: false, member: true, lead: true };
-  return { team: false, member: false, isLead };
+  const mayAllocate = !!(team.lead_can_allocate || team.lead_can_edit);
+  if (isLead && mayAllocate) return { team: false, member: true, lead: true };
+  return { team: false, member: false, isLead, lead_locked: isLead && !mayAllocate };
 }
 // Read access: managers of the company, the team's lead, or any team member.
 async function canRead(req, team) {
@@ -221,6 +240,166 @@ router.get('/mine', asyncHandler(async (req, res) => {
   }
   res.json({ quotas: out });
 }));
+
+// ── the reporting surface (all three tiers, one endpoint) ───────────────────
+// GET /quotas/report?company_id=&from=&to=
+//
+// Visibility mirrors the Teams tab, which is already correct:
+//   superadmin          → any company (?company_id), plus the company list
+//   company_admin / ops → their own company, every team in it
+//   team lead           → their own team only
+//   member              → their own row only
+//
+// The viewer never chooses their scope — the server decides it from who they
+// are and reports which scope it applied, so the UI can label the page honestly
+// ("Your team" vs "EasyTech Communications") instead of guessing.
+router.get('/report', asyncHandler(async (req, res) => {
+  const superadmin = await isSuperAdmin(req.user.id);
+  const companyId = await resolveScopedCompanyId(req);
+  if (!companyId) return res.json({ scope: 'none', teams: [], members: [], series: [], totals: null });
+  if (!superadmin && !(await isCompanyMember(req.user.id, companyId))) {
+    return res.status(403).json({ error: 'Not a member of this company' });
+  }
+
+  // Default to the current month — the period a quota is usually written for,
+  // so the page opens already answering "how are we doing on this month's number".
+  const today = new Date().toISOString().slice(0, 10);
+  const from = req.query.from || `${today.slice(0, 7)}-01`;
+  const to   = req.query.to   || today;
+
+  const manager = superadmin || (await canManageCompany(req, companyId));
+  const closerSide = await isCloserSideScope(req.user.role, companyId);
+
+  const { data: allTeams } = await supabaseAdmin.from('teams')
+    .select('id, name, team_type, lead_user_id, color, lead_can_edit, lead_can_allocate')
+    .eq('company_id', companyId).eq('is_active', true).order('name');
+
+  // Narrow to what this viewer may see.
+  let teams = allTeams || [];
+  let scope = 'company';
+  let selfOnly = false;
+  if (!manager) {
+    const led = teams.filter(t => t.lead_user_id === req.user.id);
+    if (led.length) { teams = led; scope = 'team'; }
+    else {
+      const { data: mem } = await supabaseAdmin.from('team_members')
+        .select('team_id').eq('company_id', companyId).eq('user_id', req.user.id).maybeSingle();
+      teams = mem ? teams.filter(t => t.id === mem.team_id) : [];
+      scope = 'member'; selfOnly = true;
+    }
+  }
+  if (!teams.length) {
+    return res.json({ scope, side: closerSide ? 'closer' : 'fronter', company_id: companyId, teams: [], members: [], series: [], totals: null, unassigned_count: 0 });
+  }
+
+  const teamIds = teams.map(t => t.id);
+  const { data: quotaRows } = await supabaseAdmin.from('team_quotas').select('*')
+    .in('team_id', teamIds).neq('status', 'archived').order('starts_at', { ascending: false });
+
+  const memberIdsByTeam = {};
+  for (const t of teams) memberIdsByTeam[t.id] = await memberIds(t.id, companyId);
+  const quotas = await attachAttainment(quotaRows || [], { companyId, closerSide, memberIdsByTeam });
+
+  // One activity pass over every member in scope, reused by every chart.
+  const everyone = [...new Set(Object.values(memberIdsByTeam).flat())];
+  const activity = await activitySeries({
+    userIds: selfOnly ? [req.user.id] : everyone, companyId, closerSide, from, to,
+  });
+
+  const teamOfUser = {};
+  for (const [tid, ids] of Object.entries(memberIdsByTeam)) ids.forEach(id => { teamOfUser[id] = tid; });
+  const names = await nameMap([...everyone, ...teams.map(t => t.lead_user_id)]);
+  const teamName = Object.fromEntries(teams.map(t => [t.id, t.name]));
+
+  // Per-member rows: activity + whatever they were personally allocated.
+  const quotaByUser = {};
+  quotas.filter(q => q.user_id).forEach(q => { (quotaByUser[q.user_id] = quotaByUser[q.user_id] || []).push(q); });
+  const memberRows = activity.members
+    .filter(m => !selfOnly || m.user_id === req.user.id)
+    .map(m => ({
+      ...m,
+      name: names[m.user_id] || 'Unknown',
+      team_id: teamOfUser[m.user_id] || null,
+      team_name: teamName[teamOfUser[m.user_id]] || null,
+      is_lead: teams.some(t => t.lead_user_id === m.user_id),
+      quotas: (quotaByUser[m.user_id] || []).map(q => ({
+        id: q.id, metric: q.metric, metric_label: q.metric_label, metric_unit: q.metric_unit,
+        target_value: Number(q.target_value), actual: q.actual, pct: q.pct, remaining: q.remaining,
+        starts_at: q.starts_at, ends_at: q.ends_at, label: q.label,
+      })),
+    }));
+
+  // Per-team rows: the target, live attainment, and how much of it the lead has
+  // actually handed out. `unallocated` is the lead's to-do list, and negative
+  // means they promised more than the team owes — both are reported, neither
+  // is an error.
+  const teamRows = teams.map(t => {
+    const tq = quotas.filter(q => q.team_id === t.id && !q.user_id);
+    const mq = quotas.filter(q => q.team_id === t.id && q.user_id);
+    return {
+      id: t.id, name: t.name, team_type: t.team_type, color: t.color,
+      lead_user_id: t.lead_user_id, lead_name: t.lead_user_id ? (names[t.lead_user_id] || 'Unknown') : null,
+      lead_can_edit: t.lead_can_edit, lead_can_allocate: !!(t.lead_can_allocate || t.lead_can_edit),
+      member_count: (memberIdsByTeam[t.id] || []).length,
+      quotas: tq.map(q => {
+        const kids = mq.filter(k => k.metric === q.metric && k.starts_at === q.starts_at && k.ends_at === q.ends_at);
+        const allocated = kids.reduce((n, k) => n + (Number(k.target_value) || 0), 0);
+        const target = Number(q.target_value) || 0;
+        return {
+          id: q.id, metric: q.metric, metric_label: q.metric_label, metric_unit: q.metric_unit,
+          target_value: target, actual: q.actual, pct: q.pct, remaining: q.remaining,
+          starts_at: q.starts_at, ends_at: q.ends_at, label: q.label,
+          allocated, unallocated: target - allocated, allocated_to: kids.length,
+          // Pace: what fraction of the window has elapsed vs what fraction of the
+          // target is done. Ahead/behind is the question a manager actually asks,
+          // and "61% done" means nothing without "and 80% of the month is gone".
+          ...pace(q, target),
+        };
+      }),
+      members_with_quota: new Set(mq.map(k => k.user_id)).size,
+    };
+  });
+
+  // People in scope who hold no allocation at all — the gap the org chart hides.
+  const allocatedUsers = new Set(quotas.filter(q => q.user_id).map(q => q.user_id));
+  const unallocated = everyone.filter(id => !allocatedUsers.has(id));
+
+  res.json({
+    scope, side: closerSide ? 'closer' : 'fronter', company_id: companyId,
+    range: { from, to },
+    can_manage: manager, superadmin,
+    companies: superadmin ? ((await supabaseAdmin.from('companies').select('id, name, company_type').eq('is_active', true).order('name')).data || []) : undefined,
+    teams: teamRows,
+    members: memberRows.sort((a, b) => (b.transfers - a.transfers) || (b.sales_won - a.sales_won)),
+    series: activity.days,
+    totals: activity.totals,
+    unallocated_count: unallocated.length,
+    unallocated_names: unallocated.slice(0, 40).map(id => names[id] || 'Unknown'),
+  });
+}));
+
+// Elapsed-vs-earned for a dated window. `required_pace` is what the daily rate
+// has to be from here to still land on target — the number that turns a report
+// into a decision.
+function pace(q, target) {
+  const day = 86400000;
+  const start = Date.parse(`${q.starts_at}T00:00:00`);
+  const end   = Date.parse(`${q.ends_at}T23:59:59`);
+  const now   = Date.now();
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return { elapsed_pct: null, on_track: null, required_pace: null };
+  const totalDays = Math.max(1, Math.round((end - start) / day));
+  const elapsed = Math.min(1, Math.max(0, (now - start) / (end - start)));
+  const daysLeft = Math.max(0, Math.ceil((end - now) / day));
+  const remaining = Math.max(0, target - (Number(q.actual) || 0));
+  return {
+    elapsed_pct: Math.round(elapsed * 1000) / 10,
+    days_total: totalDays,
+    days_left: daysLeft,
+    // Ahead of the clock, or behind it. null before the window opens.
+    on_track: elapsed > 0 ? ((q.pct ?? 0) / 100) >= elapsed : null,
+    required_pace: daysLeft > 0 ? Math.round((remaining / daysLeft) * 10) / 10 : null,
+  };
+}
 
 // ── create ──────────────────────────────────────────────────────────────────
 router.post('/', asyncHandler(async (req, res) => {

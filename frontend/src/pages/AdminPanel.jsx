@@ -13,6 +13,7 @@ import AdminHeader from "../components/Admin/Layout/AdminHeader";
 import AdminSidebar from "../components/Admin/Layout/AdminSidebar";
 import { CompanyManagement } from "../components/Admin/CompanyManagement";
 import TeamManager from "../components/Admin/Teams/TeamManager";
+import QuotaReport from "../components/Teams/QuotaReport";
 import { useNotifications } from "../hooks/useNotifications";
 import AdminAnalyticsDashboard from "../components/Admin/AdminAnalyticsDashboard";
 import LeadIntelligence from "../components/Admin/LeadIntelligence";
@@ -231,6 +232,7 @@ const AdminPanel = () => {
       case 'dashboard':         return <AdminAnalyticsDashboard isReadOnly={isReadOnly} user={user} />;
       case 'calendar':          return <EventsCalendar canEdit={user?.role === 'superadmin'} />;
       case 'teams':             return <TeamManager />;
+      case 'quota_report':      return <QuotaReport />;
       case 'sale-search':       return <LeadIntelligence />;
       case 'customer-profiles': return <CustomerProfile />;
       case 'numbers':           return <NumbersIntelligence />;

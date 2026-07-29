@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BarChart3, Users, Shield, Building2, FileText, ChevronRight, Zap, Network, HelpCircle, MessageSquareText, UploadCloud, Megaphone, Radio, Trophy, MessagesSquare, CalendarDays, DollarSign, ArrowRight, PhoneCall, Database, Car, Tag, Settings2, Eye, Eraser, UserCircle, Download, ClipboardCheck, Palette, Paintbrush, Hash, Send, LayoutGrid, BookOpen, Lock, X } from 'lucide-react';
+import { BarChart3, Users, Shield, Building2, FileText, ChevronRight, Zap, Network, HelpCircle, MessageSquareText, UploadCloud, Megaphone, Radio, Trophy, MessagesSquare, CalendarDays, DollarSign, ArrowRight, PhoneCall, Database, Car, Tag, Settings2, Eye, Eraser, UserCircle, Download, ClipboardCheck, Palette, Paintbrush, Hash, Send, LayoutGrid, BookOpen, Lock, Target, X } from 'lucide-react';
 import { useBranding } from '../../../contexts/BrandingContext';
 
 // Items with an `href` navigate to another shell instead of switching an
@@ -34,6 +34,7 @@ const NAV_SECTIONS = [
     items: [
       { id: 'companies',     label: 'Companies',       icon: Building2  },
       { id: 'teams',         label: 'Teams',           icon: Users      },
+      { id: 'quota_report',  label: 'Quotas',          icon: Target     },
       { id: 'user-control',  label: 'User Control',    icon: UserCircle },
       { id: 'clients-plans', label: 'Clients & Plans', icon: Tag        },
       { id: 'forms',         label: 'Form Builder',    icon: FileText   },

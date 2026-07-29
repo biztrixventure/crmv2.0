@@ -12,6 +12,7 @@
 // zeros) so a report page can't 500.
 // ============================================================================
 const { supabaseAdmin } = require('../config/database');
+const { etDateToUtcStart, etDateToUtcEnd } = require('./etUtils');
 const logger = require('./logger');
 
 const WON = ['closed_won', 'sold'];   // matches spiffMetrics CLOSED_LIKE
@@ -75,8 +76,12 @@ async function teamMetrics({ ids, companyId, from, to }) {
         .select('id, created_by, assigned_closer_id, created_at')
         .eq('company_id', companyId).neq('vicidial_pending', true)
         .or(`created_by.in.(${chunk.join(',')}),assigned_closer_id.in.(${chunk.join(',')})`);
-      if (from) tq = tq.gte('created_at', from);
-      if (to)   tq = tq.lte('created_at', `${to}T23:59:59.999Z`);
+      // ET business-day bounds, not naive UTC. sale_date below is already an ET
+      // day, so bounding transfers on UTC midnight put the two on different
+      // calendars and made this report disagree with /stats/agent-performance
+      // and the quota counter by the rows created between 00:00–04:00Z.
+      if (from) tq = tq.gte('created_at', etDateToUtcStart(from));
+      if (to)   tq = tq.lte('created_at', etDateToUtcEnd(to));
       const { data: tfs } = await tq.limit(ROW_CAP);
       if ((tfs?.length || 0) === ROW_CAP) capped = true;
       for (const t of (tfs || [])) {
@@ -117,8 +122,8 @@ async function teamMetrics({ ids, companyId, from, to }) {
       let cq = supabaseAdmin.from('callbacks')
         .select('user_id, status, callback_at')
         .eq('company_id', companyId).eq('status', 'completed').in('user_id', chunk);
-      if (from) cq = cq.gte('callback_at', from);
-      if (to)   cq = cq.lte('callback_at', `${to}T23:59:59.999Z`);
+      if (from) cq = cq.gte('callback_at', etDateToUtcStart(from));
+      if (to)   cq = cq.lte('callback_at', etDateToUtcEnd(to));
       const { data: cbs } = await cq.limit(ROW_CAP);
       if ((cbs?.length || 0) === ROW_CAP) capped = true;
       for (const c of (cbs || [])) if (idSet.has(c.user_id)) { m(c.user_id).callbacks++; bump(c.callback_at, 'callbacks'); }

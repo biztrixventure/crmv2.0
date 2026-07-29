@@ -379,17 +379,28 @@ function RingGauge({ pct, projectedPct, label, sub, color = '#16a34a', size = 12
 }
 
 // ── masked member leaderboard ───────────────────────────────────────────────
-const LB_METRICS = [
-  { k: 'sales', label: 'Sales' }, { k: 'gross', label: 'Gross' },
-  { k: 'transfers', label: 'Transfers' }, { k: 'callbacks', label: 'Callbacks' },
-  { k: 'fronted', label: 'Fronted wins' },
-];
+// Ranked on the column this company is actually judged on. Ranking a fronter
+// team by `sales` (a closer_id metric) sorted every member by zero and drew an
+// empty bar for each of them — the leaderboard looked broken when it was simply
+// measuring the wrong side.
+const lbMetrics = (fronterSide) => ([
+  fronterSide
+    ? { k: 'credited_sales', label: 'Deals fronted' }
+    : { k: 'credited_sales', label: 'Sales closed' },
+  { k: 'credited_gross', label: fronterSide ? 'Gross fronted' : 'Gross' },
+  { k: 'transfers', label: 'Transfers' },
+  { k: 'callbacks', label: 'Callbacks' },
+  ...(fronterSide ? [] : [{ k: 'assigned', label: 'Leads received' }]),
+]);
 const MEDAL = ['#f59e0b', '#94a3b8', '#b45309'];
-function Leaderboard({ members, team, dn }) {
+function Leaderboard({ members, team, dn, fronterSide = true }) {
   const mounted = useMounted();
-  const [metric, setMetric] = useState('sales');
+  const LB_METRICS = lbMetrics(fronterSide);
+  // Default to the volume metric that is never structurally zero, so the panel
+  // always opens with data on it rather than an empty rank.
+  const [metric, setMetric] = useState('transfers');
   const [showAll, setShowAll] = useState(false);
-  const isMoney = metric === 'gross' || metric === 'fronted_gross';
+  const isMoney = metric === 'credited_gross' || metric === 'gross' || metric === 'fronted_gross';
   const sorted = [...(members || [])].sort((a, b) => (b[metric] || 0) - (a[metric] || 0));
   // medals computed over NON-lead members so the lead is never crowned.
   const medalOf = new Map(sorted.filter(m => m.user_id !== team?.lead_user_id).slice(0, 3).map((m, i) => [m.user_id, i]));
@@ -409,7 +420,7 @@ function Leaderboard({ members, team, dn }) {
           const medal = medalOf.get(m.user_id);
           const v = m[metric] || 0;
           return (
-            <div key={m.user_id} className="flex items-center gap-2" title={`${dn(m)} · ${m.transfers} transfers · ${m.sales} sales · ${money(m.gross)} · ${m.callbacks} callbacks`}>
+            <div key={m.user_id} className="flex items-center gap-2" title={`${dn(m)} · ${m.transfers} transfers · ${m.credited_sales ?? 0} ${fronterSide ? 'fronted' : 'closed'} · ${money(m.credited_gross ?? 0)} · ${m.callbacks} callbacks`}>
               <span className="w-5 flex-shrink-0 text-center">
                 {medal != null
                   ? <span className="inline-flex items-center justify-center w-5 h-5 rounded-full text-[11px] sm:text-[10px] font-black text-white" style={{ backgroundColor: MEDAL[medal] }}>{medal + 1}</span>
@@ -449,18 +460,36 @@ export default function TeamAnalytics({ report, team }) {
   const filled = useMemo(() => zeroFillTrend(report?.trend, report?.range?.from, report?.range?.to), [report]);
   const spark = (key) => filled.slice(-7).map(r => r[key] || 0);
 
-  const grossData = members.map((m, i) => ({ label: dn(m), value: m.gross, color: PALETTE[i % PALETTE.length] }));
+  // ── Which column is this company actually judged on?
+  // A fronter is never a sale's closer_id, so on a fronter company `sales` and
+  // `gross` are structurally zero and every chart fed by them renders blank.
+  // The server now sends credited_* resolved to the right side; these fall back
+  // to the raw fields so an older payload still renders.
+  const fronterSide = (report?.side || 'fronter') === 'fronter';
+  const cSales = totals.credited_sales ?? (fronterSide ? totals.fronted : totals.sales) ?? 0;
+  const cGross = totals.credited_gross ?? (fronterSide ? totals.fronted_gross : totals.gross) ?? 0;
+  const cAvg   = totals.credited_avg_deal ?? (cSales ? cGross / cSales : null);
+  const mGross = (m) => m.credited_gross ?? (fronterSide ? m.fronted_gross : m.gross) ?? 0;
+  // Labelled for what it is: a fronter earns credit for the deals their leads
+  // produced, which is not the same claim as "this person closed it".
+  const salesLabel = fronterSide ? 'Deals fronted' : 'Sales closed';
+  const grossLabel = fronterSide ? 'Gross fronted' : 'Gross';
+
+  const grossData = members.map((m, i) => ({ label: dn(m), value: mGross(m), color: PALETTE[i % PALETTE.length] }));
   const splitData = [
-    { label: 'Fronting (transfers)', value: totals.transfers || 0, color: '#2563eb' },
-    { label: 'Closing (sales)', value: totals.sales || 0, color: '#16a34a' },
+    { label: 'Leads sent (transfers)', value: totals.transfers || 0, color: '#2563eb' },
+    { label: salesLabel, value: cSales, color: '#16a34a' },
   ];
 
   const rangeDays = Math.max(1, filled.length);
-  const projMonthlySales = (totals.sales || 0) / rangeDays * 30;
-  const goalPct = goal.monthly_sales ? Math.round(100 * (totals.sales || 0) / goal.monthly_sales) : null;
+  const projMonthlySales = cSales / rangeDays * 30;
+  // Attainment comes from the SERVER, measured over the quota's own window.
+  // Recomputing it here from the report's date filter produced a different
+  // number on the same screen — a 7-day view made a monthly quota read ~12%.
+  const goalPct = goal.sales_pct ?? (goal.monthly_sales ? Math.round(100 * cSales / goal.monthly_sales) : null);
   const projPct = goal.monthly_sales ? Math.round(100 * projMonthlySales / goal.monthly_sales) : null;
   const participation = report?.member_count ? Math.round(100 * (totals.active_members || 0) / report.member_count) : null;
-  const cbPerSale = totals.sales ? +(((totals.callbacks || 0) / totals.sales).toFixed(1)) : null;
+  const cbPerSale = cSales ? +(((totals.callbacks || 0) / cSales).toFixed(1)) : null;
 
   return (
     <div className="space-y-4">
@@ -473,11 +502,16 @@ export default function TeamAnalytics({ report, team }) {
       {/* KPI grid */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
         <TrendTile label="Transfers" icon={<TrendingUp size={11} />} tone="info" value={totals.transfers ?? 0} deltaPct={mo.transfers_pct} spark={spark('transfers')} />
-        <TrendTile label="Sales" icon={<DollarSign size={11} />} tone="success" value={totals.sales ?? 0} deltaPct={mo.sales_pct} spark={spark('sales')} />
-        <TrendTile label="Gross" icon={<DollarSign size={11} />} tone="warn" value={money(totals.gross)} deltaPct={mo.gross_pct} spark={spark('gross')} />
+        <TrendTile label={salesLabel} icon={<DollarSign size={11} />} tone="success" value={cSales} deltaPct={mo.sales_pct} spark={spark(fronterSide ? 'fronted' : 'sales')} />
+        <TrendTile label={grossLabel} icon={<DollarSign size={11} />} tone="warn" value={money(cGross)} deltaPct={mo.gross_pct} spark={spark('gross')} />
         <TrendTile label="MRR" icon={<Repeat size={11} />} tone="primary" value={money(totals.mrr)} deltaPct={mo.mrr_pct} />
-        <TrendTile label="Avg deal" icon={<DollarSign size={11} />} tone="warn" value={totals.avg_deal != null ? money(totals.avg_deal) : '—'} />
-        <TrendTile label="Close rate" icon={<Target size={11} />} tone="success" value={totals.close_rate != null ? `${totals.close_rate}%` : '—'} />
+        <TrendTile label="Avg deal" icon={<DollarSign size={11} />} tone="warn" value={cAvg != null ? money(cAvg) : '—'} />
+        {/* Close rate is a CLOSER's metric (sales ÷ leads handed to them). On a
+            fronter company it is always 0 and says nothing; conversion — did the
+            leads I sent turn into deals — is that side's real question. */}
+        {fronterSide
+          ? <TrendTile label="Conversion" icon={<Target size={11} />} tone="success" value={totals.credited_conversion != null ? `${totals.credited_conversion}%` : '—'} />
+          : <TrendTile label="Close rate" icon={<Target size={11} />} tone="success" value={totals.close_rate != null ? `${totals.close_rate}%` : '—'} />}
       </div>
 
       {/* secondary strip */}
@@ -498,16 +532,16 @@ export default function TeamAnalytics({ report, team }) {
           <DonutChart data={grossData} centerLabel="TEAM GROSS" isMoney />
         </div>
         <div className="rounded-2xl p-4 flex flex-col items-center justify-center" style={box}>
-          <p className="text-[11px] font-bold uppercase tracking-widest mb-2 self-start" style={{ color: 'var(--color-text-tertiary)' }}>Goal pace (monthly sales)</p>
+          <p className="text-[11px] font-bold uppercase tracking-widest mb-2 self-start" style={{ color: 'var(--color-text-tertiary)' }}>Quota pace ({salesLabel.toLowerCase()})</p>
           {goal.monthly_sales
-            ? <RingGauge pct={goalPct} projectedPct={projPct} label="of goal" color={goalPct >= 100 ? '#16a34a' : (projPct != null && projPct >= 100 ? '#2563eb' : '#d97706')}
-                sub={`${totals.sales}/${goal.monthly_sales} sales · projected ~${Math.round(projMonthlySales)} (${projPct ?? '—'}%)`} />
-            : <p className="text-xs italic py-8" style={{ color: 'var(--color-text-tertiary)' }}>No monthly sales goal set for this team.</p>}
+            ? <RingGauge pct={goalPct} projectedPct={projPct} label="of quota" color={goalPct >= 100 ? '#16a34a' : (projPct != null && projPct >= 100 ? '#2563eb' : '#d97706')}
+                sub={`${cSales}/${goal.monthly_sales} · projected ~${Math.round(projMonthlySales)} (${projPct ?? '—'}%)`} />
+            : <p className="text-xs italic py-8 m-0" style={{ color: 'var(--color-text-tertiary)' }}>No approved-sales quota set for this team yet.</p>}
         </div>
       </div>
 
       {/* leaderboard */}
-      <Leaderboard members={members} team={team} dn={dn} />
+      <Leaderboard members={members} team={team} dn={dn} fronterSide={fronterSide} />
 
       {/* fronting/closing split + funnel stats */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
@@ -517,10 +551,11 @@ export default function TeamAnalytics({ report, team }) {
         </div>
         <div className="rounded-2xl p-4 grid grid-cols-2 gap-2" style={box}>
           {[
-            { l: 'Close rate', v: totals.close_rate != null ? `${totals.close_rate}%` : '—', c: '#16a34a' },
-            { l: 'Conversion', v: totals.conversion != null ? `${totals.conversion}%` : '—', c: '#2563eb' },
+            ...(fronterSide ? [] : [{ l: 'Close rate', v: totals.close_rate != null ? `${totals.close_rate}%` : '—', c: '#16a34a' }]),
+            { l: 'Conversion', v: totals.credited_conversion != null ? `${totals.credited_conversion}%` : (totals.conversion != null ? `${totals.conversion}%` : '—'), c: '#2563eb' },
             { l: 'Participation', v: participation != null ? `${participation}%` : '—', c: '#0891b2' },
-            { l: 'Avg MRR/deal', v: totals.sales ? money((totals.mrr || 0) / totals.sales) : '—', c: '#7c3aed' },
+            { l: 'Avg MRR/deal', v: cSales ? money((totals.mrr || 0) / cSales) : '—', c: '#7c3aed' },
+            ...(fronterSide ? [{ l: grossLabel, v: money(cGross), c: '#16a34a' }] : []),
           ].map((s, i) => (
             <div key={i} className="rounded-xl p-3 text-center" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
               <div className="text-[11px] sm:text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-tertiary)' }}>{s.l}</div>
@@ -540,7 +575,7 @@ export default function TeamAnalytics({ report, team }) {
           <TableScroll stickyFirst label="Team analytics" className="border-t" style={{ borderColor: 'var(--color-border)' }}>
             <table className="w-full text-xs">
               <thead><tr style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>
-                {['#', 'Member', 'Transfers', 'Assigned', 'Sales', 'Gross', 'MRR', 'Fronted', 'Callbacks', 'Avg deal'].map(h => <th key={h} className="text-left px-3 py-2 font-semibold whitespace-nowrap">{h}</th>)}
+                {['#', 'Member', 'Transfers', 'Assigned', salesLabel, grossLabel, 'MRR', 'Fronted', 'Callbacks', 'Avg deal'].map(h => <th key={h} className="text-left px-3 py-2 font-semibold whitespace-nowrap">{h}</th>)}
               </tr></thead>
               <tbody>
                 {members.map((m, i) => (
@@ -549,8 +584,8 @@ export default function TeamAnalytics({ report, team }) {
                     <td className="px-3 py-1.5 font-semibold whitespace-nowrap" style={{ color: 'var(--color-text)' }}>{dn(m)}</td>
                     <td className="px-3 py-1.5">{m.transfers}</td>
                     <td className="px-3 py-1.5">{m.assigned}</td>
-                    <td className="px-3 py-1.5">{m.sales}</td>
-                    <td className="px-3 py-1.5">{money(m.gross)}</td>
+                    <td className="px-3 py-1.5">{m.credited_sales ?? m.sales}</td>
+                    <td className="px-3 py-1.5">{money(m.credited_gross ?? m.gross)}</td>
                     <td className="px-3 py-1.5">{money(m.mrr)}</td>
                     <td className="px-3 py-1.5">{m.fronted}</td>
                     <td className="px-3 py-1.5">{m.callbacks}</td>
