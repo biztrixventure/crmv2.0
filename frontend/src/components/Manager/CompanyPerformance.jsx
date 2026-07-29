@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, lazy, Suspense } from 'react';
 import {
   BarChart3, Send, DollarSign, CheckCircle2, Percent, TrendingUp,
   AlertTriangle, XCircle, Clock, ArrowRight, User, RotateCcw,
@@ -7,6 +7,11 @@ import client from '../../api/client';
 import ThemedSelect from '../UI/Select';
 import ThemedDate from '../UI/ThemedDate';
 import { Panel, SectionHeader, KpiTile, TableScroll, Loading, EmptyState, Field } from '../UI/kit';
+
+// Chart.js is ~200KB. Lazy so it lands in its own chunk and only downloads when
+// a manager actually opens the Overview, instead of on every login.
+const DailyActivityChart = lazy(() => import('./PerfCharts').then(m => ({ default: m.DailyActivityChart })));
+const OutcomeChart       = lazy(() => import('./PerfCharts').then(m => ({ default: m.OutcomeChart })));
 
 // ============================================================================
 // CompanyPerformance — the ONE performance surface for a company admin.
@@ -41,52 +46,6 @@ function presetRange(key) {
   const d = new Date();
   d.setUTCDate(d.getUTCDate() - ((p?.days || 30) - 1));
   return { from: iso(d), to: today };
-}
-
-// ── Grouped daily bars. Pure CSS so it stays sharp at any width and needs no
-//    chart dependency. Bars are the shape of the business; the numbers above
-//    are the size of it. ───────────────────────────────────────────────────────
-function DailyChart({ daily }) {
-  const max  = Math.max(1, ...daily.map(d => d.transfers));
-  const maxS = Math.max(1, ...daily.map(d => d.sales));
-  // Sales are one to two orders of magnitude smaller than transfers; on one
-  // shared scale they flatten to nothing and tell you nothing. Each series is
-  // scaled to its own peak, which is why the legend says so out loud.
-  const step = Math.max(1, Math.ceil(daily.length / 12));
-  return (
-    <div>
-      <div className="flex items-end gap-[3px] h-36 sm:h-44">
-        {daily.map(d => (
-          <div key={d.date} className="flex-1 min-w-[6px] h-full flex items-end justify-center gap-[2px]"
-            title={`${d.date} — ${d.transfers} transfers · ${d.sales} sales · ${d.approved} approved`}>
-            <div className="w-1/2 rounded-t"
-              style={{ height: `${(d.transfers / max) * 100}%`, minHeight: d.transfers ? 2 : 0,
-                backgroundColor: 'var(--color-info-600)' }} />
-            <div className="w-1/2 rounded-t"
-              style={{ height: `${(d.sales / maxS) * 100}%`, minHeight: d.sales ? 2 : 0,
-                backgroundColor: 'var(--color-success-600)' }} />
-          </div>
-        ))}
-      </div>
-      <div className="flex gap-[3px] mt-1.5">
-        {daily.map((d, i) => (
-          <div key={d.date} className="flex-1 min-w-[6px] text-center text-[11px] leading-none whitespace-nowrap overflow-hidden"
-            style={{ color: 'var(--color-text-tertiary)' }}>
-            {i % step === 0 ? d.date.slice(5) : ''}
-          </div>
-        ))}
-      </div>
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-3 text-[11px] leading-none" style={{ color: 'var(--color-text-tertiary)' }}>
-        <span className="inline-flex items-center gap-1.5">
-          <i className="w-2.5 h-2.5 rounded-sm inline-block" style={{ backgroundColor: 'var(--color-info-600)' }} /> Transfers
-        </span>
-        <span className="inline-flex items-center gap-1.5">
-          <i className="w-2.5 h-2.5 rounded-sm inline-block" style={{ backgroundColor: 'var(--color-success-600)' }} /> Sales
-        </span>
-        <span>each series scaled to its own peak</span>
-      </div>
-    </div>
-  );
 }
 
 // ── Funnel. Horizontal so the labels stay readable at 390 and the drop between
@@ -235,7 +194,10 @@ export default function CompanyPerformance({ initialFrom, initialTo }) {
         : (
           <div className="space-y-5">
             {/* ── The numbers ── */}
-            <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
+            {/* The "Monthly" tile (sum of approved monthly_payment) is hidden
+                at the operator's request — the revenue figure is still returned
+                by the endpoint, so restoring it is uncommenting one tile. */}
+            <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
               <KpiTile icon={Send}         tone="info"    label="Transfers"  value={num(view.transfers)} />
               <KpiTile icon={DollarSign}   tone="primary" label="Sales"      value={num(view.sales)} />
               <KpiTile icon={CheckCircle2} tone="success" label="Approved"   value={num(view.approved)} />
@@ -243,8 +205,6 @@ export default function CompanyPerformance({ initialFrom, initialTo }) {
                 sub={`${num(view.sales)} of ${num(view.transfers)}`} />
               <KpiTile icon={TrendingUp}   tone="success" label="Approval"   value={pct(view.approval)}
                 sub={`${num(view.approved)} of ${num(view.sales)}`} />
-              <KpiTile icon={DollarSign}   tone="primary" label="Monthly"    value={money(view.revenue)}
-                sub="approved policies" />
             </div>
 
             {/* Secondary states — real, but not headline. */}
@@ -261,20 +221,33 @@ export default function CompanyPerformance({ initialFrom, initialTo }) {
               )}
             </div>
 
-            {/* ── The shape: trend beside funnel, stacked on a phone. ── */}
-            <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
-              <Panel tone="inset" radius="xl" pad="md" className="xl:col-span-2">
-                <p className="m-0 mb-3 text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-tertiary)' }}>
-                  Daily activity
-                </p>
-                {daily.length ? <DailyChart daily={daily} />
-                  : <EmptyState compact icon={BarChart3} title="No daily data" />}
-              </Panel>
+            {/* ── The shape: trend across the top, funnel + outcome below.
+                   Every one stacks to full width on a phone. ── */}
+            <Panel tone="inset" radius="xl" pad="md">
+              <p className="m-0 mb-3 text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-tertiary)' }}>
+                Daily activity
+              </p>
+              {daily.length ? (
+                <Suspense fallback={<Loading variant="block" height={224} />}>
+                  <DailyActivityChart daily={daily} />
+                </Suspense>
+              ) : <EmptyState compact icon={BarChart3} title="No daily data" />}
+            </Panel>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
               <Panel tone="inset" radius="xl" pad="md">
                 <p className="m-0 mb-3 text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-tertiary)' }}>
                   Funnel
                 </p>
                 <Funnel t={view.transfers} s={view.sales} a={view.approved} />
+              </Panel>
+              <Panel tone="inset" radius="xl" pad="md">
+                <p className="m-0 mb-3 text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-tertiary)' }}>
+                  Sale outcomes
+                </p>
+                <Suspense fallback={<Loading variant="block" height={224} />}>
+                  <OutcomeChart approved={view.approved} pending={view.pending} cancelled={view.cancelled} />
+                </Suspense>
               </Panel>
             </div>
 
