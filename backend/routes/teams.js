@@ -11,8 +11,9 @@ const express = require('express');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
-const { isSuperAdmin, getUserRole, isCompanyMember } = require('../models/helpers');
+const { isSuperAdmin, getUserRole, isCompanyMember, isCloserSideScope } = require('../models/helpers');
 const { resolveTeamMemberIds, teamMetrics } = require('../utils/teamMetrics');
+const { attachAttainment } = require('../utils/quotaMetrics');
 
 const router = express.Router();
 const MANAGER_LEVELS = ['company_admin', 'operations_manager'];
@@ -205,14 +206,45 @@ router.get('/:id/report', asyncHandler(async (req, res) => {
     };
   }
 
+  // ── Targets now come from team_quotas (mig 216), NOT teams.goal_monthly_*.
+  // Those two columns were one fixed metric pair on a monthly-only period with
+  // no per-member split; the quota table supersedes them. They still exist in
+  // the DB (a later cleanup drops them) but nothing reads them from here.
+  //
+  // Attainment is measured over each QUOTA's own window, never the report's
+  // date filter — a monthly quota stays monthly while you look at a 7-day view,
+  // otherwise the ring would read 12% every Monday morning and mean nothing.
+  const closerSide = await isCloserSideScope(req.user.role, team.company_id);
+  const { data: quotaRows } = await supabaseAdmin.from('team_quotas').select('*')
+    .eq('team_id', team.id).eq('status', 'active')
+    .order('starts_at', { ascending: false });
+  const quotas = await attachAttainment(quotaRows || [], {
+    companyId: team.company_id, closerSide, memberIdsByTeam: { [team.id]: ids },
+  });
+  const teamQuotas   = quotas.filter(q => !q.user_id);
+  const memberQuotas = quotas.filter(q => q.user_id);
+
+  // Legacy `goal` shape kept verbatim so TeamAnalytics' pace ring keeps working
+  // — it is just fed from the current-month quota now. Picks the newest live
+  // quota for each metric so a team with both a July and an August target
+  // reports the one running today.
+  const today = new Date().toISOString().slice(0, 10);
+  const live  = (key) => teamQuotas.find(q => q.metric === key && q.starts_at <= today && q.ends_at >= today)
+                      || teamQuotas.find(q => q.metric === key) || null;
+  const gSales = live('sales_won'), gTransfers = live('transfers');
   const goal = {
-    monthly_sales: team.goal_monthly_sales ?? null, monthly_transfers: team.goal_monthly_transfers ?? null,
-    sales_pct: team.goal_monthly_sales ? Math.round(100 * report.totals.sales / team.goal_monthly_sales) : null,
-    transfers_pct: team.goal_monthly_transfers ? Math.round(100 * report.totals.transfers / team.goal_monthly_transfers) : null,
+    monthly_sales:     gSales     ? Number(gSales.target_value)     : null,
+    monthly_transfers: gTransfers ? Number(gTransfers.target_value) : null,
+    // Percentages are the quota's own attainment, so this number and the Quotas
+    // panel below it are the same figure from the same counter.
+    sales_pct:     gSales     ? Math.round(gSales.pct ?? 0)     : null,
+    transfers_pct: gTransfers ? Math.round(gTransfers.pct ?? 0) : null,
   };
+
   res.json({
     team: { id: team.id, name: team.name, team_type: team.team_type, lead_user_id: team.lead_user_id, lead_can_edit: team.lead_can_edit },
-    ...report, goal, previous, momentum, range: { from, to }, member_count: ids.length,
+    ...report, goal, quotas: teamQuotas, member_quotas: memberQuotas,
+    previous, momentum, range: { from, to }, member_count: ids.length,
   });
 }));
 

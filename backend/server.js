@@ -17,6 +17,7 @@ const usersRoutes = require('./routes/users');
 const readonlyAdminsRoutes = require('./routes/readonlyAdmins');
 const activityBeaconRoutes = require('./routes/activityBeacon');
 const teamsRoutes = require('./routes/teams');
+const quotasRoutes = require('./routes/quotas');
 const companiesRoutes = require('./routes/companies');
 const rolesRoutes = require('./routes/roles');
 const formsRoutes = require('./routes/forms');
@@ -327,6 +328,8 @@ app.use('/api/users', authMiddleware, readonlyGuard, egressAudit, usersRoutes);
 // caller trying to PUT/POST/DELETE here anyway.
 app.use('/api/readonly-admins', authMiddleware, readonlyGuard, readonlyAdminsRoutes);
 app.use('/api/teams', authMiddleware, readonlyGuard, teamsRoutes);
+// Two-tier team quotas (mig 216) — admin sets the team target, the lead splits it.
+app.use('/api/quotas', authMiddleware, readonlyGuard, quotasRoutes);
 // RO self-reported navigation telemetry. readonlyGuard allowlists /activity/beacon
 // so the read-only account's POST passes; the handler ignores non-RO callers.
 app.use('/api/activity', authMiddleware, readonlyGuard, activityBeaconRoutes);
