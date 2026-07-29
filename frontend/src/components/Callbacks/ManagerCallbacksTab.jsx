@@ -43,20 +43,35 @@ const OverdueDot = ({ callback }) => {
   );
 };
 
-const SortIcon = ({ col, sort }) => {
+// Function DECLARATIONS, not const arrows, and deliberately so.
+//
+// This module sits in an import cycle through ../Compliance/shared. While it
+// landed in its own Vite chunk that cycle was harmless, but a change to the
+// import graph of a shell that pulls this in can merge the modules into one
+// chunk — and then the cycle re-enters this module's body before its consts
+// have initialised, so reading `SortTh` throws "Cannot access 'SortTh' before
+// initialization" and blanks the entire page. That is exactly how it failed:
+// green `vite build --minify false`, green terser build, blank screen at
+// runtime, because neither build evaluates the module.
+//
+// Function declarations hoist, so they exist before any body statement runs and
+// cannot sit in the temporal dead zone however the bundler groups modules.
+function SortIcon({ col, sort }) {
   if (sort.col !== col) return <ChevronsUpDown size={10} className="opacity-30 ml-0.5 inline-block" />;
   return sort.dir === 'asc'
     ? <ChevronUp size={10} className="ml-0.5 inline-block" style={{ color: 'var(--color-primary-600)' }} />
     : <ChevronDown size={10} className="ml-0.5 inline-block" style={{ color: 'var(--color-primary-600)' }} />;
-};
+}
 
-const SortTh = ({ col, sort, onSort, children }) => (
-  <th onClick={() => onSort(col)}
-    className="px-4 py-2.5 text-left text-xs font-bold uppercase tracking-wide cursor-pointer select-none whitespace-nowrap transition-colors hover:text-primary-600"
-    style={{ color: sort.col === col ? 'var(--color-primary-600)' : 'var(--color-text-secondary)' }}>
-    {children}<SortIcon col={col} sort={sort} />
-  </th>
-);
+function SortTh({ col, sort, onSort, children }) {
+  return (
+    <th onClick={() => onSort(col)}
+      className="px-4 py-2.5 text-left text-xs font-bold uppercase tracking-wide cursor-pointer select-none whitespace-nowrap transition-colors hover:text-primary-600"
+      style={{ color: sort.col === col ? 'var(--color-primary-600)' : 'var(--color-text-secondary)' }}>
+      {children}<SortIcon col={col} sort={sort} />
+    </th>
+  );
+}
 
 const AgentStatsModal = ({ userId, userName, companyId, onClose }) => {
   const [stats, setStats] = useState(null);

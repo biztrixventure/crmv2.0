@@ -355,7 +355,6 @@ const ManagerShell = ({ workspaceMode = false }) => {
     return out;
   }, [TABS]);
 
-  const activeGroup = navGroups.find(g => g.items.some(t => t.key === activeTab)) || navGroups[0];
 
   const tabKeys = useMemo(() => new Set(TABS.map(t => t.key)), [TABS]);
 
@@ -368,6 +367,13 @@ const ManagerShell = ({ workspaceMode = false }) => {
   // back a tab instead of falling through and dismissing the installed app.
   const [activeTab, setActiveTab] = useHistoryTab(mgrTabKey, 'overview');
   const [activeNav, setActiveNav] = useHistoryTab(mgrNavKey, 'dashboard', { param: 'nav' });
+
+  // Which task group owns the current tab. MUST stay below the activeTab
+  // declaration — it was above it, which is a temporal-dead-zone read on every
+  // render, and it blanked the whole shell. Neither `vite build --minify false`
+  // nor the terser build catches that: esbuild does no TDZ analysis and the
+  // error only exists at runtime.
+  const activeGroup = navGroups.find(g => g.items.some(t => t.key === activeTab)) || navGroups[0];
   const [exportOpen, setExportOpen] = useState(false);
   const [dupOpen, setDupOpen] = useState(false);
 
