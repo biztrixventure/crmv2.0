@@ -390,11 +390,30 @@ router.get('/team-trends', asyncHandler(async (req, res) => {
   const userId = req.user.id, companyId = req.user.company_id, role = req.user.role;
   const days = Math.min(Math.max(parseInt(req.query.days, 10) || 14, 7), 60);
   const ZERO = '00000000-0000-0000-0000-000000000000';
+  // Window, resolved ONCE and shared by the totals and the chart.
+  //
+  // These used to disagree. The totals counted from `now - days*24h`, a rolling
+  // instant, while the chart drew buckets for `days` CALENDAR dates ending
+  // today — so rows in the part-day at the start of the window were counted in
+  // the headline but had no bar to land in. Measured on EasyTech: headline 351,
+  // bars summing 302. Same panel, same request, two different answers.
+  //
+  // Both now use whole days in the company's configured KPI timezone, from the
+  // start of (today - days) to the end of today, which is also what the
+  // "Last 7 days" preset in DateRangePicker asks the list endpoints for — so
+  // this panel finally agrees with the funnel, the agent table and compliance.
+  const tzName   = await getConfig(companyId, 'kpi.today_timezone', 'America/New_York');
+  const todayStr = todayEt(tzName);
+  const dayList  = [];
+  for (let i = days; i >= 0; i--) {
+    dayList.push(new Date(Date.parse(`${todayStr}T00:00:00Z`) - i * 86400000).toISOString().slice(0, 10));
+  }
+  const windowStart = etDateToUtcStart(dayList[0]);
+  const windowEnd   = etDateToUtcEnd(dayList[dayList.length - 1]);
   // Same company-type rule as /dashboard, minus 'closer': a lone closer has no
   // team here and must not be widened to their whole company's numbers.
   const isCloserSide = role !== 'closer' && await isCloserSideScope(role, companyId);
   const isGlobal = ['superadmin', 'readonly_admin'].includes(role);
-  const sinceUtc = new Date(Date.now() - days * 86400000).toISOString();
 
   let coUserIds = [];
   if (isCloserSide && companyId) {
@@ -428,16 +447,17 @@ router.get('/team-trends', asyncHandler(async (req, res) => {
     : (isCloserSide ? 'closer' : 'both');
 
   const [{ data: trs }, { data: sls }] = await Promise.all([
-    scopeT(supabaseAdmin.from('transfers').select('created_at, created_by').gte('created_at', sinceUtc)).limit(8000),
-    scopeS(supabaseAdmin.from('sales').select('sale_date, created_at, status, closer_id, fronter_id').gte('created_at', sinceUtc)).limit(8000),
+    scopeT(supabaseAdmin.from('transfers').select('created_at, created_by')
+      .gte('created_at', windowStart).lte('created_at', windowEnd)).limit(20000),
+    scopeS(supabaseAdmin.from('sales').select('sale_date, created_at, status, closer_id, fronter_id')
+      .gte('created_at', windowStart).lte('created_at', windowEnd)).limit(20000),
   ]);
 
   const dayOf = (d) => String(d || '').slice(0, 10);
+  // One bucket per date in the SAME window the rows were fetched from, so the
+  // bars always add up to the headline.
   const buckets = {};
-  for (let i = days - 1; i >= 0; i--) {
-    const d = new Date(Date.now() - i * 86400000).toISOString().slice(0, 10);
-    buckets[d] = { date: d, transfers: 0, sales: 0, approved: 0 };
-  }
+  dayList.forEach(d => { buckets[d] = { date: d, transfers: 0, sales: 0, approved: 0 }; });
   (trs || []).forEach(t => { const d = dayOf(t.created_at); if (buckets[d]) buckets[d].transfers++; });
   (sls || []).forEach(s => {
     const d = dayOf(s.sale_date || s.created_at);
