@@ -555,4 +555,157 @@ router.get('/user-performance/:userId', asyncHandler(async (req, res) => {
   });
 }));
 
+// ============================================================================
+// GET /stats/agent-performance?date_from=YYYY-MM-DD&date_to=YYYY-MM-DD
+//
+// Per-AGENT scoreboard for the manager Overview: who is doing what, and how
+// well. One row per person with the funnel they own end to end —
+// transfers → sales → approved — plus the two rates that actually drive a
+// coaching conversation:
+//
+//   conversion = sales / transfers     "this fronter sent 120 leads, 9 sold"
+//   approval   = approved / sales      "…and 7 of those 9 survived compliance"
+//
+// Side-aware, the same company-type rule the rest of the shell uses. A FRONTER
+// company ranks its fronters by leads generated (transfers.created_by) and
+// credits them the sales their leads produced (sales.fronter_id). A CLOSER
+// company ranks its closers by sales closed (sales.closer_id) against the
+// leads handed to them (transfers.assigned_closer_id).
+//
+// Why this exists rather than reusing the client-side leaderboard: that one
+// pages 1,000 rows to the browser and counts them in JS, so on a company with
+// 6,614 transfers it silently ranked a sample. It also called
+// completed/transfers "conversion", which is a TRANSFER STATUS, not a sale —
+// a fronter whose leads never sold could still show 90%.
+// ============================================================================
+router.get('/agent-performance', asyncHandler(async (req, res) => {
+  const userId = req.user.id, companyId = req.user.company_id, role = req.user.role;
+  const isGlobal = ['superadmin', 'readonly_admin'].includes(role);
+  if (!companyId && !isGlobal) return res.json({ side: null, agents: [], totals: null });
+
+  const closerSide = await isCloserSideScope(role, companyId);
+  const side = closerSide ? 'closer' : 'fronter';
+
+  // Date window. Transfers key on created_at (when the lead was sent), sales on
+  // sale_date (the business day the deal happened) — the same columns the two
+  // list endpoints filter on, so these numbers reconcile with the tabs.
+  const { date_from, date_to } = req.query;
+  const tFrom = date_from ? etDateToUtcStart(date_from) : null;
+  const tTo   = date_to   ? etDateToUtcEnd(date_to)     : null;
+
+  // Company members — the roster we rank, and (closer side) the id set the
+  // transfer/sale scoping keys on.
+  let memberIds = [];
+  if (companyId) {
+    const { data: mem } = await supabaseAdmin
+      .from('user_company_roles').select('user_id').eq('company_id', companyId).eq('is_active', true);
+    memberIds = [...new Set((mem || []).map(m => m.user_id))];
+  }
+  if (closerSide && !memberIds.length) return res.json({ side, agents: [], totals: null });
+
+  // Paginated narrow fetch. PostgREST caps a page at 1000, so counting rows in
+  // one .select() silently truncates — which is the bug this endpoint replaces.
+  const PAGE = 1000, MAX_PAGES = 40;          // 40k rows is far past any real window
+  const fetchAll = async (build) => {
+    const out = [];
+    for (let p = 0; p < MAX_PAGES; p++) {
+      const { data, error } = await build().range(p * PAGE, p * PAGE + PAGE - 1);
+      if (error) { logger.warn('AGENT_PERF', error.message); break; }
+      out.push(...(data || []));
+      if (!data || data.length < PAGE) break;
+    }
+    return out;
+  };
+
+  const transfers = await fetchAll(() => {
+    let q = supabaseAdmin.from('transfers')
+      .select('created_by, assigned_closer_id')
+      .neq('vicidial_pending', true);
+    if (closerSide) q = q.in('assigned_closer_id', memberIds);
+    else if (companyId) q = q.eq('company_id', companyId);
+    if (tFrom) q = q.gte('created_at', tFrom);
+    if (tTo)   q = q.lte('created_at', tTo);
+    return q;
+  });
+
+  const sales = await fetchAll(() => {
+    let q = supabaseAdmin.from('sales')
+      .select('fronter_id, closer_id, status, monthly_payment');
+    if (closerSide) q = q.in('closer_id', memberIds);
+    else if (companyId) q = q.eq('company_id', companyId);
+    if (date_from) q = q.gte('sale_date', date_from);
+    if (date_to)   q = q.lte('sale_date', date_to);
+    return q;
+  });
+
+  // ── Group ────────────────────────────────────────────────────────────────
+  const row = () => ({ transfers: 0, sales: 0, approved: 0, cancelled: 0, pending: 0, revenue: 0 });
+  const byAgent = {};
+  const bucket = (id) => { if (!id) return null; byAgent[id] = byAgent[id] || row(); return byAgent[id]; };
+
+  const tKey = closerSide ? 'assigned_closer_id' : 'created_by';
+  transfers.forEach(t => { const b = bucket(t[tKey]); if (b) b.transfers++; });
+
+  const sKey = closerSide ? 'closer_id' : 'fronter_id';
+  sales.forEach(s => {
+    const b = bucket(s[sKey]);
+    if (!b) return;
+    b.sales++;
+    if (s.status === 'closed_won')     { b.approved++; b.revenue += Number(s.monthly_payment || 0); }
+    else if (s.status === 'cancelled')   b.cancelled++;
+    else if (s.status === 'pending_review') b.pending++;
+  });
+
+  const ids = Object.keys(byAgent);
+  const names = {};
+  if (ids.length) {
+    const { data: profs } = await supabaseAdmin
+      .from('user_profiles').select('user_id, first_name, last_name').in('user_id', ids);
+    (profs || []).forEach(p => { names[p.user_id] = [p.first_name, p.last_name].filter(Boolean).join(' ') || null; });
+  }
+
+  // A rate with a zero denominator is undefined, not 0 — the UI shows "—".
+  // Reporting 0% for a fronter who sent no leads today reads as failure.
+  const rate = (num, den) => (den > 0 ? Math.round((num / den) * 1000) / 10 : null);
+
+  const agents = ids.map(id => {
+    const a = byAgent[id];
+    return {
+      user_id: id,
+      name: names[id] || 'Unknown',
+      transfers: a.transfers,
+      sales: a.sales,
+      approved: a.approved,
+      cancelled: a.cancelled,
+      pending: a.pending,
+      revenue: Math.round(a.revenue * 100) / 100,
+      conversion: rate(a.sales, a.transfers),
+      approval:   rate(a.approved, a.sales),
+    };
+  })
+  // Rank by the metric this side is judged on, then by approved as the
+  // tie-break so volume alone can't outrank someone who actually closes.
+  .sort((x, y) => (side === 'fronter'
+    ? (y.transfers - x.transfers) || (y.approved - x.approved)
+    : (y.sales - x.sales) || (y.approved - x.approved)));
+
+  const sum = (k) => agents.reduce((n, a) => n + a[k], 0);
+  const totT = sum('transfers'), totS = sum('sales'), totA = sum('approved');
+
+  res.json({
+    side,
+    agent_metric: side === 'fronter' ? 'transfers' : 'sales',
+    range: { from: date_from || null, to: date_to || null },
+    agents,
+    totals: {
+      agents: agents.length,
+      transfers: totT, sales: totS, approved: totA,
+      cancelled: sum('cancelled'), pending: sum('pending'),
+      revenue: Math.round(sum('revenue') * 100) / 100,
+      conversion: rate(totS, totT),
+      approval:   rate(totA, totS),
+    },
+  });
+}));
+
 module.exports = router;
