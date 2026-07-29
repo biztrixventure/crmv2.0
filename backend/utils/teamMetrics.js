@@ -160,4 +160,18 @@ async function teamMetrics({ ids, companyId, from, to }) {
   }
 }
 
-module.exports = { resolveTeamMemberIds, teamMetrics, WON };
+// ── member-id cache invalidation ────────────────────────────────────────────
+// routes/quotas.js caches each team's resolved member ids for 60s (a quota read
+// resolves them several times per request). Nothing invalidated it on a
+// membership change, so a lead who added someone to their team and immediately
+// allocated to them was told "That user is not a member of this team" for up to
+// a minute — a wrong answer, phrased as if they had made a mistake.
+//
+// The whole namespace is cleared rather than one team's key: with nested teams
+// a member added to a CHILD changes every ancestor's resolved id set too, and
+// membership changes are rare enough that precision buys nothing.
+const cache = require('./cache');
+const MEMBER_CACHE_NS = 'quota_members';
+function invalidateTeamMemberCache() { cache.invalidateNamespace(MEMBER_CACHE_NS); }
+
+module.exports = { resolveTeamMemberIds, teamMetrics, WON, MEMBER_CACHE_NS, invalidateTeamMemberCache };

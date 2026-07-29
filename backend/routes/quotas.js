@@ -41,13 +41,16 @@ async function sideIsCloser(req, companyId) {
   if (type === 'closer' || type === 'fronter') return type === 'closer';
   return isCloserSideScope(req.user.role, companyId);
 }
-const { resolveTeamMemberIds } = require('../utils/teamMetrics');
+const { resolveTeamMemberIds, MEMBER_CACHE_NS } = require('../utils/teamMetrics');
 const { getCatalog, attachAttainment, periodBounds, activitySeries } = require('../utils/quotaMetrics');
 const cache = require('../utils/cache');
 
 const router = express.Router();
 const MANAGER_LEVELS = ['company_admin', 'operations_manager'];
-const NS = 'quota_members';           // teamId → member ids, 60s
+// teamId → member ids, 60s. The namespace is shared with teamMetrics, which owns
+// the invalidator routes/teams.js calls on every membership change — a local
+// string literal here would let the two drift and silently stop invalidating.
+const NS = MEMBER_CACHE_NS;
 const TTL = 60_000;
 
 // ── access helpers ──────────────────────────────────────────────────────────

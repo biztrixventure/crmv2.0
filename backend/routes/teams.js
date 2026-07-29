@@ -12,7 +12,7 @@ const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
 const { isSuperAdmin, getUserRole, isCompanyMember, isCloserSideScope, getCompanyType } = require('../models/helpers');
-const { resolveTeamMemberIds, teamMetrics } = require('../utils/teamMetrics');
+const { resolveTeamMemberIds, teamMetrics, invalidateTeamMemberCache } = require('../utils/teamMetrics');
 const { attachAttainment } = require('../utils/quotaMetrics');
 
 const router = express.Router();
@@ -141,6 +141,7 @@ router.delete('/:id', asyncHandler(async (req, res) => {
   if (!(await canManageCompany(req, team.company_id))) return res.status(403).json({ error: 'Not allowed' });
   await supabaseAdmin.from('teams').update({ is_active: false, updated_at: new Date().toISOString() }).eq('id', team.id);
   await supabaseAdmin.from('team_members').delete().eq('team_id', team.id);   // free the members (one-per-company)
+  invalidateTeamMemberCache();
   res.json({ ok: true });
 }));
 
@@ -148,10 +149,15 @@ router.delete('/:id', asyncHandler(async (req, res) => {
 // Upsert on (user_id, company_id) MOVES a user to this team (one team per user
 // per company). Returns the row.
 async function addMember(teamId, companyId, userId, roleInTeam, addedBy) {
-  return supabaseAdmin.from('team_members').upsert(
+  const res = await supabaseAdmin.from('team_members').upsert(
     { team_id: teamId, user_id: userId, company_id: companyId, role_in_team: roleInTeam || 'member', added_by: addedBy },
     { onConflict: 'user_id,company_id' },
   );
+  // The quota routes cache resolved member ids for 60s. Without this, allocating
+  // to someone you just added failed with "not a member of this team" until the
+  // TTL lapsed.
+  invalidateTeamMemberCache();
+  return res;
 }
 router.post('/:id/members', asyncHandler(async (req, res) => {
   const team = await teamById(req.params.id);
@@ -171,6 +177,7 @@ router.delete('/:id/members/:userId', asyncHandler(async (req, res) => {
   const isLead = team.lead_user_id === req.user.id;
   if (!(await canManageCompany(req, team.company_id)) && !isLead) return res.status(403).json({ error: 'Not allowed' });
   await supabaseAdmin.from('team_members').delete().eq('team_id', team.id).eq('user_id', req.params.userId);
+  invalidateTeamMemberCache();   // removal must be as immediate as addition
   res.json({ ok: true });
 }));
 
