@@ -127,6 +127,25 @@ export function useStandalone() {
   return standalone;
 }
 
+/**
+ * True when this SPA session has an entry behind the current one.
+ *
+ * `history.length` is useless for this: it counts the whole tab's history
+ * including whatever was open before the app, and in an installed PWA it is
+ * pinned at 1 until something pushes. react-router keeps its own position in
+ * window.history.state.idx, which is exactly "how many entries deep into THIS
+ * router session are we" — so idx > 0 means going back stays inside the app,
+ * and idx === 0 means back would leave it. A back button that could exit the
+ * app is worse than no back button, so this is the conservative signal.
+ */
+export function useCanGoBack() {
+  const location = useLocation();          // re-render on every navigation
+  const idx = typeof window !== 'undefined' ? window.history.state?.idx : 0;
+  // location is read so the hook re-evaluates; the value itself is unused.
+  void location;
+  return typeof idx === 'number' && idx > 0;
+}
+
 export function isStandalone() {
   try {
     // navigator.standalone is iOS-only and is the ONLY signal iOS sets for a

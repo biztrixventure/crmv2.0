@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Moon, Sun, LogOut, ChevronDown, LayoutGrid } from 'lucide-react';
 import NotificationBell from '../UI/NotificationBell';
+import BackButton from '../UI/BackButton';
 import ChatLauncher from '../Chat/ChatLauncher';
 import MailLauncher from '../Mail/MailLauncher';
 import ProfileModal from '../Profile/ProfileModal';
@@ -100,6 +101,10 @@ const AppHeader = ({
         >
           {/* Left: Logo & Title */}
           <div className="flex items-center gap-3 min-w-0">
+            {/* Installed-PWA only, and only when there is somewhere to go back
+                to. A home-screen app has no browser chrome, so without this the
+                only back is an invisible edge swipe. Null everywhere else. */}
+            <BackButton />
             {companyLogoUrl ? (
               <CompanyLogoImg brandInitial={brandInitial} src={companyLogoUrl} />
             ) : logo ?? (

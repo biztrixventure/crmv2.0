@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Moon, Sun, LogOut, Settings, ChevronDown, PanelLeftClose, PanelLeft, Menu } from 'lucide-react';
 import { useAuth } from '../../../contexts/AuthContext';
 import NotificationBell from '../../UI/NotificationBell';
+import BackButton from '../../UI/BackButton';
 import ChatLauncher from '../../Chat/ChatLauncher';
 import MailLauncher from '../../Mail/MailLauncher';
 import ProfileModal from '../../Profile/ProfileModal';
@@ -36,6 +37,10 @@ const AdminHeader = ({
       >
         {/* Left: Sidebar toggle + Logo + Title */}
         <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+          {/* Installed-PWA only, and only when there is somewhere to go back to.
+              A home-screen app has no browser chrome, so without this the only
+              back is an invisible edge swipe. Renders null everywhere else. */}
+          <BackButton />
           {/* Below `lg` the sidebar is an off-canvas drawer, so the control is a
               hamburger that OPENS it. At `lg`+ it's the collapse toggle for the
               persistent column — two different jobs, so two buttons rather than
