@@ -469,6 +469,9 @@ export default function TeamAnalytics({ report, team }) {
   const cSales = totals.credited_sales ?? (fronterSide ? totals.fronted : totals.sales) ?? 0;
   const cGross = totals.credited_gross ?? (fronterSide ? totals.fronted_gross : totals.gross) ?? 0;
   const cAvg   = totals.credited_avg_deal ?? (cSales ? cGross / cSales : null);
+  // MRR had the same closer_id-only problem as sales and gross: a fronter
+  // company's recurring revenue read $0 while its leads were producing it.
+  const cMrr   = totals.credited_mrr ?? (fronterSide ? totals.fronted_mrr : totals.mrr) ?? 0;
   const mGross = (m) => m.credited_gross ?? (fronterSide ? m.fronted_gross : m.gross) ?? 0;
   // Labelled for what it is: a fronter earns credit for the deals their leads
   // produced, which is not the same claim as "this person closed it".
@@ -504,7 +507,7 @@ export default function TeamAnalytics({ report, team }) {
         <TrendTile label="Transfers" icon={<TrendingUp size={11} />} tone="info" value={totals.transfers ?? 0} deltaPct={mo.transfers_pct} spark={spark('transfers')} />
         <TrendTile label={salesLabel} icon={<DollarSign size={11} />} tone="success" value={cSales} deltaPct={mo.sales_pct} spark={spark(fronterSide ? 'fronted' : 'sales')} />
         <TrendTile label={grossLabel} icon={<DollarSign size={11} />} tone="warn" value={money(cGross)} deltaPct={mo.gross_pct} spark={spark('gross')} />
-        <TrendTile label="MRR" icon={<Repeat size={11} />} tone="primary" value={money(totals.mrr)} deltaPct={mo.mrr_pct} />
+        <TrendTile label="MRR" icon={<Repeat size={11} />} tone="primary" value={money(cMrr)} deltaPct={mo.mrr_pct} />
         <TrendTile label="Avg deal" icon={<DollarSign size={11} />} tone="warn" value={cAvg != null ? money(cAvg) : '—'} />
         {/* Close rate is a CLOSER's metric (sales ÷ leads handed to them). On a
             fronter company it is always 0 and says nothing; conversion — did the
@@ -554,7 +557,7 @@ export default function TeamAnalytics({ report, team }) {
             ...(fronterSide ? [] : [{ l: 'Close rate', v: totals.close_rate != null ? `${totals.close_rate}%` : '—', c: '#16a34a' }]),
             { l: 'Conversion', v: totals.credited_conversion != null ? `${totals.credited_conversion}%` : (totals.conversion != null ? `${totals.conversion}%` : '—'), c: '#2563eb' },
             { l: 'Participation', v: participation != null ? `${participation}%` : '—', c: '#0891b2' },
-            { l: 'Avg MRR/deal', v: cSales ? money((totals.mrr || 0) / cSales) : '—', c: '#7c3aed' },
+            { l: 'Avg MRR/deal', v: cSales ? money(cMrr / cSales) : '—', c: '#7c3aed' },
             ...(fronterSide ? [{ l: grossLabel, v: money(cGross), c: '#16a34a' }] : []),
           ].map((s, i) => (
             <div key={i} className="rounded-xl p-3 text-center" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>

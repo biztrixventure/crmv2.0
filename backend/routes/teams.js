@@ -242,16 +242,19 @@ router.get('/:id/report', asyncHandler(async (req, res) => {
   // actually judged on, and the UI reads those.
   const creditSales = (r) => (closerSide ? r.sales : r.fronted);
   const creditGross = (r) => (closerSide ? r.gross : r.fronted_gross);
+  const creditMrr   = (r) => (closerSide ? r.mrr : (r.fronted_mrr || 0));
   report.members = (report.members || []).map(r => ({
     ...r,
     credited_sales: creditSales(r),
     credited_gross: creditGross(r),
+    credited_mrr: creditMrr(r),
     credited_avg_deal: creditSales(r) ? +(creditGross(r) / creditSales(r)).toFixed(2) : null,
   }));
   report.totals = {
     ...report.totals,
     credited_sales: creditSales(report.totals),
     credited_gross: creditGross(report.totals),
+    credited_mrr: creditMrr(report.totals),
     credited_avg_deal: creditSales(report.totals) ? +(creditGross(report.totals) / creditSales(report.totals)).toFixed(2) : null,
     credited_conversion: report.totals.transfers > 0
       ? +(100 * creditSales(report.totals) / report.totals.transfers).toFixed(1) : null,

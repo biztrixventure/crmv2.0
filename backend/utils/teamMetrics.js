@@ -63,7 +63,7 @@ async function teamMetrics({ ids, companyId, from, to }) {
   try {
     const M = {};
     // every member carries the full stat shape so the client never sees undefined
-    const m = (id) => (M[id] = M[id] || { user_id: id, transfers: 0, assigned: 0, sales: 0, gross: 0, callbacks: 0, fronted: 0, fronted_gross: 0, mrr: 0 });
+    const m = (id) => (M[id] = M[id] || { user_id: id, transfers: 0, assigned: 0, sales: 0, gross: 0, callbacks: 0, fronted: 0, fronted_gross: 0, fronted_mrr: 0, mrr: 0 });
     const trend = {};   // date → { transfers, sales, gross, callbacks, assigned }
     const day = (date) => { const k = dayKey(date); if (!k) return null; return (trend[k] = trend[k] || { date: k, transfers: 0, sales: 0, gross: 0, callbacks: 0, assigned: 0, fronted: 0 }); };
     const bump = (date, key) => { const d = day(date); if (d) d[key]++; };
@@ -112,7 +112,14 @@ async function teamMetrics({ ids, companyId, from, to }) {
           bump(s.sale_date, 'sales'); bumpVal(s.sale_date, 'gross', dp);
         }
         // Fronted-win credit (rows already fetched — the OR filter includes fronter_id).
-        if (idSet.has(s.fronter_id)) { const r2 = m(s.fronter_id); r2.fronted++; r2.fronted_gross += dp; bump(s.sale_date, 'fronted'); }
+        // Fronted MRR too, not just gross: without it a fronter company's MRR
+        // tile read $0 forever, because monthly_payment was only ever credited
+        // through closer_id and a fronter is never a sale's closer.
+        if (idSet.has(s.fronter_id)) {
+          const r2 = m(s.fronter_id);
+          r2.fronted++; r2.fronted_gross += dp; r2.fronted_mrr += Number(s.monthly_payment) || 0;
+          bump(s.sale_date, 'fronted');
+        }
       }
     }
 
@@ -144,7 +151,8 @@ async function teamMetrics({ ids, companyId, from, to }) {
       transfers: t.transfers + r.transfers, assigned: t.assigned + r.assigned,
       sales: t.sales + r.sales, gross: t.gross + r.gross, callbacks: t.callbacks + r.callbacks,
       mrr: t.mrr + r.mrr, fronted: t.fronted + r.fronted, fronted_gross: t.fronted_gross + r.fronted_gross,
-    }), { transfers: 0, assigned: 0, sales: 0, gross: 0, callbacks: 0, mrr: 0, fronted: 0, fronted_gross: 0 });
+      fronted_mrr: t.fronted_mrr + r.fronted_mrr,
+    }), { transfers: 0, assigned: 0, sales: 0, gross: 0, callbacks: 0, mrr: 0, fronted: 0, fronted_gross: 0, fronted_mrr: 0 });
 
     // Derived, all divide-by-zero guarded.
     totals.conversion = totals.transfers > 0 && totals.sales <= totals.transfers
