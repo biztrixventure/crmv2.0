@@ -111,7 +111,15 @@ async function processDueCallbacks() {
             body:               message,
             tag:                `callback-${cb.id}`,
             requireInteraction: true,
-            data:               { type: 'callback_due', callback_id: cb.id },
+            // The same fields the in-app row above carries. The push used to
+            // send only the id, so a client had the record but nothing to
+            // label it with until it had fetched.
+            data:               {
+              type:           'callback_due',
+              callback_id:    cb.id,
+              customer_name:  cb.customer_name,
+              customer_phone: cb.customer_phone,
+            },
           });
         }
 

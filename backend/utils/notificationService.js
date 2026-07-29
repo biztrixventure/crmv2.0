@@ -48,6 +48,14 @@ async function shouldNotify(companyId, key, fallback = true) {
 // Push for a single, individually-targeted recipient. A helper so the seven
 // direct sends in this file cannot drift apart from one another, and so each
 // one names the event type it belongs to instead of implying it.
+// A note on the `data` these push payloads carry. They used to send a bare
+// { sale_id } while the in-app row for the SAME event carried the reference no
+// and the customer name — so the push path threw away exactly the context that
+// makes a notification worth reading, and handed the client an id with nothing
+// to label it. Every push below now carries what its bell twin carries.
+//
+// This adds no event type and bypasses nothing: every one of these still goes
+// through resolveDelivery, so the 17-event matrix still decides what sends.
 async function pushForEvent(type, userId, companyId, payload) {
   if (!userId) return;
   try {
@@ -199,9 +207,9 @@ async function onTransferCreated({ transfer, fronterName, closerUserId }) {
     });
     await pushForEvent('transfer_assigned', closerUserId, companyId, {
       title: 'New transfer assigned',
-      body:  `${fronterName} → ${customerName}`,
+      body:  `${fronterName} transferred ${customerName} directly to you.`,
       tag:   'transfer_assigned',
-      data:  { transfer_id: transfer.id },
+      data:  { transfer_id: transfer.id, customer_name: customerName },
     });
   }
 
@@ -230,9 +238,9 @@ async function onTransferRejected({ transfer, closerName, reason }) {
     });
     await pushForEvent('transfer_rejected', fronterUserId, companyId, {
       title: 'Transfer rejected',
-      body:  `${closerName} rejected ${customerName}${reason ? ': ' + reason : ''}`,
+      body:  `${closerName} rejected ${customerName}${reason ? ' — ' + reason : ''}`,
       tag:   'transfer_rejected',
-      data:  { transfer_id: transfer.id },
+      data:  { transfer_id: transfer.id, customer_name: customerName, reason },
     });
   }
 
@@ -320,9 +328,9 @@ async function onSaleApproved({ sale, reviewerName }) {
     });
     await pushForEvent('sale_approved', closerId, companyId, {
       title: 'Sale approved!',
-      body:  `${customerName} — Ref: ${refNo} approved by compliance`,
+      body:  `${customerName} (Ref: ${refNo}) was approved by ${reviewerName}.`,
       tag:   'sale_approved',
-      data:  { sale_id: sale.id },
+      data:  { sale_id: sale.id, reference_no: refNo, customer_name: customerName, ...dispoData },
     });
   }
 
@@ -370,9 +378,9 @@ async function onSaleApproved({ sale, reviewerName }) {
     // resolved against the company the recipient actually holds a role in.
     await pushForEvent('sale_approved', fronterUserId, fronterCompanyId || companyId, {
       title: 'Lead confirmed!',
-      body:  `${customerName} — Ref: ${refNo} closed won${dispoSuffix}`,
+      body:  `${customerName} (Ref: ${refNo}) closed won${dispoSuffix}`,
       tag:   'sale_approved',
-      data:  { sale_id: sale.id },
+      data:  { sale_id: sale.id, reference_no: refNo, customer_name: customerName, ...dispoData },
     });
   }
 
@@ -404,9 +412,9 @@ async function onSaleReturned({ sale, reviewerName, note }) {
     });
     await pushForEvent('sale_needs_revision', closerId, companyId, {
       title: 'Sale needs revision',
-      body:  `${customerName}: ${note}`,
+      body:  `${customerName} (Ref: ${refNo}) — ${note}`,
       tag:   'sale_needs_revision',
-      data:  { sale_id: sale.id },
+      data:  { sale_id: sale.id, reference_no: refNo, customer_name: customerName, note },
     });
   }
 
@@ -479,9 +487,9 @@ async function onDispositionSubmitted({ action, transfer, config, submitterId, s
     });
     await pushForEvent('disposition_submitted', fronterUserId, fronterCompanyId, {
       title: `Lead outcome: ${config.name}`,
-      body:  `${customerName} — ${config.name}`,
+      body:  `${submitterName} marked your lead ${customerName} as "${config.name}".${noteStr}`,
       tag:   'disposition_submitted',
-      data:  { transfer_id: transfer.id },
+      data:  { transfer_id: transfer.id, action_id: action.id, customer_name: customerName, disposition: config.name },
     });
   }
 
@@ -561,7 +569,12 @@ async function onFronterDuplicateEvent({ kind, companyId, fronterId, phone, prio
     const day = new Date().toISOString().slice(0, 10);
     const rows = targets.map(uid => ({
       user_id: uid, company_id: companyId, type: COPY.type, title: COPY.title, message: COPY.message,
-      data: { phone, kind, fronter_id: fronterId },
+      // priorTransferId is what this alert is actually ABOUT, so carrying it as
+      // transfer_id is what lets a manager tap through to the record instead of
+      // landing on an unfiltered transfers tab. `refresh` has no prior id, and
+      // resolves to the tab by type alone — which is the right outcome for an
+      // alert about a phone rather than about one row.
+      data: { phone, kind, fronter_id: fronterId, ...(priorTransferId ? { transfer_id: priorTransferId } : {}) },
       is_read: false,
       dedup_key: `dup_${kind}_${fronterId}_${day}_${uid}`,   // one per manager/fronter/day/kind
     }));
@@ -595,9 +608,9 @@ async function onResellCreated({ newSale, oldSale, closerName, intent }) {
     });
     await pushForEvent('resell_created', oldSale.fronter_id, companyId, {
       title: 'Customer resold',
-      body:  `${customer} → ${closerName} (${intent})`,
+      body:  `${closerName} resold ${customer}${policy ? ` (#${policy})` : ''}. Intent: ${intent}.`,
       tag:   'resell_created',
-      data:  { sale_id: newSale.id },
+      data:  { sale_id: newSale.id, original_sale_id: oldSale.id, customer_name: customer, reference_no: policy || null, intent },
     });
   }
 
