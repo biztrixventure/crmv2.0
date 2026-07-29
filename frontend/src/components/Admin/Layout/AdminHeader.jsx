@@ -7,6 +7,7 @@ import ChatLauncher from '../../Chat/ChatLauncher';
 import MailLauncher from '../../Mail/MailLauncher';
 import ProfileModal from '../../Profile/ProfileModal';
 import { useFocus } from '../../../contexts/FocusContext';
+import { useStandalone } from '../../../hooks/useHistoryTab';
 import { useBranding } from '../../../contexts/BrandingContext';
 
 const AdminHeader = ({
@@ -19,6 +20,13 @@ const AdminHeader = ({
   const { siteName, logoUrl } = useBranding();
   const [profileOpen, setProfileOpen] = useState(false);
   const { openFromNotification } = useFocus();
+  // The back control costs 44px in the left cluster, which at 390 is exactly
+  // enough to push the brand chip underneath the mail icon. In an installed app
+  // the brand chip is the thing worth dropping: the user launched this from a
+  // home-screen icon, so they already know which app they are in — whereas the
+  // back control is the only way out of a page. Standalone + below `sm` only;
+  // a browser tab is unchanged.
+  const standalone = useStandalone();
 
   const initials = user?.first_name
     ? `${user.first_name[0]}${user.last_name?.[0] || ''}`.toUpperCase()
@@ -73,7 +81,7 @@ const AdminHeader = ({
               context beneath it — previously this was inverted, which buried the
               CRM's name in 11px tertiary text under a generic heading. Both
               come from Branding & SEO, so renaming the CRM renames this. */}
-          <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 overflow-hidden"
+          <div className={`w-9 h-9 rounded-xl ${standalone ? 'hidden sm:flex' : 'flex'} items-center justify-center flex-shrink-0 overflow-hidden`}
             style={{ background: 'var(--gradient-sidebar)', boxShadow: 'var(--shadow-sm)' }}>
             {logoUrl
               ? <img src={logoUrl} alt="" className="w-full h-full object-cover" />

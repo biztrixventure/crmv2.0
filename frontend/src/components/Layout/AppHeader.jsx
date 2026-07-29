@@ -7,6 +7,7 @@ import MailLauncher from '../Mail/MailLauncher';
 import ProfileModal from '../Profile/ProfileModal';
 import { usePushNotifications } from '../../hooks/usePushNotifications';
 import { useFocus } from '../../contexts/FocusContext';
+import { useStandalone } from '../../hooks/useHistoryTab';
 import { useBranding } from '../../contexts/BrandingContext';
 
 const CompanyLogoImg = ({ src, brandInitial = 'C' }) => {
@@ -66,6 +67,9 @@ const AppHeader = ({
 }) => {
   const [profileOpen, setProfileOpen] = useState(false);
   const { openFromNotification } = useFocus();
+  // Drives the standalone-only logo collapse below — see the comment at its
+  // usage for why the logo is what gives way to the back control at 390.
+  const standalone = useStandalone();
   // Shells pass their own section title ("Compliance", "Manager"); when one
   // doesn't, fall back to the configured brand rather than a hardcoded name.
   const { siteName } = useBranding();
@@ -105,14 +109,23 @@ const AppHeader = ({
                 to. A home-screen app has no browser chrome, so without this the
                 only back is an invisible edge swipe. Null everywhere else. */}
             <BackButton />
-            {companyLogoUrl ? (
-              <CompanyLogoImg brandInitial={brandInitial} src={companyLogoUrl} />
-            ) : logo ?? (
-              <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-                style={{ background: 'var(--gradient-sidebar)', boxShadow: '0 2px 8px rgba(168,136,92,0.35)' }}>
-                <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '1.1rem', color: 'white' }}>{brandInitial}</span>
-              </div>
-            )}
+            {/* The back control costs 44px, which at 390 is enough to push the
+                logo into the right-hand control cluster — and a company logo
+                here can be up to 120px wide. In an installed app the logo is
+                the thing worth dropping below `sm`: the user launched this from
+                a home-screen icon and already knows which app they are in,
+                whereas the back control is their only way out of a page. A
+                browser tab renders exactly as before. */}
+            <div className={standalone ? 'hidden sm:contents' : 'contents'}>
+              {companyLogoUrl ? (
+                <CompanyLogoImg brandInitial={brandInitial} src={companyLogoUrl} />
+              ) : logo ?? (
+                <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+                  style={{ background: 'var(--gradient-sidebar)', boxShadow: '0 2px 8px rgba(168,136,92,0.35)' }}>
+                  <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '1.1rem', color: 'white' }}>{brandInitial}</span>
+                </div>
+              )}
+            </div>
             <div className="hidden sm:flex flex-col min-w-0 leading-none">
               <span className="font-bold truncate"
                 style={{ fontFamily: 'var(--font-display)', fontSize: '1.05rem', letterSpacing: '-0.01em', color: 'var(--color-primary-700)', lineHeight: 1.15 }}>
