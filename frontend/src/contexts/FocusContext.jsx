@@ -52,6 +52,11 @@ export function FocusProvider({ children }) {
       kind: target.kind,
       id:   target.id != null ? String(target.id) : null,
       ref:  target.ref || null,
+      // Optional intent from the sender. 'drawer' = put the record itself on
+      // screen, not just its tab. Only honoured when there IS an id to open,
+      // so a kind-only target (the duplicate-phone alerts, which genuinely
+      // point at no record) can never ask a shell to open a drawer on nothing.
+      open: (target.open === 'drawer' && target.id != null) ? 'drawer' : null,
       ts:   Date.now(),
     });
     setHot(true);
@@ -95,8 +100,8 @@ export function FocusProvider({ children }) {
     const sp = new URLSearchParams(window.location.search);
     const kind = sp.get('fkind');
     if (kind) {
-      requestFocus({ kind, id: sp.get('fid') });
-      sp.delete('fkind'); sp.delete('fid');
+      requestFocus({ kind, id: sp.get('fid'), open: sp.get('fopen') });
+      sp.delete('fkind'); sp.delete('fid'); sp.delete('fopen');
       const q = sp.toString();
       window.history.replaceState({}, '', window.location.pathname + (q ? `?${q}` : '') + window.location.hash);
     }

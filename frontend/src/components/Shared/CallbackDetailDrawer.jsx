@@ -1,6 +1,6 @@
-import { X, Phone, Clock, Globe, StickyNote, Bell, User, AlertCircle } from 'lucide-react';
-import { createPortal } from 'react-dom';
+import { Phone, Clock, Globe, StickyNote, Bell, User, AlertCircle } from 'lucide-react';
 import { Badge } from '../UI';
+import DrawerShell from './DrawerShell';
 import { useDrawerLayout } from '../../hooks/useDrawerLayout';
 
 const STATUS_BADGE = {
@@ -116,40 +116,26 @@ export default function CallbackDetailDrawer({ callback, onClose }) {
     ) : null
   );
 
-  return createPortal(
-    <>
-      <div className="fixed inset-0 z-[60] bsx-scrim" style={{ backgroundColor: 'rgba(0,0,0,0.45)' }} onClick={onClose} />
-      <div
-        className="fixed right-0 top-0 h-full w-full max-w-md z-[61] flex flex-col shadow-2xl animate-slide-in-right overflow-y-auto"
-        style={{ backgroundColor: 'var(--color-surface)', borderLeft: '1px solid var(--color-border)' }}
-      >
-        {/* Header */}
-        <div className="flex items-start justify-between p-5 flex-shrink-0"
-          style={{ borderBottom: '1px solid var(--color-border)' }}>
-          <div>
-            <div className="flex items-center gap-2 mb-1">
-              <div className="w-8 h-8 rounded-lg flex items-center justify-center"
-                style={{ background: 'var(--gradient-sidebar)' }}>
-                <Phone size={15} className="text-white" />
-              </div>
-              <h2 className="text-lg font-bold text-text">
-                {callback.customer_name || 'Callback'}
-              </h2>
-            </div>
-            {callback.customer_phone && (
-              <p className="text-sm font-mono ml-10" style={{ color: 'var(--color-text-secondary)' }}>
-                {callback.customer_phone}
-              </p>
-            )}
-          </div>
-          <button onClick={onClose}
-            className="p-2 rounded-lg transition-colors hover:bg-bg-secondary flex-shrink-0">
-            <X size={18} style={{ color: 'var(--color-text-secondary)' }} />
-          </button>
+  return (
+    <DrawerShell
+      // Light header preserved (headerTone="plain") — this drawer has never
+      // used the brand gradient, only its icon puck does.
+      headerTone="plain"
+      icon={(
+        <div className="w-8 h-8 rounded-lg flex items-center justify-center"
+          style={{ background: 'var(--gradient-sidebar)' }}>
+          <Phone size={15} className="text-white" />
         </div>
-
-        {/* Status + priority bar */}
-        <div className="flex items-center gap-2 px-5 py-3 flex-wrap"
+      )}
+      title={callback.customer_name || 'Callback'}
+      subtitle={callback.customer_phone || null}
+      onClose={onClose}
+      recordKey={callback?.id}
+      width={448}
+      labelledById="callback-drawer-title"
+      chrome={(
+        /* Status + priority bar */
+        <div className="flex items-center gap-2 px-3 sm:px-5 py-3 flex-wrap flex-shrink-0"
           style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
           <Badge variant={STATUS_BADGE[callback.status] || 'secondary'}>
             {(callback.status || 'unknown').replace(/_/g, ' ')}
@@ -167,7 +153,8 @@ export default function CallbackDetailDrawer({ callback, onClose }) {
             </Badge>
           )}
         </div>
-
+      )}
+    >
         {/* Body — section order + visibility + field placement from
             useDrawerLayout (SuperAdmin configures per role). Field-id driven so
             a dragged field appears in its new section. */}
@@ -177,8 +164,6 @@ export default function CallbackDetailDrawer({ callback, onClose }) {
           if (rows.length === 0) return null;
           return <Section key={s.id} icon={SECTION_ICON[s.id]} title={s.label || s.id}>{rows}</Section>;
         })}
-      </div>
-    </>,
-    document.body,
+    </DrawerShell>
   );
 }

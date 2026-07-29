@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef, Fragment } from 'react';
-import { useFocus } from '../../contexts/FocusContext';
+import { useFocus, useNavFocus } from '../../contexts/FocusContext';
+import { useSaleDeepLink } from '../../hooks/useSaleDeepLink';
 import { Shield, RotateCcw, Trash2, Eye, ChevronDown, ChevronUp, CheckCircle } from 'lucide-react';
 import { Badge } from '../UI';
 import SaleStatusBadge from '../UI/SaleStatusBadge';
@@ -91,6 +92,13 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
   const { focus, hot } = useFocus();
   const focusRef = useRef(null);
   const focusedId = hot && focus?.kind === 'sale' ? focus.id : null;
+  // When the notification asked for the record itself, open its drawer.
+  // useNavFocus, not the `hot`-gated id above: the ring is allowed to have
+  // faded during a slow cold start and the record is still the one the user
+  // tapped — but the 5-minute nav window must still apply, or this tab
+  // remounting an hour later would pop a drawer nobody asked for.
+  const navFocus = useNavFocus();
+  useSaleDeepLink(navFocus, setDetailSale);
   useEffect(() => {
     if (focusedId && focusRef.current) {
       try { focusRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch { /* noop */ }

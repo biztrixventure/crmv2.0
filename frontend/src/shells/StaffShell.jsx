@@ -67,6 +67,7 @@ import { useTransfers } from "../hooks/useTransfers";
 import { useSales } from "../hooks/useSales";
 import { useNotifications } from "../hooks/useNotifications";
 import { useFocus, useNavFocus } from "../contexts/FocusContext";
+import { useSaleDeepLink } from "../hooks/useSaleDeepLink";
 import { useFormFields } from "../hooks/useFormFields";
 import { dispositionTabs, isPostDateDispo, prettyDispo } from "../utils/dispositions";
 import { useSaleConfigs } from "../hooks/useSaleConfigs";
@@ -343,6 +344,11 @@ const StaffShell = () => {
       else setActiveTab('transfers');
     }
   }, [navFocus]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // …and when the notification asked for the record itself (not just its tab),
+  // open the drawer on it. The tab switch above still runs, so closing the
+  // drawer leaves the user on the right list rather than nowhere.
+  useSaleDeepLink(navFocus, setDetailSale);
 
   // Scroll the focused card into view + a helper the cards use to ring 5s.
   const focusCardRef = useRef(null);

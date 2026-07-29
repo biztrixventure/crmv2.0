@@ -72,9 +72,13 @@ function deepLinkFor(data) {
   if (fp.url) return fp.url;
   // A kind with no id is still worth carrying: it opens the right tab. The
   // duplicate-phone alerts genuinely have no record id to point at.
-  return fp.fid
-    ? `/dashboard?fkind=${encodeURIComponent(fp.fkind)}&fid=${encodeURIComponent(fp.fid)}`
-    : `/dashboard?fkind=${encodeURIComponent(fp.fkind)}`;
+  let out = `/dashboard?fkind=${encodeURIComponent(fp.fkind)}`;
+  if (fp.fid) out += `&fid=${encodeURIComponent(fp.fid)}`;
+  // Mirror of the `open` intent in notificationNav.js — same 'drawer'-only
+  // whitelist, and only when there is an id to open, so a cold start from a
+  // killed app lands on exactly the screen the warm postMessage path reaches.
+  if ((data || {}).open === 'drawer' && fp.fid) out += '&fopen=drawer';
+  return out;
 }
 
 // Pages acknowledge a NOTIFICATION_CLICK they actually handled, keyed by nonce.

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
-import { createPortal } from 'react-dom';
-import { X, Clock, AlertTriangle, Send, DollarSign, CheckCircle, XCircle, MessageSquare, Activity, UserPlus } from 'lucide-react';
+import { Clock, AlertTriangle, Send, DollarSign, CheckCircle, XCircle, MessageSquare, Activity, UserPlus } from 'lucide-react';
 import { Badge } from '../UI';
+import DrawerShell from './DrawerShell';
 import FetchDispoButton from '../Vicidial/FetchDispoButton';
 import ReassignOwnership from './ReassignOwnership';
 import { useAuth } from '../../contexts/AuthContext';
@@ -76,11 +76,8 @@ const ROLE_LABELS = {
 };
 
 export default function TransferDetailDrawer({ transfer, onClose }) {
-  const [closing, setClosing] = useState(false);
-  const requestClose = () => { if (closing) return; setClosing(true); setTimeout(() => onClose?.(), 220); };
-  // The drawer stays mounted, so reset the close-animation flag whenever a new
-  // record opens — otherwise it'd stay slid-out and the next record wouldn't show.
-  useEffect(() => { setClosing(false); }, [transfer]);
+  // Scrim, panel, header, Esc and the close animation all belong to
+  // DrawerShell now — this component is the transfer's CONTENT.
   const { hasPermission } = useAuth();
   const { sections } = useDrawerLayout('transfer');
   const [dispoHistory, setDispoHistory] = useState([]);
@@ -280,43 +277,15 @@ export default function TransferDetailDrawer({ transfer, onClose }) {
     </div>
   );
 
-  return createPortal(
+  // The fixed strips between header and body, grouped so DrawerShell can place
+  // (and, in a compact view, omit) them as one unit.
+  const chrome = (
     <>
-      {/* Backdrop */}
-      <div className={`fixed inset-0 z-[60] ${closing ? 'bsx-scrim-out' : 'bsx-scrim'}`} style={{ backgroundColor: 'rgba(0,0,0,0.45)' }}
-        onClick={requestClose} />
-
-      {/* Drawer */}
-      <div className={`fixed right-0 top-0 h-full z-[61] flex flex-col shadow-2xl ${closing ? 'animate-slide-out-right' : 'animate-slide-in-right'}`}
-        style={{
-          width: 'min(480px, 100vw)',
-          backgroundColor: 'var(--color-surface)',
-          borderLeft: '1px solid var(--color-border)',
-        }}>
-
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 flex-shrink-0"
-          style={{ background: 'var(--gradient-sidebar)' }}>
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-xl bg-white/20">
-              <Send size={18} className="text-white" />
-            </div>
-            <div>
-              <h2 className="text-base font-bold text-white truncate max-w-[260px]">{name}</h2>
-              <p className="text-xs text-white/70">Transfer Details</p>
-            </div>
-          </div>
-          <button onClick={requestClose}
-            className="p-2 rounded-xl bg-white/20 hover:bg-white/30 transition-colors">
-            <X size={18} className="text-white" />
-          </button>
-        </div>
-
         {/* Status bar */}
         {(() => {
           const ds = getTransferDisplayStatus(transfer);
           return (
-            <div className="flex items-center gap-3 px-5 py-3 flex-shrink-0"
+            <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-5 py-2.5 sm:py-3 flex-shrink-0 flex-wrap"
               style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
               <Badge variant={ds.variant}>{ds.label.toUpperCase()}</Badge>
               <span className="text-xs text-text-tertiary ml-auto">
@@ -358,11 +327,24 @@ export default function TransferDetailDrawer({ transfer, onClose }) {
           </div>
         )}
 
-        {/* Scrollable body — section order + visibility + field placement come
-            from useDrawerLayout (SuperAdmin configures per role in Business
-            Rules → Drawer Layout). Rendering is field-id driven, so a field
-            dragged into another section appears there. */}
-        <div className="flex-1 overflow-y-auto px-5 py-4">
+    </>
+  );
+
+  return (
+    <DrawerShell
+      icon={<Send size={18} className="text-white" />}
+      title={name}
+      subtitle="Transfer Details"
+      onClose={onClose}
+      recordKey={transfer?.id}
+      width={480}
+      labelledById="transfer-drawer-title"
+      chrome={chrome}
+    >
+      {/* Body — section order + visibility + field placement come from
+          useDrawerLayout (SuperAdmin configures per role in Business Rules →
+          Drawer Layout). Rendering is field-id driven, so a field dragged into
+          another section appears there. Scroll container is DrawerShell's. */}
           {sections.filter(s => s.visible).map(s => {
             // Special (non-field) blocks render by section id.
             if (s.id === 'dispositions') return dispositionsBlock();
@@ -385,9 +367,6 @@ export default function TransferDetailDrawer({ transfer, onClose }) {
 
           {/* Superadmin-only ownership reassignment (renders nothing for others). */}
           <ReassignOwnership kind="transfer" record={transfer} onDone={onClose} />
-        </div>
-      </div>
-    </>,
-    document.body,
+    </DrawerShell>
   );
 }

@@ -1,6 +1,6 @@
-import { X, Mail, Shield, Calendar, User, Activity } from 'lucide-react';
-import { createPortal } from 'react-dom';
+import { Mail, Shield, Calendar, User, Activity } from 'lucide-react';
 import { Badge } from '../UI';
+import DrawerShell from './DrawerShell';
 import UserPermissionsPanel from '../Admin/UserManagement/UserPermissionsPanel';
 
 const LEVEL_COLOR = {
@@ -43,36 +43,28 @@ export default function UserDetailDrawer({ user, onClose }) {
     ? new Date(user.created_at).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })
     : null;
 
-  return createPortal(
-    <>
-      <div className="fixed inset-0 z-[60] bsx-scrim" style={{ backgroundColor: 'rgba(0,0,0,0.45)' }} onClick={onClose} />
-      <div
-        className="fixed right-0 top-0 h-full w-full max-w-lg z-[61] flex flex-col shadow-2xl animate-slide-in-right overflow-y-auto"
-        style={{ backgroundColor: 'var(--color-surface)', borderLeft: '1px solid var(--color-border)' }}
-      >
-        {/* Header */}
-        <div className="flex items-start justify-between p-5 flex-shrink-0"
-          style={{ borderBottom: '1px solid var(--color-border)' }}>
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-base flex-shrink-0"
-              style={{ background: 'var(--gradient-sidebar)' }}>
-              {initials}
-            </div>
-            <div>
-              <h2 className="text-lg font-bold text-text">{fullName || user.email}</h2>
-              {fullName && (
-                <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>{user.email}</p>
-              )}
-            </div>
-          </div>
-          <button onClick={onClose}
-            className="p-2 rounded-lg transition-colors hover:bg-bg-secondary flex-shrink-0">
-            <X size={18} style={{ color: 'var(--color-text-secondary)' }} />
-          </button>
+  return (
+    <DrawerShell
+      // headerTone="plain" keeps this drawer's surface-coloured header: it has
+      // never used the brand gradient, and adopting the shared shell must not
+      // restyle it. The avatar puck is passed as the icon so the header reads
+      // exactly as it did before.
+      headerTone="plain"
+      icon={(
+        <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full flex items-center justify-center text-white font-bold text-base flex-shrink-0"
+          style={{ background: 'var(--gradient-sidebar)' }}>
+          {initials}
         </div>
-
-        {/* Status / Role badges */}
-        <div className="flex items-center flex-wrap gap-2 px-5 py-3"
+      )}
+      title={fullName || user.email}
+      subtitle={fullName ? user.email : null}
+      onClose={onClose}
+      recordKey={user?.id}
+      width={512}
+      labelledById="user-drawer-title"
+      chrome={(
+        /* Status / Role badges */
+        <div className="flex items-center flex-wrap gap-2 px-3 sm:px-5 py-3 flex-shrink-0"
           style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
           <Badge variant={user.is_active ? 'success' : 'secondary'}>
             {user.is_active ? 'Active' : 'Inactive'}
@@ -90,7 +82,8 @@ export default function UserDetailDrawer({ user, onClose }) {
             </span>
           )}
         </div>
-
+      )}
+    >
         {/* Profile */}
         <Section icon={User} title="Profile">
           {fullName && <Row label="Full Name" value={fullName} />}
@@ -110,8 +103,6 @@ export default function UserDetailDrawer({ user, onClose }) {
         <Section icon={Shield} title="Permissions">
           <UserPermissionsPanel user={user} />
         </Section>
-      </div>
-    </>,
-    document.body,
+    </DrawerShell>
   );
 }

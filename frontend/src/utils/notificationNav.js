@@ -1,11 +1,16 @@
 /**
  * Resolve a notification (in-app row OR OS push `data`) to a focus target the
- * shells understand: { kind, id, ref }.
+ * shells understand: { kind, id, ref, open }.
  *
  *   kind  — 'transfer' | 'sale' | 'callback' | 'number' | 'chat' | 'email'
  *           | 'batch' | 'qa' | 'url'
  *   id    — the entity id to open + highlight
  *   ref   — a human label (reference no / customer / phone) for context
+ *   open  — optional INTENT: 'drawer' asks the shell to put the record itself
+ *           on screen instead of only switching tab + ringing the row. Set per
+ *           event by the sender (today: sale_pending_review). Absent means the
+ *           old behaviour, so it can never retro-change a notification written
+ *           before the field existed.
  *
  * Key-based first (robust to a missing `type`), type-prefix as a fallback.
  *
@@ -16,6 +21,17 @@
  * comment for the same reason.
  */
 export function resolveNotificationTarget(n) {
+  const t = resolveKind(n);
+  if (!t || t.kind === 'url') return t;
+  // Whitelist rather than pass-through: `open` reaches the shells as a command,
+  // and the only value any shell acts on is 'drawer'. Anything else — a typo, a
+  // future value an older bundle does not understand — degrades to the row
+  // highlight instead of leaving a shell holding an intent it cannot honour.
+  const open = (n?.data || {}).open === 'drawer' ? 'drawer' : null;
+  return { ...t, open };
+}
+
+function resolveKind(n) {
   if (!n) return null;
   const d = n.data || {};
   const type = String(n.type || d.type || '').toLowerCase();
@@ -67,5 +83,6 @@ export function focusDeepLink(target, base = '/dashboard') {
   const sp = new URLSearchParams();
   sp.set('fkind', target.kind);
   if (target.id) sp.set('fid', String(target.id));
+  if (target.open) sp.set('fopen', String(target.open));
   return `${base}?${sp.toString()}`;
 }

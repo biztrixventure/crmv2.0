@@ -54,6 +54,10 @@ export const SALE_COPY_FIELDS = [
   { key: 'down',          label: 'Down Payment',     fin: true, get: (s, fd) => s.down_payment || gd(fd, 'SaleDownPayment') },
   { key: 'closer',        label: 'Closer Name',      get: (s) => s.closer_name || '' },
   { key: 'fronter',       label: 'Fronter / Employee', get: (s) => s.fronter_name || '' },
+  // Company is enrichment, not a column: the list routes attach `companies`,
+  // GET /sales/:id attaches both shapes. Read either, never sale.company_id —
+  // a raw uuid in a spreadsheet cell helps nobody.
+  { key: 'company',       label: 'Company',          get: (s) => s.company_name || s.companies?.name || '' },
   { key: 'ref',           label: 'Policy / Ref #',   get: (s, fd) => s.policy_number || s.reference_no || gd(fd, 'SaleReferenceNo') },
   { key: 'comments',      label: 'Comments',         get: (s) => s.compliance_note || '' },
   { key: 'created',       label: 'Created At',       get: (s) => asDate(s.created_at) },

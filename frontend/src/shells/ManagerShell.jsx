@@ -52,6 +52,7 @@ import { useSales } from "../hooks/useSales";
 import { useTransfers } from "../hooks/useTransfers";
 import { useNotifications } from "../hooks/useNotifications";
 import { useNavFocus } from "../contexts/FocusContext";
+import { useSaleDeepLink } from "../hooks/useSaleDeepLink";
 import { useDashboardStats } from "../hooks/useDashboardStats";
 import { useShellLayout } from "../hooks/useShellLayout";
 import StatCardTriple from "../components/UI/StatCardTriple";
@@ -481,6 +482,14 @@ const ManagerShell = ({ workspaceMode = false }) => {
   // ── Detail drawers ────────────────────────────────────────────────────────
   const [detailTransfer, setDetailTransfer] = useState(null);
   const [detailSale, setDetailSale]         = useState(null);
+
+  // A notification carrying `open: 'drawer'` opens the record itself, not just
+  // its tab (the tab switch is the `focus` effect further up, which still
+  // runs). This call lives HERE, below the state it feeds, rather than next to
+  // that effect: `setDetailSale` is a const declared on the line above, so
+  // calling it from up there would be a temporal-dead-zone read — the kind
+  // that builds green and blanks the page at runtime.
+  useSaleDeepLink(focus, setDetailSale);
 
   // ── Rate call / Set dispo ─────────────────────────────────────────────────
   const RATINGS = ['excellent', 'good', 'average', 'below_average', 'bad'];

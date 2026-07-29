@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { createPortal } from 'react-dom';
-import { X, Phone, AlertTriangle, RefreshCw, CheckCircle, Clock, XCircle, PhoneMissed, Star } from 'lucide-react';
+import { Phone, AlertTriangle, RefreshCw, CheckCircle, Clock, XCircle, PhoneMissed, Star } from 'lucide-react';
 import { Badge } from '../UI';
+import DrawerShell from './DrawerShell';
 import client from '../../api/client';
 
 const STATUS_META = {
@@ -51,35 +51,27 @@ export default function CallbackPhoneHistoryDrawer({ phone, customerName, onClos
   const pendingCount  = data?.pending_count ?? 0;
   const hasDuplicates = pendingCount > 1;
 
-  return createPortal(
-    <>
-      <div className="fixed inset-0 z-[60] bsx-scrim" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }} onClick={onClose} />
-      <div className="fixed right-0 top-0 h-full w-full max-w-lg z-[61] flex flex-col shadow-2xl animate-slide-in-right"
-        style={{ backgroundColor: 'var(--color-surface)', borderLeft: '1px solid var(--color-border)' }}>
-
-        {/* Header */}
-        <div className="flex items-start justify-between p-5 flex-shrink-0"
-          style={{ borderBottom: '1px solid var(--color-border)' }}>
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-              style={{ background: 'var(--gradient-sidebar)' }}>
-              <Phone size={18} className="text-white" />
-            </div>
-            <div>
-              <h2 className="text-lg font-bold text-text font-mono">{phone}</h2>
-              {customerName && (
-                <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>{customerName}</p>
-              )}
-            </div>
-          </div>
-          <button onClick={onClose} className="p-2 rounded-lg transition-colors hover:bg-bg-secondary flex-shrink-0">
-            <X size={18} style={{ color: 'var(--color-text-secondary)' }} />
-          </button>
+  return (
+    <DrawerShell
+      // Light header preserved; bodyPadded={false} because the history rows
+      // below already run edge-to-edge with their own gutters.
+      headerTone="plain"
+      bodyPadded={false}
+      icon={(
+        <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+          style={{ background: 'var(--gradient-sidebar)' }}>
+          <Phone size={18} className="text-white" />
         </div>
-
-        {/* Stats bar */}
-        {data && (
-          <div className="flex items-center flex-wrap gap-2 px-5 py-3 flex-shrink-0"
+      )}
+      title={<span className="font-mono">{phone}</span>}
+      subtitle={customerName || null}
+      onClose={onClose}
+      recordKey={phone}
+      width={512}
+      labelledById="callback-history-drawer-title"
+      chrome={data ? (
+        /* Stats bar */
+          <div className="flex items-center flex-wrap gap-2 px-3 sm:px-5 py-3 flex-shrink-0"
             style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
             <span className="text-xs font-semibold px-2.5 py-1 rounded-full"
               style={{ backgroundColor: 'var(--color-bg)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}>
@@ -102,10 +94,12 @@ export default function CallbackPhoneHistoryDrawer({ phone, customerName, onClos
               </span>
             )}
           </div>
-        )}
-
-        {/* Body */}
-        <div className="flex-1 overflow-y-auto">
+      ) : null}
+    >
+        {/* Body — a plain wrapper: the scrolling container is DrawerShell's,
+            so this must not also be flex-1/overflow-y-auto or the drawer would
+            scroll inside itself. */}
+        <div>
           {loading && (
             <div className="flex justify-center items-center py-16">
               <RefreshCw size={22} className="animate-spin" style={{ color: 'var(--color-primary-500)' }} />
@@ -234,8 +228,6 @@ export default function CallbackPhoneHistoryDrawer({ phone, customerName, onClos
             </div>
           )}
         </div>
-      </div>
-    </>,
-    document.body,
+    </DrawerShell>
   );
 }

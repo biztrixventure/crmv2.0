@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react';
-import { createPortal } from 'react-dom';
-import { X, AlertTriangle, DollarSign, CheckCircle, Clock, RefreshCw, Copy, Check } from 'lucide-react';
-import { Badge, SmartText, BalancedText } from '../UI';
+import { AlertTriangle, DollarSign, RefreshCw } from 'lucide-react';
+import { SmartText, BalancedText } from '../UI';
 import SaleStatusBadge from '../UI/SaleStatusBadge';
 import client from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
+import { useFocus } from '../../contexts/FocusContext';
+import { useIsMobile } from '../../hooks/useIsMobile';
+import DrawerShell from './DrawerShell';
+import SaleEssentials from './SaleEssentials';
 import { fmtSaleDate } from '../../utils/timezone';
 import { salePaidTenure } from '../../utils/saleTenure';
 import ResellModal from '../Closer/ResellModal';
@@ -67,23 +70,30 @@ const displayFieldValue = (key, v) => {
   return REF_KEY_RE.test(String(key)) ? s.toUpperCase() : s;
 };
 
+// A label/value pair. At 390px the old version could not lay out: the label was
+// flex-shrink-0 and the value had no min-width, so a long VIN or address pushed
+// the row wider than the panel and clipped. The label may now shrink, the value
+// may wrap, and the gap tightens on small screens.
 const Row = ({ label, value, mono = false, highlight }) => {
   if (!value && value !== 0) return null;
   return (
-    <div className="flex justify-between items-start gap-4 py-2"
+    <div className="flex justify-between items-start gap-2 sm:gap-4 py-2"
       style={{ borderBottom: '1px solid var(--color-border)' }}>
-      <span className="text-xs font-semibold text-text-secondary uppercase tracking-wide flex-shrink-0">{label}</span>
-      <span className={`text-sm text-right ${mono ? 'font-mono' : ''} ${highlight ? 'font-bold' : 'text-text'}`}
+      <span className="text-[11px] sm:text-xs font-semibold text-text-secondary uppercase tracking-wide flex-shrink min-w-0">{label}</span>
+      <span className={`text-sm text-right min-w-0 break-words ${mono ? 'font-mono' : ''} ${highlight ? 'font-bold' : 'text-text'}`}
         style={highlight ? { color: highlight } : undefined}>{value}</span>
     </div>
   );
 };
 
 const Section = ({ title, children }) => (
-  <div className="mb-5">
-    <p className="text-xs font-bold uppercase tracking-widest mb-2"
+  <div className="mb-4 sm:mb-5">
+    {/* mt-0 mb-2, not `m-0 mb-2` — the global `p { margin: 12px 0 }` has to be
+        cancelled, but `m-0` and `mb-2` are the same specificity, so which wins
+        depends on Tailwind's emit order rather than on intent. */}
+    <p className="text-xs font-bold uppercase tracking-widest mt-0 mb-2"
       style={{ color: 'var(--color-primary-600)' }}>{title}</p>
-    <div className="rounded-xl px-4 py-1"
+    <div className="rounded-xl px-3 sm:px-4 py-1"
       style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
       {children}
     </div>
@@ -91,26 +101,33 @@ const Section = ({ title, children }) => (
 );
 
 export default function SaleDetailDrawer({ sale: saleProp, onClose, onResold }) {
-  const [closing, setClosing] = useState(false);
-  const requestClose = () => { if (closing) return; setClosing(true); setTimeout(() => onClose?.(), 220); };
-  // The drawer stays mounted, so reset the close-animation flag whenever a new
-  // record opens — otherwise it'd stay slid-out and the next record wouldn't show.
-  useEffect(() => { setClosing(false); }, [saleProp]);
+  // Close animation, Esc, the scrim and the portal all belong to DrawerShell
+  // now — this component is the sale's CONTENT, not its chrome.
   const { user, hasPermission, isReadOnly, roFlag } = useAuth();
   const { sections } = useDrawerLayout('sale');
   // Reason keys → readable labels (same catalog the cancel modals use).
   const { labelOf: reasonLabelOf } = useCancellationReasons();
+
+  // Did we get here by tapping a sale-review notification, on a phone? If so
+  // the drawer opens straight onto the essentials view — the recipient tapped
+  // "a sale is waiting", and the eight identifying fields are what answers
+  // that on a 390px screen; the full record is one tap away.
+  //
+  // Read here rather than threaded down from six call sites: the intent is a
+  // property of HOW the record was opened, which the shells would only have
+  // had to forward unchanged through every one of them.
+  const { focus } = useFocus();
+  const isMobile = useIsMobile();
+  const openedFromDeepLink = !!focus
+    && focus.kind === 'sale'
+    && focus.open === 'drawer'
+    && saleProp?.id != null
+    && String(focus.id) === String(saleProp.id);
   // Item 5.1 — bundle-sibling navigation: clicking a sibling swaps the viewed
   // sale locally (the parent still owns open/close via the prop). Every data
   // effect below keys on sale.id, so chain/lifetime/group refetch on swap.
   const [viewSale, setViewSale] = useState(null);
   useEffect(() => { setViewSale(null); }, [saleProp?.id]);
-  // Esc closes the drawer (expected UX; overlay-click already does).
-  useEffect(() => {
-    const onKey = (e) => { if (e.key === 'Escape') onClose?.(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
   const sale = viewSale || saleProp;
   const openSibling = (id) => {
     client.get(`sales/${id}`)
@@ -266,51 +283,14 @@ export default function SaleDetailDrawer({ sale: saleProp, onClose, onResold }) 
     return (DEFAULT_FIELDS[s.id] || []).map(id => ({ id }));
   };
 
-  const complianceColor = {
-    open: 'var(--color-info-600)',
-    pending_review: 'var(--color-warning-600)',
-    needs_revision: 'var(--color-error-600)',
-    closed_won: 'var(--color-success-600)',
-    closed_lost: 'var(--color-error-600)',
-  }[sale.status];
-
-  return createPortal(
+  // The fixed strips that sit between the header and the scrolling body.
+  // Grouped into one node and handed to DrawerShell as `chrome`, so the
+  // compact view can drop all of them together instead of each one needing to
+  // know whether it is currently wanted.
+  const chrome = (
     <>
-      <div className={`fixed inset-0 z-[60] ${closing ? 'bsx-scrim-out' : 'bsx-scrim'}`} style={{ backgroundColor: 'rgba(0,0,0,0.45)' }}
-        onClick={requestClose} />
-
-      <div className={`fixed right-0 top-0 h-full z-[61] flex flex-col shadow-2xl ${closing ? 'animate-slide-out-right' : 'animate-slide-in-right'}`}
-        style={{
-          width: 'min(480px, 100vw)',
-          backgroundColor: 'var(--color-surface)',
-          borderLeft: '1px solid var(--color-border)',
-        }}>
-
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 flex-shrink-0"
-          style={{ background: 'var(--gradient-sidebar)' }}>
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-xl bg-white/20">
-              <DollarSign size={18} className="text-white" />
-            </div>
-            <div>
-              <h2 className="text-base font-bold text-white truncate max-w-[260px]">
-                {sale.customer_name || 'Sale'}
-              </h2>
-              <p className="text-xs text-white/70">Sale Details</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <SaleCopyBar sale={sale} canFinancial={canFinancial} canManage={canManageCopy} />
-            <button onClick={requestClose}
-              className="p-2 rounded-xl bg-white/20 hover:bg-white/30 transition-colors">
-              <X size={18} className="text-white" />
-            </button>
-          </div>
-        </div>
-
         {/* Status bar */}
-        <div className="flex items-center gap-3 px-5 py-3 flex-shrink-0 flex-wrap"
+        <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-5 py-2.5 sm:py-3 flex-shrink-0 flex-wrap"
           style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
           <SaleStatusBadge sale={sale} size="md" />
           {sale.is_resell && (
@@ -372,11 +352,11 @@ export default function SaleDetailDrawer({ sale: saleProp, onClose, onResold }) 
 
         {/* Compliance note banner */}
         {sale.status === 'needs_revision' && sale.compliance_note && (
-          <div className="mx-5 mt-4 p-3 rounded-xl flex items-start gap-2 flex-shrink-0"
+          <div className="mx-3 sm:mx-5 mt-3 sm:mt-4 p-3 rounded-xl flex items-start gap-2 flex-shrink-0"
             style={{ backgroundColor: 'var(--color-error-50)', border: '1px solid var(--color-error-200)' }}>
             <AlertTriangle size={14} className="text-error-600 mt-0.5 flex-shrink-0" />
-            <div>
-              <p className="text-xs font-bold text-error-700">Compliance Note</p>
+            <div className="min-w-0">
+              <p className="text-xs font-bold text-error-700 m-0">Compliance Note</p>
               <SmartText text={sale.compliance_note} maxLines={4} className="text-xs text-error-600 mt-0.5" />
             </div>
           </div>
@@ -385,17 +365,35 @@ export default function SaleDetailDrawer({ sale: saleProp, onClose, onResold }) 
         {/* Item 5.1 — viewing a bundle sibling: one-tap return to the original */}
         {viewSale && (
           <button type="button" onClick={() => setViewSale(null)}
-            className="w-full text-left text-xs font-bold px-5 py-2 flex-shrink-0 hover:opacity-80"
+            className="w-full text-left text-xs font-bold px-3 sm:px-5 py-2 flex-shrink-0 hover:opacity-80 truncate"
             style={{ background: 'var(--color-primary-50, #eef2ff)', color: 'var(--color-primary-700, #4338ca)', borderBottom: '1px solid var(--color-border)' }}>
             ← Back to {saleProp?.customer_name || 'the original sale'}{saleProp?.reference_no ? ` · #${saleProp.reference_no}` : ''}
           </button>
         )}
 
-        {/* Scrollable body — section order + visibility from useDrawerLayout
-            (SuperAdmin configures per role in Business Rules → Drawer Layout).
-            Unknown sections (e.g. 'compliance_actions' for compliance role) are
-            tolerated; renderer map below decides what to render. */}
-        <div className="flex-1 overflow-y-auto px-5 py-4">
+    </>
+  );
+
+  return (
+    <>
+      <DrawerShell
+        icon={<DollarSign size={18} className="text-white" />}
+        title={sale.customer_name || 'Sale'}
+        subtitle="Sale Details"
+        onClose={onClose}
+        recordKey={sale.id}
+        width={480}
+        labelledById="sale-drawer-title"
+        headerActions={<SaleCopyBar sale={sale} canFinancial={canFinancial} canManage={canManageCopy} />}
+        chrome={chrome}
+        essentials={<SaleEssentials sale={sale} canFinancial={canFinancial} />}
+        defaultEssentials={openedFromDeepLink && isMobile}
+      >
+        {/* Body — section order + visibility from useDrawerLayout (SuperAdmin
+            configures per role in Business Rules → Drawer Layout). Unknown
+            sections (e.g. 'compliance_actions' for compliance role) are
+            tolerated; the renderer map below decides what to render.
+            The scroll container itself is DrawerShell's. */}
           {(() => {
             // Every field id explicitly placed in some section (core + dynamic).
             const placed = new Set(sections.flatMap(sec => (sec.fields || []).map(f => f.id)));
@@ -603,18 +601,18 @@ export default function SaleDetailDrawer({ sale: saleProp, onClose, onResold }) 
 
           {/* Superadmin-only ownership reassignment (renders nothing for others). */}
           <ReassignOwnership kind="sale" record={sale} onDone={onClose} />
-        </div>
-      </div>
+      </DrawerShell>
 
       {/* Resell modal — gated by config + status; parent gets the new sale id
-          via onResold callback so it can navigate or refresh the list. */}
+          via onResold callback so it can navigate or refresh the list.
+          Rendered OUTSIDE DrawerShell: it owns its own overlay, and nesting it
+          inside the drawer's scroll container would trap it there. */}
       <ResellModal
         isOpen={resellOpen}
         sale={sale}
         onClose={() => setResellOpen(false)}
         onSuccess={(newSale, oldSale) => { setResellOpen(false); onResold?.(newSale, oldSale); }}
       />
-    </>,
-    document.body,
+    </>
   );
 }

@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
-import { createPortal } from 'react-dom';
+import DrawerShell from './DrawerShell';
 import {
-  X, Phone, User, Clock, Calendar, Hash, ArrowRight,
+  Phone, User, Clock, Calendar, Hash, ArrowRight,
   CheckCircle2, XCircle, PhoneCall, PhoneMissed, PhoneOff,
   Voicemail, RefreshCw, Building2, Link2,
   PlusCircle, UserPlus, UserMinus, Edit3, Activity, Shuffle,
@@ -338,34 +338,28 @@ export default function CallbackNumberDetailDrawer({ numberId, numberRow, onClos
     ? Math.ceil((new Date(number.release_at) - Date.now()) / 86400000)
     : null;
 
-  return createPortal(
-    <>
-      <div className="fixed inset-0 z-[60] bsx-scrim" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }} onClick={onClose} />
-      <div className="fixed right-0 top-0 h-full w-full max-w-lg z-[61] flex flex-col shadow-2xl animate-slide-in-right"
-        style={{ backgroundColor: 'var(--color-surface)', borderLeft: '1px solid var(--color-border)' }}>
-
-        {/* ── Header ── */}
-        <div className="flex items-start justify-between p-5 flex-shrink-0"
-          style={{ borderBottom: '1px solid var(--color-border)' }}>
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-              style={{ background: 'var(--gradient-sidebar)' }}>
-              <Hash size={18} className="text-white" />
-            </div>
-            <div>
-              <h2 className="text-lg font-bold text-text font-mono">{number.phone_number || '—'}</h2>
-              {number.customer_name && (
-                <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>{number.customer_name}</p>
-              )}
-            </div>
-          </div>
-          <button onClick={onClose} className="p-2 rounded-lg transition-colors hover:bg-bg-secondary flex-shrink-0">
-            <X size={18} style={{ color: 'var(--color-text-secondary)' }} />
-          </button>
+  return (
+    <DrawerShell
+      // Light header preserved; bodyPadded={false} because the timeline rows
+      // below run edge-to-edge with their own gutters.
+      headerTone="plain"
+      bodyPadded={false}
+      icon={(
+        <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+          style={{ background: 'var(--gradient-sidebar)' }}>
+          <Hash size={18} className="text-white" />
         </div>
-
+      )}
+      title={<span className="font-mono">{number.phone_number || '—'}</span>}
+      subtitle={number.customer_name || null}
+      onClose={onClose}
+      recordKey={number?.id || numberId}
+      width={512}
+      labelledById="callback-number-drawer-title"
+      chrome={(
+        <>
         {/* ── Status bar ── */}
-        <div className="flex items-center flex-wrap gap-2 px-5 py-3 flex-shrink-0"
+        <div className="flex items-center flex-wrap gap-2 px-3 sm:px-5 py-3 flex-shrink-0"
           style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
           <Badge variant={STATUS_BADGE[number.status] || 'secondary'}>
             {number.status || '—'}
@@ -385,7 +379,7 @@ export default function CallbackNumberDetailDrawer({ numberId, numberRow, onClos
         </div>
 
         {/* ── Tab switcher ── */}
-        <div className="flex gap-1 px-5 py-2 flex-shrink-0"
+        <div className="flex gap-1 px-3 sm:px-5 py-2 flex-shrink-0 overflow-x-auto"
           style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
           {[
             { key: 'overview', label: 'Overview', icon: LayoutList },
@@ -402,9 +396,12 @@ export default function CallbackNumberDetailDrawer({ numberId, numberRow, onClos
             </button>
           ))}
         </div>
-
-        {/* ── Body (scrollable) ── */}
-        <div className="flex-1 overflow-y-auto">
+        </>
+      )}
+    >
+        {/* ── Body ── a plain wrapper; the scrolling container is
+            DrawerShell's, so this must not be flex-1/overflow-y-auto too. */}
+        <div>
 
           {/* Loading */}
           {loading && (
@@ -564,8 +561,6 @@ export default function CallbackNumberDetailDrawer({ numberId, numberRow, onClos
             </div>
           )}
         </div>
-      </div>
-    </>,
-    document.body,
+    </DrawerShell>
   );
 }
