@@ -300,7 +300,9 @@ const ManagerShell = ({ workspaceMode = false }) => {
   const focus = useNavFocus();
   useEffect(() => {
     if (!focus) return;
-    const KIND_TAB = { transfer: 'transfers', sale: 'sales', callback: 'callbacks' };
+    // batch was missing: this shell has a Batches tab, so a batch_received
+    // notification resolved to a kind nobody here consumed.
+    const KIND_TAB = { transfer: 'transfers', sale: 'sales', callback: 'callbacks', batch: 'batches' };
     const tab = KIND_TAB[focus.kind];
     setActiveNav('dashboard');
     if (tab && tabKeys.has(tab)) setActiveTab(tab);

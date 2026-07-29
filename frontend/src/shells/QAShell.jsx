@@ -16,6 +16,8 @@ import { QAAgentDashboard, QAManagerDashboard } from '../components/QA/QADashboa
 import { Donut, Bars, Lines, PALETTE } from '../components/QA/Charts';
 import { isSheetConfig } from '../utils/qaSheetFormula';
 import ThemedSelect from '../components/UI/Select';
+import { useHistoryTab } from '../hooks/useHistoryTab';
+import { useNavFocus } from '../contexts/FocusContext';
 
 // ============================================================================
 // QA Shell — isolated shell for qa_manager / qa_agent (mirrors ComplianceShell).
@@ -3292,7 +3294,14 @@ function AgentWork({ selfId, companyId, scoped, allowedWt }) {
 }
 
 function QAAgentView({ user, logout }) {
-  const [tab, setTab] = useState('work');
+  // History-backed so the iOS edge swipe goes back a tab instead of dismissing
+  // the installed app. `persist: false` — this shell has never remembered its
+  // tab across reloads and this change is about the back stack, not that.
+  const [tab, setTab] = useHistoryTab(null, 'work', { persist: false });
+  // A tapped QA notification (assignment or review) lands on the work queue —
+  // which is the thing the notification is telling them to go do.
+  const qaFocus = useNavFocus();
+  useEffect(() => { if (qaFocus?.kind === 'qa') setTab('work'); }, [qaFocus]); // eslint-disable-line react-hooks/exhaustive-deps
   const [methods, setMethods] = useState(null);
   const { companies, all, companyId, setCompanyId } = useQaCompanies();
   const scoped = companyId === ALL_CO ? '' : companyId;
@@ -3343,7 +3352,21 @@ export default function QAShell() {
   // Land on the first tab the user can actually load: a reports-only or config-only
   // role has no view_qa_queue, so its Dashboard/Live/Completed would 403 — start it
   // on Reports (or Config / Day) instead of a blank 403 landing.
-  const [tab, setTab] = useState(() => canQueue ? 'dashboard' : canReports ? 'reports' : canManage ? 'config' : canAssign ? 'day' : 'dashboard');
+  // History-backed (see QAAgentView above for why). `persist: false` keeps the
+  // existing "land on the first tab this role can actually load" behaviour as
+  // the default instead of restoring a remembered tab that may now 403.
+  const [tab, setTab] = useHistoryTab(
+    null,
+    canQueue ? 'dashboard' : canReports ? 'reports' : canManage ? 'config' : canAssign ? 'day' : 'dashboard',
+    { persist: false },
+  );
+  // A tapped QA notification lands on Completed — a manager's QA notifications
+  // are about reviews that have been done, not about work waiting for them.
+  // Declared before the QAAgentView early-return below so hook order is stable.
+  const qaFocus = useNavFocus();
+  useEffect(() => {
+    if (qaFocus?.kind === 'qa') setTab(canQueue ? 'completed' : 'reports');
+  }, [qaFocus]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // A QA AGENT (no manager-side permission at all) gets the focused agent
   // console. ANY manager-side permission — assign, config, or reports — opens

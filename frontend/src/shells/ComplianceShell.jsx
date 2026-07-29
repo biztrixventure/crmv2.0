@@ -171,7 +171,9 @@ const ComplianceShell = () => {
   const focus = useNavFocus();
   useEffect(() => {
     if (!focus) return;
-    const KIND_TAB = { sale: 'sales', transfer: 'transfers', callback: 'callbacks', number: 'numbers' };
+    // batch + qa were missing: this shell has both tabs, so a batch_received or
+    // qa_review notification resolved to a kind nobody here consumed.
+    const KIND_TAB = { sale: 'sales', transfer: 'transfers', callback: 'callbacks', number: 'numbers', batch: 'batches', qa: 'qa_admin' };
     const tab = KIND_TAB[focus.kind];
     if (tab && TABS.some(t => t.key === tab)) setActiveTab(tab);
   }, [focus, TABS]);
