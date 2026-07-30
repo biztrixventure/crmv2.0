@@ -6,10 +6,10 @@
 // NO loading state at all — it now shows the same skeleton every other tab uses
 // while the role list the profile form needs is loading.
 import { useState, useEffect } from 'react';
-import { KeyRound, Send, LogIn, Power, Trash2, UserCog, Wrench } from 'lucide-react';
+import { KeyRound, Send, LogIn, Power, Trash2, UserCog, Wrench, Save, IdCard } from 'lucide-react';
 import client from '../../../api/client';
 import { Button, Alert } from '../../../components/UI';
-import { SectionHeader, Loading, EmptyState, ActionRow, useFlash, accent } from '../../UI/kit';
+import { SectionHeader, Loading, ActionRow, Field, useFlash, accent } from '../../UI/kit';
 import UserForm from '../UserManagement/UserForm';
 
 export default function AccountSection({ account, assignment, onChanged }) {
@@ -19,6 +19,17 @@ export default function AccountSection({ account, assignment, onChanged }) {
   const [busy, setBusy]       = useState(null);   // which action is running
   const { msg, flash, clear } = useFlash();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // Display name, edited on its own for accounts with no company assignment
+  // (env-bootstrapped superadmins). UserForm can't serve them: it saves through
+  // PUT /users/:assignmentId, and there is no assignment.
+  const [dnFirst, setDnFirst]   = useState('');
+  const [dnLast, setDnLast]     = useState('');
+  const [dnSaving, setDnSaving] = useState(false);
+
+  useEffect(() => {
+    setDnFirst(account?.first_name || '');
+    setDnLast(account?.last_name || '');
+  }, [account?.user_id, account?.first_name, account?.last_name]);
 
   useEffect(() => {
     if (!assignment?.company_id) { setRoles([]); setRolesLoading(false); return; }
@@ -31,8 +42,55 @@ export default function AccountSection({ account, assignment, onChanged }) {
     return () => { alive = false; };
   }, [assignment?.company_id]);
 
+  // Save the name on the AUTH user (upsert), not on an assignment.
+  const saveDisplayName = async () => {
+    if (!dnFirst.trim()) { flash('error', 'A first name is required.'); return; }
+    setDnSaving(true);
+    try {
+      await client.put(`users/${account.user_id}/display-name`, {
+        first_name: dnFirst.trim(), last_name: dnLast.trim(),
+      });
+      flash('success', 'Display name saved — it now shows in mail, chat and every user list.');
+      onChanged?.();
+    } catch (e) {
+      flash('error', e.response?.data?.error || 'Save failed.');
+    } finally { setDnSaving(false); }
+  };
+
+  // No assignment = an env-bootstrapped superadmin (or a readonly admin created
+  // outside the company flow). This used to be a dead end that said "assign this
+  // user to a company first" — which is wrong advice for an account that is
+  // never meant to belong to one. The name is the one thing that DOES apply.
   if (!assignment) {
-    return <EmptyState icon={UserCog} title="No company assignment to edit" hint="Assign this user to a company on the Companies & Role tab first." />;
+    return (
+      <div className="max-w-xl">
+        <SectionHeader icon={IdCard} title="Display name"
+          subtitle="This account has no company assignment, so it has no per-company profile — but this name is what it renders as everywhere: internal mail, chat, activity logs, every user list." />
+        {msg && <div className="mb-3"><Alert type={msg.type} onDismiss={clear}>{msg.text}</Alert></div>}
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <Field label="First name">
+            <input type="text" value={dnFirst} onChange={e => setDnFirst(e.target.value)}
+              placeholder="Wajid" maxLength={60} className="input" />
+          </Field>
+          <Field label="Last name">
+            <input type="text" value={dnLast} onChange={e => setDnLast(e.target.value)}
+              placeholder="Manzoor" maxLength={60} className="input" />
+          </Field>
+        </div>
+
+        <p className="m-0 mt-3 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+          Signed in as <strong style={{ color: 'var(--color-text)' }}>{account.email}</strong>
+          {account.admin_role ? ` · ${String(account.admin_role).replace(/_/g, ' ')}` : ''}
+        </p>
+
+        <div className="mt-4">
+          <Button size="sm" loading={dnSaving} onClick={saveDisplayName}>
+            <Save size={14} /> Save display name
+          </Button>
+        </div>
+      </div>
+    );
   }
 
   // Save profile via the existing PUT /users/:id (assignment id).

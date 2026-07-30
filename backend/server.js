@@ -152,6 +152,68 @@ async function syncReadonlyAdminMetadata() {
   }
 }
 
+// Placeholder display name from an email local part: letters only, title-cased.
+// Mirrors the SQL in migration 220 exactly (initcap over a digit-stripped local
+// part) so the backfill and this bootstrap can never disagree on a name.
+function nameFromEmail(email) {
+  const local = String(email || '').split('@')[0].replace(/[^a-zA-Z]+/g, '');
+  if (!local) return 'Admin';
+  return local.charAt(0).toUpperCase() + local.slice(1).toLowerCase();
+}
+
+// Env-bootstrapped superadmins are created by stamping app_metadata and NOTHING
+// else — they never got a user_profiles row. That row, not a blank name field,
+// is why they render as 'Unknown' / '(unnamed)' / a raw email everywhere: some
+// ~200 read sites across the backend resolve a display name by joining
+// user_profiles and falling back. Two of them fail outright rather than
+// cosmetically — POST /emails/send rejects a recipient with no profile row
+// ("Unknown recipient(s)"), and chatService.searchDirectory scans that table,
+// so a superadmin was neither mailable nor findable in chat.
+//
+// Runs AFTER both metadata syncs (chained below, not fire-and-forget) so an
+// account stamped on this very boot is already visible to the role filter here.
+// Migration 220 does the same backfill in SQL for the existing rows; this hook
+// is the durable half — it covers a fresh project and any email ADDED to
+// SUPERADMIN_EMAIL later, which a one-time migration cannot.
+//
+// portal_client accounts are excluded deliberately. Those are external
+// client-recording-portal logins (migration 116); the chat directory and the
+// mail recipient picker are both driven by user_profiles, so giving one a row
+// would make an outside client searchable and mailable by staff.
+async function ensureAdminProfiles() {
+  const envAdmins = new Set(
+    [...(process.env.SUPERADMIN_EMAIL || '').split(','), ...(process.env.READONLY_ADMIN_EMAIL || '').split(',')]
+      .map(e => e.trim().toLowerCase()).filter(Boolean)
+  );
+  try {
+    const { data } = await _saForSync.auth.admin.listUsers({ perPage: 1000 });
+    const admins = (data?.users || []).filter(u => {
+      if (u.app_metadata?.portal_client) return false;         // external client — never
+      const role = u.app_metadata?.role;
+      return role === 'superadmin' || role === 'readonly_admin' || envAdmins.has((u.email || '').toLowerCase());
+    });
+    if (!admins.length) return;
+
+    const { data: existing } = await _saForSync
+      .from('user_profiles').select('user_id').in('user_id', admins.map(u => u.id));
+    const have = new Set((existing || []).map(r => r.user_id));
+    const missing = admins.filter(u => !have.has(u.id));
+    if (!missing.length) return;
+
+    // Prefer a name the account was actually invited with; fall back to the email.
+    const rows = missing.map(u => ({
+      user_id:    u.id,
+      first_name: String(u.user_metadata?.first_name || '').trim() || nameFromEmail(u.email),
+      last_name:  String(u.user_metadata?.last_name || '').trim() || null,
+    }));
+    const { error } = await _saForSync.from('user_profiles').upsert(rows, { onConflict: 'user_id' });
+    if (error) throw error;
+    console.log(`[ADMIN_PROFILE] Created ${rows.length} missing admin profile row(s): ${missing.map(u => u.email).join(', ')}`);
+  } catch (err) {
+    console.error('[ADMIN_PROFILE] Profile bootstrap failed:', err.message);
+  }
+}
+
 const app = express();
 const PORT = process.env.PORT || 3001;
 
@@ -479,8 +541,12 @@ app.listen(PORT, () => {
   startCallbackScheduler();
   startBackgroundJobs();       // matview refresh + cache sweep (utils/scheduler)
   startAutoFetchDispo();       // catch-up dispo fetch for manual-dial transfers
-  syncSuperadminMetadata();    // Stamp JWT metadata for superadmins — no-op if already done
-  syncReadonlyAdminMetadata(); // Same for readonly_admin
+  // Chained, not fire-and-forget: ensureAdminProfiles filters on the stamp both
+  // syncs write, so it must not race them or it misses an account stamped on
+  // this very boot and the profile row waits a whole restart.
+  syncSuperadminMetadata()     // Stamp JWT metadata for superadmins — no-op if already done
+    .then(syncReadonlyAdminMetadata)  // Same for readonly_admin
+    .then(ensureAdminProfiles);       // Then give every admin a user_profiles row (see above)
   warmAuditCols();          // Probe last_modified_by on tracked tables (mig 063)
   console.log(`\n🚀 Backend server running on http://localhost:${PORT}`);
   console.log(`📡 Environment: ${process.env.NODE_ENV || 'development'}`);

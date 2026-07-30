@@ -10,10 +10,10 @@
 // surface that legitimately runs TWO tab tiers, exactly like the Compliance
 // shell: chrome for the company axis, PillTabs for the role axis beneath it.
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Search, Users, Building2, X, Circle } from 'lucide-react';
+import { Search, Users, Building2, X, Circle, ShieldCheck } from 'lucide-react';
 import client from '../../../api/client';
 import ChromeTabs from '../../UI/ChromeTabs';
-import { Loading, EmptyState, PillTabs } from '../../UI/kit';
+import { Loading, EmptyState, PillTabs, accent } from '../../UI/kit';
 
 const LEVEL_COLOR = {
   superadmin: 'var(--color-primary)', readonly_admin: '#8b5cf6',
@@ -28,6 +28,15 @@ const roleRank = (r) => { const i = ROLE_ORDER.indexOf(r); return i === -1 ? 99 
 const prettyRole = (r) => String(r || '').replace(/_/g, ' ');
 const initialsOf = (u) => (u.first_name?.[0] || u.name?.[0] || u.email?.[0] || '?').toUpperCase();
 const nameOf = (u) => [u.first_name, u.last_name].filter(Boolean).join(' ') || u.name || u.email || '(unnamed)';
+
+// Pseudo-company tab for accounts that belong to no company. Superadmins and
+// readonly admins are bootstrapped from env and have ZERO user_company_roles
+// rows, so GET /users — which is driven entirely by that table — can never
+// return them and the company→role directory below could never reach them.
+// That is why the nameless-superadmin bug had no UI fix: the accounts weren't
+// reachable, let alone editable. This tab loads GET /users/admin-accounts,
+// which reads the auth roster instead.
+const ADMIN_KEY = '__admins';
 
 export default function UserDirectory({ onSelect }) {
   const [companies, setCompanies]   = useState([]);
@@ -49,12 +58,14 @@ export default function UserDirectory({ onSelect }) {
       .finally(() => setLoadingCo(false));
   }, []);
 
-  // users for the active company
+  // users for the active company — or the company-less admin roster
   useEffect(() => {
     if (!activeCo) { setUsers([]); return; }
     setLoadingU(true); setRole('all');
-    client.get('users', { params: { company_id: activeCo, include_inactive: true } })
-      .then(r => setUsers(r.data.users || []))
+    const req = activeCo === ADMIN_KEY
+      ? client.get('users/admin-accounts')
+      : client.get('users', { params: { company_id: activeCo, include_inactive: true } });
+    req.then(r => setUsers(r.data.users || []))
       .catch(() => setUsers([]))
       .finally(() => setLoadingU(false));
   }, [activeCo]);
@@ -83,6 +94,7 @@ export default function UserDirectory({ onSelect }) {
   }, [results, users, role]);
 
   const activeCompany = companies.find(c => c.id === activeCo);
+  const onAdmins = activeCo === ADMIN_KEY && !results;
 
   return (
     <div className="flex flex-col" style={{ minHeight: 'calc(100vh - 220px)' }}>
@@ -108,7 +120,10 @@ export default function UserDirectory({ onSelect }) {
             <EmptyState icon={Building2} compact title="No companies found" />
           ) : (
             <ChromeTabs variant="chrome" value={activeCo} onChange={setActiveCo}
-              items={companies.map(c => ({ key: c.id, label: c.name, icon: Building2 }))} />
+              items={[
+                { key: ADMIN_KEY, label: 'Admin Accounts', icon: ShieldCheck },
+                ...companies.map(c => ({ key: c.id, label: c.name, icon: Building2 })),
+              ]} />
           )}
 
           {/* Role sub-tabs (tier 2) */}
@@ -118,15 +133,26 @@ export default function UserDirectory({ onSelect }) {
         </>
       )}
 
+      {/* What this tab is — these accounts exist outside the company model. */}
+      {onAdmins && (
+        <p className="m-0 mt-3 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+          Bootstrapped from <code>SUPERADMIN_EMAIL</code> / <code>READONLY_ADMIN_EMAIL</code> — they belong to no
+          company, so they never appear under a company tab. Open one to set the display name it shows as in mail,
+          chat and every user list.
+        </p>
+      )}
+
       {/* User grid */}
       <div className="flex-1 overflow-y-auto mt-3 -mx-1 px-1">
         {(loadingU && !results) ? (
           <Loading variant="cards" cards={6} label="Loading users…" />
         ) : shown.length === 0 ? (
           <EmptyState
-            icon={Users}
-            title={results ? 'No users match your search' : 'No users here'}
-            hint={results ? undefined : `${activeCompany?.name || 'This company'} has no users${role !== 'all' ? ` with role ${prettyRole(role)}` : ''}.`}
+            icon={onAdmins ? ShieldCheck : Users}
+            title={results ? 'No users match your search' : onAdmins ? 'No admin accounts' : 'No users here'}
+            hint={results ? undefined : onAdmins
+              ? 'Nothing is stamped superadmin or readonly_admin, and SUPERADMIN_EMAIL / READONLY_ADMIN_EMAIL are empty.'
+              : `${activeCompany?.name || 'This company'} has no users${role !== 'all' ? ` with role ${prettyRole(role)}` : ''}.`}
           />
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 pb-4">
@@ -149,6 +175,11 @@ export default function UserDirectory({ onSelect }) {
                       {inactive && <Circle size={7} fill="var(--color-error-500)" style={{ color: 'var(--color-error-500)' }} />}
                     </div>
                     <div className="text-[11px] truncate" style={{ color: 'var(--color-text-secondary)' }}>{u.email || (results ? u.company_name : activeCompany?.name) || '—'}</div>
+                    {u.has_profile === false && (
+                      <div className="text-[11px] font-semibold" style={{ color: accent('warn').fg }}>
+                        no profile row — renders as Unknown
+                      </div>
+                    )}
                     <span className="inline-block mt-1 text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded-full"
                       style={{ background: col + '22', color: col }}>{prettyRole(lvl)}{results && u.company_name ? ` · ${u.company_name}` : ''}</span>
                   </div>

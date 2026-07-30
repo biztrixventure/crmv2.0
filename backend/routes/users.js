@@ -305,7 +305,13 @@ router.get('/full/:userId', asyncHandler(async (req, res) => {
   let auth = {};
   try {
     const { data: a } = await supabaseAdmin.auth.admin.getUserById(userId);
-    if (a?.user) auth = { email: a.user.email, created_at: a.user.created_at, last_sign_in_at: a.user.last_sign_in_at };
+    if (a?.user) auth = {
+      email: a.user.email, created_at: a.user.created_at, last_sign_in_at: a.user.last_sign_in_at,
+      // Env-bootstrapped admins have NO user_company_roles row, so the
+      // assignment-derived is_active below would call them Inactive. The stamp
+      // is what actually grants them access — carry it.
+      admin_role: a.user.app_metadata?.role || null,
+    };
   } catch (e) {
     logger.warn('GET_USER_FULL', 'auth lookup failed', { userId, err: e.message });
   }
@@ -352,10 +358,146 @@ router.get('/full/:userId', asyncHandler(async (req, res) => {
       last_sign_in_at: auth.last_sign_in_at || null,
       vicidial_agent_ids: dialerIds,
       vicidial_agent_id: dialerJoined,
-      is_active: activeAssignments.length > 0,
+      // An env-stamped admin is active by virtue of the stamp, with zero
+      // assignments — without this they render "Inactive" in the Control Center.
+      is_active: activeAssignments.length > 0 || !!auth.admin_role,
+      admin_role: auth.admin_role || null,
     },
     assignments,
     primary_assignment_id: primary?.id || null,
+  });
+}));
+
+// ============================================================================
+// GET /users/admin-accounts — the superadmin / readonly_admin roster.
+//
+// These accounts are INVISIBLE to GET /users. That list is driven by
+// user_company_roles, and an env-bootstrapped admin has zero rows there
+// (verified live: 0 assignments for all 5 admin accounts). So the User Control
+// Center's company→role directory could never reach them — which is precisely
+// why nobody could fix the nameless-superadmin problem from the UI.
+//
+// Rows are shaped like a GET /users row (user_id, first_name, last_name, email,
+// role_level, is_active) so UserDirectory renders them with the same card and
+// hands the same user_id to /users/full/:userId. No new frontend shape.
+// ============================================================================
+router.get('/admin-accounts', asyncHandler(async (req, res) => {
+  if (req.user.role !== 'superadmin') {
+    return res.status(403).json({ error: 'Superadmin access required' });
+  }
+  const envList = (name) => new Set(
+    (process.env[name] || '').split(',').map(e => e.trim().toLowerCase()).filter(Boolean)
+  );
+  const superEnv = envList('SUPERADMIN_EMAIL');
+  const roEnv    = envList('READONLY_ADMIN_EMAIL');
+
+  const { data: authData, error: authErr } = await supabaseAdmin.auth.admin.listUsers({ perPage: 1000 });
+  if (authErr) return res.status(500).json({ error: authErr.message });
+
+  const admins = (authData?.users || []).filter(u => {
+    if (u.app_metadata?.portal_client) return false;   // external client login — not staff
+    const e = (u.email || '').toLowerCase();
+    const stamped = u.app_metadata?.role;
+    return stamped === 'superadmin' || stamped === 'readonly_admin' || superEnv.has(e) || roEnv.has(e);
+  });
+  if (!admins.length) return res.json({ users: [], count: 0 });
+
+  const { data: profs } = await supabaseAdmin
+    .from('user_profiles').select('user_id, first_name, last_name')
+    .in('user_id', admins.map(u => u.id));
+  const byId = Object.fromEntries((profs || []).map(p => [p.user_id, p]));
+
+  const users = admins.map(u => {
+    const e = (u.email || '').toLowerCase();
+    const p = byId[u.id] || {};
+    const level = (u.app_metadata?.role === 'superadmin' || superEnv.has(e)) ? 'superadmin' : 'readonly_admin';
+    return {
+      user_id:      u.id,
+      email:        u.email,
+      first_name:   p.first_name || null,
+      last_name:    p.last_name || null,
+      role_level:   level,
+      role:         level === 'superadmin' ? 'Super Admin' : 'Readonly Admin',
+      company_id:   null,
+      company_name: null,
+      is_active:    true,
+      via_env:      superEnv.has(e) || roEnv.has(e),
+      // The whole point of this endpoint: surface who is still missing the row.
+      has_profile:  !!byId[u.id],
+      created_at:   u.created_at,
+      last_sign_in_at: u.last_sign_in_at || null,
+    };
+  }).sort((a, b) =>
+    (a.role_level === b.role_level ? 0 : a.role_level === 'superadmin' ? -1 : 1)
+    || (a.first_name || a.email || '').localeCompare(b.first_name || b.email || ''));
+
+  res.json({ users, count: users.length });
+}));
+
+// ============================================================================
+// PUT /users/:userId/display-name — set the name a user renders as, everywhere.
+//
+// Keyed on the AUTH user id, not an assignment id, which is the entire reason
+// this exists alongside PUT /users/:id. That route resolves the target through
+// user_company_roles and then `.update()`s user_profiles — so for an account
+// with no assignment it 404s, and for an account with no profile row it would
+// silently update zero rows. Both are exactly the superadmin case.
+//
+// Upsert, so this CREATES the row when it's missing rather than no-opping.
+// Superadmin-only (one superadmin names every admin account).
+// ============================================================================
+router.put('/:userId/display-name', asyncHandler(async (req, res) => {
+  if (req.user.role !== 'superadmin') {
+    return res.status(403).json({ error: 'Superadmin access required' });
+  }
+  const { userId } = req.params;
+
+  // Accept either full_name or first/last, same contract as PUT /users/:id.
+  let first = String(req.body?.first_name || '').trim();
+  let last  = String(req.body?.last_name || '').trim();
+  if (req.body?.full_name !== undefined && String(req.body.full_name).trim()) {
+    ({ first_name: first, last_name: last } = splitFullName(req.body.full_name));
+  }
+  if (!first) return res.status(400).json({ error: 'A first name is required.' });
+  if (first.length > 60 || last.length > 60) {
+    return res.status(400).json({ error: 'Name is too long (60 characters max per field).' });
+  }
+
+  // The target must be a real auth user, and must not be a client-portal login:
+  // user_profiles drives the chat directory and the mail recipient picker, so a
+  // row here would make an external client searchable and mailable by staff.
+  let target;
+  try {
+    const { data } = await supabaseAdmin.auth.admin.getUserById(userId);
+    target = data?.user;
+  } catch (e) {
+    logger.warn('SET_DISPLAY_NAME', 'auth lookup failed', { userId, err: e.message });
+  }
+  if (!target) return res.status(404).json({ error: 'User not found.' });
+  if (target.app_metadata?.portal_client) {
+    return res.status(400).json({ error: 'Client-portal logins do not have a CRM display name.' });
+  }
+
+  const { error: upErr } = await supabaseAdmin.from('user_profiles').upsert({
+    user_id: userId, first_name: first, last_name: last || null,
+    updated_at: new Date().toISOString(),
+  }, { onConflict: 'user_id' });
+  if (upErr) return res.status(500).json({ error: upErr.message });
+
+  // Mirror into auth user_metadata so the invite/create paths (which read it)
+  // and ensureAdminProfiles on a future boot agree with what's displayed.
+  try {
+    await supabaseAdmin.auth.admin.updateUserById(userId, {
+      user_metadata: { ...(target.user_metadata || {}), first_name: first, last_name: last || '' },
+    });
+  } catch (e) { logger.warn('SET_DISPLAY_NAME', `metadata mirror failed: ${e.message}`); }
+
+  logger.success('SET_DISPLAY_NAME', `Set display name for ${target.email} → "${[first, last].filter(Boolean).join(' ')}"`, { userId, by: req.user.id });
+  res.json({
+    user_id: userId,
+    first_name: first,
+    last_name: last || null,
+    full_name: [first, last].filter(Boolean).join(' '),
   });
 }));
 
