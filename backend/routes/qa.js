@@ -1851,12 +1851,18 @@ router.get('/reviews', asyncHandler(async (req, res) => {
   if (!(await can(req, 'view_qa_queue'))) return res.status(403).json({ error: 'Forbidden' });
   const managerView = (await isSuperAdmin(req.user.id)) || await hasPermission(req.user.id, req.user.company_id, 'view_qa_reports') || await hasPermission(req.user.id, req.user.company_id, 'view_all_qa_reviews');
 
-  let q = supabaseAdmin.from('qa_reviews').select('*').order('created_at', { ascending: false }).limit(2000);
+  // Ask for ONE more than the cap so a full page reports as truncated instead of
+  // silently stopping — a sheet that quietly ends mid-month reads as "that's all
+  // there was", which is the one thing a QA record must never do.
+  const SHEET_CAP = 2000;
+  let q = supabaseAdmin.from('qa_reviews').select('*').order('created_at', { ascending: false }).limit(SHEET_CAP + 1);
   const allowed = await allowedCompanyIds(req);
-  if (allowed) { if (!allowed.length) return res.json({ reviews: [], scorecards: {} }); q = q.in('company_id', allowed); }
+  if (allowed) { if (!allowed.length) return res.json({ reviews: [], scorecards: {}, truncated: false }); q = q.in('company_id', allowed); }
   if (req.query.mine === 'true' || !managerView) q = q.eq('reviewer_id', req.user.id);
   if (req.query.company_id)  q = q.eq('company_id', req.query.company_id);
   if (req.query.method)      q = q.eq('method', req.query.method);
+  // fronter / closer side of the REVIEWED person — same split the charts use
+  if (req.query.subject_role === 'fronter' || req.query.subject_role === 'closer') q = q.eq('subject_role', req.query.subject_role);
   if (req.query.reviewer_id && managerView) q = q.eq('reviewer_id', req.query.reviewer_id);
   // per-AGENT quality file: every review of one reviewed user (CRM subject)
   if (req.query.subject_user_id) q = q.eq('subject_user_id', req.query.subject_user_id);
@@ -1864,7 +1870,9 @@ router.get('/reviews', asyncHandler(async (req, res) => {
   if (req.query.date_to)     q = q.lte('created_at', `${req.query.date_to}T23:59:59.999Z`);
   const { data: reviews, error } = await q;
   if (error) return res.status(500).json({ error: error.message });
-  if (!reviews.length) return res.json({ reviews: [], scorecards: {}, manager_view: managerView });
+  const truncated = reviews.length > SHEET_CAP;
+  if (truncated) reviews.length = SHEET_CAP;
+  if (!reviews.length) return res.json({ reviews: [], scorecards: {}, manager_view: managerView, truncated: false });
 
   const rIds = reviews.map(r => r.id);
   const aIds = [...new Set(reviews.map(r => r.assignment_id).filter(Boolean))];
@@ -1926,7 +1934,7 @@ router.get('/reviews', asyncHandler(async (req, res) => {
     const a = String(req.query.agent).trim().toLowerCase();
     rows = out.filter(r => String(r.agent || '').trim().toLowerCase() === a);
   }
-  res.json({ reviews: rows, scorecards, manager_view: managerView });
+  res.json({ reviews: rows, scorecards, manager_view: managerView, truncated, cap: SHEET_CAP });
 }));
 
 // ── single-agent quality report — the manager "pick a user → full report" view.
@@ -2197,6 +2205,14 @@ router.get('/reports', asyncHandler(async (req, res) => {
   }
   if (!rows.length) return res.json(EMPTY);
 
+  // Fronter / closer split. Applied BEFORE the agent selector is built, so
+  // picking "Fronters" narrows the dropdown to fronters instead of leaving
+  // closers in a list that can only ever return an empty report.
+  if (req.query.subject_role === 'fronter' || req.query.subject_role === 'closer') {
+    rows = rows.filter(r => r.subject_role === req.query.subject_role);
+    if (!rows.length) return res.json(EMPTY);
+  }
+
   // reviewed-agent identity from the linked assignment (dialer login + real name)
   const aIds = [...new Set(rows.map(r => r.assignment_id).filter(Boolean))];
   let asgById = {};
@@ -2217,15 +2233,20 @@ router.get('/reports', asyncHandler(async (req, res) => {
   // full reviewed-agent list for the selector (BEFORE applying the agent filter).
   // Carry subject_user_id per agent so the single-agent deep report (which keys on
   // the CRM user id) works even when the selector key is a dialer label.
+  // Each entry also carries its dominant side (fronter/closer) so the selector can
+  // label and group people even when the split filter is off.
   const agentsMap = {};
   for (const r of rows) {
     const k = agentKey(r);
     const a = asgById[r.assignment_id] || {};
     const sid = a.subject_user_id || r.subject_user_id || null;
-    if (!agentsMap[k]) agentsMap[k] = { name: agentName(r), subject_user_id: sid };
+    if (!agentsMap[k]) agentsMap[k] = { name: agentName(r), subject_user_id: sid, fronter: 0, closer: 0 };
     else if (!agentsMap[k].subject_user_id && sid) agentsMap[k].subject_user_id = sid;
+    agentsMap[k][r.subject_role === 'closer' ? 'closer' : 'fronter']++;
   }
-  const agents = Object.entries(agentsMap).map(([key, v]) => ({ key, name: v.name, subject_user_id: v.subject_user_id })).sort((a, b) => a.name.localeCompare(b.name));
+  const agents = Object.entries(agentsMap)
+    .map(([key, v]) => ({ key, name: v.name, subject_user_id: v.subject_user_id, role: v.closer > v.fronter ? 'closer' : 'fronter' }))
+    .sort((a, b) => a.name.localeCompare(b.name));
   const reviewersMap = {};
   for (const r of rows) if (r.reviewer_id) reviewersMap[r.reviewer_id] = uname[r.reviewer_id] || 'Unknown';
   const reviewers = Object.entries(reviewersMap).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
@@ -2540,14 +2561,46 @@ router.get('/assignments/:id/crm-fields', asyncHandler(async (req, res) => {
   const allowed = await allowedCompanyIds(req);
   if (allowed && !allowed.includes(a.company_id)) return res.status(403).json({ error: 'Forbidden' });
   let fields = {}, extra = {};
+  // The CENTER the scorecard asks for. Resolved, never guessed:
+  //   fronter_center — the company that produced the lead, i.e. the TRANSFER's
+  //                    company. On a closer-leg row that is the linked transfer's
+  //                    company, not the sale's (the materializer stores closer work
+  //                    under the CLOSER company — printing that on a field labelled
+  //                    "Fronter_Center" would be a confident wrong answer).
+  //   center_name    — the center of whoever is being evaluated: the closer company
+  //                    on a sale, the fronter company on a transfer.
+  // Deliberately NOT derived from the dialer agent id: a dual-id agent resolves to
+  // different companies down that path (the drift fixed in 840615f). No link → the
+  // key is left off entirely, so the cell stays blank rather than wrong.
+  let fronterCompanyId = null, ownCompanyId = null;
   if (a.sale_id) {
     const { data: s } = await supabaseAdmin.from('sales')
-      .select('form_data, customer_name, customer_phone, customer_address, plan, client_name, sale_date, reference_no').eq('id', a.sale_id).maybeSingle();
-    if (s) { fields = s.form_data && typeof s.form_data === 'object' ? s.form_data : {}; extra = { customer_name: s.customer_name, customer_phone: s.customer_phone, customer_address: s.customer_address, plan: s.plan, client_name: s.client_name, date: s.sale_date, reference_no: s.reference_no }; }
+      .select('form_data, customer_name, customer_phone, customer_address, plan, client_name, sale_date, reference_no, closer_disposition, company_id, transfer_id').eq('id', a.sale_id).maybeSingle();
+    if (s) {
+      fields = s.form_data && typeof s.form_data === 'object' ? s.form_data : {};
+      extra = { customer_name: s.customer_name, customer_phone: s.customer_phone, customer_address: s.customer_address, plan: s.plan, client_name: s.client_name, date: s.sale_date, reference_no: s.reference_no, disposition: s.closer_disposition };
+      ownCompanyId = s.company_id || null;
+      if (s.transfer_id) {
+        const { data: t } = await supabaseAdmin.from('transfers').select('company_id').eq('id', s.transfer_id).maybeSingle();
+        fronterCompanyId = t?.company_id || null;
+      }
+    }
   } else if (a.transfer_id) {
     const { data: t } = await supabaseAdmin.from('transfers')
-      .select('form_data, normalized_phone, created_at, latest_disposition, vicidial_vendor_code').eq('id', a.transfer_id).maybeSingle();
-    if (t) { fields = t.form_data && typeof t.form_data === 'object' ? t.form_data : {}; extra = { customer_phone: t.normalized_phone, date: t.created_at, disposition: t.latest_disposition, vendor_code: t.vicidial_vendor_code }; }
+      .select('form_data, normalized_phone, created_at, latest_disposition, vicidial_vendor_code, company_id').eq('id', a.transfer_id).maybeSingle();
+    if (t) {
+      fields = t.form_data && typeof t.form_data === 'object' ? t.form_data : {};
+      extra = { customer_phone: t.normalized_phone, date: t.created_at, disposition: t.latest_disposition, vendor_code: t.vicidial_vendor_code };
+      fronterCompanyId = t.company_id || null;
+      ownCompanyId = t.company_id || null;
+    }
+  }
+  const coIds = [...new Set([fronterCompanyId, ownCompanyId].filter(Boolean))];
+  if (coIds.length) {
+    const { data: cos } = await supabaseAdmin.from('companies').select('id, name').in('id', coIds);
+    const nameOf = Object.fromEntries((cos || []).map(c => [c.id, c.name]));
+    if (nameOf[fronterCompanyId]) extra.fronter_center = nameOf[fronterCompanyId];
+    if (nameOf[ownCompanyId])     extra.center_name    = nameOf[ownCompanyId];
   }
   res.json({ fields, extra });
 }));

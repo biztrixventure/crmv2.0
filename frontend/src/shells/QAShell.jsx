@@ -16,6 +16,7 @@ import { QAAgentDashboard, QAManagerDashboard } from '../components/QA/QADashboa
 import { Donut, Bars, Lines, PALETTE } from '../components/QA/Charts';
 import { isSheetConfig } from '../utils/qaSheetFormula';
 import ThemedSelect from '../components/UI/Select';
+import FilterBar, { FilterSelect } from '../components/UI/FilterBar';
 import { useHistoryTab } from '../hooks/useHistoryTab';
 import { useNavFocus } from '../contexts/FocusContext';
 
@@ -333,7 +334,12 @@ function metaAutoFill(cfg, a) {
   const dispo = a.disposition || a.dispo || rec.disposition || '';
   for (const f of (cfg?.meta_fields || [])) {
     const k = `${f.key} ${f.label || ''}`.toLowerCase();
-    if (/center|company/.test(k)) continue;         // center name isn't ours to guess
+    // Center stays out of the fuzzy pass — it is RESOLVED, not guessed:
+    // /qa/assignments/:id/crm-fields returns fronter_center (the linked
+    // transfer's company) and center_name (the evaluated party's company), and
+    // crmAutoFill below fills them by exact normalized-name match. No link → the
+    // cell stays blank rather than naming the wrong center.
+    if (/center|company/.test(k)) continue;
     else if (/call.?id|lead.?id|call_id/.test(k)) out[f.key] = rec.lead_id || a.lead_id || a.call_id || '';
     else if (/date/.test(k)) { const d = a.subject_date || a.call_date || rec.start_time || a.created_at; out[f.key] = d ? new Date(d).toLocaleDateString() : ''; }
     else if (/agent/.test(k)) out[f.key] = a.agent_name || a.agent_display || a.subject_name || '';   // BEFORE the /name/ rule
@@ -363,6 +369,26 @@ function crmAutoFill(cfg, fields, extra) {
     for (const cand of [normKey(f.key), normKey(f.label)]) { if (byNorm[cand] != null) { out[f.key] = String(byNorm[cand]); break; } }
   }
   return out;
+}
+
+// Pre-fill the Call_Outcome column from the disposition the CLOSER recorded on
+// the sale (sales.closer_disposition, surfaced as crm-fields extra.disposition;
+// falls back to the disposition already on the queue row).
+//
+// EXACT MATCH ONLY, on purpose. call_outcome is a fixed option list and
+// SheetScoreRow renders a <select>: a value that isn't in the list renders as
+// blank while still being submitted, and the outcome formula would score it 0.
+// A silent 0 on a real call is worse than an empty cell the agent has to fill,
+// so anything that isn't literally one of the configured options is left alone.
+// Case/whitespace are normalised — that's still an exact match, not a mapping.
+// The cell stays fully editable either way; the QA agent has the last word.
+function outcomeAutoFill(cfg, a, extra) {
+  const co = cfg?.call_outcome;
+  if (!co?.key) return {};
+  const dispo = String(extra?.disposition ?? a?.disposition ?? a?.dispo ?? '').trim();
+  if (!dispo) return {};
+  const hit = (co.options || []).find(o => String(o).trim().toLowerCase() === dispo.toLowerCase());
+  return hit ? { [co.key]: hit } : {};
 }
 
 // ── scorecard form ────────────────────────────────────────────────────────────
@@ -407,7 +433,11 @@ function ScoreForm({ assignment, onScored }) {
       <SheetScoreRow
         key={assignment.id + (crm ? ':crm' : '')}
         config={scorecard.criteria}
-        initialValues={{ ...metaAutoFill(scorecard.criteria, assignment), ...crmAutoFill(scorecard.criteria, crm?.fields, crm?.extra) }}
+        initialValues={{
+          ...metaAutoFill(scorecard.criteria, assignment),
+          ...crmAutoFill(scorecard.criteria, crm?.fields, crm?.extra),
+          ...outcomeAutoFill(scorecard.criteria, assignment, crm?.extra),
+        }}
         busy={busy}
         onSubmit={async (payload) => {
           setBusy(true);
@@ -1047,14 +1077,161 @@ function AgentReport({ subjectId, subjectName, companyId, from, to }) {
   );
 }
 
+// ── the marking sheet ────────────────────────────────────────────────────────
+// The scored rows exactly as the QA agent filled them in: one row per review,
+// one column per scorecard field, grouped by scorecard (each card has its own
+// columns, so TRA and RCM can never share a table). Reads GET /qa/reviews — the
+// same endpoint, and the same raw per-field values, that the scoring UI writes.
+//
+// Column order mirrors SheetScoreRow so the sheet reads like the form that
+// produced it: meta → ratings → auto-fail → penalties → tracking → sale
+// compliance → outcome → verdict, then the computed columns off the review row.
+function sheetColumns(card) {
+  const c = card?.criteria;
+  if (!c) return [];
+  if (Array.isArray(c)) return c.map(x => ({ key: x.key, label: x.label || x.key }));   // legacy weighted card
+  const cols = [];
+  (c.meta_fields || []).forEach(f => cols.push({ key: f.key, label: f.label || f.key }));
+  (c.rating_criteria || []).forEach(f => cols.push({ key: f.key, label: f.label || f.key }));
+  ((c.autofail || {}).fields || []).forEach(f => cols.push({ key: f.key, label: f.label || f.key }));
+  (c.penalty_flags || []).forEach(f => cols.push({ key: f.key, label: f.label || f.key }));
+  (c.tracking_flags || []).forEach(f => cols.push({ key: f.key, label: f.label || f.key }));
+  ((c.quality_score || {}).fields || []).forEach(f => cols.push({ key: f.key, label: f.label || f.key }));
+  if (c.call_outcome)  cols.push({ key: c.call_outcome.key,  label: c.call_outcome.label  || 'Call_Outcome' });
+  if (c.manual_status) cols.push({ key: c.manual_status.key, label: c.manual_status.label || 'QA Overall Status' });
+  return cols;
+}
+// computed columns live on the review row itself, not in `values`
+const COMPUTED = [
+  { key: 'base_score',      label: 'Base_Score' },
+  { key: 'autofail_result', label: 'Auto_Fail' },
+  { key: 'total_penalty',   label: 'Total_Penalty' },
+  { key: 'final_score',     label: 'Final_Score' },
+  { key: 'quality_score',   label: 'Quality_Score' },
+];
+
+function ReviewSheet({ companyId, method, subjectRole, reviewerId, agentSel, dateFrom, dateTo, canExportQa }) {
+  const [d, setD] = useState(null);
+  const [loading, setLoading] = useState(true);
+  // `agentSel` is the row from data.agents. /qa/reviews keys the reviewed person
+  // on subject_user_id (a CRM account) and falls back to matching the resolved
+  // display label — dialer-only agents have no account, so both paths matter.
+  const subjectId = agentSel?.subject_user_id || '';
+  const agentLabel = agentSel && !agentSel.subject_user_id ? (agentSel.name || '') : '';
+
+  useEffect(() => {
+    setLoading(true);
+    const params = {};
+    if (companyId)   params.company_id = companyId;
+    if (method)      params.method = method;
+    if (subjectRole) params.subject_role = subjectRole;
+    if (reviewerId)  params.reviewer_id = reviewerId;
+    if (subjectId)   params.subject_user_id = subjectId;
+    if (agentLabel)  params.agent = agentLabel;
+    if (dateFrom)    params.date_from = dateFrom;
+    if (dateTo)      params.date_to = dateTo;
+    client.get('qa/reviews', { params })
+      .then(r => setD(r.data)).catch(() => setD(null)).finally(() => setLoading(false));
+  }, [companyId, method, subjectRole, reviewerId, subjectId, agentLabel, dateFrom, dateTo]);
+
+  if (loading && !d) return <div className="text-center py-16"><Loader2 className="animate-spin inline" size={22} style={{ color: 'var(--color-text-tertiary)' }} /></div>;
+  const rows = d?.reviews || [];
+  if (!rows.length) return <div className="text-center py-16 text-sm" style={{ color: 'var(--color-text-tertiary)' }}>No scored reviews match these filters. The sheet fills in as your QA team marks calls.</div>;
+
+  // group by scorecard — one table per card, because the columns ARE the card
+  const groups = {};
+  for (const r of rows) (groups[r.scorecard_id || 'none'] ||= []).push(r);
+
+  const csv = (cardId, cols, list, cardName) => {
+    const head = ['Date', 'Reviewed', 'Side', 'QA agent', 'Customer', ...cols.map(c => c.label), ...COMPUTED.map(c => c.label), 'Result', 'Notes'];
+    const esc = v => { const s = String(v ?? ''); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+    const lines = [head.map(esc).join(',')];
+    for (const r of list) lines.push([
+      r.call_date ? new Date(r.call_date).toLocaleDateString() : '',
+      r.agent || r.subject_name || '', r.subject_role || '', r.reviewer_name || '', r.customer_name || '',
+      ...cols.map(c => r.values?.[c.key] ?? ''),
+      ...COMPUTED.map(c => r[c.key] ?? ''),
+      r.passed === true ? 'Pass' : r.passed === false ? 'Fail' : (r.autofail_result || ''),
+      r.overall_notes || '',
+    ].map(esc).join(','));
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = `qa-marking-sheet_${(cardName || cardId).replace(/[^a-z0-9]+/gi, '-').toLowerCase()}_${dateFrom || 'all'}_${dateTo || 'all'}.csv`;
+    a.click(); URL.revokeObjectURL(a.href);
+  };
+
+  const th = { padding: '6px 8px', fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '.02em', color: 'var(--color-text-tertiary)', whiteSpace: 'nowrap', textAlign: 'left', borderBottom: '1px solid var(--color-border)' };
+  const td = { padding: '6px 8px', fontSize: 12, color: 'var(--color-text-secondary)', whiteSpace: 'nowrap', borderTop: '1px solid var(--color-border)' };
+
+  return (
+    <div className="space-y-4">
+      {d?.truncated && (
+        <div className="text-xs font-semibold px-3 py-2 rounded-xl m-0" style={{ background: 'color-mix(in srgb, var(--color-warning-600) 12%, transparent)', color: 'var(--color-warning-700)', border: '1px solid color-mix(in srgb, var(--color-warning-600) 30%, transparent)' }}>
+          Showing the {d.cap} most recent reviews — there are more in this range. Narrow the dates, the company or the method to see the rest.
+        </div>
+      )}
+      {Object.entries(groups).map(([cardId, list]) => {
+        const card = d?.scorecards?.[cardId] || null;
+        const cols = sheetColumns(card);
+        return (
+          <div key={cardId}>
+            <div className="flex items-center justify-between mb-1.5 flex-wrap gap-2">
+              <div className="text-sm font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                <Table2 size={15} />{card?.name || 'Reviews'}
+                <span className="text-[11px] font-normal" style={{ color: 'var(--color-text-tertiary)' }}>{list.length} scored{card?.method ? ` · ${String(card.method).toUpperCase()}` : ''}</span>
+              </div>
+              {canExportQa && (
+                <button onClick={() => csv(cardId, cols, list, card?.name)}
+                  className="flex items-center gap-1 text-[11px] font-bold px-2.5 py-1.5 rounded-lg"
+                  style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}
+                  title="Download this sheet exactly as shown, one row per scored review">
+                  <Download size={13} /> CSV
+                </button>
+              )}
+            </div>
+            <div className="rounded-xl" style={{ border: '1px solid var(--color-border)', overflowX: 'auto', maxHeight: 520, overflowY: 'auto' }}>
+              <table style={{ borderCollapse: 'collapse', width: 'max-content', minWidth: '100%' }}>
+                <thead style={{ position: 'sticky', top: 0, zIndex: 1, background: 'var(--color-surface-hover)' }}>
+                  <tr>
+                    {['Date', 'Reviewed', 'Side', 'QA agent', 'Customer'].map(h => <th key={h} style={th}>{h}</th>)}
+                    {cols.map(c => <th key={c.key} style={th}>{c.label}</th>)}
+                    {COMPUTED.map(c => <th key={c.key} style={{ ...th, color: 'var(--color-primary-600)' }}>{c.label}</th>)}
+                    <th style={th}>Result</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {list.map(r => (
+                    <tr key={r.id}>
+                      <td style={td}>{r.call_date ? new Date(r.call_date).toLocaleDateString() : '—'}</td>
+                      <td style={{ ...td, color: 'var(--color-text)', fontWeight: 600 }}>{r.agent || r.subject_name || '—'}</td>
+                      <td style={td}>{r.subject_role || '—'}</td>
+                      <td style={td}>{r.reviewer_name || '—'}</td>
+                      <td style={td}>{r.customer_name || '—'}</td>
+                      {cols.map(c => <td key={c.key} style={td}>{r.values?.[c.key] ?? '—'}</td>)}
+                      {COMPUTED.map(c => <td key={c.key} style={{ ...td, fontWeight: 700, color: 'var(--color-text)' }}>{r[c.key] ?? '—'}</td>)}
+                      <td style={{ ...td, fontWeight: 800, color: r.passed === false ? 'var(--color-error-600)' : r.passed === true ? 'var(--color-success-600)' : 'var(--color-text-tertiary)' }}>
+                        {r.passed === true ? 'Pass' : r.passed === false ? 'Fail' : (r.autofail_result || '—')}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function ReportsTab({ companyId, companyName = '' }) {
   const { canExport } = useAuth();
   const today = new Date().toISOString().slice(0, 10);
   const monthAgo = new Date(Date.now() - 29 * 864e5).toISOString().slice(0, 10);
-  const [f, setF] = useState({ method: '', agent: '', reviewer: '', date_from: monthAgo, date_to: today });
+  const [f, setF] = useState({ method: '', agent: '', reviewer: '', subject_role: '', date_from: monthAgo, date_to: today });
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [mode, setMode] = useState('team');   // 'team' overview | 'agent' single-user report
+  const [mode, setMode] = useState('team');   // 'team' overview | 'agent' single-user report | 'sheet' marking sheet
 
   const load = useCallback(() => {
     setLoading(true);
@@ -1095,26 +1272,58 @@ function ReportsTab({ companyId, companyName = '' }) {
   return (
     <div className="h-full overflow-auto pb-4">
       <div className="max-w-[1480px] mx-auto w-full">
-      {/* filters */}
-      <div className="flex items-center gap-2 flex-wrap mb-4">
-        <div className="flex items-center gap-1 p-1 rounded-xl" style={{ background: 'var(--color-surface-hover)', border: '1px solid var(--color-border)' }}>
-          {[['team', 'Team overview'], ['agent', 'Single agent']].map(([k, l]) => (
-            <button key={k} onClick={() => setMode(k)} title={k === 'team' ? 'Charts + tables across the whole team' : 'Pick one reviewed fronter/closer for their full performance report'} className="px-3 py-1 rounded-lg text-xs font-bold" style={{ background: mode === k ? 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))' : 'transparent', color: mode === k ? '#fff' : 'var(--color-text-secondary)' }}>{l}</button>
-          ))}
-        </div>
-        <ThemedSelect value={f.agent} onChange={e => set('agent', e.target.value)} style={inp} title={mode === 'agent' ? 'Pick the agent to report on' : 'Reviewed agent'}>
+      {/* filters — the shared FilterBar every other list view uses, so QA reads
+          as one product with the fronter/manager shells rather than its own
+          inline control row. Pills = view mode + fronter/closer side; extras =
+          the agent / method / reviewer selects and the export buttons. */}
+      <FilterBar
+        dateRange={{
+          value: { date_from: f.date_from, date_to: f.date_to },
+          onChange: v => setF(o => ({ ...o, date_from: v?.date_from || '', date_to: v?.date_to || '' })),
+          defaultPreset: '30d',
+        }}
+        // Clearing resets the selects; FilterBar itself resets the date range, so
+        // don't touch the dates here or the two writes fight each other.
+        onClearAll={() => setF(o => ({ ...o, method: '', agent: '', reviewer: '', subject_role: '' }))}
+        activeChips={[
+          f.subject_role && { key: 'side', label: f.subject_role === 'fronter' ? 'Fronters only' : 'Closers only', onRemove: () => setF(o => ({ ...o, subject_role: '', agent: '' })) },
+          f.agent && { key: 'agent', label: `Agent: ${(data?.agents || []).find(a => a.key === f.agent)?.name || f.agent}`, onRemove: () => set('agent', '') },
+          f.method && { key: 'method', label: `Method: ${f.method.toUpperCase()}`, onRemove: () => set('method', '') },
+          f.reviewer && { key: 'reviewer', label: `QA agent: ${(data?.reviewers || []).find(r => r.id === f.reviewer)?.name || f.reviewer}`, onRemove: () => set('reviewer', '') },
+        ].filter(Boolean)}
+        statusPills={<>
+          <div className="flex items-center gap-1 p-1 rounded-xl" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+            {[['team', 'Team overview'], ['agent', 'Single agent'], ['sheet', 'Marking sheet']].map(([k, l]) => (
+              <button key={k} onClick={() => setMode(k)}
+                title={k === 'team' ? 'Charts + tables across the whole team'
+                     : k === 'agent' ? 'Pick one reviewed fronter/closer for their full performance report'
+                     : 'The scored rows exactly as the QA agent filled them in — one column per scorecard field'}
+                className="px-3 py-1 rounded-lg text-xs font-bold"
+                style={{ background: mode === k ? 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))' : 'transparent', color: mode === k ? '#fff' : 'var(--color-text-secondary)' }}>{l}</button>
+            ))}
+          </div>
+          {/* Fronter / closer side. Clears the agent too — the selector is rebuilt
+              from the filtered rows, so a closer left selected under "Fronters"
+              would report zero and look like missing data. */}
+          <div className="flex items-center gap-1 p-1 rounded-xl" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+            {[['', 'All'], ['fronter', 'Fronters'], ['closer', 'Closers']].map(([k, l]) => (
+              <button key={k || 'all'} onClick={() => setF(o => ({ ...o, subject_role: k, agent: '' }))}
+                title={k ? `Only reviews of ${l.toLowerCase()}` : 'Fronters and closers together'}
+                className="px-3 py-1 rounded-lg text-xs font-bold"
+                style={{ background: f.subject_role === k ? 'var(--color-primary-600)' : 'transparent', color: f.subject_role === k ? '#fff' : 'var(--color-text-secondary)' }}>{l}</button>
+            ))}
+          </div>
+        </>}
+        extras={<>
+        <FilterSelect value={f.agent} onChange={e => set('agent', e.target.value)} title={mode === 'agent' ? 'Pick the agent to report on' : 'Reviewed agent — the fronter or closer whose call was scored'}>
           <option value="">{mode === 'agent' ? 'Pick an agent…' : 'All agents'}</option>
-          {(data?.agents || []).map(a => <option key={a.key} value={a.key}>{a.name}</option>)}
-        </ThemedSelect>
-        <ThemedSelect value={f.method} onChange={e => set('method', e.target.value)} style={inp}><option value="">TRA + RCM</option><option value="tra">TRA</option><option value="rcm">RCM</option></ThemedSelect>
-        <ThemedSelect value={f.reviewer} onChange={e => set('reviewer', e.target.value)} style={inp} title="Scored by">
-          <option value="">Any reviewer</option>
+          {(data?.agents || []).map(a => <option key={a.key} value={a.key}>{a.name}{!f.subject_role && a.role ? ` · ${a.role}` : ''}</option>)}
+        </FilterSelect>
+        <FilterSelect value={f.method} onChange={e => set('method', e.target.value)} title="Method"><option value="">TRA + RCM</option><option value="tra">TRA</option><option value="rcm">RCM</option></FilterSelect>
+        <FilterSelect value={f.reviewer} onChange={e => set('reviewer', e.target.value)} title="Scored by — which QA agent did the marking">
+          <option value="">Any QA agent</option>
           {(data?.reviewers || []).map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-        </ThemedSelect>
-        <label className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-text-secondary)' }}><Calendar size={13} />from</label>
-        <ThemedDate value={f.date_from} max={f.date_to} onChange={e => set('date_from', e.target.value)} style={inp} />
-        <label className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>to</label>
-        <ThemedDate value={f.date_to} max={today} onChange={e => set('date_to', e.target.value)} style={inp} />
+        </FilterSelect>
         <button onClick={load} className="p-2 rounded-lg" style={{ background: 'var(--color-surface-hover)' }} title="Refresh"><RefreshCw size={14} style={{ color: 'var(--color-text-secondary)' }} /></button>
         {canExport('qa') && (
         <button onClick={() => {
@@ -1149,9 +1358,21 @@ function ReportsTab({ companyId, companyName = '' }) {
         </button>
         )}
         <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>from scored reviews only</span>
-      </div>
+        </>}
+      />
 
-      {mode === 'agent'
+      {mode === 'sheet'
+        ? <ReviewSheet
+            companyId={companyId}
+            method={f.method}
+            subjectRole={f.subject_role}
+            reviewerId={f.reviewer}
+            agentSel={(data?.agents || []).find(a => a.key === f.agent) || null}
+            dateFrom={f.date_from}
+            dateTo={f.date_to}
+            canExportQa={canExport('qa')}
+          />
+        : mode === 'agent'
         ? (() => {
             const sel = (data?.agents || []).find(a => a.key === f.agent);
             return (f.agent && sel?.subject_user_id)
