@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Settings2, RefreshCw, Search, BarChart3, ShieldCheck, Bell, Building2, Copy, LayoutTemplate, Workflow, LayoutDashboard, Car, Gauge, Boxes, Highlighter } from 'lucide-react';
+import { Settings2, RefreshCw, Search, BarChart3, ShieldCheck, Bell, Building2, Copy, LayoutTemplate, Workflow, LayoutDashboard, Car, Gauge, Boxes, Highlighter, CalendarClock } from 'lucide-react';
 import client from '../../../api/client';
 import ResellRules from './ResellRules';
 import DedupRules from './DedupRules';
@@ -13,6 +13,7 @@ import DrawerLayoutRules from './DrawerLayoutRules';
 import SystemRules from './SystemRules';
 import BatchRules from './BatchRules';
 import SaleHighlightRules from './SaleHighlightRules';
+import PostDateRules from './PostDateRules';
 import ThemedSelect from '../../UI/Select';
 import { useAuth } from '../../../contexts/AuthContext';
 
@@ -27,6 +28,7 @@ const PAGES = [
   { id: 'kpi',          label: 'Stats & KPIs',           icon: BarChart3,   Component: KpiRules },
   { id: 'compliance',   label: 'Compliance Workflow',    icon: ShieldCheck, Component: ComplianceRules },
   { id: 'sale_highlight', label: 'Sale Highlight',       icon: Highlighter, Component: SaleHighlightRules },
+  { id: 'post_dates',   label: 'Post Dates',             icon: CalendarClock, Component: PostDateRules },
   { id: 'transfer',     label: 'Transfer Lifecycle',     icon: Workflow,    Component: TransferStatusRules },
   { id: 'batch_rules',  label: 'Batch Distribution',     icon: Boxes,       Component: BatchRules },
   { id: 'vehicle',      label: 'Vehicle Eligibility',    icon: Car,         Component: VehicleEligibilityRules },

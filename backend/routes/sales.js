@@ -1672,6 +1672,122 @@ router.patch('/:id/reassign', asyncHandler(async (req, res) => {
 }));
 
 // ============================================================================
+// POST /sales/:id/charge-failed — the branch that never existed
+//
+// The charge day arrives, the closer calls, and the card does NOT go through.
+// Until now there was nothing to do with that: no reason, no retry, no record.
+// The record just sat in the Post Date tab with a date in the past.
+//
+// Body: { reason_key, note?, next_charge_at }
+//   next_charge_at is REQUIRED — a failed charge always gets another date. That
+//   is the product decision: the record stays in the Post Date tab and the
+//   reminder re-arms, rather than disappearing into a dead status. Clearing
+//   charge_notified_at is what re-arms it (processDueCharges only picks up rows
+//   where it IS NULL), exactly as editing the charge date already does.
+//
+// The attempt row is append-only, so "declined twice, then paid" stays readable
+// a month later. sales.last_charge_fail_* is the denormalized newest attempt so
+// the tab and the compliance list can show the reason without a per-row join.
+// ============================================================================
+router.post('/:id/charge-failed', asyncHandler(async (req, res) => {
+  const userId   = req.user.id;
+  const userRole = req.user.role;
+  const { id }   = req.params;
+  const { reason_key, note, next_charge_at } = req.body || {};
+
+  if (!reason_key || typeof reason_key !== 'string') {
+    return res.status(400).json({ error: 'A reason is required to record a failed charge' });
+  }
+  if (!next_charge_at) {
+    return res.status(400).json({ error: 'Pick the next date to try the card' });
+  }
+  const nextAt = new Date(next_charge_at);
+  if (Number.isNaN(nextAt.getTime())) {
+    return res.status(400).json({ error: 'next_charge_at is not a valid date' });
+  }
+
+  const { data: sale, error } = await supabaseAdmin
+    .from('sales').select('id,closer_id,created_by,closer_disposition,charge_at').eq('id', id).single();
+  if (error || !sale) return res.status(404).json({ error: 'Sale not found' });
+
+  // Owner-or-privileged, same shape as submit-review. A manager or compliance
+  // may record the failure on the closer's behalf; another closer may not.
+  const isOwner     = sale.created_by === userId || sale.closer_id === userId;
+  const privileged  = ['superadmin', 'compliance_manager', 'company_admin',
+                       'operations_manager', 'closer_manager'].includes(userRole);
+  if (!isOwner && !privileged) {
+    return res.status(403).json({ error: 'Only the sale owner can record a failed charge' });
+  }
+
+  // Guard the state, not just the permission: a sale that is no longer a
+  // post-date has already been charged, and logging a failure against it would
+  // put a contradictory reason on a live sale.
+  if (!isPostDateDispo(sale.closer_disposition)) {
+    return res.status(400).json({ error: 'This sale is not post-dated — there is no scheduled charge to fail' });
+  }
+
+  const nextIso = nextAt.toISOString();
+  const now     = new Date().toISOString();
+
+  // Append-only log first. If the sale update below fails we would rather hold
+  // an attempt with no reschedule than reschedule with no reason on record.
+  const { error: attemptErr } = await supabaseAdmin.from('post_date_attempts').insert({
+    sale_id: id,
+    reason_key,
+    note: note || null,
+    previous_charge_at: sale.charge_at || null,
+    next_charge_at: nextIso,
+    actor_id: userId,
+  });
+  if (attemptErr) return res.status(500).json({ error: attemptErr.message });
+
+  const { data: updated, error: updErr } = await supabaseAdmin
+    .from('sales')
+    .update({
+      charge_at: nextIso,
+      charge_notified_at: null,        // re-arms processDueCharges for the new date
+      last_charge_fail_reason_key: reason_key,
+      last_charge_fail_at: now,
+      last_modified_by: userId,
+      updated_at: now,
+    })
+    .eq('id', id)
+    .select()
+    .single();
+  if (updErr) return res.status(500).json({ error: updErr.message });
+
+  logger.info('POST_DATE_FAIL', `Sale ${id} charge failed (${reason_key}), retry ${nextIso}`);
+  res.json({ sale: updated });
+}));
+
+// ============================================================================
+// GET /sales/:id/charge-attempts — the failed-charge history for one sale.
+// Read-only. Compliance opens this on the sale record to see why a post-date
+// has been sitting for three weeks; the closer sees their own history.
+// ============================================================================
+router.get('/:id/charge-attempts', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { data, error } = await supabaseAdmin
+    .from('post_date_attempts')
+    .select('id,reason_key,note,previous_charge_at,next_charge_at,actor_id,created_at')
+    .eq('sale_id', id)
+    .order('created_at', { ascending: false });
+  if (error) return res.status(500).json({ error: error.message });
+
+  // Resolve actor display names in one round-trip rather than N.
+  const actorIds = [...new Set((data || []).map(a => a.actor_id).filter(Boolean))];
+  let names = {};
+  if (actorIds.length) {
+    const { data: profs } = await supabaseAdmin
+      .from('user_profiles').select('user_id,first_name,last_name').in('user_id', actorIds);
+    names = Object.fromEntries((profs || []).map(p => [
+      p.user_id, [p.first_name, p.last_name].filter(Boolean).join(' ') || null,
+    ]));
+  }
+  res.json({ attempts: (data || []).map(a => ({ ...a, actor_name: names[a.actor_id] || null })) });
+}));
+
+// ============================================================================
 // POST /sales/:id/submit-review — Closer submits sale for compliance review
 // ============================================================================
 router.post('/:id/submit-review', asyncHandler(async (req, res) => {

@@ -16,6 +16,7 @@ import NumberRiskCheck from './NumberRiskCheck';
 import ReassignOwnership from './ReassignOwnership';
 import { useDrawerLayout } from '../../hooks/useDrawerLayout';
 import { useCancellationReasons } from '../../hooks/useCancellationReasons';
+import { usePostDateFailReasons } from '../../hooks/usePostDateFailReasons';
 import SaleCopyBar from './SaleCopyBar';
 
 const SALE_BADGE = {
@@ -86,6 +87,17 @@ const Row = ({ label, value, mono = false, highlight }) => {
   );
 };
 
+// A timestamptz in the viewer's own timezone. charge_at / post_dated_at are
+// INSTANTS, not the zone-free DATE that sale_date is, so they must not be
+// formatted by slicing the ISO string.
+const fmtInstant = (v) => {
+  if (!v) return '—';
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString([], {
+    month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit',
+  });
+};
+
 const Section = ({ title, children }) => (
   <div className="mb-4 sm:mb-5">
     {/* mt-0 mb-2, not `m-0 mb-2` — the global `p { margin: 12px 0 }` has to be
@@ -107,6 +119,8 @@ export default function SaleDetailDrawer({ sale: saleProp, onClose, onResold }) 
   const { sections } = useDrawerLayout('sale');
   // Reason keys → readable labels (same catalog the cancel modals use).
   const { labelOf: reasonLabelOf } = useCancellationReasons();
+  // Failed-charge reason keys → labels (post_date_fail_reasons catalog).
+  const { labelOf: postDateFailLabel } = usePostDateFailReasons();
 
   // Did we get here by tapping a sale-review notification, on a phone? If so
   // the drawer opens straight onto the essentials view — the recipient tapped
@@ -148,6 +162,8 @@ export default function SaleDetailDrawer({ sale: saleProp, onClose, onResold }) 
   const [lifetime, setLifetime] = useState(null);
   // FIX 4 — multi-vehicle bundle siblings (shared sale_group_id, mig 165).
   const [groupSiblings, setGroupSiblings] = useState([]);
+  // Every failed charge on this post-date (mig 221, append-only).
+  const [chargeAttempts, setChargeAttempts] = useState([]);
   useEffect(() => {
     setGroupSiblings([]);
     if (!sale?.id) return;
@@ -186,6 +202,19 @@ export default function SaleDetailDrawer({ sale: saleProp, onClose, onResold }) 
     }).catch(() => { /* endpoint optional; silent fallback */ });
     return () => { cancelled = true; };
   }, [sale?.id, sale?.original_sale_id]);
+
+  // Failed-charge history for a post-date. Only fetched when the sale carries
+  // the mig-221 origin marker, so a normal sale costs no round-trip. This is
+  // where compliance reads WHY a card keeps not going through — that reason
+  // used to exist nowhere at all.
+  useEffect(() => {
+    if (!sale?.id || !sale?.post_dated_at) { setChargeAttempts([]); return; }
+    let cancelled = false;
+    client.get(`sales/${sale.id}/charge-attempts`)
+      .then(r => { if (!cancelled) setChargeAttempts(r.data?.attempts || []); })
+      .catch(() => { /* pre-mig-221 — the section just hides */ });
+    return () => { cancelled = true; };
+  }, [sale?.id, sale?.post_dated_at]);
 
   // Lifetime customer fetch — by phone so cross-company sales surface even
   // when this user has never seen the other rows directly. Server-side
@@ -468,6 +497,46 @@ export default function SaleDetailDrawer({ sale: saleProp, onClose, onResold }) 
                     </span>
                   </button>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {/* Post-date origin + every failed charge on it (mig 221). Renders on
+              any sale that was EVER post-dated, including one already charged —
+              that is the whole point of the P→S pill: compliance can see the
+              money arrived late and why. Hidden entirely on a normal sale. */}
+          {sale.post_dated_at && (
+            <div className="mb-5">
+              <p className="text-xs font-bold uppercase tracking-widest mt-0 mb-2" style={{ color: '#b45309' }}>
+                Post-Date{chargeAttempts.length ? ` · ${chargeAttempts.length} failed attempt${chargeAttempts.length === 1 ? '' : 's'}` : ''}
+              </p>
+              <div className="rounded-xl px-3 sm:px-4 py-3"
+                style={{ backgroundColor: 'color-mix(in srgb, #f59e0b 10%, transparent)', border: '1px solid color-mix(in srgb, #f59e0b 35%, transparent)' }}>
+                <p className="m-0 text-xs font-semibold" style={{ color: 'var(--color-text)' }}>
+                  {sale.post_date_converted_at
+                    ? <>Post-dated {fmtInstant(sale.post_dated_at)} → <b>charged {fmtInstant(sale.post_date_converted_at)}</b></>
+                    : <>Post-dated {fmtInstant(sale.post_dated_at)} — <b>card not charged yet</b>{sale.charge_at ? <>, next try {fmtInstant(sale.charge_at)}</> : null}</>}
+                </p>
+                {chargeAttempts.length > 0 && (
+                  <div className="mt-2.5 space-y-1.5">
+                    {chargeAttempts.map(a => (
+                      <div key={a.id} className="rounded-lg px-2.5 py-1.5"
+                        style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+                        <p className="m-0 text-[11px] font-bold" style={{ color: '#dc2626' }}>
+                          {postDateFailLabel(a.reason_key)}
+                        </p>
+                        <p className="m-0 text-[11px] mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                          {fmtInstant(a.created_at)}
+                          {a.next_charge_at ? ` · rescheduled to ${fmtInstant(a.next_charge_at)}` : ''}
+                          {a.actor_name ? ` · ${a.actor_name}` : ''}
+                        </p>
+                        {a.note && (
+                          <p className="m-0 text-[11px] mt-1" style={{ color: 'var(--color-text)' }}>“{a.note}”</p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           )}

@@ -94,6 +94,8 @@ import SaleDetailDrawer from "../components/Shared/SaleDetailDrawer";
 import client from "../api/client";
 import DevCredit from "../components/DevCredit";
 import CallChecklistWidget from "../components/Closer/CallChecklistWidget";
+import ChargeFailedModal from "../components/Closer/ChargeFailedModal";
+import { usePostDateFailReasons } from "../hooks/usePostDateFailReasons";
 import FronterNumbersWidget from "../components/Numbers/FronterNumbersWidget";
 
 const TRANSFER_BADGE = { pending: 'warning', assigned: 'info', completed: 'success', cancelled: 'error', rejected: 'error' };
@@ -262,6 +264,10 @@ const StaffShell = () => {
   // Detail drawers
   const [detailTransfer, setDetailTransfer] = useState(null);
   const [detailSale, setDetailSale]         = useState(null);
+  // The post-date whose card just failed — opens ChargeFailedModal.
+  const [failSale, setFailSale]             = useState(null);
+  // Resolves last_charge_fail_reason_key → the admin-configured label.
+  const { labelOf: failReasonLabel }        = usePostDateFailReasons();
 
   // ── Team Transfers tab (rich server-side view) ───────────────────────────
   const [xferTabRows,    setXferTabRows]    = useState([]);
@@ -1543,16 +1549,34 @@ const StaffShell = () => {
                                 <CalendarDays size={11} /> Charge {new Date(s.charge_at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
                               </p>
                             )}
+                            {/* Last failed attempt — so a card that has bounced
+                                twice reads that way at a glance, not as a fresh
+                                post-date whose date happens to have moved. */}
+                            {s.last_charge_fail_reason_key && (
+                              <p className="m-0 text-[11px] mt-1 flex items-center gap-1 font-semibold" style={{ color: '#dc2626' }}>
+                                <AlertTriangle size={11} /> {failReasonLabel(s.last_charge_fail_reason_key)}
+                              </p>
+                            )}
                           </div>
                           <SaleStatusBadge sale={s} size="sm" />
                         </div>
-                        <div className="flex gap-2 mt-3" onClick={e => e.stopPropagation()}>
+                        <div className="flex gap-2 mt-3 flex-wrap" onClick={e => e.stopPropagation()}>
                           {isPost && (
+                            <>
                             <button onClick={() => chargeSale(s.id, dispo)}
                               className="flex-1 py-1.5 px-3 rounded-lg text-xs font-bold text-white flex items-center justify-center gap-1 hover:scale-[1.02] transition-all"
                               style={{ background: 'var(--gradient-sidebar)' }}>
                               <DollarSign size={12} /> Charge → Sale
                             </button>
+                            {/* The other half of the charge call. Before this the
+                                closer had nowhere to put "declined" — the record
+                                just sat here with a date in the past. */}
+                            <button onClick={() => setFailSale(s)}
+                              className="px-3 py-1.5 rounded-lg text-xs font-bold border flex items-center gap-1 transition-all"
+                              style={{ borderColor: '#f59e0b66', color: '#b45309', background: '#f59e0b14' }}>
+                              <AlertTriangle size={11} /> Didn’t go through
+                            </button>
+                            </>
                           )}
                           <button onClick={() => { setEditSale(s); setEditSaleError(''); }}
                             className="px-3 py-1.5 rounded-lg text-xs font-semibold border flex items-center gap-1 transition-all hover:bg-bg-secondary"
@@ -2108,6 +2132,19 @@ const StaffShell = () => {
       <TransferDetailDrawer transfer={detailTransfer} onClose={() => setDetailTransfer(null)} />
       <SaleDetailDrawer     sale={detailSale}         onClose={() => setDetailSale(null)}
         onResold={(newSale) => { setDetailSale(null); if (newSale?.id) setEditSale(newSale); }} />
+
+      {/* Failed charge on a post-date: reason + a new date. The record stays in
+          the Post Date tab with its reminder re-armed, so refetching the current
+          section is all the UI has to do. */}
+      {failSale && (
+        <ChargeFailedModal sale={failSale} onClose={() => setFailSale(null)}
+          onDone={() => {
+            setFailSale(null);
+            setSaleSuccess('Recorded — rescheduled, you’ll be reminded again.');
+            fetchSales(closerSalesParams());
+            setTimeout(() => setSaleSuccess(''), 4000);
+          }} />
+      )}
 
       {/* Closers only — floating call-checklist mini-panel */}
       {isCloser && <CallChecklistWidget />}

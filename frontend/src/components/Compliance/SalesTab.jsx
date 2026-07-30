@@ -33,6 +33,18 @@ import {
 import { useTableQuery, useAbortable, isCanceled } from '../../hooks/useTableQuery';
 import { useFilterOptions } from '../../hooks/useFilterOptions';
 
+// A timestamptz rendered in the VIEWER's timezone. Distinct from fmtSaleDate,
+// which slices the leading YYYY-MM-DD off the string: correct for sale_date (a
+// DATE column, no zone) but wrong for an instant — a stamp written at 8pm ET is
+// already tomorrow in UTC, so slicing would show the wrong day.
+const fmtStamp = (v) => {
+  if (!v) return '—';
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString([], {
+    month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit',
+  });
+};
+
 // When the sale's status was last changed. The edit_history audit trail records
 // every status transition with its timestamp — the latest one is the "status
 // updated" date (e.g. the moment an approved sale was flipped to cancelled).
@@ -451,6 +463,26 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                       <td className="px-3 py-1.5">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <SaleStatusBadge sale={s} size="sm" />
+                          {/* Came from a post-date. Deliberately a pill and not
+                              a banner — the ask was "no major prompt", just
+                              enough to understand at a glance. P→S = charged and
+                              converted; P = still waiting on the card. Reads the
+                              markers stamped by trg_stamp_post_date (mig 221);
+                              before that, charging a post-date overwrote every
+                              trace it had ever been one. */}
+                          {s.post_dated_at && (
+                            <span title={s.post_date_converted_at
+                                ? `Post-dated ${fmtStamp(s.post_dated_at)} → charged ${fmtStamp(s.post_date_converted_at)}`
+                                : `Post-dated ${fmtStamp(s.post_dated_at)} — card not charged yet`}
+                              className="inline-flex items-center text-[11px] sm:text-[10px] font-extrabold px-1.5 py-0.5 rounded whitespace-nowrap"
+                              style={{
+                                backgroundColor: 'color-mix(in srgb, var(--color-primary-500, #6366f1) 16%, transparent)',
+                                color: 'var(--color-primary-700, #4338ca)',
+                                border: '1px solid color-mix(in srgb, var(--color-primary-500, #6366f1) 40%, transparent)',
+                              }}>
+                              {s.post_date_converted_at ? 'P → S' : 'P'}
+                            </span>
+                          )}
                           {(() => { const t = salePaidTenure(s); return t ? (
                             <span title={`Kept paying ${t.label} — sale ${fmtSaleDate(s.sale_date)} → cancelled ${fmtSaleDate(s.cancellation_date)}`}
                               className="inline-flex items-center text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded whitespace-nowrap"
