@@ -109,9 +109,15 @@ export const hasRoleAccess = (userRole, requiredRole) => {
     return normRequired === 'admin';
   }
 
-  // Compliance manager: only /compliance
+  // Compliance manager: /compliance, plus the QA shell. Compliance OWNS the QA
+  // department (they wire the org chart), and the role already carries every QA
+  // permission the API gates on — view_qa_queue, view_qa_reports,
+  // view_all_qa_reviews, assign_qa_tasks, manage_qa_config, override_qa_review —
+  // so /qa was blocked here and nowhere else. They still LAND on /compliance
+  // (getRoleRoute is unchanged); this only lets them reach /qa by URL. No other
+  // shell opens up.
   if (normUser === 'compliancemanager') {
-    return normRequired === 'compliancemanager';
+    return normRequired === 'compliancemanager' || normRequired === 'qamanager' || normRequired === 'qaagent';
   }
 
   // QA roles: only the isolated /qa shell. Both qa_manager and qa_agent land in

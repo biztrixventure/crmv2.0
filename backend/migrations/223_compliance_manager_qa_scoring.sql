@@ -1,0 +1,91 @@
+-- ============================================================================
+-- 223_compliance_manager_qa_scoring.sql
+-- Let a compliance manager work as a quality manager: grant the ONE QA
+-- permission the role was missing.
+--
+-- ── WHY THIS IS ONE PERMISSION AND NOT SEVEN ────────────────────────────────
+-- The compliance_manager role already holds six of the seven QA permissions,
+-- granted when the department shipped (migs 168-172, 208):
+--
+--   view_qa_queue        view_qa_reports      view_all_qa_reviews
+--   assign_qa_tasks      manage_qa_config     override_qa_review
+--   (+ manage_qa_department, the org-chart wiring surface)
+--
+-- Missing: submit_qa_review — the one that lets them actually SCORE a call.
+-- So they could see the queue, assign it, configure the scorecards and override
+-- someone else's verdict, but not fill in a scorecard themselves. That is the
+-- gap this closes.
+--
+-- Nothing else was blocking them at the API layer. backend/routes/qa.js gates
+-- every endpoint on isSuperAdmin() OR a permission — the string
+-- 'compliance_manager' appears nowhere in it. The only real block was in the
+-- FRONTEND router (frontend/src/utils/roleRouting.js), an early return that
+-- pinned the role to /compliance; that is lifted in the same commit.
+--
+-- ── COMPANY SCOPE: THIS GRANTS NO NEW DATA ──────────────────────────────────
+-- Worth being explicit, because widening QA reach touches cross-tenant data.
+-- allowedCompanyIds() (qa.js) short-circuits to null — every company — for
+-- anyone holding view_all_qa_reviews, which compliance_manager ALREADY had.
+-- So their company scope is unchanged by this migration; it was already global,
+-- by design (compliance sees all companies). What changes is that they can now
+-- submit a scorecard in those companies instead of only reading them.
+--
+-- Measured before writing this file: qa_manager_companies = 0 rows,
+-- qa_team_members = 0 rows, and ZERO users hold the qa_manager role (6 qa_agent,
+-- 4 compliance_manager). The two-tier org from mig 208 is wired to nobody, so in
+-- practice compliance managers are the only quality managers that exist.
+--
+-- ── SAFETY ──────────────────────────────────────────────────────────────────
+-- Scoped to roles whose level IS compliance_manager, across every company that
+-- has one (today: one role row, but a new tenant's role must inherit this too).
+-- ON CONFLICT DO NOTHING → idempotent, safe to re-run.
+--
+-- To REVOKE (single statement, no data loss — reviews they already submitted
+-- stay, as they should; the person did the work):
+--   DELETE FROM role_permissions rp
+--    USING custom_roles r, permissions p
+--    WHERE rp.role_id = r.id AND rp.permission_id = p.id
+--      AND r.level::text = 'compliance_manager' AND p.name = 'submit_qa_review';
+--
+-- Apply: paste into the Supabase SQL editor. Plain DML, 1 row per compliance
+-- role. No DDL, no locks, no index build.
+-- ============================================================================
+
+INSERT INTO role_permissions (role_id, permission_id)
+SELECT r.id, p.id
+  FROM custom_roles r
+ CROSS JOIN permissions p
+ WHERE r.level::text = 'compliance_manager'
+   AND p.name = 'submit_qa_review'
+ON CONFLICT DO NOTHING;
+
+-- ── post-apply verification ─────────────────────────────────────────────────
+-- 1. submit_qa_review specifically landed. Expect >= 1 row.
+--    SELECT r.name FROM role_permissions rp
+--      JOIN custom_roles r ON r.id = rp.role_id
+--      JOIN permissions  p ON p.id = rp.permission_id
+--     WHERE p.name = 'submit_qa_review' AND r.level::text = 'compliance_manager';
+--
+-- 2. Every compliance role now carries the full QA set. Expect n = 8
+--    (7 QA permissions + manage_qa_department), one row per compliance role.
+--    SELECT r.id, r.name, count(*) AS n
+--      FROM role_permissions rp
+--      JOIN custom_roles r ON r.id = rp.role_id
+--      JOIN permissions  p ON p.id = rp.permission_id
+--     WHERE r.level::text = 'compliance_manager' AND p.category = 'qa'
+--     GROUP BY r.id, r.name;
+--
+-- 3. Nothing else moved — this must return ONLY compliance_manager, qa_manager
+--    and qa_agent. Any other role appearing here means the WHERE clause matched
+--    too widely; revert with the DELETE above.
+--    SELECT DISTINCT r.level::text FROM role_permissions rp
+--      JOIN custom_roles r ON r.id = rp.role_id
+--      JOIN permissions  p ON p.id = rp.permission_id
+--     WHERE p.category = 'qa';
+--
+-- 4. In the browser, as a REAL compliance manager (not superadmin — superadmin
+--    bypasses every check in qa.js): visit /qa, open a task, submit a scorecard.
+--    Before this migration that POST /api/qa/reviews returned 403.
+--
+-- NOTE: hasPermission() is cached for 30s (utils/cache.js). A compliance manager
+-- already logged in may see the old 403 for up to half a minute after apply.
