@@ -276,16 +276,39 @@ router.get(
       return res.status(500).json({ error: error.message });
     }
 
-    // Enrich with closer names
-    const closerIds = [...new Set((data || []).map(s => s.closer_id).filter(Boolean))];
-    let closerProfileMap = {};
-    if (closerIds.length > 0) {
+    // Enrich with closer AND fronter names.
+    //
+    // The fronter half was missing, which is why the Manager shell's Team Sales
+    // table rendered an em-dash in every Fronter cell: that column reads
+    // `s.fronter_name` and nothing here ever set it. /compliance/sales has
+    // always resolved it, which is why the same record shows a fronter there
+    // and a blank here.
+    //
+    // Same NULL fallback as compliance: sales.fronter_id is empty on legacy
+    // rows (written before the column was populated) and on bulk-uploaded sales
+    // whose file carried no fronter — in both cases the LINKED TRANSFER's
+    // created_by IS the fronter for that lead by definition. The transfer is
+    // already embedded in this query's select (`transfers(id, status,
+    // created_by)`), so the fallback costs no extra round-trip.
+    const resolvedFronterId = (s) => s.fronter_id || s.transfers?.created_by || null;
+
+    // One profile query for both roles rather than two — the ids go into the
+    // same .in() list, so adding the fronter name adds no query at all.
+    const closerIds  = [...new Set((data || []).map(s => s.closer_id).filter(Boolean))];
+    const fronterIds = [...new Set((data || []).map(resolvedFronterId).filter(Boolean))];
+    const lookupIds  = [...new Set([...closerIds, ...fronterIds])];
+    const closerProfileMap = {};
+    if (lookupIds.length > 0) {
       const { data: profiles } = await supabaseAdmin
         .from('user_profiles')
         .select('user_id, first_name, last_name')
-        .in('user_id', closerIds);
+        .in('user_id', lookupIds);
       (profiles || []).forEach(p => { closerProfileMap[p.user_id] = p; });
     }
+    const profileName = (id) => {
+      const p = id ? closerProfileMap[id] : null;
+      return p ? (`${p.first_name || ''} ${p.last_name || ''}`.trim() || null) : null;
+    };
 
     // Item 5.2 — bundle sizes for this page (one set-based count query) so the
     // closer's own list can chip "N-car deal". No-op pre-mig-165.
@@ -297,11 +320,19 @@ router.get(
     }
 
     const enriched = (data || []).map(s => {
-      const profile = closerProfileMap[s.closer_id];
-      const closer_name = profile
-        ? `${profile.first_name || ''} ${profile.last_name || ''}`.trim() || null
-        : null;
-      return { ...s, closer_name: closer_name || 'Unknown', group_count: s.sale_group_id ? (listGroupCount[s.sale_group_id] || 0) : 0 };
+      const frId = resolvedFronterId(s);
+      return {
+        ...s,
+        closer_name: profileName(s.closer_id) || 'Unknown',
+        // Surface the RESOLVED id as well, so a UI linking to the fronter's
+        // profile doesn't have to repeat the transfer fallback itself.
+        fronter_id:   s.fronter_id || frId,
+        // '—' rather than 'Unknown': a sale genuinely can have no fronter (a
+        // closer self-generated it), and labelling that "Unknown" reads as a
+        // lookup failure. The closer above keeps 'Unknown' — every sale has one.
+        fronter_name: profileName(frId) || '—',
+        group_count: s.sale_group_id ? (listGroupCount[s.sale_group_id] || 0) : 0,
+      };
     });
 
     res.json({
