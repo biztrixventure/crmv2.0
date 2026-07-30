@@ -37,13 +37,74 @@ export const Spinner = () => (
   </div>
 );
 
-export const Empty = ({ icon: Icon = FileText, msg = 'No records found.' }) => (
+export const Empty = ({ icon: Icon = FileText, msg = 'No records found.', hint = null, onAction = null, actionLabel = '' }) => (
   <div className="text-center py-16">
     <Icon size={36} className="mx-auto mb-3"
       style={{ color: 'var(--color-text-tertiary)', opacity: 0.4 }} />
-    <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>{msg}</p>
+    <p className="text-sm m-0" style={{ color: 'var(--color-text-secondary)' }}>{msg}</p>
+    {hint && <p className="text-xs mt-2 mb-0 max-w-md mx-auto" style={{ color: 'var(--color-text-tertiary)' }}>{hint}</p>}
+    {onAction && (
+      <button onClick={onAction}
+        className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border transition-colors"
+        style={{ borderColor: 'var(--color-primary-600)', color: 'var(--color-primary-600)', backgroundColor: 'transparent' }}>
+        {actionLabel}
+      </button>
+    )}
   </div>
 );
+
+// ── Active column filters ─────────────────────────────────────────────────────
+// A column filter set from a header popover narrows the list, PERSISTS IN
+// sessionStorage across reloads, and — before this — announced itself only as a
+// faint tint on the filter button inside that column's own header. These tables
+// are wider than the viewport (compliance sales measures ~851px), so a filter on
+// an off-screen column emptied the list with its only tell scrolled out of
+// sight. That reads as "the records are gone", not "you filtered them" — and a
+// reload doesn't clear it, so it looks permanent.
+//
+// So: whenever a filter is live, say so above the table and offer one click to
+// undo it. Renders nothing when no filter is set, which is the normal case.
+const FILTER_LABEL = (k) => String(k).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+const OP_TEXT = {
+  contains: 'contains', eq: 'is', starts: 'starts with', ends: 'ends with',
+  in: 'is any of', gte: 'from', lte: 'up to', between: 'between', on: 'on',
+  empty: 'is empty', notempty: 'is not empty',
+};
+const filterText = (f) => {
+  const op = OP_TEXT[f?.op] || f?.op || '';
+  if (f?.op === 'empty' || f?.op === 'notempty') return op;
+  const v = Array.isArray(f?.v) ? `${f.v.length} selected` : String(f?.v ?? '');
+  return f?.op === 'between' && f?.v2 ? `${op} ${v} – ${f.v2}` : `${op} ${v}`;
+};
+
+export const ActiveFilters = ({ tq }) => {
+  const entries = Object.entries(tq?.filters || {});
+  if (!entries.length) return null;
+  return (
+    <div className="flex items-center gap-1.5 flex-wrap mb-3">
+      <span className="text-[11px] font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-tertiary)' }}>
+        Column filters
+      </span>
+      {entries.map(([key, f]) => (
+        <span key={key}
+          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold"
+          style={{
+            backgroundColor: 'color-mix(in srgb, var(--color-primary-600) 12%, transparent)',
+            color: 'var(--color-primary-700)',
+            border: '1px solid color-mix(in srgb, var(--color-primary-600) 35%, transparent)',
+          }}>
+          {FILTER_LABEL(key)} {filterText(f)}
+          <button onClick={() => tq.clearFilter(key)} aria-label={`Remove the ${FILTER_LABEL(key)} filter`} className="hover:opacity-70">×</button>
+        </span>
+      ))}
+      <button onClick={tq.clearAll}
+        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold transition-colors"
+        style={{ color: 'var(--color-error-600)', border: '1px solid color-mix(in srgb, var(--color-error-600) 35%, transparent)', backgroundColor: 'color-mix(in srgb, var(--color-error-600) 6%, transparent)' }}>
+        Clear column filters
+      </button>
+    </div>
+  );
+};
 
 export const Pagination = ({ page, total, limit, onPage }) => {
   if (!total || total <= limit) return null;

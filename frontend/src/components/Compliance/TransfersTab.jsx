@@ -30,7 +30,7 @@ import { useFormFields } from '../../hooks/useFormFields';
 import {
   STATUS_BADGE, STATUS_LABEL, TRANSFER_STATUSES, LIMIT,
   fmtDate, fmtDateTime, customerName,
-  TabHeader, Spinner, Empty, Pagination, Th, TqTh, Filters, FInput, FSelect,
+  TabHeader, Spinner, Empty, ActiveFilters, Pagination, Th, TqTh, Filters, FInput, FSelect,
   Overlay, ModalBox, ModalHeader, InfoTile,
   fetchAllForExport,
 } from './shared';
@@ -273,10 +273,14 @@ const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
         activeStatus={status}
         onSelectStatus={(s) => { setStatus(s); setPage(1); }} />
 
+      <ActiveFilters tq={tq} />
+
       <div className="rounded-xl overflow-hidden"
         style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
         {loading ? <Spinner /> : transfers.length === 0 ? (
-          <Empty icon={ArrowRight} msg="No transfers found." />
+          <Empty icon={ArrowRight} msg="No transfers match the current filters."
+            hint={tq.activeCount ? 'A column filter is narrowing this list. Clear it to see every transfer again.' : null}
+            onAction={tq.activeCount ? tq.clearAll : null} actionLabel="Clear column filters" />
         ) : (
           <TableScroll stickyFirst inheritRowBg label="Transfers">
             <table className="w-full text-sm">

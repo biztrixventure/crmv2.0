@@ -14,7 +14,7 @@ import ThemedSelect from '../UI/Select';
 import {
   STATUS_BADGE, STATUS_LABEL, CALLBACK_STATUSES, LIMIT,
   fmtDate, fmtDateTime,
-  TabHeader, Spinner, Empty, Pagination, Th, Filters, FInput, FSelect,
+  TabHeader, Spinner, Empty, ActiveFilters, Pagination, Th, Filters, FInput, FSelect,
   Overlay, ModalBox, ModalHeader, InfoTile, fetchAllForExport,
 } from './shared';
 import { writeExport } from '../../utils/exportSpec';
@@ -669,10 +669,14 @@ const CallbacksTab = ({ companyList }) => {
         {/* Priority stats bar */}
         {callbacks.length > 0 && <PriorityStatsBar callbacks={callbacks} />}
 
+        <ActiveFilters tq={tq} />
+
         <div className="rounded-xl overflow-hidden"
           style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
           {loading ? <Spinner /> : sorted.length === 0 ? (
-            <Empty icon={PhoneCall} msg="No callbacks found." />
+            <Empty icon={PhoneCall} msg="No callbacks match the current filters."
+              hint={tq.activeCount ? 'A column filter is narrowing this list. Clear it to see every callback again.' : null}
+              onAction={tq.activeCount ? tq.clearAll : null} actionLabel="Clear column filters" />
           ) : (
             <TableScroll stickyFirst label="Callbacks">
               <table className="w-full text-sm">

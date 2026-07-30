@@ -4,7 +4,7 @@ import client from '../../api/client';
 import { TableScroll } from '../UI/kit';
 import ExportModal from './ExportModal';
 import { FilterSelect } from '../UI/FilterBar';
-import { fmtDate, customerName, TabHeader, Spinner, Empty, Th, TqTh, fetchAllForExport } from './shared';
+import { fmtDate, customerName, TabHeader, Spinner, Empty, ActiveFilters, Th, TqTh, fetchAllForExport } from './shared';
 import { writeExport } from '../../utils/exportSpec';
 import { useExportColumns } from '../../hooks/useExportColumns';
 import { useTableQuery } from '../../hooks/useTableQuery';
@@ -128,6 +128,8 @@ const ReviewsTab = ({ companyList }) => {
           </div>
         }
       />
+
+      <ActiveFilters tq={tq} />
 
       <div className="rounded-xl overflow-hidden"
         style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>

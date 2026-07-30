@@ -27,7 +27,7 @@ import ThemedDate from '../UI/ThemedDate';
 import {
   STATUS_BADGE, STATUS_LABEL, ALL_SALE_STATUSES as FALLBACK_ALL, COMPLIANCE_EDIT_STATUSES as FALLBACK_EDIT, LIMIT,
   fmtDate, closerName,
-  TabHeader, Spinner, Empty, Pagination, Th, TqTh, Filters, FInput, FSelect,
+  TabHeader, Spinner, Empty, ActiveFilters, Pagination, Th, TqTh, Filters, FInput, FSelect,
   Overlay, ModalBox, ModalHeader, fetchAllForExport,
 } from './shared';
 import { useTableQuery, useAbortable, isCanceled } from '../../hooks/useTableQuery';
@@ -85,6 +85,10 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
   const [total, setTotal]       = useState(0);
   const [statusCounts, setStatusCounts] = useState(null);
   const [loading, setLoading]   = useState(false);
+  // Why the last load failed, if it did. Without this a 500 or a dropped
+  // connection rendered as an empty table — indistinguishable from "there are
+  // no sales", which is the worst possible way for a compliance list to fail.
+  const [loadError, setLoadError] = useState('');
   const [page, setPage]         = useState(1);
   const [search, setSearch]     = useState('');
   const [status, setStatus]     = useState(initStatus);
@@ -185,6 +189,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
         // each load cancels the one before it.
         signal: abortable(),
       });
+      setLoadError('');
       setSales(res.data.sales || []);
       setTotal(res.data.total || 0);
       if (res.data.columns) setColumns(res.data.columns);
@@ -195,6 +200,10 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
       // A cancelled request is a superseded one, not a failure — leaving
       // `loading` on would freeze the table on every keystroke.
       if (isCanceled(e)) return;
+      // Everything else is a real failure and must be visible. Swallowing it
+      // here is what turned a 500 into "zero sales" with no explanation.
+      const httpStatus = e.response?.status;   // not the `status` filter above
+      setLoadError(e.response?.data?.error || (httpStatus ? `the server returned ${httpStatus}` : (e.message || 'the request failed')));
     } finally { setLoading(false); }
   }, [search, status, company, disposition, chargeFrom, chargeTo, dateFrom, dateTo, page, tq.version, tq.params, abortable]);
 
@@ -404,9 +413,34 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
         }}
       />
 
+      <ActiveFilters tq={tq} />
+
+      {/* A failed load must never look like an empty result set. */}
+      {loadError && (
+        <div className="flex items-center gap-2 flex-wrap mb-3 px-3 py-2 rounded-xl text-xs font-semibold"
+          style={{ backgroundColor: 'color-mix(in srgb, var(--color-error-600) 8%, transparent)', color: 'var(--color-error-600)', border: '1px solid color-mix(in srgb, var(--color-error-600) 30%, transparent)' }}>
+          <span>Could not load sales — {loadError}</span>
+          <button onClick={load} className="px-2 py-0.5 rounded-full font-bold"
+            style={{ border: '1px solid color-mix(in srgb, var(--color-error-600) 40%, transparent)' }}>Retry</button>
+        </div>
+      )}
+
       <div className="rounded-xl overflow-hidden"
         style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-        {loading ? <Spinner /> : sales.length === 0 ? <Empty /> : (
+        {loading ? <Spinner /> : sales.length === 0 ? (
+          // Say WHY it is empty. A bare "No records found" under an off-screen
+          // column filter is what sent somebody hunting for missing sales.
+          <Empty
+            msg={loadError ? 'The list could not be loaded.' : 'No sales match the current filters.'}
+            hint={loadError ? 'This is a load failure, not an empty result — the records are still there.'
+              : tq.activeCount ? 'A column filter is narrowing this list. Clear it to see every sale again.'
+              : (search || status || company || dateFrom || dateTo)
+                ? 'Search, status, company or date filters are active above.'
+                : null}
+            onAction={!loadError && tq.activeCount ? tq.clearAll : null}
+            actionLabel="Clear column filters"
+          />
+        ) : (
           // Customer stays pinned while the rest scrolls — this table measures
           // 851px inside a 346px phone viewport, and without the pin scrolling
           // right leaves you reading rows you can no longer identify.
