@@ -80,10 +80,11 @@ const ReportsPanel = ({ companyId }) => {
     try {
       const [tRes, sRes, soldRes, wonRes, pendRes] = await Promise.all([
         client.get('transfers', { params: { company_id: companyId, limit: 1000, date_from, date_to } }),
-        client.get('sales',     { params: { company_id: companyId, limit: 1000, date_from, date_to } }),
-        client.get('sales',     { params: { company_id: companyId, limit: 1, page: 1, date_from, date_to, status: 'sold' } }),
-        client.get('sales',     { params: { company_id: companyId, limit: 1, page: 1, date_from, date_to, status: 'closed_won' } }),
-        client.get('sales',     { params: { company_id: companyId, limit: 1, page: 1, date_from, date_to, status: 'pending_review' } }),
+        // exclude_post_date — reports must not count a card nobody has charged.
+        client.get('sales',     { params: { company_id: companyId, limit: 1000, date_from, date_to, exclude_post_date: true } }),
+        client.get('sales',     { params: { company_id: companyId, limit: 1, page: 1, date_from, date_to, status: 'sold',           exclude_post_date: true } }),
+        client.get('sales',     { params: { company_id: companyId, limit: 1, page: 1, date_from, date_to, status: 'closed_won',     exclude_post_date: true } }),
+        client.get('sales',     { params: { company_id: companyId, limit: 1, page: 1, date_from, date_to, status: 'pending_review', exclude_post_date: true } }),
       ]);
 
       const allT = tRes.data.transfers || [];

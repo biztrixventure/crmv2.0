@@ -585,7 +585,11 @@ const ManagerShell = ({ workspaceMode = false }) => {
     if (!companyId) return;
     setSalesTabLoading(true);
     try {
-      const params = { company_id: companyId, page: salesPage, limit: PAGE_SIZE, date_from, date_to, sort_by: salesSort.col, sort_dir: salesSort.dir };
+      // exclude_post_date: an un-charged post-date is a reminder, not a sale.
+      // This tab has no disposition sub-tabs, so without the flag a post-date
+      // surfaced here (and in the counts below) on its future sale_date, before
+      // anyone had charged the card.
+      const params = { company_id: companyId, page: salesPage, limit: PAGE_SIZE, date_from, date_to, sort_by: salesSort.col, sort_dir: salesSort.dir, exclude_post_date: true };
       if (salesStatus) params.status  = salesStatus;
       if (salesAgent)  params.user_id = salesAgent;
       if (salesSearch) params.search  = salesSearch;
@@ -602,10 +606,10 @@ const ManagerShell = ({ workspaceMode = false }) => {
       // Leaderboard data + accurate total counts — all parallel
       const [tRes, sRes, soldRes, wonRes, pendingRes] = await Promise.all([
         client.get('transfers', { params: { company_id: companyId, limit: 1000, date_from, date_to } }),
-        client.get('sales',     { params: { company_id: companyId, limit: 1000, date_from, date_to } }),
-        client.get('sales',     { params: { company_id: companyId, limit: 1, page: 1, date_from, date_to, status: 'sold' } }),
-        client.get('sales',     { params: { company_id: companyId, limit: 1, page: 1, date_from, date_to, status: 'closed_won' } }),
-        client.get('sales',     { params: { company_id: companyId, limit: 1, page: 1, date_from, date_to, status: 'pending_review' } }),
+        client.get('sales',     { params: { company_id: companyId, limit: 1000, date_from, date_to, exclude_post_date: true } }),
+        client.get('sales',     { params: { company_id: companyId, limit: 1, page: 1, date_from, date_to, status: 'sold',           exclude_post_date: true } }),
+        client.get('sales',     { params: { company_id: companyId, limit: 1, page: 1, date_from, date_to, status: 'closed_won',     exclude_post_date: true } }),
+        client.get('sales',     { params: { company_id: companyId, limit: 1, page: 1, date_from, date_to, status: 'pending_review', exclude_post_date: true } }),
       ]);
 
       const allT = tRes.data.transfers || [];

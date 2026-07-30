@@ -14,6 +14,7 @@
 
 const { supabaseAdmin } = require('../config/database');
 const { utcToEtDate } = require('./etUtils');
+const { excludePostDate } = require('./postDate');
 
 const TTL = 60_000;
 const cache = new Map();   // campaign_id -> { at, data }
@@ -110,8 +111,13 @@ async function computeValues(campaign, userIds) {
     const statuses  = metric_source === 'revenue' ? REVENUE_LIKE : CLOSED_LIKE;
     const startDate = utcToEtDate(starts_at);
     const endDate   = utcToEtDate(ends_at);
-    const rows = await fetchAllRows(supabaseAdmin
-      .from('sales').select('closer_id, fronter_id, monthly_payment, transfers(created_by)')
+    //   5. An un-charged post-date is not a sale — no SPIFF credit until the
+    //      card is actually charged. Today CLOSED_LIKE/REVENUE_LIKE already
+    //      exclude them incidentally (post-dates sit at open/pending_review),
+    //      but that is a side effect of the status list, not a rule: one manual
+    //      status edit to closed_won would pay out on uncollected money.
+    const rows = await fetchAllRows(excludePostDate(supabaseAdmin
+      .from('sales').select('closer_id, fronter_id, monthly_payment, transfers(created_by)'))
       .in('status', statuses)
       .gte('sale_date', startDate).lte('sale_date', endDate));
     rows.forEach(r => {

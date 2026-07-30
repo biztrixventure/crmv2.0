@@ -13,6 +13,7 @@
 // ============================================================================
 const { supabaseAdmin } = require('../config/database');
 const { etDateToUtcStart, etDateToUtcEnd } = require('./etUtils');
+const { excludePostDate } = require('./postDate');
 const logger = require('./logger');
 
 const WON = ['closed_won', 'sold'];   // matches spiffMetrics CLOSED_LIKE
@@ -95,8 +96,13 @@ async function teamMetrics({ ids, companyId, from, to }) {
     //    MRR = monthly_payment on won; also credit fronted wins (fronter_id).
     const seenS = new Set();
     for (const chunk of idChunks) {
-      let sq = supabaseAdmin.from('sales')
-        .select('id, closer_id, fronter_id, down_payment, monthly_payment, status, sale_date')
+      // Un-charged post-dates are excluded at the query, not left to the WON
+      // filter below. WON currently hides them by accident (a post-date sits at
+      // open/pending_review); making it explicit means a post-date manually
+      // flipped to closed_won still can't inflate a team's numbers, and the row
+      // cap below isn't spent on rows we would discard anyway.
+      let sq = excludePostDate(supabaseAdmin.from('sales')
+        .select('id, closer_id, fronter_id, down_payment, monthly_payment, status, sale_date'))
         .eq('company_id', companyId)
         .or(`closer_id.in.(${chunk.join(',')}),fronter_id.in.(${chunk.join(',')})`);
       if (from) sq = sq.gte('sale_date', from);

@@ -35,6 +35,7 @@
 // ============================================================================
 const { supabaseAdmin } = require('../config/database');
 const { etDateToUtcStart, etDateToUtcEnd } = require('./etUtils');
+const { excludePostDate } = require('./postDate');
 const logger = require('./logger');
 
 // ── Catalog ─────────────────────────────────────────────────────────────────
@@ -139,7 +140,11 @@ async function countWindow({ metric, userIds, companyId, closerSide, from, to })
       // sale_date is already the ET business day → compare as a plain date.
       const sel = metric.sumField ? `${col}, ${metric.sumField}` : col;
       const rows = await fetchAll(() => {
-        let q = supabaseAdmin.from('sales').select(sel).in(col, ids);
+        // Un-charged post-dates never count toward quota: the card has not been
+        // charged. This matters most for metrics with won=false (a "sales
+        // submitted" target), which counted every row regardless of status and
+        // so credited post-dates the moment their future sale_date arrived.
+        let q = excludePostDate(supabaseAdmin.from('sales').select(sel).in(col, ids));
         if (!closerSide && companyId) q = q.eq('company_id', companyId);
         if (metric.won) q = q.in('status', WON_STATUSES);
         if (from) q = q.gte('sale_date', from);
@@ -360,8 +365,10 @@ async function activitySeries({ userIds, companyId, closerSide, from, to }) {
     transfers.forEach(r => hit(String(r.created_at || '').slice(0, 10), r[tCol], 'transfers'));
 
     const sales = await fetchAll(() => {
-      let q = supabaseAdmin.from('sales')
-        .select(`${sCol}, status, sale_date, monthly_payment, down_payment`).in(sCol, ids);
+      // Same rule as countWindow: the activity series must not draw a
+      // sales_submitted bar for a post-date nobody has charged yet.
+      let q = excludePostDate(supabaseAdmin.from('sales')
+        .select(`${sCol}, status, sale_date, monthly_payment, down_payment`).in(sCol, ids));
       if (!closerSide && companyId) q = q.eq('company_id', companyId);
       if (from) q = q.gte('sale_date', from);
       if (to)   q = q.lte('sale_date', to);

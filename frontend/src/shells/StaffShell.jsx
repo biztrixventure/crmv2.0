@@ -459,6 +459,12 @@ const StaffShell = () => {
     } else {
       p.date_from = date_from; p.date_to = date_to;
       if (salesStatus) p.status = salesStatus;
+      // The main Sales section hides un-charged post-dates. Without this they
+      // appeared here the moment their FUTURE sale_date became today — looking
+      // like the sale had "moved by itself" — while the stat cards (which now
+      // exclude them) said something different. The Post Date tab above is the
+      // one place they live until the card is actually charged.
+      p.exclude_post_date = true;
     }
     return p;
   }, [closerSection, closerSalesPage, date_from, date_to, salesStatus]);

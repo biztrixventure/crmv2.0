@@ -11,6 +11,7 @@ const { escapeOrValue, safeUuid } = require('../utils/searchSanitize');
 const { applySort } = require('../utils/sortHelper');
 const { applyColumnFilters, resolveColumnAccess } = require('../utils/columnFilter');
 const { SALE_COLUMNS } = require('../config/recordColumns');
+const { excludePostDate, isPostDateDispo } = require('../utils/postDate');
 const { titleCase, titleCaseFormData } = require('../utils/titleCase');
 const { expandStateInFormData } = require('../utils/stateMap');
 const { stampActor } = require('../utils/auditColumnGuard');
@@ -154,7 +155,7 @@ router.get(
         && !(await isCompanyMember(userId, req.query.company_id))) {
       companyId = req.user.company_id;
     }
-    const { status, disposition, charge_from, charge_to, search, page = 1, limit = 50, date_from, date_to, user_id, sort_by, sort_dir, filters } = req.query;
+    const { status, disposition, charge_from, charge_to, search, page = 1, limit = 50, date_from, date_to, user_id, sort_by, sort_dir, filters, exclude_post_date } = req.query;
 
     logger.info('GET_SALES', `user=${userId}, role=${userRole}, company=${companyId}`);
 
@@ -244,6 +245,13 @@ router.get(
     // disposition tabs (e.g. "Post Date"). Generic: the frontend resolves which
     // value is the post-date one from the live form-field options and passes it.
     if (disposition) query = query.eq('closer_disposition', disposition);
+    // …and its inverse: every OTHER section hides un-charged post-dates, so the
+    // list agrees with the stat counters (which now exclude them unconditionally
+    // — utils/postDate.js). Opt-in rather than automatic because this endpoint
+    // also backs exports and admin tooling, which must still be able to see
+    // every row; the closer/manager shells pass the flag, those callers don't.
+    // Same clause compliance.js uses. NULL-safe.
+    else if (exclude_post_date === 'true' || exclude_post_date === true) query = excludePostDate(query);
     // Charge-date window (post-dated sales) — closer + compliance Post Date tabs.
     if (charge_from) query = query.gte('charge_at', charge_from);
     if (charge_to)   query = query.lte('charge_at', charge_to);

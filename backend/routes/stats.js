@@ -5,6 +5,7 @@ const { etDateToUtcStart, etDateToUtcEnd, todayEt } = require('../utils/etUtils'
 const { getConfig } = require('../utils/businessConfig');
 const { isCloserSideScope, getCompanyType } = require('../models/helpers');
 const { safeUuid } = require('../utils/searchSanitize');
+const { excludePostDate } = require('../utils/postDate');
 const logger = require('../utils/logger');
 
 const router = express.Router();
@@ -98,7 +99,13 @@ router.get(
       const excludeResellsFromConversion = kpiCounts.conversion === false;
 
       // ── Sales stats — role-scoped COUNT queries (also uncapped). ───────────────
-      const scopeSales = (q) => {
+      // roleScopeSales decides WHO may see a row. scopeSales wraps it with WHAT
+      // counts as a sale: an un-charged post-date is a reminder, not a sale, so
+      // it is excluded from EVERY counter below (totals, per-status, today,
+      // month). Wrapping rather than editing the body is deliberate — the body
+      // returns early for superadmin and for fronter, so an exclusion added
+      // inside it would be skipped for exactly the roles watching these numbers.
+      const roleScopeSales = (q) => {
         if (['superadmin', 'readonly_admin'].includes(userRole)) return q;              // global
         if (userRole === 'closer') return q.eq('closer_id', userId);                    // own sales
         // Fronter: their personal pipeline only — sales whose fronter_id is them.
@@ -120,6 +127,7 @@ router.get(
         }
         return q.eq('id', ZERO_UUID);
       };
+      const scopeSales = (q) => excludePostDate(roleScopeSales(q));
       const saleCount = (status, opts = {}) => {
         let q = scopeSales(supabaseAdmin.from('sales').select('id', { count: 'exact', head: true }));
         if (status) q = q.eq('status', status);
