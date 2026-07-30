@@ -115,7 +115,7 @@ downloadCSV(rows, headers, filename)  // defined inline in compliance/manager sh
 
 ## Database Migrations
 Files in `backend/migrations/` — apply in order via Supabase SQL editor.
-Current highest: `221_post_date_lifecycle.sql` — **applied** (verified 2026-07-30). 208 is applied too; the warning that used to sit here was stale.
+Current highest: `223_compliance_manager_qa_scoring.sql` — **pending**. 221 and 222 are **applied** (SQL-verified 2026-07-30: post-dates are open 40 / pending_review 0 / cancelled 3). 208 is applied too; the warning that used to sit here was stale.
 
 ### Post-dated sales (mig 083 + 221)
 A post-date is a **reminder, not a sale** — the card has not been charged, so it must never be counted as one. Identity is a string match on `closer_disposition` (`/post[\s_-]?date|postdate/i`) defined in **three places that must stay in sync**: `backend/utils/postDate.js`, `frontend/src/utils/dispositions.js`, and `fn_stamp_post_date` in mig 221.
