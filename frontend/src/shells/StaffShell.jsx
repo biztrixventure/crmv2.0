@@ -609,7 +609,13 @@ const StaffShell = () => {
       // still post-dated. Editing a post-date record (its charging time / note)
       // keeps it in the Post Date tab; it only enters review when the closer
       // either flips the disposition off "post date" here or clicks Charge.
-      const nowPostDate = isPostDateDispo(formData.closer_disposition);
+      // Fall back to the sale's CURRENT disposition when the edit payload has
+      // none. SaleForm sends closer_disposition: dynVal(...) || null, so an edit
+      // whose form has no resolvable disposition field sent null — which read as
+      // "not a post-date" and resubmitted the record. That is how four of these
+      // reached pending_review. A real flip off post-date sends 'sale' here, so
+      // the falsy fallback still lets a genuine conversion through.
+      const nowPostDate = isPostDateDispo(formData.closer_disposition || editSale.closer_disposition);
       const resubmit = !nowPostDate && ['needs_revision', 'open'].includes(editSale.status);
       if (resubmit) await client.post(`sales/${editSale.id}/submit-review`);
       setEditSale(null);

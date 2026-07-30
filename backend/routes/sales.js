@@ -1809,6 +1809,26 @@ router.post('/:id/submit-review', asyncHandler(async (req, res) => {
     return res.status(400).json({ error: `Cannot submit a sale with status "${sale.status}" for review` });
   }
 
+  // An un-charged post-date is not reviewable — the card has not been charged,
+  // so there is nothing for compliance to approve yet. It enters review only
+  // via Charge → Sale, which flips closer_disposition OFF post-date first and
+  // therefore passes this guard.
+  //
+  // This lives here, not at the call sites, because there are five of them and
+  // only ONE carried the check: StaffShell.handleSaleEdit. That one read the
+  // disposition off the submitted form (`formData.closer_disposition`), which
+  // is null whenever the edit payload has no resolvable disposition field — so
+  // it resubmitted the very post-dates it meant to protect. handleSubmitForReview
+  // and compliance's SalesTab had no check at all. Measured 2026-07-31: 5 post-
+  // dated sales sat in pending_review, one submitted 0.5s after creation and
+  // four between 32 minutes and 2 days later (the edit path). Repaired by
+  // mig 222; this guard is what stops it happening again.
+  if (isPostDateDispo(sale.closer_disposition)) {
+    return res.status(400).json({
+      error: 'This sale is post-dated — charge the card first ("Charge → Sale"). An un-charged post-date cannot go to compliance review.',
+    });
+  }
+
   const now = new Date().toISOString();
   const { data: updated, error: updateErr } = await supabaseAdmin
     .from('sales')
