@@ -155,9 +155,14 @@ UPDATE sales
 
 -- (b) Already converted. The ONLY surviving trace is a policy_events 'charged'
 --     row (087 writes it when charge_notified_at is first set). That covers a
---     post-date whose reminder fired before it was charged — 26 rows on this
---     database — and misses any charged before the reminder. Nothing recoverable
---     exists for those; they simply get no pill, which is honest.
+--     post-date whose reminder fired before it was charged, and misses any
+--     charged before the reminder. Nothing recoverable exists for those; they
+--     simply get no pill, which is honest.
+--
+--     Measured on apply: 26 'charged' events exist, but only 6 sit on sales
+--     that have since left the post-date disposition — the other 20 are still
+--     post-dated (reminder fired, card not yet charged) and are covered by (a).
+--     6 is the number of pills this recovers.
 UPDATE sales s
    SET post_dated_at          = COALESCE(s.post_dated_at, e.first_charged),
        post_date_converted_at = COALESCE(s.post_date_converted_at, e.first_charged)
@@ -193,9 +198,13 @@ ON CONFLICT (scope, key) DO NOTHING;
 --    SELECT count(*) FROM sales
 --     WHERE closer_disposition ILIKE '%post%date%' AND post_dated_at IS NULL;
 --
--- 2. Converted post-dates recovered from the event trail. Expect ~26 here.
---    SELECT count(*) FROM sales
---     WHERE post_dated_at IS NOT NULL AND post_date_converted_at IS NOT NULL;
+-- 2. Converted post-dates recovered from the event trail. Expect 6 here, and
+--    49 stamped in total (43 still post-dated + the 6 converted).
+--    SELECT count(*) FILTER (WHERE post_date_converted_at IS NOT NULL) AS converted,
+--           count(*)                                                   AS stamped
+--      FROM sales WHERE post_dated_at IS NOT NULL;
+--    ✅ VERIFIED APPLIED 2026-07-30: converted = 6, stamped = 49, 0 unstamped
+--       post-dates, trigger + post_date_attempts + catalog all present.
 --
 -- 3. The trigger fires on conversion — run inside a transaction and ROLL BACK:
 --    BEGIN;

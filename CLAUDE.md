@@ -115,7 +115,14 @@ downloadCSV(rows, headers, filename)  // defined inline in compliance/manager sh
 
 ## Database Migrations
 Files in `backend/migrations/` — apply in order via Supabase SQL editor.
-Current highest: `208_qa_teams.sql`  ⚠️ **208 is not yet applied in Supabase** — the QA two-tier org (manager↔company↔agent scoping) needs it before it fully works.
+Current highest: `221_post_date_lifecycle.sql` — **applied** (verified 2026-07-30). 208 is applied too; the warning that used to sit here was stale.
+
+### Post-dated sales (mig 083 + 221)
+A post-date is a **reminder, not a sale** — the card has not been charged, so it must never be counted as one. Identity is a string match on `closer_disposition` (`/post[\s_-]?date|postdate/i`) defined in **three places that must stay in sync**: `backend/utils/postDate.js`, `frontend/src/utils/dispositions.js`, and `fn_stamp_post_date` in mig 221.
+- Use `excludePostDate(q)` from `backend/utils/postDate.js` for any new sales count. It is NULL-safe — the naive `.not('closer_disposition','ilike',…)` evaluates to NULL, not TRUE, for a NULL disposition and silently drops those rows.
+- `GET /sales` takes `exclude_post_date=true` (opt-in, so exports and admin tooling still see every row).
+- `post_dated_at` / `post_date_converted_at` are trigger-stamped and survive the charge — they drive the compliance `P → S` pill. Do **not** try to derive this from `policy_events`: its `charged` event fires on the scheduler's reminder stamp, not on the charge, and it never writes `post_dated` at all.
+- Failed charge → `POST /sales/:id/charge-failed` (reason + new date, re-arms the reminder); history in `post_date_attempts`; reason catalog in `business_config.post_date_fail_reasons`.
 
 ### QA department (two-tier org — mig 208)
 Compliance wires the org chart only (assign companies + agents to a quality **manager**); the manager owns all the work (per-agent methods, task assignment, per-company review-type config), scoped to their companies + team. One company → one manager; one agent → one manager (`qa_manager_companies`, `qa_team_members`). `resolveAgent` (transfer→company attribution) is now deterministic. See memory: qa_two_tier_org, qa_ux_reporting_2026_07, vicidial_agent_attribution.
