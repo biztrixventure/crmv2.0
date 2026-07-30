@@ -1,35 +1,47 @@
-import React, { useState } from 'react';
-import { Edit2, Trash2, Eye, CheckCircle, XCircle, ChevronUp, ChevronDown, ChevronsUpDown, Building2, Users } from 'lucide-react';
+import React from 'react';
+import { Edit2, Trash2, Eye, CheckCircle, XCircle, Building2, Users } from 'lucide-react';
 import { Card } from '../../../components/UI';
 import { TableScroll } from "../../UI/kit";
-
-const SortIcon = ({ col, sort }) => {
-  if (sort.col !== col) return <ChevronsUpDown size={11} className="opacity-30" />;
-  return sort.dir === 'asc' ? <ChevronUp size={11} /> : <ChevronDown size={11} />;
-};
+import ColumnHeader from '../../UI/ColumnHeader';
+import { useTableQuery } from '../../../hooks/useTableQuery';
+import { clientColumns } from '../../../utils/clientColumns';
 
 const TYPE_STYLES = {
   fronter: { bg: 'var(--color-success-50)',  color: 'var(--color-success-700)',  border: 'var(--color-success-200)'  },
   closer:  { bg: 'var(--color-primary-50)', color: 'var(--color-primary-700)', border: 'var(--color-primary-200)' },
 };
 
+// Client mode: this component is handed the WHOLE company list as a prop (six
+// rows in production), so a round-trip per keystroke would be the regression,
+// not the fix. Same headers and same menus as the server-backed tabs.
+const COLUMNS = clientColumns({
+  name:    'text',
+  type:    { type: 'enum', values: ['fronter', 'closer'] },
+  status:  'bool',
+  created: 'date',
+});
+const TYPE_OPTIONS = [{ value: 'fronter', label: 'Fronter' }, { value: 'closer', label: 'Closer' }];
+
+// The uiKeys above are the header labels; the rows carry schema names. One
+// accessor maps between them, so the catalog reads like the header row.
+const accessor = (row, key) => {
+  if (key === 'name')    return row?.name;
+  if (key === 'type')    return row?.company_type;
+  if (key === 'status')  return !!row?.is_active;
+  if (key === 'created') return row?.created_at;
+  return row?.[key];
+};
+
 const CompanyList = ({ companies, onEdit, onDeactivate, onActivate, onHardDelete, onView }) => {
-  const [sort, setSort] = useState({ col: 'name', dir: 'asc' });
-
-  const toggleSort = (col) => {
-    setSort(s => s.col === col ? { col, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: 'asc' });
-  };
-
-  const sorted = [...(companies || [])].sort((a, b) => {
-    let av, bv;
-    if (sort.col === 'name')    { av = a.name?.toLowerCase() || ''; bv = b.name?.toLowerCase() || ''; }
-    if (sort.col === 'type')    { av = a.company_type || ''; bv = b.company_type || ''; }
-    if (sort.col === 'status')  { av = a.is_active ? 1 : 0; bv = b.is_active ? 1 : 0; }
-    if (sort.col === 'created') { av = a.created_at || ''; bv = b.created_at || ''; }
-    if (av < bv) return sort.dir === 'asc' ? -1 : 1;
-    if (av > bv) return sort.dir === 'asc' ?  1 : -1;
-    return 0;
+  const tq = useTableQuery({
+    scope: 'admin:companies',
+    mode: 'client',
+    columns: COLUMNS,
+    defaultSort: { by: 'name', dir: 'asc' },   // unchanged from the old local sort
+    accessor,
   });
+
+  const sorted = tq.apply(companies || []);
 
   if (!companies || companies.length === 0) {
     return (
@@ -40,7 +52,10 @@ const CompanyList = ({ companies, onEdit, onDeactivate, onActivate, onHardDelete
     );
   }
 
-  const thCls = "px-3 py-2 text-left text-xs font-bold text-text-secondary uppercase tracking-wider cursor-pointer select-none hover:text-text transition-colors";
+  // No cursor-pointer on the cell any more: ColumnHeader puts the click targets
+  // on its own label button and filter chip, so painting the whole <th> as
+  // clickable would promise a hit area that no longer exists.
+  const thCls = "px-3 py-2 text-left text-xs font-bold text-text-secondary uppercase tracking-wider select-none";
 
   return (
     <Card variant="outlined" className="overflow-hidden">
@@ -48,22 +63,28 @@ const CompanyList = ({ companies, onEdit, onDeactivate, onActivate, onHardDelete
         <table className="w-full text-sm">
           <thead>
             <tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
-              <th className={thCls} onClick={() => toggleSort('name')}>
-                <span className="flex items-center gap-1">Company <SortIcon col="name" sort={sort} /></span>
-              </th>
-              <th className={thCls} onClick={() => toggleSort('type')}>
-                <span className="flex items-center gap-1">Type <SortIcon col="type" sort={sort} /></span>
-              </th>
-              <th className={thCls} onClick={() => toggleSort('status')}>
-                <span className="flex items-center gap-1">Status <SortIcon col="status" sort={sort} /></span>
-              </th>
-              <th className={thCls} onClick={() => toggleSort('created')}>
-                <span className="flex items-center gap-1">Created <SortIcon col="created" sort={sort} /></span>
-              </th>
+              <ColumnHeader tq={tq} colKey="name"    label="Company" className={thCls} />
+              <ColumnHeader tq={tq} colKey="type"    label="Type"    className={thCls} options={TYPE_OPTIONS} />
+              <ColumnHeader tq={tq} colKey="status"  label="Status"  className={thCls} />
+              <ColumnHeader tq={tq} colKey="created" label="Created" className={thCls} />
+              {/* No catalog entry → an inert header, exactly as in server mode. */}
               <th className="px-3 py-2 text-left text-xs font-bold text-text-secondary uppercase tracking-wider">Actions</th>
             </tr>
           </thead>
           <tbody>
+            {/* The card-level empty state above is gated on `companies`, so the
+                headers survive a filter that matches nothing — this row is what
+                explains the blank table and offers the way out. */}
+            {sorted.length === 0 && (
+              <tr>
+                <td colSpan={5} className="px-3 py-8 text-center text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+                  No companies match the column filters.{' '}
+                  <button onClick={tq.clearAll} className="font-semibold underline" style={{ color: 'var(--color-primary-600)' }}>
+                    Clear filters
+                  </button>
+                </td>
+              </tr>
+            )}
             {sorted.map(company => {
               const typeStyle = TYPE_STYLES[company.company_type] || {};
               return (

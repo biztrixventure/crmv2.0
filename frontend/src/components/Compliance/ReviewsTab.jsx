@@ -1,17 +1,36 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { Star } from 'lucide-react';
 import client from '../../api/client';
 import { TableScroll } from '../UI/kit';
 import ExportModal from './ExportModal';
 import { FilterSelect } from '../UI/FilterBar';
-import { fmtDate, customerName, TabHeader, Spinner, Empty, Th, fetchAllForExport } from './shared';
+import { fmtDate, customerName, TabHeader, Spinner, Empty, Th, TqTh, fetchAllForExport } from './shared';
 import { writeExport } from '../../utils/exportSpec';
 import { useExportColumns } from '../../hooks/useExportColumns';
+import { useTableQuery } from '../../hooks/useTableQuery';
+import { clientColumns } from '../../utils/clientColumns';
 
 const RATING_COLOR = {
   excellent: '#16a34a', good: '#2563eb', average: '#d97706',
   below_average: '#ea580c', bad: '#dc2626',
 };
+
+// Client mode: both lists are fetched whole (limit 200) and held in state, so
+// filtering in memory is a keystroke rather than a request. This tab had NO
+// sorting at all before — every column below is new.
+//
+// The Rating / Disposition column is deliberately NOT in the catalog. It is the
+// one header whose meaning changes with the sub-tab, and useTableQuery reads its
+// stored scope once at mount — so a `rating` filter would survive a switch to
+// Dispositions and silently match nothing. The sub-tab toggle already IS that
+// filter; a header that lies about the current dataset is worse than no header.
+const COLUMNS = clientColumns({
+  customer: 'text',
+  company:  'text',
+  closer:   'text',
+  notes:    'text',
+  date:     'date',
+});
 
 const ReviewsTab = ({ companyList }) => {
   // null = unconfigured → this tab keeps its own default column set.
@@ -52,7 +71,31 @@ const ReviewsTab = ({ companyList }) => {
   const companyName = (id) => companyList.find(c => c.id === id)?.name || '—';
   const profileName = (p) => p ? `${p.first_name || ''} ${p.last_name || ''}`.trim() || '—' : '—';
 
-  const data = subTab === 'ratings' ? reviews : dispos;
+  // Sort and filter on what the row DISPLAYS, not on what it stores: the
+  // Company cell shows a resolved name, so "company contains vert" has to see
+  // "1-Vertex", not a uuid. Same for Customer (built from the joined transfer)
+  // and Closer (built from the joined profile).
+  const accessor = useCallback((row, key) => {
+    if (key === 'customer') return customerName(row?.transfers);
+    if (key === 'company')  return companyList.find(c => c.id === row?.company_id)?.name || '';
+    if (key === 'closer')   return row?.user_profiles
+      ? `${row.user_profiles.first_name || ''} ${row.user_profiles.last_name || ''}`.trim()
+      : '';
+    if (key === 'notes')    return row?.notes;
+    if (key === 'date')     return row?.created_at;
+    return row?.[key];
+  }, [companyList]);
+
+  const tq = useTableQuery({
+    scope: 'compliance:reviews',
+    mode: 'client',
+    columns: COLUMNS,
+    defaultSort: { by: 'date', dir: 'desc' },   // newest first — what the endpoint already returned
+    accessor,
+  });
+
+  const source = subTab === 'ratings' ? reviews : dispos;
+  const data = useMemo(() => tq.apply(source), [tq, source]);
 
   return (
     <div>
@@ -88,22 +131,37 @@ const ReviewsTab = ({ companyList }) => {
 
       <div className="rounded-xl overflow-hidden"
         style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-        {loading ? <Spinner /> : data.length === 0 ? (
+        {/* Gate the empty state on the SOURCE, not the filtered result. Gating
+            on `data` would swap the whole table — headers included — for "No
+            ratings found" the moment a column filter matched nothing, leaving
+            no control on screen to clear the filter that caused it. */}
+        {loading ? <Spinner /> : source.length === 0 ? (
           <Empty icon={Star} msg={`No ${subTab === 'ratings' ? 'ratings' : 'dispositions'} found.`} />
         ) : (
           <TableScroll stickyFirst label="Call reviews">
             <table className="w-full text-sm">
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
-                  <Th>Customer</Th>
-                  <Th>Company</Th>
-                  <Th>Closer</Th>
+                  <TqTh tq={tq} col="customer">Customer</TqTh>
+                  <TqTh tq={tq} col="company">Company</TqTh>
+                  <TqTh tq={tq} col="closer">Closer</TqTh>
+                  {/* Not in the catalog on purpose — see COLUMNS above. */}
                   <Th>{subTab === 'ratings' ? 'Rating' : 'Disposition'}</Th>
-                  <Th>Notes</Th>
-                  <Th>Date</Th>
+                  <TqTh tq={tq} col="notes">Notes</TqTh>
+                  <TqTh tq={tq} col="date">Date</TqTh>
                 </tr>
               </thead>
               <tbody>
+                {data.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-8 text-center text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+                      No rows match the column filters.{' '}
+                      <button onClick={tq.clearAll} className="font-semibold underline" style={{ color: 'var(--color-primary-600)' }}>
+                        Clear filters
+                      </button>
+                    </td>
+                  </tr>
+                )}
                 {data.map(r => (
                   <tr key={r.id} style={{ borderBottom: '1px solid var(--color-border)' }}
                     onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--color-bg-secondary)'}
