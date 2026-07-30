@@ -189,8 +189,8 @@ function Compose({ me, preset, onClose, onSent }) {
   const nRecip = to.length + cc.length + bcc.length;
   return (
     <div className="flex flex-col h-full min-h-0">
-      <div className="flex items-center gap-2 px-4 py-3 flex-shrink-0" style={{ borderBottom: '1px solid var(--color-border)' }}>
-        <PenSquare size={15} style={{ color: 'var(--color-primary-600)' }} />
+      <div className="flex items-center gap-2 px-3 sm:px-4 py-3 flex-shrink-0" style={{ borderBottom: '1px solid var(--color-border)' }}>
+        <PenSquare size={15} className="flex-shrink-0" style={{ color: 'var(--color-primary-600)' }} />
         <span className="text-sm font-bold flex-1" style={{ color: 'var(--color-text)' }}>
           {preset?.reply_to_email_id ? 'Reply' : preset?.is_forward ? 'Forward' : draftId ? 'Draft' : 'New email'}
         </span>
@@ -201,7 +201,7 @@ function Compose({ me, preset, onClose, onSent }) {
             <BookTemplate size={13} /> Templates <ChevronDown size={12} />
           </button>
           {tplOpen && (
-            <div className="absolute right-0 top-full z-30 mt-1 w-72 rounded-xl overflow-hidden max-h-64 overflow-y-auto"
+            <div className="absolute right-0 top-full z-30 mt-1 w-72 max-w-[calc(100vw-24px)] rounded-xl overflow-hidden max-h-64 overflow-y-auto"
               style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-lg, 0 8px 24px rgba(0,0,0,0.15))' }}>
               {templates.map(t => (
                 <div key={t.id} className="flex items-center gap-1 px-1 hover:bg-bg-secondary">
@@ -229,7 +229,7 @@ function Compose({ me, preset, onClose, onSent }) {
         <button onClick={onClose} className="p-1.5 rounded-lg" style={{ color: 'var(--color-text-secondary)' }}><X size={16} /></button>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 min-h-0">
+      <div className="flex-1 overflow-y-auto px-3 sm:px-4 min-h-0">
         <RecipientField label="To" value={to} onChange={setTo} autoFocus={!preset?.to?.length} />
         {showCc ? (
           <>
@@ -293,7 +293,8 @@ function Compose({ me, preset, onClose, onSent }) {
         )}
       </div>
 
-      <div className="flex items-center gap-2 px-4 py-3 flex-shrink-0" style={{ borderTop: '1px solid var(--color-border)' }}>
+      {/* Send + attach + save draft + discard exceed 320px on one line. */}
+      <div className="flex items-center gap-2 flex-wrap px-3 sm:px-4 py-3 flex-shrink-0" style={{ borderTop: '1px solid var(--color-border)' }}>
         <button onClick={send} disabled={sending} className="text-sm font-bold px-5 py-2 rounded-lg flex items-center gap-2 disabled:opacity-50"
           style={{ background: 'var(--gradient-sidebar)', color: 'var(--color-text-inverse)' }}>
           {sending ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />} Send{bulk && nRecip > 1 ? ` ×${nRecip}` : ''}
@@ -310,7 +311,7 @@ function Compose({ me, preset, onClose, onSent }) {
 
       {saveTplOpen && (
         <div className="absolute inset-0 z-40 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.4)' }} onClick={() => setSaveTplOpen(false)}>
-          <div className="w-72 rounded-2xl p-4" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }} onClick={e => e.stopPropagation()}>
+          <div className="w-72 max-w-[calc(100vw-32px)] rounded-2xl p-4" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }} onClick={e => e.stopPropagation()}>
             <div className="text-sm font-bold mb-2" style={{ color: 'var(--color-text)' }}>Save as my template</div>
             <input autoFocus value={tplName} onChange={e => setTplName(e.target.value)} placeholder="Template name" style={{ ...inp, width: '100%' }}
               onKeyDown={e => e.key === 'Enter' && saveMyTemplate()} />
@@ -368,12 +369,12 @@ function ThreadView({ threadId, meId, onBack, onCompose, refreshUnread }) {
   if (!data) return null;
   return (
     <div className="flex flex-col h-full min-h-0">
-      <div className="flex items-center gap-2 px-4 py-3 flex-shrink-0" style={{ borderBottom: '1px solid var(--color-border)' }}>
-        <button onClick={onBack} className="p-1.5 rounded-lg" style={{ color: 'var(--color-text-secondary)' }}><ChevronLeft size={16} /></button>
+      <div className="flex items-center gap-2 px-3 sm:px-4 py-3 flex-shrink-0" style={{ borderBottom: '1px solid var(--color-border)' }}>
+        <button onClick={onBack} aria-label="Back to list" className="p-1.5 rounded-lg flex-shrink-0" style={{ color: 'var(--color-text-secondary)' }}><ChevronLeft size={16} /></button>
         <span className="text-sm font-bold flex-1 truncate" style={{ color: 'var(--color-text)' }}>{data.thread.subject || '(no subject)'}</span>
         <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{data.emails.length} message{data.emails.length === 1 ? '' : 's'}</span>
       </div>
-      <div className="flex-1 overflow-y-auto p-4 space-y-3 min-h-0">
+      <div className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-3 min-h-0">
         {data.emails.map(e => (
           <div key={e.id} className="rounded-xl p-3.5" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
             <div className="flex items-center gap-2 flex-wrap">
@@ -401,7 +402,9 @@ function ThreadView({ threadId, meId, onBack, onCompose, refreshUnread }) {
                 ))}
               </div>
             )}
-            <div className="flex items-center gap-1.5 mt-2.5">
+            {/* Wraps: Reply + Reply all + Forward is ~250px of buttons and the
+                card is narrower than that at 320. */}
+            <div className="flex items-center gap-1.5 mt-2.5 flex-wrap">
               <button onClick={() => reply(e)} className="text-[11px] font-bold px-2.5 py-1 rounded-lg flex items-center gap-1" style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}><Reply size={11} /> Reply</button>
               {(e.recipients.length > 1 || (e.recipients.length === 1 && !e.mine && e.recipients[0].user_id !== meId)) && (
                 <button onClick={() => replyAll(e)} className="text-[11px] font-bold px-2.5 py-1 rounded-lg flex items-center gap-1" style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}><ReplyAll size={11} /> Reply all</button>
@@ -528,11 +531,20 @@ export default function MailPanel({ onClose, meId, liveTick, onUnreadChange }) {
 
   return createPortal(
     <div className="fixed inset-0 z-[70] flex items-stretch justify-center p-0 sm:p-6" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={onClose}>
+      {/* Full-bleed on a phone (the wrapper drops its padding below sm), so the
+          panel itself owes the safe-area insets — otherwise the folder bar sits
+          under the notch and the pager under the home indicator when installed. */}
       <div className="relative w-full max-w-5xl flex rounded-none sm:rounded-2xl overflow-hidden animate-scale-in"
-        style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }} onClick={e => e.stopPropagation()}>
+        style={{
+          background: 'var(--color-bg)', border: '1px solid var(--color-border)',
+          paddingTop: 'env(safe-area-inset-top, 0px)', paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+        }} onClick={e => e.stopPropagation()}>
 
-        {/* folder sidebar */}
-        <div className="w-44 flex-shrink-0 flex flex-col p-3 gap-1" style={{ background: 'var(--color-surface)', borderRight: '1px solid var(--color-border)' }}>
+        {/* Folder sidebar — hidden below sm. 176px of a 320px screen left 144px
+            for the entire mail list, which is the whole reason mail was unusable
+            on a phone. The scrollable folder bar inside the main column replaces
+            it there: same four folders, same Compose, same Signature. */}
+        <div className="hidden sm:flex w-44 flex-shrink-0 flex-col p-3 gap-1" style={{ background: 'var(--color-surface)', borderRight: '1px solid var(--color-border)' }}>
           <button onClick={() => setView({ kind: 'compose', preset: null })}
             className="flex items-center justify-center gap-2 text-sm font-bold px-3 py-2.5 rounded-xl mb-2"
             style={{ background: 'var(--gradient-sidebar)', color: 'var(--color-text-inverse)' }}>
@@ -558,6 +570,39 @@ export default function MailPanel({ onClose, meId, liveTick, onUnreadChange }) {
 
         {/* main area */}
         <div className="flex-1 flex flex-col min-w-0 min-h-0">
+          {/* Mobile folder bar — the sidebar's job below sm. Scrolls sideways so
+              five controls never wrap into a second row and eat list height on a
+              320px screen; the active folder keeps the same tint the sidebar uses,
+              so which folder you're in reads the same at every width.
+              Hidden while composing: on a phone this bar sits under the thumb, and
+              switching folders drops an unsaved draft with no confirmation — a
+              hazard the desktop sidebar has too, but one a stray tap makes far
+              likelier here. Hiding it also gives the editor back ~40px. */}
+          <div className={`${view.kind === 'compose' ? 'hidden' : 'sm:hidden flex'} items-center gap-1.5 px-2.5 py-2 overflow-x-auto flex-shrink-0`}
+            style={{ background: 'var(--color-surface)', borderBottom: '1px solid var(--color-border)' }}>
+            <button onClick={() => setView({ kind: 'compose', preset: null })}
+              className="flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-xl flex-shrink-0"
+              style={{ background: 'var(--gradient-sidebar)', color: 'var(--color-text-inverse)' }}>
+              <PenSquare size={13} /> Compose
+            </button>
+            {FOLDERS.map(({ key, label, Icon }) => (
+              <button key={key} onClick={() => switchFolder(key)}
+                className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-2 rounded-xl flex-shrink-0"
+                style={{
+                  background: folder === key && view.kind === 'list' ? 'var(--color-primary-100, #e0e7ff)' : 'transparent',
+                  color: folder === key ? 'var(--color-primary-700, #4338ca)' : 'var(--color-text-secondary)',
+                  border: '1px solid var(--color-border)',
+                }}>
+                <Icon size={13} /> {label}
+              </button>
+            ))}
+            <button onClick={() => setSigOpen(true)}
+              className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-2 rounded-xl flex-shrink-0"
+              style={{ color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}>
+              <PenLine size={13} /> Signature
+            </button>
+          </div>
+
           {view.kind === 'compose' ? (
             <Compose me={meId} preset={view.preset}
               onClose={() => setView({ kind: 'list' })}
@@ -569,14 +614,19 @@ export default function MailPanel({ onClose, meId, liveTick, onUnreadChange }) {
               refreshUnread={() => onUnreadChange?.()} />
           ) : (
             <>
-              <div className="flex items-center gap-2 px-4 py-3 flex-shrink-0" style={{ borderBottom: '1px solid var(--color-border)' }}>
-                <Mail size={16} style={{ color: 'var(--color-primary-600)' }} />
+              {/* At 320 the title, search and three buttons cannot share a line.
+                  `order-last w-full` drops the search onto its own row on a phone
+                  and returns it inline from sm up — one input, not two copies
+                  fighting over the same state. */}
+              <div className="flex items-center gap-2 flex-wrap px-3 sm:px-4 py-2.5 sm:py-3 flex-shrink-0" style={{ borderBottom: '1px solid var(--color-border)' }}>
+                <Mail size={16} className="flex-shrink-0" style={{ color: 'var(--color-primary-600)' }} />
                 <span className="text-sm font-bold capitalize" style={{ color: 'var(--color-text)' }}>{folder}</span>
                 <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>{total ? total.toLocaleString() : ''}</span>
-                <div className="relative flex-1 max-w-xs ml-2">
+                <div className="relative order-last w-full sm:order-none sm:w-auto sm:flex-1 sm:max-w-xs sm:ml-2">
                   <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
                   <input value={qLive} onChange={e => search(e.target.value)} placeholder="Search subject or body…" style={{ ...inp, paddingLeft: 28, width: '100%' }} />
                 </div>
+                <span className="flex-1 sm:hidden" />
                 {folder === 'inbox' && (
                   <button onClick={() => { setUnreadOnly(v => !v); setOffset(0); }}
                     className="text-[11px] font-bold px-2.5 py-1.5 rounded-lg"
@@ -599,7 +649,7 @@ export default function MailPanel({ onClose, meId, liveTick, onUnreadChange }) {
                   </div>
                 ) : displayItems.map(it => (
                   <div key={it.id} onClick={() => openItem(it)}
-                    className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-bg-secondary transition-colors group"
+                    className="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-3 cursor-pointer hover:bg-bg-secondary transition-colors group"
                     style={{ borderBottom: '1px solid var(--color-border)', background: (folder === 'inbox' && !it.read) ? 'var(--color-primary-50, rgba(99,102,241,0.05))' : 'transparent' }}>
                     {folder === 'inbox' && <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: it.read ? 'transparent' : 'var(--color-primary-600)' }} />}
                     <div className="min-w-0 flex-1">
@@ -614,8 +664,13 @@ export default function MailPanel({ onClose, meId, liveTick, onUnreadChange }) {
                         <span className="text-xs truncate" style={{ color: 'var(--color-text-tertiary)' }}>— {it.preview}</span>
                       </div>
                     </div>
+                    {/* Trash / restore was hover-only. A phone has no hover, so
+                        on mobile this button never appeared and the ONLY way to
+                        delete or restore a mail did not exist. Visible by default,
+                        hover-revealed from sm up where the quiet look still holds. */}
                     <button onClick={e => trash(e, it)} title={folder === 'trash' ? 'Restore' : 'Trash'}
-                      className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                      aria-label={folder === 'trash' ? 'Restore' : 'Move to trash'}
+                      className="p-1.5 rounded-lg opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity flex-shrink-0">
                       {folder === 'trash' ? <CornerUpLeft size={13} style={{ color: 'var(--color-primary-600)' }} /> : <Trash2 size={13} style={{ color: '#ef4444' }} />}
                     </button>
                   </div>
