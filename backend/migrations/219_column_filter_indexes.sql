@@ -22,12 +22,82 @@
 --
 -- Additive and idempotent.
 --
--- ⚠ CONCURRENTLY: each statement must run OUTSIDE a transaction block. Paste
--- them ONE AT A TIME in the Supabase SQL editor, not as a single block. Without
--- CONCURRENTLY a plain CREATE INDEX takes a SHARE lock and blocks every
--- transfer write for the duration of the build, on a table taking live VICIDIAL
--- traffic.
+-- ── HOW TO APPLY (read this, the obvious way does not work) ─────────────────
+--
+-- The Supabase SQL editor wraps whatever you paste in a transaction, and
+-- CREATE INDEX CONCURRENTLY cannot run inside one:
+--     ERROR: 25001: CREATE INDEX CONCURRENTLY cannot run inside a transaction block
+-- Running the statements one at a time does NOT help — each one still gets its
+-- own BEGIN. The wrapper is the blocker, not the batching.
+--
+-- So this file is split by ACTUAL RISK rather than by table:
+--
+--   PART A (callbacks + sales) — paste into the SQL editor as-is, any time.
+--     These are plain CREATE INDEX. callbacks is 1.3 MB of heap and sales is
+--     12 MB, so each build is milliseconds. CONCURRENTLY would be ceremony.
+--
+--   PART B (transfers) — 59 MB of heap, 80,720 rows, taking live VICIDIAL
+--     writes. Two options, in order of preference:
+--
+--       1. psql, keeping CONCURRENTLY. psql runs in autocommit, so there is no
+--          transaction to be inside. Connection string:
+--          Supabase → Project Settings → Database → Connection string → URI.
+--              psql "postgresql://postgres.<ref>:<pw>@<host>:5432/postgres" \
+--                   -f backend/migrations/219_column_filter_indexes.sql
+--          (Use the DIRECT connection on port 5432, not the 6543 transaction
+--          pooler — the pooler cannot hold a session-level CONCURRENTLY build.)
+--
+--       2. If psql is not available: drop the word CONCURRENTLY from the three
+--          PART B statements and run them in the SQL editor during a quiet
+--          minute. What that actually costs: CREATE INDEX takes a SHARE lock,
+--          which blocks INSERT/UPDATE/DELETE but NOT SELECT — so reads are
+--          unaffected and the app stays responsive. Writes WAIT rather than
+--          fail, because the backend writes as service_role, which has no
+--          statement_timeout (only anon=3s and authenticated=8s do). Expect a
+--          few seconds per index, the trigram GIN being the slowest.
+--
+-- Everything is IF NOT EXISTS, so re-running after a partial apply is safe.
+--
+-- ⚠ One caveat specific to CONCURRENTLY: if it fails part-way it leaves an
+-- INVALID index behind, and IF NOT EXISTS will then skip it forever. Check
+-- after applying:
+--     SELECT c.relname FROM pg_class c JOIN pg_index i ON i.indexrelid = c.oid
+--      WHERE NOT i.indisvalid;
+-- Anything listed must be DROPped and rebuilt.
 -- ============================================================================
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- PART A — safe in the Supabase SQL editor, paste the whole block.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- callbacks: the (filter, sort) pairs.
+-- compliance.js already filters callbacks by status and priority and orders by
+-- callback_at — and callbacks had NO index on either status or priority. The
+-- composite key order matches the pair the route actually issues (scope by
+-- company, filter by status, order by callback_at), which a sort-only index
+-- would not serve.
+CREATE INDEX IF NOT EXISTS idx_callbacks_company_status_at
+  ON callbacks (company_id, status, callback_at DESC);
+
+-- The compliance global view has no company_id at all, so it needs the
+-- status-leading form as well.
+CREATE INDEX IF NOT EXISTS idx_callbacks_status_at
+  ON callbacks (status, callback_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_callbacks_priority
+  ON callbacks (priority);
+
+-- sales: the one column that IS worth it.
+-- updated_at backs the "Status Updated" header, which is already live in
+-- SALE_SORT (compliance.js) and has never had an index. Unlike customer_name
+-- this one is also a natural default ordering for the review queue, so it earns
+-- its write cost where the name columns do not.
+CREATE INDEX IF NOT EXISTS idx_sales_updated_at
+  ON sales (updated_at DESC);
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- PART B — transfers (80,720 rows, live writes). psql, or drop CONCURRENTLY.
+-- ═══════════════════════════════════════════════════════════════════════════
 
 -- ── 1. transfers: customer name sort ────────────────────────────────────────
 -- transfers has NO customer columns. Every customer-facing value lives in
@@ -66,31 +136,6 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_transfers_fd_firstname
 -- GIN can.
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_transfers_phone_trgm
   ON transfers USING gin (normalized_phone gin_trgm_ops);
-
--- ── 3. callbacks: the (filter, sort) pairs ──────────────────────────────────
--- compliance.js already filters callbacks by status and priority and orders by
--- callback_at — and callbacks had NO index on either status or priority. The
--- composite key order matches the pair the route actually issues (scope by
--- company, filter by status, order by callback_at), which a sort-only index
--- would not serve.
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_callbacks_company_status_at
-  ON callbacks (company_id, status, callback_at DESC);
-
--- The compliance global view has no company_id at all, so it needs the
--- status-leading form as well.
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_callbacks_status_at
-  ON callbacks (status, callback_at DESC);
-
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_callbacks_priority
-  ON callbacks (priority);
-
--- ── 4. sales: the one column that IS worth it ───────────────────────────────
--- updated_at backs the "Status Updated" header, which is already live in
--- SALE_SORT (compliance.js) and has never had an index. Unlike customer_name
--- this one is also a natural default ordering for the review queue, so it earns
--- its write cost where the name columns do not.
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_sales_updated_at
-  ON sales (updated_at DESC);
 
 -- ── post-apply verification ─────────────────────────────────────────────────
 -- SELECT indexname FROM pg_indexes
