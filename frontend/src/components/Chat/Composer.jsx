@@ -9,8 +9,11 @@ import { isHtmlEmpty, htmlToText, extractMentions, uploadChatFile } from '../../
 import TemplatesModal from './TemplatesModal';
 import Avatar from './Avatar';
 
+// Size is NOT set here on purpose: global.css's `pointer: coarse` block already
+// floors any button whose only element child is an svg to 44x44, and this is
+// one. aria-label mirrors the title so the floor applies to a labelled control.
 const ToolBtn = ({ title, onClick, children, active }) => (
-  <button type="button" title={title} onMouseDown={e => { e.preventDefault(); onClick(); }}
+  <button type="button" title={title} aria-label={title} onMouseDown={e => { e.preventDefault(); onClick(); }}
     className="p-1.5 rounded-lg transition-colors hover:bg-bg-secondary"
     style={{ color: active ? 'var(--color-primary-600)' : 'var(--color-text-secondary)' }}>
     {children}
@@ -201,7 +204,14 @@ const Composer = ({ onSend, onTyping, disabled, disabledReason, meId, members = 
     <div className="relative flex-shrink-0" style={{ borderTop: '1px solid var(--color-border)' }}>
       <style>{`
         .bsx-chat-ed:empty:before { content: attr(data-ph); color: var(--color-text-tertiary); }
-        .bsx-chat-ed img { max-width: 220px; max-height: 200px; border-radius: 8px; margin: 4px 0; }
+        /* 16px on phones is not a style choice: iOS Safari auto-ZOOMS the page
+           when a focused editable has a font-size under 16px, and it does this
+           for contenteditable too — .input escapes it only because --text-base
+           is already 16px. Below 640 the composer therefore matches, and the
+           14px look comes back on the sizes that never zoom. */
+        .bsx-chat-ed { font-size: 16px; }
+        @media (min-width: 640px) { .bsx-chat-ed { font-size: var(--text-sm, 0.875rem); } }
+        .bsx-chat-ed img { max-width: min(220px, 55vw); max-height: 200px; border-radius: 8px; margin: 4px 0; }
         .bsx-chat-ed a { color: var(--color-primary-600); text-decoration: underline; }
         .bsx-chat-ed ul { list-style: disc; padding-left: 1.2rem; }
         .bsx-chat-ed ol { list-style: decimal; padding-left: 1.2rem; }
@@ -289,8 +299,10 @@ const Composer = ({ onSend, onTyping, disabled, disabledReason, meId, members = 
         <input ref={fileRef} type="file" multiple className="hidden" onChange={onPickFile} />
       </div>
 
-      {/* Editor + send */}
-      <div className="flex items-end gap-2 px-3 py-2.5">
+      {/* Editor + send. The editor carries NO text-size utility — .bsx-chat-ed
+          owns the size so the 16px mobile rule above isn't fighting a Tailwind
+          class of equal specificity. */}
+      <div className="flex items-end gap-2 px-2.5 sm:px-3 py-2.5">
         <div
           ref={edRef}
           contentEditable
@@ -302,8 +314,8 @@ const Composer = ({ onSend, onTyping, disabled, disabledReason, meId, members = 
           onKeyDown={onKey}
           onMouseUp={detectSuggestion}
           onPaste={onPaste}
-          className="bsx-chat-ed flex-1 resize-none rounded-2xl px-4 py-2.5 text-sm focus:outline-none overflow-y-auto"
-          style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', color: 'var(--color-text)', minHeight: 42, maxHeight: 180 }}
+          className="bsx-chat-ed flex-1 min-w-0 resize-none rounded-2xl px-3 sm:px-4 py-2.5 focus:outline-none overflow-y-auto"
+          style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', color: 'var(--color-text)', minHeight: 42, maxHeight: 'min(180px, 30vh)' }}
         />
         <button onClick={submit} disabled={!canSend} title="Send"
           className="w-10 h-10 rounded-full flex items-center justify-center text-white flex-shrink-0 disabled:opacity-40 transition-transform hover:scale-105"

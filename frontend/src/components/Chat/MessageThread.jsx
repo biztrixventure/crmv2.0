@@ -32,11 +32,16 @@ const TypingDots = ({ names }) => (
   </div>
 );
 
+// 260px was wider than the bubble it lives in once the viewport hits 320 — the
+// image set the bubble's width and pushed the whole row off-screen. min() keeps
+// the desktop size and lets the phone clamp it.
+const MEDIA_MAX = 'min(260px, 58vw)';
+
 const Attachment = ({ a, mine }) => {
   if (a.kind === 'image') {
     return (
       <a href={a.url} target="_blank" rel="noopener noreferrer" className="block">
-        <img src={a.url} alt={a.name} className="rounded-lg" style={{ maxWidth: 260, maxHeight: 240, objectFit: 'cover' }} />
+        <img src={a.url} alt={a.name} className="rounded-lg" style={{ maxWidth: MEDIA_MAX, maxHeight: 240, objectFit: 'cover' }} />
       </a>
     );
   }
@@ -45,7 +50,7 @@ const Attachment = ({ a, mine }) => {
       className="flex items-center gap-2 px-2.5 py-2 rounded-lg transition-opacity hover:opacity-90"
       style={{ backgroundColor: mine ? 'rgba(255,255,255,0.18)' : 'var(--color-bg-secondary)', border: mine ? 'none' : '1px solid var(--color-border)' }}>
       <FileText size={16} style={{ color: mine ? 'white' : 'var(--color-primary-600)' }} />
-      <span className="text-xs truncate" style={{ maxWidth: 170, color: mine ? 'white' : 'var(--color-text)' }}>{a.name}</span>
+      <span className="text-xs truncate" style={{ maxWidth: 'min(170px, 40vw)', color: mine ? 'white' : 'var(--color-text)' }}>{a.name}</span>
       <Download size={13} style={{ color: mine ? 'rgba(255,255,255,0.8)' : 'var(--color-text-tertiary)' }} />
     </a>
   );
@@ -62,7 +67,7 @@ const Bubble = memo(({ m, mine, meId, showName, read, settings = {}, onEdit, onD
   const canHide   = !m.deleted && !isTemp;   // "delete for me" — any member, any message
   return (
     <div className={`flex ${mine ? 'justify-end' : 'justify-start'} group`}>
-      <div className={`max-w-[80%] min-w-0 flex flex-col ${mine ? 'items-end' : 'items-start'}`}>
+      <div className={`max-w-[85%] sm:max-w-[80%] min-w-0 flex flex-col ${mine ? 'items-end' : 'items-start'}`}>
         {/* Sender name takes the per-user font color (Chat Control → Font
             Colors) when set, falling back to the system primary. */}
         {showName && !mine && (
@@ -80,7 +85,14 @@ const Bubble = memo(({ m, mine, meId, showName, read, settings = {}, onEdit, onD
               separate react launcher that overlapped the menu.) */}
           {!m.deleted && (
             <div className={`relative self-center ${mine ? 'order-first' : 'order-last'}`}>
-              <button onClick={() => setMenu(v => !v)} className="opacity-0 group-hover:opacity-100 p-1 rounded transition-opacity" style={{ color: 'var(--color-text-tertiary)' }} title="Message actions"><MoreVertical size={14} /></button>
+              {/* Reply / react / edit / delete lived behind :hover ONLY. A phone
+                  has no hover, so on mobile this button never appeared and every
+                  message action was unreachable — the single worst thing about
+                  chat on a phone. Visible by default, hover-revealed from lg up
+                  where the original quiet-until-hover look still applies. */}
+              <button onClick={() => setMenu(v => !v)}
+                className="opacity-70 lg:opacity-0 lg:group-hover:opacity-100 p-2 lg:p-1 rounded transition-opacity"
+                style={{ color: 'var(--color-text-tertiary)' }} title="Message actions" aria-label="Message actions"><MoreVertical size={14} /></button>
               {menu && (
                 <>
                   <div className="fixed inset-0 z-10" onClick={() => setMenu(false)} />
@@ -90,10 +102,10 @@ const Bubble = memo(({ m, mine, meId, showName, read, settings = {}, onEdit, onD
                         {QUICK.map(e => <button key={e} onClick={() => { setMenu(false); onReact(m.id, e); }} className="text-lg leading-none hover:scale-125 transition-transform">{e}</button>)}
                       </div>
                     )}
-                    <button onClick={() => { setMenu(false); onReply(m); }} className="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-bg-secondary" style={{ color: 'var(--color-text)' }}><Reply size={13} /> Reply</button>
-                    {canEdit   && <button onClick={() => { setMenu(false); onEdit(m); }} className="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-bg-secondary" style={{ color: 'var(--color-text)' }}><Pencil size={13} /> Edit</button>}
-                    {canHide   && <button onClick={() => { setMenu(false); onHide(m); }} className="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-bg-secondary" style={{ color: 'var(--color-text)' }}><EyeOff size={13} /> Delete for me</button>}
-                    {canDelAll && <button onClick={() => { setMenu(false); onDelete(m); }} className="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-error-50" style={{ color: '#ef4444' }}><Trash2 size={13} /> Delete for everyone</button>}
+                    <button onClick={() => { setMenu(false); onReply(m); }} className="w-full flex items-center gap-2 px-3 py-2 lg:py-1.5 text-xs hover:bg-bg-secondary" style={{ color: 'var(--color-text)' }}><Reply size={13} /> Reply</button>
+                    {canEdit   && <button onClick={() => { setMenu(false); onEdit(m); }} className="w-full flex items-center gap-2 px-3 py-2 lg:py-1.5 text-xs hover:bg-bg-secondary" style={{ color: 'var(--color-text)' }}><Pencil size={13} /> Edit</button>}
+                    {canHide   && <button onClick={() => { setMenu(false); onHide(m); }} className="w-full flex items-center gap-2 px-3 py-2 lg:py-1.5 text-xs hover:bg-bg-secondary" style={{ color: 'var(--color-text)' }}><EyeOff size={13} /> Delete for me</button>}
+                    {canDelAll && <button onClick={() => { setMenu(false); onDelete(m); }} className="w-full flex items-center gap-2 px-3 py-2 lg:py-1.5 text-xs hover:bg-error-50" style={{ color: 'var(--color-error-600)' }}><Trash2 size={13} /> Delete for everyone</button>}
                   </div>
                 </>
               )}
@@ -118,7 +130,7 @@ const Bubble = memo(({ m, mine, meId, showName, read, settings = {}, onEdit, onD
                   <span className="block text-[11px] font-bold truncate" style={{ color: mine ? 'rgba(255,255,255,0.95)' : 'var(--color-primary-600)' }}>
                     {m.reply_preview.sender_id === meId ? 'You' : m.reply_preview.sender_name}
                   </span>
-                  <span className="block text-xs truncate" style={{ maxWidth: 240, color: mine ? 'rgba(255,255,255,0.85)' : 'var(--color-text-secondary)', fontStyle: m.reply_preview.deleted ? 'italic' : 'normal' }}>
+                  <span className="block text-xs truncate" style={{ maxWidth: 'min(240px, 55vw)', color: mine ? 'rgba(255,255,255,0.85)' : 'var(--color-text-secondary)', fontStyle: m.reply_preview.deleted ? 'italic' : 'normal' }}>
                     {m.reply_preview.deleted ? 'message deleted' : (m.reply_preview.body || 'Attachment')}
                   </span>
                 </button>
@@ -270,7 +282,7 @@ const MessageThread = ({ conversation, meId, onlineIds, onBack, banned, msgSetti
       <style>{`
         @keyframes bsxTyping{0%,80%,100%{transform:translateY(0);opacity:.4}40%{transform:translateY(-3px);opacity:1}}
         .bsx-typing-dot{animation:bsxTyping 1.1s infinite ease-in-out}
-        .bsx-msg img{max-width:260px;max-height:240px;border-radius:8px;margin:3px 0}
+        .bsx-msg img{max-width:min(260px,58vw);max-height:240px;border-radius:8px;margin:3px 0}
         .bsx-msg a{color:inherit;text-decoration:underline}
         .bsx-msg ul{list-style:disc;padding-left:1.15rem;margin:2px 0}
         .bsx-msg ol{list-style:decimal;padding-left:1.15rem;margin:2px 0}

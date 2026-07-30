@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { X, AlertTriangle, MessagesSquare } from 'lucide-react';
 import { toast } from 'sonner';
 import client from '../../api/client';
@@ -13,6 +14,24 @@ import GroupSettingsModal from './GroupSettingsModal';
 // Full chat window: dim backdrop + opaque docked panel. On large screens it's a
 // two-pane layout (conversation list always visible alongside the open thread,
 // so going back is one click); on mobile it's single-pane with a back button.
+//
+// MOBILE BACK. The panel is an overlay, not a route, so on a phone it had no
+// relationship to the back gesture at all: an edge swipe with a thread open went
+// straight past both the thread and the panel, and in an installed PWA (no
+// browser chrome) that swipe is the ONLY back control there is — it fell through
+// to the iOS system gesture and dismissed the app. useHistoryTab documents that
+// exact failure for shell tabs; the fix here is the same shape, and deliberately
+// goes through react-router's navigate() rather than a raw pushState, because
+// the router keeps its own idx/key bookkeeping in window.history.state and
+// stamping over that by hand desynchronises it.
+//
+// Two entries, so back unwinds in the order the user built it:
+//   ?chat=1            panel open, conversation list
+//   ?chat=<convId>     a thread open
+// Back from a thread returns to the list; back from the list closes the panel;
+// only then does back leave the app. The `chat` param is additive — useHistoryTab
+// reads only `t` and rebuilds the query from the live search string, so the two
+// never clobber each other.
 const ChatPanel = ({ open, onClose, meId, banned, focusConversationId = null, onFocusConsumed }) => {
   const [conversations, setConversations] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -24,6 +43,80 @@ const ChatPanel = ({ open, onClose, meId, banned, focusConversationId = null, on
   const [msgSettings, setMsgSettings] = useState({ edit_enabled: true, delete_enabled: true, edit_window_min: 15, delete_everyone_window_min: 60 });
   const pollRef = useRef(null);
   const onlineIds = usePresence(open);
+
+  // ── back-gesture wiring (see the header comment) ──────────────────────────
+  const navigate  = useNavigate();
+  const location  = useLocation();
+  const chatParam = new URLSearchParams(location.search).get('chat');
+  const pushedRef = useRef(0);          // how many entries WE put on the stack
+  const skipMirrorRef = useRef(false);  // a URL-driven change is being applied
+  const armedRef  = useRef(false);      // our param is on the URL — pops are real
+  const activeRef  = useRef(active);   activeRef.current  = active;
+  const onCloseRef = useRef(onClose);  onCloseRef.current = onClose;
+
+  // 1) URL → state. Declared FIRST on purpose: on a back gesture both this and
+  //    the mirror below run in the same commit, and the mirror would otherwise
+  //    push the thread straight back on — making the swipe look like a no-op.
+  //
+  //    armedRef is what makes "no chat param" mean "the user went back" instead
+  //    of "we haven't written one yet". On the commit where `open` first flips
+  //    true the param is still absent, and without the latch this effect read
+  //    that as a pop and closed the panel the instant it opened.
+  //
+  //    It does NOT need to guard against `active` changing under it: the deps
+  //    are [chatParam, open], so opening a thread doesn't re-run this at all.
+  useEffect(() => {
+    if (!open || !armedRef.current) return;
+    if (chatParam == null) {                       // popped past the panel
+      skipMirrorRef.current = true;
+      armedRef.current = false;
+      pushedRef.current = 0;
+      onCloseRef.current?.();
+    } else if (chatParam === '1' && activeRef.current) {   // popped back to the list
+      skipMirrorRef.current = true;
+      pushedRef.current = Math.max(0, pushedRef.current - 1);
+      setActive(null);
+    }
+  }, [chatParam, open]);
+
+  // 2) state → URL. Pushes going deeper (closed → list → thread) so each level
+  //    has its own entry; swapping between threads on the two-pane desktop
+  //    layout replaces instead, or every click would pile up an entry.
+  useEffect(() => {
+    if (!open) { pushedRef.current = 0; armedRef.current = false; return; }
+    if (skipMirrorRef.current) { skipMirrorRef.current = false; return; }
+    const want = active ? String(active.id) : '1';
+    if (chatParam === want) { armedRef.current = true; return; }
+    const deeper = chatParam == null || chatParam === '1';
+    const sp = new URLSearchParams(window.location.search);
+    sp.set('chat', want);
+    if (deeper) pushedRef.current += 1;
+    armedRef.current = true;
+    navigate({ search: `?${sp.toString()}` }, { replace: !deeper, state: location.state });
+  }, [open, active, chatParam, navigate, location.state]);
+
+  // Closing from the X / backdrop unwinds our own entries rather than leaving
+  // them in the forward stack, where a stray back would re-open the panel. With
+  // nothing pushed (a reload that already carried ?chat=…) strip the param
+  // instead, so a later back doesn't land on a URL that reopens chat.
+  const closePanel = useCallback(() => {
+    if (pushedRef.current > 0) { navigate(-pushedRef.current); return; }   // effect 1 then closes
+    const sp = new URLSearchParams(window.location.search);
+    if (sp.has('chat')) {
+      sp.delete('chat');
+      const s = sp.toString();
+      navigate({ search: s ? `?${s}` : '' }, { replace: true, state: location.state });
+    }
+    armedRef.current = false;
+    onClose?.();
+  }, [navigate, onClose, location.state]);
+
+  // The thread's back arrow is a real history pop, so the on-screen control and
+  // the edge swipe do exactly the same thing.
+  const backToList = useCallback(() => {
+    if (pushedRef.current > 1) navigate(-1);
+    else setActive(null);
+  }, [navigate]);
 
   // Edit/delete controls (superadmin-configured) — fetched once per open.
   useEffect(() => { if (open) client.get('chat/settings').then(r => setMsgSettings(r.data)).catch(() => {}); }, [open]);
@@ -145,20 +238,30 @@ const ChatPanel = ({ open, onClose, meId, banned, focusConversationId = null, on
   return createPortal(
     <>
       {/* Dim backdrop on all sizes (fixes the see-through look) */}
-      <div className="fixed inset-0 z-[2147483646]" style={{ backgroundColor: 'rgba(15,23,42,0.55)', backdropFilter: 'blur(2px)' }} onClick={onClose} />
+      <div className="fixed inset-0 z-[2147483646]" style={{ backgroundColor: 'rgba(15,23,42,0.55)', backdropFilter: 'blur(2px)' }} onClick={closePanel} />
 
-      <aside className="fixed top-0 right-0 z-[2147483647] h-full flex flex-col w-full lg:w-[920px] animate-slide-in-right"
-        style={{ backgroundColor: 'var(--color-surface)', borderLeft: '1px solid var(--color-border)', boxShadow: 'var(--shadow-xl)' }}>
+      {/* max-w-full so the lg width can never exceed a narrow viewport, and
+          safe-area padding so the title bar clears an iPhone notch and the
+          composer clears the home indicator when installed as a PWA. */}
+      <aside className="fixed top-0 right-0 z-[2147483647] h-full flex flex-col w-full max-w-full lg:w-[920px] animate-slide-in-right"
+        style={{
+          backgroundColor: 'var(--color-surface)', borderLeft: '1px solid var(--color-border)', boxShadow: 'var(--shadow-xl)',
+          paddingTop: 'env(safe-area-inset-top, 0px)', paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+        }}>
         {/* Title bar */}
-        <div className="flex items-center justify-between px-4 h-14 flex-shrink-0" style={{ background: 'var(--gradient-sidebar)' }}>
-          <span className="flex items-center gap-2 font-bold text-white" style={{ fontFamily: 'var(--font-display)' }}><MessagesSquare size={18} /> Chat</span>
-          <button onClick={onClose} className="p-1.5 rounded-lg bg-white/20 hover:bg-white/30"><X size={18} className="text-white" /></button>
+        <div className="flex items-center justify-between px-3 sm:px-4 h-14 flex-shrink-0" style={{ background: 'var(--gradient-sidebar)' }}>
+          <span className="flex items-center gap-2 font-bold text-white truncate" style={{ fontFamily: 'var(--font-display)' }}><MessagesSquare size={18} className="flex-shrink-0" /> Chat</span>
+          {/* No explicit size: global.css's `pointer: coarse` block already
+              floors an icon-only button to 44x44 on touch. */}
+          <button onClick={closePanel} aria-label="Close chat"
+            className="p-1.5 rounded-lg bg-white/20 hover:bg-white/30 flex-shrink-0"><X size={18} className="text-white" /></button>
         </div>
 
         {banned && (
-          <div className="flex items-center gap-2 px-4 py-2.5 flex-shrink-0" style={{ backgroundColor: '#fef2f2', borderBottom: '1px solid var(--color-border)' }}>
-            <AlertTriangle size={15} style={{ color: '#b91c1c' }} />
-            <span className="text-xs" style={{ color: '#b91c1c' }}>You are banned from chat. You can read but not send messages.</span>
+          <div className="flex items-center gap-2 px-4 py-2.5 flex-shrink-0"
+            style={{ backgroundColor: 'color-mix(in srgb, var(--color-error-600) 12%, transparent)', borderBottom: '1px solid var(--color-border)' }}>
+            <AlertTriangle size={15} className="flex-shrink-0" style={{ color: 'var(--color-error-600)' }} />
+            <span className="text-xs" style={{ color: 'var(--color-error-600)' }}>You are banned from chat. You can read but not send messages.</span>
           </div>
         )}
 
@@ -178,7 +281,7 @@ const ChatPanel = ({ open, onClose, meId, banned, focusConversationId = null, on
           {/* RIGHT — open thread (or empty state on large screens) */}
           <div className={`flex-1 min-w-0 flex-col ${active ? 'flex' : 'hidden lg:flex'}`} style={{ backgroundColor: 'var(--color-bg)' }}>
             {active
-              ? <MessageThread key={active.id} conversation={active} meId={meId} onlineIds={onlineIds} banned={banned} msgSettings={msgSettings} onBack={() => setActive(null)} onSent={load} onOpenSettings={setSettingsConv} />
+              ? <MessageThread key={active.id} conversation={active} meId={meId} onlineIds={onlineIds} banned={banned} msgSettings={msgSettings} onBack={backToList} onSent={load} onOpenSettings={setSettingsConv} />
               : (
                 <div className="flex flex-col items-center justify-center h-full gap-3 px-8 text-center">
                   <div className="w-16 h-16 rounded-2xl flex items-center justify-center" style={{ background: 'var(--gradient-sidebar)', opacity: 0.9 }}>
