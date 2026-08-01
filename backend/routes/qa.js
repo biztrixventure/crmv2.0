@@ -24,7 +24,7 @@ const { asyncHandler } = require('../middleware/errorHandler');
 const { isSuperAdmin, hasPermission, getUserCompanies } = require('../models/helpers');
 const { getConfig, setConfig, getAllConfig } = require('../utils/businessConfig');
 const { isSheetConfig, computeSheetReview, isY } = require('../utils/qaSheetFormula');
-const { listCandidatesByLeadId, listCandidatesByPhone, listCandidatesForSale, locationForRecording, listDayRecordings, getBoxes, fillLeadStatuses, resolveDispos, leadFieldCustomer } = require('../utils/dialerBoxes');
+const { listCandidatesByLeadId, listCandidatesByPhone, listCandidatesForSale, locationForRecording, listDayRecordings, getBoxes, fillLeadStatuses, resolveDispos, leadFieldCustomer, leadCustomFields, discoverCustomFieldNames } = require('../utils/dialerBoxes');
 const { materializeCompany } = require('../utils/qaMaterializer');
 const { autoAssignCompany } = require('../utils/qaAutoAssign');
 const { WORK_TYPES, workTypeOf, getActiveRules, materializeCloserWork, applyCompanyRules, openCounts } = require('../utils/qaRules');
@@ -2603,6 +2603,78 @@ router.get('/assignments/:id/crm-fields', asyncHandler(async (req, res) => {
     if (nameOf[ownCompanyId])     extra.center_name    = nameOf[ownCompanyId];
   }
   res.json({ fields, extra });
+}));
+
+// ── VICIdial lead fields for ONE assignment ──────────────────────────────────
+// The vehicle data (VIN, make, model, year, mileage) a fronter collects lives in
+// the dialer list's CUSTOM fields, not in the CRM record — so an RCM review of a
+// raw dialer call has no other source for it. The caller passes exactly the field
+// names its scorecard maps, because VICIdial has no all-fields-by-lead call and
+// every field costs one HTTP round-trip.
+//
+// Best-effort by design: an unreachable box returns {} and the reviewer types the
+// cell. This must never 500 the scoring form over a dialer being down.
+router.get('/assignments/:id/vici-fields', asyncHandler(async (req, res) => {
+  if (!(await can(req, 'view_qa_queue'))) return res.status(403).json({ error: 'Forbidden' });
+  const wanted = String(req.query.fields || '').split(',').map(s => s.trim()).filter(Boolean).slice(0, 20);
+  if (!wanted.length) return res.json({ values: {} });
+
+  const { data: a } = await supabaseAdmin.from('qa_assignments')
+    .select('id, company_id, recording_ref').eq('id', req.params.id).maybeSingle();
+  if (!a) return res.status(404).json({ error: 'Not found' });
+  const allowed = await allowedCompanyIds(req);
+  if (allowed && !allowed.includes(a.company_id)) return res.status(403).json({ error: 'Forbidden' });
+
+  const rec = a.recording_ref || {};
+  const leadId = rec.lead_id || null;
+  if (!leadId) return res.json({ values: {} });
+  const box = getBoxes().find(b => b.id === rec.box_id) || null;
+  try {
+    const values = await leadCustomFields(box, leadId, wanted);
+    res.json({ values });
+  } catch (e) {
+    logger.warn('QA', `vici-fields ${req.params.id}: ${e.message}`);
+    res.json({ values: {} });   // the dialer is not a dependency of scoring
+  }
+}));
+
+// ── The mapping menu: which dialer fields exist ──────────────────────────────
+// Powers the "fetch from" dropdown in Scorecards & Config for EVERY method — the
+// same catalogue whether the card is TRA, RCM, Closed Sale or Unclosed Sale.
+// VICIdial only exposes custom fields per LIST, so sample the list_ids of a few
+// recent leads and union what they define. Cached upstream (15 min per list).
+router.get('/vici-field-names', asyncHandler(async (req, res) => {
+  if (!(await can(req, 'manage_qa_config'))) return res.status(403).json({ error: 'Forbidden' });
+  const allowed = await allowedCompanyIds(req);
+  let q = supabaseAdmin.from('qa_assignments')
+    .select('recording_ref, created_at').not('recording_ref', 'is', null)
+    .order('created_at', { ascending: false }).limit(40);
+  if (allowed) { if (!allowed.length) return res.json({ names: [] }); q = q.in('company_id', allowed); }
+  const { data: rows } = await q;
+
+  // Distinct leads → their list_ids. Three samples is plenty: campaigns reuse the
+  // same custom-field layout, and each extra sample is more dialer traffic.
+  const seen = new Set();
+  const listIds = [];
+  for (const r of (rows || [])) {
+    const rec = r.recording_ref || {};
+    if (!rec.lead_id || seen.has(rec.lead_id)) continue;
+    seen.add(rec.lead_id);
+    const box = getBoxes().find(b => b.id === rec.box_id) || getBoxes()[0];
+    if (!box) break;
+    try {
+      const got = await leadCustomFields(box, rec.lead_id, ['list_id']);
+      if (got.list_id) listIds.push(got.list_id);
+    } catch { /* skip this sample */ }
+    if (listIds.length >= 3) break;
+  }
+  try {
+    const names = await discoverCustomFieldNames([...new Set(listIds)]);
+    res.json({ names, sampled_lists: listIds.length });
+  } catch (e) {
+    logger.warn('QA', `vici-field-names: ${e.message}`);
+    res.json({ names: [], sampled_lists: 0 });
+  }
 }));
 
 // GET /qa/my-methods — the calling agent's own bound methods (drives their UI).

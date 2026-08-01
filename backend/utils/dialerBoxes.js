@@ -603,6 +603,106 @@ async function leadFieldCustomer(box, leadId) {
   return null;
 }
 
+// ── VICIdial CUSTOM lead fields (the vehicle data etc. a campaign collects) ────
+// The vehicle details a fronter takes — VIN, make, model, year, mileage — are not
+// VICIdial standard lead columns. They live in the LIST's custom fields, which
+// lead_field_info only returns when asked with custom_fields=Y (vici.md:596-615).
+// There is no all-fields-by-lead call, so: ask the list which custom fields exist
+// (list_custom_fields), then pull the wanted ones in parallel, cached.
+//
+// All best-effort. A box that is down, an archived lead, or an API user below
+// level 7 resolves to null rather than throwing — scoring a call must never be
+// blocked by the dialer being unreachable.
+
+// A lead's list_id — the list_id override needed when reading a custom field.
+const _leadListId = (box, leadId) => _leadFieldValue(box, leadId, 'list_id');
+
+// Custom-field NAMES defined on a list. Lets the Scorecards editor offer a real
+// mapping menu instead of asking somebody to type a field name from memory.
+async function listCustomFieldNames(box, listId) {
+  if (!box || !listId) return [];
+  const key = `lcf|${box.id}|${listId}`;
+  const hit = _lssCache.get(key);
+  if (hit && Date.now() - hit.at < LSS_TTL) return hit.names;
+  let names = [];
+  try {
+    const r = await axios.get(`${box.base}/vicidial/non_agent_api.php`, {
+      params: { source: 'crm', user: box.user, pass: box.pass, function: 'list_custom_fields', list_id: listId },
+      timeout: 15000, responseType: 'text',
+    });
+    const text = (typeof r.data === 'string' ? r.data : String(r.data || '')).trim();
+    if (text && !/^ERROR|^NOTICE/i.test(text)) {
+      // Rows are pipe- or comma-separated; the field name is the first column.
+      // Drop the header row VICIdial prints before the records.
+      for (const line of text.split(/\r?\n/)) {
+        const first = line.split(/[|,]/)[0].trim();
+        if (first && /^[a-z0-9_]+$/i.test(first) && !/^(field_label|field_name)$/i.test(first)) names.push(first);
+      }
+      names = [...new Set(names)];
+    }
+  } catch { /* box unreachable → no names */ }
+  _lssCache.set(key, { at: Date.now(), names });
+  return names;
+}
+
+// One field's value for a lead. Tries the plain read first (a field can be
+// standard on one cluster and custom on another), then the custom_fields=Y form
+// with the lead's own list_id.
+async function _customFieldOnBox(box, leadId, field) {
+  const plain = await _leadFieldValue(box, leadId, field);
+  if (plain) return plain;
+  const key = `lcv|${box.id}|${leadId}|${field}`;
+  const hit = _lssCache.get(key);
+  if (hit && Date.now() - hit.at < LSS_TTL) return hit.val;
+  let val = null;
+  try {
+    const listId = await _leadListId(box, leadId);
+    const r = await axios.get(`${box.base}/vicidial/non_agent_api.php`, {
+      params: {
+        source: 'crm', user: box.user, pass: box.pass, function: 'lead_field_info',
+        field_name: field, lead_id: leadId, custom_fields: 'Y',
+        ...(listId ? { list_id: listId } : {}),
+      },
+      timeout: 12000, responseType: 'text',
+    });
+    const text = (typeof r.data === 'string' ? r.data : String(r.data || '')).trim();
+    if (text && !/^ERROR|^NOTICE/i.test(text)) val = (text.split(/\r?\n/)[0].trim() || null);
+  } catch { /* box unreachable → null */ }
+  _lssCache.set(key, { at: Date.now(), val });
+  return val;
+}
+
+/**
+ * Values for named lead fields (standard or custom) for ONE lead.
+ * Tries the recording's own box first, then the others — a lead_id can resolve on
+ * a different cluster. Returns { field: value } carrying only fields that had a
+ * value, so an empty object means "nothing to fill", never an error.
+ */
+async function leadCustomFields(box, leadId, fields = []) {
+  const want = [...new Set((fields || []).filter(Boolean))].slice(0, 20);   // bounded: 1 HTTP call per field
+  if (!leadId || !want.length) return {};
+  const boxes = [box, ...BOXES.filter(b => b && (!box || b.id !== box.id))].filter(Boolean);
+  const out = {};
+  for (const b of boxes) {
+    const missing = want.filter(f => out[f] == null);
+    if (!missing.length) break;
+    const vals = await Promise.all(missing.map(f => _customFieldOnBox(b, leadId, f)));
+    missing.forEach((f, i) => { if (vals[i]) out[f] = vals[i]; });
+  }
+  return out;
+}
+
+/** Custom-field names across the boxes for the given lists — the mapping menu. */
+async function discoverCustomFieldNames(sampleListIds = []) {
+  const names = new Set();
+  for (const b of BOXES) {
+    for (const listId of sampleListIds) {
+      for (const n of await listCustomFieldNames(b, listId)) names.add(n);
+    }
+  }
+  return [...names].sort();
+}
+
 // Resolve dispositions for (boxId, leadId) pairs INCREMENTALLY. Cached-final
 // leads (incl. resolved-null) are returned instantly; up to `budget` NEW leads
 // are fetched this call. Returns { map, remaining, total } so the caller can
@@ -717,4 +817,5 @@ module.exports = {
   listCandidatesForSale, listCandidatesByPhone, listCandidatesByLeadId, locationForRecording,
   listDayRecordings, phoneFromLocation, listDayDispositions, leadStatusSearch,
   leadFieldStatus, leadFieldCustomer, fillLeadStatuses, resolveDispos,
+  leadCustomFields, listCustomFieldNames, discoverCustomFieldNames,
 };

@@ -282,7 +282,9 @@ function Candidates({ assignmentId }) {
             <div className="min-w-0 flex-1">
               <div className="text-sm font-bold tabular-nums flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>{fmtDur(c.duration)}
                 {c.leg && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase" style={c.leg === 'fronter' ? { background: 'rgba(37,99,235,0.16)', color: 'var(--color-primary-600)' } : { background: 'rgba(5,150,105,0.16)', color: '#059669' }}>{c.leg}</span>}
-                <span className="text-xs font-normal" style={{ color: 'var(--color-text-secondary)' }}>· {c.agent_user || 'agent ?'}</span></div>
+                {/* the PERSON, not their dialer login — the id is a lookup key,
+                    not something a reviewer can recognise mid-call */}
+                <span className="text-xs font-normal" style={{ color: 'var(--color-text-secondary)' }} title={c.agent_user ? `Dialer id ${c.agent_user}` : undefined}>· {c.agent_name || c.agent_user || 'agent ?'}</span></div>
               <div className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{fmtTime(c.start_time)} · box {c.box_id} · rec {c.recording_id}</div>
             </div>
             {canTranscribe && (
@@ -412,10 +414,24 @@ const AUTOFILL_SOURCES = [
   { v: 'center_name',    label: 'Center (evaluated party)' },
 ];
 
-function sourceAutoFill(cfg, a, extra) {
+// Fields whose source is a dialer field, so ScoreForm knows what to ask for.
+// `vici:<field>` — a VICIdial lead field (standard or a list custom field, which
+// is where the vehicle data lives). One HTTP round-trip per field, so we only
+// ever request the ones this scorecard actually maps.
+const viciSourcesOf = (cfg) => [...new Set((cfg?.meta_fields || [])
+  .map(f => (typeof f.source === 'string' && f.source.startsWith('vici:')) ? f.source.slice(5) : null)
+  .filter(Boolean))];
+
+function sourceAutoFill(cfg, a, crm, vici) {
   const out = {};
   const rec = a?.recording_ref || {};
-  const ex = extra || {};
+  const ex = crm?.extra || {};
+  const crmFields = crm?.fields || {};
+  // CRM lookups are name-based and case/spacing-agnostic, matching crmAutoFill.
+  const crmByNorm = {};
+  for (const [k, v] of Object.entries({ ...ex, ...crmFields })) {
+    if (v != null && v !== '' && typeof v !== 'object') crmByNorm[normKey(k)] = v;
+  }
   const pick = {
     agent_name:     () => a?.agent_name || a?.agent_display || a?.subject_name || '',
     duration:       () => ((a?.duration ?? rec.duration) != null ? fmtDur(a?.duration ?? rec.duration) : ''),
@@ -433,6 +449,16 @@ function sourceAutoFill(cfg, a, extra) {
     const s = f.source;
     if (!s) continue;                       // '' / undefined → leave the fuzzy pass in charge
     if (s === 'none') { out[f.key] = ''; continue; }
+    if (s.startsWith('vici:')) {            // a dialer lead field (vehicle data etc.)
+      const v = vici?.[s.slice(5)];
+      if (v != null && v !== '') out[f.key] = String(v);
+      continue;
+    }
+    if (s.startsWith('crm:')) {             // a field the fronter/closer typed
+      const v = crmByNorm[normKey(s.slice(4))];
+      if (v != null && v !== '') out[f.key] = String(v);
+      continue;
+    }
     const fn = pick[s];
     if (fn) out[f.key] = fn();
   }
@@ -448,9 +474,10 @@ function ScoreForm({ assignment, onScored }) {
   const [overall, setOverall] = useState('');
   const [busy, setBusy] = useState(false);
   const [crm, setCrm] = useState(null);           // { fields, extra } the fronter/closer entered
+  const [vici, setVici] = useState(null);         // dialer lead fields this card maps
 
   useEffect(() => {
-    setScorecard(null); setLoadErr(''); setScores({}); setNotes({}); setOverall(''); setCrm(null);
+    setScorecard(null); setLoadErr(''); setScores({}); setNotes({}); setOverall(''); setCrm(null); setVici(null);
     // the CRM fields the fronter/closer already entered → auto-fill matching scorecard fields
     client.get(`qa/assignments/${assignment.id}/crm-fields`).then(r => setCrm({ fields: r.data.fields || {}, extra: r.data.extra || {} })).catch(() => setCrm({ fields: {}, extra: {} }));
     // fetch by WORK TYPE slot (tra | rcm | closer_sales | closer_dispo) so each
@@ -471,6 +498,20 @@ function ScoreForm({ assignment, onScored }) {
       .catch(e => setLoadErr(e.response?.data?.error || 'Could not load the scorecard (check QA permissions).'));
   }, [assignment.id]);
 
+  // Dialer lead fields — only the ones this card actually maps, and only once the
+  // card is known. Never blocks scoring: an unreachable box resolves to {} and
+  // those cells stay editable and empty.
+  const viciWanted = scorecard ? viciSourcesOf(scorecard.criteria) : [];
+  const viciKey = viciWanted.join(',');
+  useEffect(() => {
+    if (!viciKey) { setVici({}); return; }
+    let alive = true;
+    client.get(`qa/assignments/${assignment.id}/vici-fields`, { params: { fields: viciKey } })
+      .then(r => { if (alive) setVici(r.data.values || {}); })
+      .catch(() => { if (alive) setVici({}); });
+    return () => { alive = false; };
+  }, [assignment.id, viciKey]);
+
   if (loadErr) return <div className="py-4 text-sm text-center" style={{ color: 'var(--color-error-600)' }}>{loadErr}</div>;
   if (scorecard === null) return <div className="py-4 text-center"><Loader2 className="animate-spin inline" style={{ color: 'var(--color-text-tertiary)' }} /></div>;
   if (!scorecard) return <div className="py-4 text-sm text-center" style={{ color: 'var(--color-error-600)' }}>No active scorecard for {SLOT_LABEL[assignment.work_type || assignment.method] || (assignment.method || '').toUpperCase()} yet. Ask a QA manager to set one up in Scorecards &amp; Config.</div>;
@@ -479,13 +520,13 @@ function ScoreForm({ assignment, onScored }) {
   if (isSheetConfig(scorecard.criteria)) {
     return (
       <SheetScoreRow
-        key={assignment.id + (crm ? ':crm' : '')}
+        key={assignment.id + (crm ? ':crm' : '') + (vici ? ':v' : '')}
         config={scorecard.criteria}
         initialValues={{
           ...metaAutoFill(scorecard.criteria, assignment),
           ...crmAutoFill(scorecard.criteria, crm?.fields, crm?.extra),
           // An explicitly-configured source wins over both guesses above.
-          ...sourceAutoFill(scorecard.criteria, assignment, crm?.extra),
+          ...sourceAutoFill(scorecard.criteria, assignment, crm, vici),
           ...outcomeAutoFill(scorecard.criteria, assignment, crm?.extra),
         }}
         busy={busy}
@@ -1609,6 +1650,17 @@ const atPath = (obj, path) => path.reduce((o, k) => (o == null ? o : o[k]), obj)
 
 function SheetHeaderEditor({ cfg, patch, ratingMin, ratingScale }) {
   const [openCol, setOpenCol] = useState(null);   // `${groupId}:${index}` whose options are expanded
+  // The dialer's own lead fields — including the LIST CUSTOM fields where the
+  // vehicle data (VIN, make, model, year, mileage) lives. Discovered from the
+  // dialer rather than typed from memory, and offered on EVERY method's card.
+  const [viciNames, setViciNames] = useState(null);   // null = loading, [] = none reachable
+  useEffect(() => {
+    let alive = true;
+    client.get('qa/vici-field-names')
+      .then(r => { if (alive) setViciNames(r.data.names || []); })
+      .catch(() => { if (alive) setViciNames([]); });
+    return () => { alive = false; };
+  }, []);
 
   const groups = SHEET_GROUPS.filter(g => Array.isArray(atPath(cfg, g.path)) || g.id === 'meta' || g.id === 'rating');
 
@@ -1697,7 +1749,16 @@ function SheetHeaderEditor({ cfg, patch, ratingMin, ratingScale }) {
                             <ThemedSelect value={f.source || ''} onChange={e => setField(g, i, { source: e.target.value })}
                               style={{ ...inp, width: '100%', fontSize: 11, padding: '3px 6px' }}>
                               {AUTOFILL_SOURCES.map(s => <option key={s.v} value={s.v}>{s.label}</option>)}
+                              {(viciNames || []).map(n => <option key={`vici:${n}`} value={`vici:${n}`}>Dialer · {n}</option>)}
+                              {/* A source already saved but no longer offered (box
+                                  down, or the list changed) must still show, or
+                                  opening the editor would silently reset it. */}
+                              {f.source && f.source.startsWith('vici:') && !(viciNames || []).includes(f.source.slice(5))
+                                && <option value={f.source}>Dialer · {f.source.slice(5)}</option>}
+                              {f.source && f.source.startsWith('crm:') && <option value={f.source}>CRM · {f.source.slice(4)}</option>}
                             </ThemedSelect>
+                            {viciNames === null && <span className="text-[9px] font-normal" style={{ color: 'var(--color-text-tertiary)' }}>loading dialer fields…</span>}
+                            {viciNames && !viciNames.length && <span className="text-[9px] font-normal" style={{ color: 'var(--color-text-tertiary)' }}>no dialer fields found</span>}
                           </label>
                         )}
                         {open && g.id === 'rating' && (
@@ -2551,7 +2612,7 @@ function DayRecordingsTab({ canAssign, companyId, scoped }) {
                           <td className="px-3 py-1 text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>call {i + 1}</td>
                           <td className="px-3 py-1"><DispoBadge d={c.dispo} /></td>
                           <td className="px-3 py-1">{c.transferred && <TransferBadge t />}</td>
-                          <td className="px-3 py-1 text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{c.agent_user}</td>
+                          <td className="px-3 py-1 text-[11px]" style={{ color: 'var(--color-text-tertiary)' }} title={c.agent_user ? `Dialer id ${c.agent_user}` : undefined}>{c.agent_name || g.agent_name || c.agent_user}</td>
                           <td className="px-3 py-1" />
                           <td className="px-3 py-1 tabular-nums text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{fmtDur(c.duration)}</td>
                           <td />
