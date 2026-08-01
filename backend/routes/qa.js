@@ -718,7 +718,8 @@ router.post('/assignments/:id/assign', asyncHandler(async (req, res) => {
 router.get('/assignments/:id/candidates', asyncHandler(async (req, res) => {
   if (!(await can(req, 'view_qa_queue'))) return res.status(403).json({ error: 'Forbidden' });
   const { data: a } = await supabaseAdmin.from('qa_assignments')
-    .select('id, company_id, method, subject_role, transfer_id, sale_id, status, assigned_to, recording_ref').eq('id', req.params.id).maybeSingle();
+    .select('id, company_id, method, subject_role, transfer_id, sale_id, status, assigned_to, recording_ref, customer_phone, recording_date, created_at')
+    .eq('id', req.params.id).maybeSingle();
   if (!a) return res.status(404).json({ error: 'Assignment not found' });
   const allowed = await allowedCompanyIds(req);
   if (!(await assignmentInScope(a, allowed))) return res.status(403).json({ error: 'Forbidden' });
@@ -728,6 +729,9 @@ router.get('/assignments/:id/candidates', asyncHandler(async (req, res) => {
   }
 
   let candidates = [];
+  // What the search actually looked for — returned so the UI can explain an empty
+  // list instead of showing a bare "no recordings" the reviewer cannot act on.
+  let diag = null;
   if (a.recording_ref && a.recording_ref.recording_id) {
     // day-recording assignment — the EXACT clip is known. Show it + its grouped
     // parts (all dials of this number by this agent) + any other legs on the lead.
@@ -772,20 +776,38 @@ router.get('/assignments/:id/candidates', asyncHandler(async (req, res) => {
     const agentIds = [...new Set([...fronterIds, ...closerIds])];
     const date = createdAt ? String(createdAt).slice(0, 10) : (saleDate ? String(saleDate).slice(0, 10) : null);
 
+    // Last-resort identifiers off the ASSIGNMENT itself. resolveCustomer already
+    // denormalised the phone onto the row, and recording_date/created_at carry the
+    // day — so a transfer whose own phone or timestamp is missing can still be
+    // searched instead of silently returning nothing.
+    if (!phone) phone = a.customer_phone || null;
+    const dayOf = (v) => (v ? String(v).slice(0, 10) : null);
+    const searchDate = date || dayOf(a.recording_date) || dayOf(a.created_at);
+
     const byKey = new Map();
     const merge = (rows) => { for (const r of (rows || [])) { const k = `${r.box_id}|${r.recording_id}`; if (!byKey.has(k)) byKey.set(k, r); } };
-    try { merge(await listCandidatesForSale({ code: leadCode, phone, agentIds, date, dialerAt: createdAt })); }
+    try { merge(await listCandidatesForSale({ code: leadCode, phone, agentIds, date: searchDate, dialerAt: createdAt })); }
     catch (e) { logger.warn('QA', `candidates resolve: ${e.message}`); }
     // mapping-free phone catch-all, bounded to the call day ±1 so a repeat
     // customer's calls on other days never bleed in — this is what surfaces the
     // closer's leg when the closer has no vicidial_agent_ids mapped.
     if (phone) {
-      const dn = date ? Date.parse(`${date}T00:00:00Z`) : null;
+      const dn = searchDate ? Date.parse(`${searchDate}T00:00:00Z`) : null;
       const df = dn ? new Date(dn - 86400000).toISOString().slice(0, 10) : null;
       const dt = dn ? new Date(dn + 86400000).toISOString().slice(0, 10) : null;
       try { merge(await listCandidatesByPhone({ phone, dateFrom: df, dateTo: dt })); }
       catch (e) { logger.warn('QA', `candidates phone: ${e.message}`); }
+      // Still nothing? The ±1 day window assumes the CRM timestamp is the call
+      // time. It is not, for a bulk-imported or late-entered transfer — the lead
+      // was dialled days before it reached the CRM. Retry unbounded, once, only
+      // when the bounded search came back empty, so the normal path keeps its
+      // narrow window and a repeat customer's other days never bleed in.
+      if (!byKey.size) {
+        try { merge(await listCandidatesByPhone({ phone })); }
+        catch (e) { logger.warn('QA', `candidates phone wide: ${e.message}`); }
+      }
     }
+    diag = { phone: phone ? `••••${String(phone).slice(-4)}` : null, date: searchDate, lead_code: !!leadCode, mapped_agents: agentIds.length };
     // tag each clip's leg by whose dialer id recorded it (fronter vs closer)
     candidates = [...byKey.values()]
       .map(c => {
@@ -814,7 +836,7 @@ router.get('/assignments/:id/candidates', asyncHandler(async (req, res) => {
   if (a.status === 'pending' && a.assigned_to === req.user.id) {
     await supabaseAdmin.from('qa_assignments').update({ status: 'in_review' }).eq('id', a.id);
   }
-  res.json({ assignment_id: a.id, candidates });
+  res.json({ assignment_id: a.id, candidates, diag });
 }));
 
 // ── recording stream proxy (mirrors compliance/recordings/stream; kept under

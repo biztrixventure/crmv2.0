@@ -208,6 +208,7 @@ function WaveViz({ audioRef, active }) {
 // ── candidate audio player (blob-streamed with auth, like RecordingReviewTab) ──
 function Candidates({ assignmentId }) {
   const [rows, setRows] = useState(null);
+  const [diag, setDiag] = useState(null);   // what the dialer search actually looked for
   const audioRef = useRef(null); const urlRef = useRef(null);
   const [loadingId, setLoadingId] = useState(null);
   const [playingRid, setPlayingRid] = useState(null);
@@ -221,10 +222,10 @@ function Candidates({ assignmentId }) {
 
   useEffect(() => {
     let dead = false;
-    setRows(null); setTxById({}); setTxOpen({}); setAudioRid(null); setCurTime(0);
+    setRows(null); setDiag(null); setTxById({}); setTxOpen({}); setAudioRid(null); setCurTime(0);
     client.get(`qa/assignments/${assignmentId}/candidates`)
-      .then(r => { if (!dead) setRows(r.data.candidates || []); })
-      .catch(() => { if (!dead) setRows([]); });
+      .then(r => { if (!dead) { setRows(r.data.candidates || []); setDiag(r.data.diag || null); } })
+      .catch(() => { if (!dead) { setRows([]); setDiag(null); } });
     // Is on-demand transcription enabled FOR THIS USER? (per-user, default OFF —
     // superadmin/compliance grants it in QA config → Transcription access.)
     client.get('qa/config').then(r => { if (!dead) setCanTranscribe(!!r.data?.can_transcribe); }).catch(() => {});
@@ -265,7 +266,22 @@ function Candidates({ assignmentId }) {
   };
 
   if (rows === null) return <div className="text-center py-6"><Loader2 className="animate-spin inline" style={{ color: 'var(--color-text-tertiary)' }} /><div className="text-xs mt-1" style={{ color: 'var(--color-text-tertiary)' }}>Loading recordings…</div></div>;
-  if (!rows.length) return <div className="text-center py-6 text-sm" style={{ color: 'var(--color-text-tertiary)' }}>No recordings found on the dialer for this call.</div>;
+  if (!rows.length) return (
+    <div className="text-center py-6 text-sm" style={{ color: 'var(--color-text-tertiary)' }}>
+      <p className="m-0">No recordings found on the dialer for this call.</p>
+      {/* Say WHAT was searched. "None found" alone gives a reviewer nothing to
+          act on — knowing it searched a phone with no date, or had no phone at
+          all, is the difference between a data gap and a dialer problem. */}
+      {diag && (
+        <p className="text-[11px] mt-1.5 mb-0" style={{ color: 'var(--color-text-tertiary)' }}>
+          Searched {diag.phone ? <>phone <b>{diag.phone}</b></> : <b>no phone on this record</b>}
+          {diag.date ? <> around <b>{diag.date}</b></> : <> with <b>no call date</b></>}
+          {diag.lead_code ? ', lead code linked' : ', no dialer lead code'}
+          {diag.mapped_agents ? `, ${diag.mapped_agents} mapped agent id(s)` : ', no mapped agent ids'}.
+        </p>
+      )}
+    </div>
+  );
   return (
     <div className="space-y-2">
       {rows.some(c => c.leg) && (
