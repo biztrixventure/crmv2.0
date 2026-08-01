@@ -24,7 +24,7 @@ const { asyncHandler } = require('../middleware/errorHandler');
 const { isSuperAdmin, hasPermission, getUserCompanies } = require('../models/helpers');
 const { getConfig, setConfig, getAllConfig } = require('../utils/businessConfig');
 const { isSheetConfig, computeSheetReview, isY } = require('../utils/qaSheetFormula');
-const { listCandidatesByLeadId, listCandidatesByPhone, listCandidatesForSale, locationForRecording, listDayRecordings, getBoxes, fillLeadStatuses, resolveDispos, leadFieldCustomer, leadCustomFields, discoverCustomFieldNames } = require('../utils/dialerBoxes');
+const { listCandidatesByLeadId, listCandidatesByPhone, listCandidatesForSale, locationForRecording, listDayRecordings, getBoxes, fillLeadStatuses, resolveDispos, leadFieldCustomer, leadCustomFields, discoverCustomFieldNames, leadFromVendorCode } = require('../utils/dialerBoxes');
 const { materializeCompany } = require('../utils/qaMaterializer');
 const { autoAssignCompany } = require('../utils/qaAutoAssign');
 const { WORK_TYPES, workTypeOf, getActiveRules, materializeCloserWork, applyCompanyRules, openCounts } = require('../utils/qaRules');
@@ -795,6 +795,21 @@ router.get('/assignments/:id/candidates', asyncHandler(async (req, res) => {
       })
       .sort((x, y) => String(x.start_time).localeCompare(String(y.start_time)));
   }
+  // Every clip must name the PERSON who took the call. The dialer only ever
+  // returns agent_user (the login, e.g. "1042"), and nothing here resolved it —
+  // which is why the recordings list showed an id where a name belongs. The queue
+  // list already does exactly this at :315; the candidates endpoint never did.
+  try {
+    const logins = [...new Set(candidates.map(c => c.agent_user).filter(Boolean))];
+    if (logins.length) {
+      const nm = await dialerAgentNameMap(logins);
+      candidates = candidates.map(c => ({
+        ...c,
+        agent_name: c.agent_name || nm[String(c.agent_user || '').toUpperCase()] || null,
+      }));
+    }
+  } catch (e) { logger.warn('QA', `candidates names: ${e.message}`); }   // a name is not worth failing playback over
+
   // first open by the assignee moves it into 'in_review' (progress signal)
   if (a.status === 'pending' && a.assigned_to === req.user.id) {
     await supabaseAdmin.from('qa_assignments').update({ status: 'in_review' }).eq('id', a.id);
@@ -2625,16 +2640,37 @@ router.get('/assignments/:id/vici-fields', asyncHandler(async (req, res) => {
   const allowed = await allowedCompanyIds(req);
   if (allowed && !allowed.includes(a.company_id)) return res.status(403).json({ error: 'Forbidden' });
 
+  // Reaching the lead. recording_ref only exists on RCM / day-recording tasks —
+  // measured: 101 of 385 assignments. The other 284 are materialised from a CRM
+  // transfer or sale, and their lead lives in the transfer's vicidial_vendor_code
+  // (box prefix + lead_id). Without this fallback three quarters of all tasks had
+  // no lead at all, so every dialer-mapped column stayed empty with no clue why.
   const rec = a.recording_ref || {};
-  const leadId = rec.lead_id || null;
-  if (!leadId) return res.json({ values: {} });
-  const box = getBoxes().find(b => b.id === rec.box_id) || null;
+  let leadId = rec.lead_id || null;
+  let boxId = rec.box_id || null;
+  if (!leadId) {
+    let transferId = a.transfer_id || null;
+    if (!transferId && a.sale_id) {
+      const { data: s } = await supabaseAdmin.from('sales').select('transfer_id').eq('id', a.sale_id).maybeSingle();
+      transferId = s?.transfer_id || null;
+    }
+    if (transferId) {
+      const { data: t } = await supabaseAdmin.from('transfers').select('vicidial_vendor_code').eq('id', transferId).maybeSingle();
+      const parsed = leadFromVendorCode(t?.vicidial_vendor_code);
+      if (parsed) { leadId = parsed.leadId; boxId = boxId || parsed.boxId; }
+    }
+  }
+  // `reason` so the UI can say WHY a mapped column is empty instead of leaving
+  // the reviewer to guess whether it is broken or simply has nothing to fetch.
+  if (!leadId) return res.json({ values: {}, reason: 'no_lead' });
+
+  const box = getBoxes().find(b => b.id === boxId) || null;
   try {
     const values = await leadCustomFields(box, leadId, wanted);
-    res.json({ values });
+    res.json({ values, lead_id: leadId });
   } catch (e) {
     logger.warn('QA', `vici-fields ${req.params.id}: ${e.message}`);
-    res.json({ values: {} });   // the dialer is not a dependency of scoring
+    res.json({ values: {}, reason: 'dialer_unreachable' });   // the dialer is not a dependency of scoring
   }
 }));
 

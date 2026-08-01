@@ -518,6 +518,7 @@ function ScoreForm({ assignment, onScored }) {
   const [busy, setBusy] = useState(false);
   const [crm, setCrm] = useState(null);           // { fields, extra } the fronter/closer entered
   const [vici, setVici] = useState(null);         // dialer lead fields this card maps
+  const [viciNote, setViciNote] = useState('');   // why they're blank, when they are
 
   useEffect(() => {
     setScorecard(null); setLoadErr(''); setScores({}); setNotes({}); setOverall(''); setCrm(null); setVici(null);
@@ -547,11 +548,24 @@ function ScoreForm({ assignment, onScored }) {
   const viciWanted = scorecard ? viciSourcesOf(scorecard.criteria) : [];
   const viciKey = viciWanted.join(',');
   useEffect(() => {
-    if (!viciKey) { setVici({}); return; }
+    if (!viciKey) { setVici({}); setViciNote(''); return; }
     let alive = true;
     client.get(`qa/assignments/${assignment.id}/vici-fields`, { params: { fields: viciKey } })
-      .then(r => { if (alive) setVici(r.data.values || {}); })
-      .catch(() => { if (alive) setVici({}); });
+      .then(r => {
+        if (!alive) return;
+        const values = r.data.values || {};
+        setVici(values);
+        // A mapped column that comes back empty must SAY why. Silently blank is
+        // what made this look broken rather than "this call has no dialer lead".
+        const got = Object.keys(values).length;
+        setViciNote(
+          r.data.reason === 'no_lead' ? 'No dialer lead is linked to this call, so the dialer-mapped columns stay blank.'
+            : r.data.reason === 'dialer_unreachable' ? 'The dialer could not be reached — dialer-mapped columns are blank; type them in.'
+              : got === 0 ? 'The dialer returned no value for the mapped fields on this lead.'
+                : '',
+        );
+      })
+      .catch(() => { if (alive) { setVici({}); setViciNote('Could not reach the dialer for this call.'); } });
     return () => { alive = false; };
   }, [assignment.id, viciKey]);
 
@@ -562,6 +576,13 @@ function ScoreForm({ assignment, onScored }) {
   // sheet_v2 (WaveTech replication) → horizontal spreadsheet-row scoring UI
   if (isSheetConfig(scorecard.criteria)) {
     return (
+      <>
+      {viciNote && (
+        <div className="text-[11px] font-semibold mb-2 px-2.5 py-1.5 rounded-lg m-0"
+          style={{ background: 'color-mix(in srgb, var(--color-warning-600) 10%, transparent)', color: 'var(--color-warning-700)' }}>
+          {viciNote}
+        </div>
+      )}
       <SheetScoreRow
         key={assignment.id + (crm ? ':crm' : '') + (vici ? ':v' : '')}
         config={scorecard.criteria}
@@ -586,6 +607,7 @@ function ScoreForm({ assignment, onScored }) {
           finally { setBusy(false); }
         }}
       />
+      </>
     );
   }
 
@@ -1691,6 +1713,18 @@ const SHEET_GROUPS = [
 
 const atPath = (obj, path) => path.reduce((o, k) => (o == null ? o : o[k]), obj);
 
+// Human label for a saved source token, so the cell can show its mapping.
+const sourceLabel = (src) => {
+  if (!src) return 'auto (by name)';
+  if (src.startsWith('vici:')) {
+    const f = src.slice(5);
+    const known = VICI_STANDARD_FIELDS.find(([n]) => n === f);
+    return `Dialer · ${known ? known[1] : f}`;
+  }
+  if (src.startsWith('crm:')) return `CRM · ${src.slice(4)}`;
+  return AUTOFILL_SOURCES.find(s => s.v === src)?.label || src;
+};
+
 function SheetHeaderEditor({ cfg, patch, ratingMin, ratingScale }) {
   const [openCol, setOpenCol] = useState(null);   // `${groupId}:${index}` whose options are expanded
   // The dialer's own lead fields — including the LIST CUSTOM fields where the
@@ -1785,6 +1819,19 @@ function SheetHeaderEditor({ cfg, patch, ratingMin, ratingScale }) {
                             <XCircle size={12} style={{ color: 'var(--color-error-600)' }} />
                           </button>
                         </div>
+
+                        {/* The mapping, visible ON the cell. Behind the gear it
+                            took one click per column to check a card's wiring —
+                            you could not see at a glance what was mapped and what
+                            was still guessing by name. */}
+                        {g.meta && (
+                          <button onClick={() => setOpenCol(open ? null : key)}
+                            className="text-[9px] font-bold text-left truncate"
+                            title={f.source ? `Fetches from: ${sourceLabel(f.source)}` : 'No source set — filled by matching the column name. Click to map it.'}
+                            style={{ color: f.source ? g.tint : 'var(--color-text-tertiary)' }}>
+                            {f.source ? `← ${sourceLabel(f.source)}` : '← auto (by name)'}
+                          </button>
+                        )}
 
                         {open && g.meta && (
                           <label className="flex flex-col gap-0.5 text-[9px] font-bold" style={{ color: 'var(--color-text-tertiary)' }}>

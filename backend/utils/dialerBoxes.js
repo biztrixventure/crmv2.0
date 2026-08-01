@@ -692,6 +692,25 @@ async function leadCustomFields(box, leadId, fields = []) {
   return out;
 }
 
+/**
+ * Split a vendor_lead_code into the box + lead_id it encodes.
+ *
+ * This is the SECOND way to reach a lead, and for QA it is the important one:
+ * only a quarter of QA assignments carry a recording_ref (the RCM / day-recording
+ * ones). The rest are materialised from a CRM transfer or sale and have no
+ * recording attached — but their transfer carries vicidial_vendor_code, which is
+ * box prefix + lead_id. Without this, every CRM-sourced task had no lead to look
+ * up, so dialer-mapped columns silently filled nothing.
+ *
+ * Same parse as leadStatusByCode: letters = prefix, digits = lead_id.
+ */
+function leadFromVendorCode(code) {
+  const m = String(code || '').match(/^([A-Za-z]*)(\d+)$/);
+  if (!m) return null;
+  const boxId = BOX_BY_PREFIX[(m[1] || '').toUpperCase()] || null;
+  return m[2] ? { boxId, leadId: m[2] } : null;
+}
+
 /** Custom-field names across the boxes for the given lists — the mapping menu. */
 async function discoverCustomFieldNames(sampleListIds = []) {
   const names = new Set();
@@ -817,5 +836,5 @@ module.exports = {
   listCandidatesForSale, listCandidatesByPhone, listCandidatesByLeadId, locationForRecording,
   listDayRecordings, phoneFromLocation, listDayDispositions, leadStatusSearch,
   leadFieldStatus, leadFieldCustomer, fillLeadStatuses, resolveDispos,
-  leadCustomFields, listCustomFieldNames, discoverCustomFieldNames,
+  leadCustomFields, listCustomFieldNames, discoverCustomFieldNames, leadFromVendorCode,
 };
