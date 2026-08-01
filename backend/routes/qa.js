@@ -24,7 +24,7 @@ const { asyncHandler } = require('../middleware/errorHandler');
 const { isSuperAdmin, hasPermission, getUserCompanies } = require('../models/helpers');
 const { getConfig, setConfig, getAllConfig } = require('../utils/businessConfig');
 const { isSheetConfig, computeSheetReview, isY, resolveSheetFields, fieldPoints } = require('../utils/qaSheetFormula');
-const { listCandidatesByLeadId, listCandidatesByPhone, listCandidatesForSale, locationForRecording, listDayRecordings, getBoxes, fillLeadStatuses, resolveDispos, leadFieldCustomer, leadCustomFields, discoverCustomFieldNames, leadFromVendorCode } = require('../utils/dialerBoxes');
+const { listCandidatesByLeadId, listCandidatesByPhone, listCandidatesForSale, locationForRecording, listDayRecordings, getBoxes, fillLeadStatuses, resolveDispos, leadFieldCustomer, leadCustomFields, discoverCustomFieldNames, leadFromVendorCode, findLeadByPhone } = require('../utils/dialerBoxes');
 const { materializeCompany } = require('../utils/qaMaterializer');
 const { autoAssignCompany } = require('../utils/qaAutoAssign');
 const { WORK_TYPES, workTypeOf, getActiveRules, materializeCloserWork, applyCompanyRules, openCounts } = require('../utils/qaRules');
@@ -2679,8 +2679,13 @@ router.get('/assignments/:id/vici-fields', asyncHandler(async (req, res) => {
   const wanted = String(req.query.fields || '').split(',').map(s => s.trim()).filter(Boolean).slice(0, 20);
   if (!wanted.length) return res.json({ values: {} });
 
+  // transfer_id / sale_id / customer_phone / subject_agent MUST be selected —
+  // the fallbacks below read them. They were not, so `a.transfer_id` was always
+  // undefined and the vendor-code path never ran once: 254 of the 295 tasks that
+  // reported "no dialer lead is linked to this call" already had a lead.
   const { data: a } = await supabaseAdmin.from('qa_assignments')
-    .select('id, company_id, recording_ref').eq('id', req.params.id).maybeSingle();
+    .select('id, company_id, recording_ref, transfer_id, sale_id, customer_phone, subject_agent, recording_date')
+    .eq('id', req.params.id).maybeSingle();
   if (!a) return res.status(404).json({ error: 'Not found' });
   const allowed = await allowedCompanyIds(req);
   if (allowed && !allowed.includes(a.company_id)) return res.status(403).json({ error: 'Forbidden' });
@@ -2693,26 +2698,88 @@ router.get('/assignments/:id/vici-fields', asyncHandler(async (req, res) => {
   const rec = a.recording_ref || {};
   let leadId = rec.lead_id || null;
   let boxId = rec.box_id || null;
-  if (!leadId) {
-    let transferId = a.transfer_id || null;
-    if (!transferId && a.sale_id) {
-      const { data: s } = await supabaseAdmin.from('sales').select('transfer_id').eq('id', a.sale_id).maybeSingle();
-      transferId = s?.transfer_id || null;
+  let linkedBy = leadId ? (rec.linked_by || 'recording') : null;
+  let transferId = a.transfer_id || null;
+  let phone = a.customer_phone || null;
+
+  if (!transferId && a.sale_id) {
+    const { data: s } = await supabaseAdmin.from('sales').select('transfer_id').eq('id', a.sale_id).maybeSingle();
+    transferId = s?.transfer_id || null;
+  }
+  let transfer = null;
+  if (transferId) {
+    const { data: t } = await supabaseAdmin.from('transfers')
+      .select('id, vicidial_vendor_code, normalized_phone').eq('id', transferId).maybeSingle();
+    transfer = t || null;
+    phone = phone || t?.normalized_phone || null;
+  }
+
+  // 2nd route: the transfer's vendor_lead_code (box prefix + lead_id).
+  if (!leadId && transfer) {
+    const parsed = leadFromVendorCode(transfer.vicidial_vendor_code);
+    if (parsed) { leadId = parsed.leadId; boxId = boxId || parsed.boxId; linkedBy = 'vendor_code'; }
+  }
+
+  // 3rd route: ASK THE DIALER BY PHONE. Nothing linked this call to a lead, but
+  // every task has a customer phone, and update_lead(no_update=Y) will name the
+  // lead behind it. Narrowed by the evaluated agent's own dialer ids so a number
+  // dialled by several centres resolves to THIS agent's call.
+  let resolved = null;
+  if (!leadId && phone) {
+    // subject_agent is sometimes the dialer id and sometimes the person's name,
+    // so try it BOTH ways: as an id it goes straight in; as a name it resolves
+    // through the profile's mapped ids (a closer can hold several — WaveTech
+    // agents are dual-id). .overlaps is how the rest of this file matches them.
+    const agentIds = new Set();
+    const subject = String(a.subject_agent || '').trim();
+    if (subject) {
+      if (/^[\w-]{1,12}$/.test(subject)) agentIds.add(subject);
+      const { data: byId } = await supabaseAdmin.from('user_profiles')
+        .select('vicidial_agent_ids').overlaps('vicidial_agent_ids', [subject, subject.toUpperCase()]).limit(2);
+      const { data: byName } = await supabaseAdmin.from('user_profiles')
+        .select('vicidial_agent_ids, first_name, last_name')
+        .not('vicidial_agent_ids', 'is', null).limit(500);
+      for (const p of (byId || [])) for (const id of (p.vicidial_agent_ids || [])) agentIds.add(String(id));
+      const want = subject.toLowerCase();
+      for (const p of (byName || [])) {
+        const full = `${p.first_name || ''} ${p.last_name || ''}`.trim().toLowerCase();
+        if (full && full === want) for (const id of (p.vicidial_agent_ids || [])) agentIds.add(String(id));
+      }
     }
-    if (transferId) {
-      const { data: t } = await supabaseAdmin.from('transfers').select('vicidial_vendor_code').eq('id', transferId).maybeSingle();
-      const parsed = leadFromVendorCode(t?.vicidial_vendor_code);
-      if (parsed) { leadId = parsed.leadId; boxId = boxId || parsed.boxId; }
+    try {
+      resolved = await findLeadByPhone({ phone, agentIds: [...agentIds], preferBoxId: boxId });
+    } catch (e) { logger.warn('QA', `phone→lead ${req.params.id}: ${e.message}`); }
+    if (resolved && resolved.confidence !== 'ambiguous') {
+      leadId = resolved.lead_id;
+      boxId = resolved.box || boxId;
+      linkedBy = `phone:${resolved.confidence}`;
+      // ATTACH IT, so this costs one lookup ever rather than one per open. The
+      // assignment always gets the stamp; the transfer's vendor code is only
+      // FILLED IN when empty — never overwritten, because that field is what the
+      // rest of the CRM (recordings, dispo recovery) trusts to identify the call.
+      const nextRef = { ...rec, box_id: boxId, lead_id: leadId, linked_by: linkedBy, linked_at: new Date().toISOString() };
+      await supabaseAdmin.from('qa_assignments').update({ recording_ref: nextRef }).eq('id', a.id);
+      if (transfer && !String(transfer.vicidial_vendor_code || '').trim() && resolved.prefix) {
+        await supabaseAdmin.from('transfers')
+          .update({ vicidial_vendor_code: `${resolved.prefix}${leadId}` }).eq('id', transfer.id);
+      }
+      logger.info('QA', `linked assignment ${a.id} → lead ${leadId} on ${boxId} (${linkedBy})`);
     }
   }
+
   // `reason` so the UI can say WHY a mapped column is empty instead of leaving
   // the reviewer to guess whether it is broken or simply has nothing to fetch.
-  if (!leadId) return res.json({ values: {}, reason: 'no_lead' });
+  if (!leadId) {
+    const reason = resolved?.confidence === 'ambiguous' ? 'lead_ambiguous'
+      : phone ? 'no_lead_for_phone'
+        : 'no_lead';
+    return res.json({ values: {}, reason, ...(resolved?.matches ? { matches: resolved.matches } : {}) });
+  }
 
   const box = getBoxes().find(b => b.id === boxId) || null;
   try {
     const values = await leadCustomFields(box, leadId, wanted);
-    res.json({ values, lead_id: leadId });
+    res.json({ values, lead_id: leadId, box_id: boxId, linked_by: linkedBy });
   } catch (e) {
     logger.warn('QA', `vici-fields ${req.params.id}: ${e.message}`);
     res.json({ values: {}, reason: 'dialer_unreachable' });   // the dialer is not a dependency of scoring

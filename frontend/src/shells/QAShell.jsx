@@ -618,11 +618,17 @@ function ScoreForm({ assignment, onScored }) {
         // A mapped column that comes back empty must SAY why. Silently blank is
         // what made this look broken rather than "this call has no dialer lead".
         const got = Object.keys(values).length;
+        // Each reason names the NEXT step. "No lead is linked" was the same
+        // sentence whether the call had no phone, the dialer had never seen the
+        // number, or the number belonged to several leads — three different
+        // problems, one dead end.
         setViciNote(
-          r.data.reason === 'no_lead' ? 'No dialer lead is linked to this call, so the dialer-mapped columns stay blank.'
-            : r.data.reason === 'dialer_unreachable' ? 'The dialer could not be reached — dialer-mapped columns are blank; type them in.'
-              : got === 0 ? 'The dialer returned no value for the mapped fields on this lead.'
-                : '',
+          r.data.reason === 'no_lead' ? 'This task has no phone number and no linked transfer, so there is nothing to look the lead up by — type the dialer columns in.'
+            : r.data.reason === 'no_lead_for_phone' ? 'The dialer has no lead for this customer’s number, so the dialer-mapped columns stay blank — type them in.'
+              : r.data.reason === 'lead_ambiguous' ? `This number matches ${r.data.matches || 'several'} different dialer leads and none of them is this agent’s, so none was attached — type the dialer columns in.`
+                : r.data.reason === 'dialer_unreachable' ? 'The dialer could not be reached — dialer-mapped columns are blank; type them in, or use Re-fetch details.'
+                  : got === 0 ? 'The dialer returned no value for the mapped fields on this lead.'
+                    : '',
         );
       })
       .catch(() => { if (alive) { setVici({}); setViciNote('Could not reach the dialer for this call.'); } });

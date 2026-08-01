@@ -692,6 +692,80 @@ async function leadCustomFields(box, leadId, fields = []) {
   return out;
 }
 
+// ── Phone → lead_id, without needing a recording ────────────────────────────
+// update_lead with no_update=Y performs NO write: it only reports which leads
+// match, and its NOTICE line carries the lead_id we cannot get any other way
+// (phone_number_log returns call rows with no lead_id, and recording_lookup
+// needs a recording to exist — many QA tasks have neither).
+//
+//   NOTICE: update_lead LEADS FOUND IN THE SYSTEM: |user|lead_id|vendor_lead_code|phone|list_id|entry_list_id
+//
+// `records` asks for more than the single most-recent match so an agent match is
+// possible when a customer was dialled repeatedly.
+async function leadsByPhoneOnBox(box, phone, { records = 10 } = {}) {
+  const variants = phoneVariants(phone);
+  if (!box || !variants.length) return [];
+  const out = [];
+  for (const v of variants) {
+    try {
+      const r = await axios.get(`${box.base}/vicidial/non_agent_api.php`, {
+        params: {
+          source: 'crm', user: box.user, pass: box.pass, function: 'update_lead',
+          search_method: 'PHONE_NUMBER', search_location: 'SYSTEM',
+          phone_number: v, records, no_update: 'Y',
+        },
+        timeout: 15000, responseType: 'text',
+      });
+      const text = (typeof r.data === 'string' ? r.data : String(r.data || '')).trim();
+      if (!text || /NO MATCHES FOUND/i.test(text)) continue;
+      for (const line of text.split(/\r?\n/)) {
+        if (!/LEADS FOUND IN THE SYSTEM/i.test(line)) continue;
+        // Split from the FIRST PIPE, not the first colon — "NOTICE:" carries a
+        // colon of its own, and slicing there shifts every field by one, which
+        // reads the API user id as the lead id.
+        const pipe = line.indexOf('|');
+        if (pipe < 0) continue;
+        const cells = line.slice(pipe + 1).split('|').map(s => s.trim());
+        const [user, lead_id, vendor_lead_code, lphone, list_id] = cells;
+        if (!/^\d+$/.test(String(lead_id || ''))) continue;
+        out.push({ box: box.id, prefix: box.prefix, user, lead_id: String(lead_id), vendor_lead_code, phone: lphone, list_id });
+      }
+      if (out.length) break;          // a 10-digit hit is enough; don't re-ask with 1+10
+    } catch { /* box unreachable → try the next variant/box */ }
+  }
+  return out;
+}
+
+/**
+ * Find the dialer lead for a phone across every box.
+ *
+ * Ambiguity is the whole problem: the same customer can exist on several boxes
+ * and several lists. So a match is only reported as CONFIDENT when it is
+ * unambiguous — either the lead's own agent is one of this agent's dialer ids,
+ * or the phone matched exactly one lead in the whole estate. Anything else comes
+ * back as confidence 'ambiguous' and the caller must not persist it: writing the
+ * wrong vendor_lead_code onto a transfer would mislink a customer's call
+ * history, which is far worse than an empty column.
+ */
+async function findLeadByPhone({ phone, agentIds = [], preferBoxId = null } = {}) {
+  if (!phone) return null;
+  const boxes = [...BOXES].sort((a, b) => (a.id === preferBoxId ? -1 : b.id === preferBoxId ? 1 : 0));
+  const hits = (await Promise.all(boxes.map(b => leadsByPhoneOnBox(b, phone)))).flat();
+  if (!hits.length) return null;
+
+  const ids = new Set((agentIds || []).map(x => String(x).trim().toLowerCase()).filter(Boolean));
+  const byAgent = ids.size ? hits.filter(h => ids.has(String(h.user || '').trim().toLowerCase())) : [];
+  if (byAgent.length) {
+    // same agent, same customer — if they dialled it more than once, the newest
+    // lead is still that agent's call, so pick it rather than giving up
+    const newest = byAgent.slice().sort((a, b) => Number(b.lead_id) - Number(a.lead_id))[0];
+    return { ...newest, confidence: 'agent' };
+  }
+  const unique = [...new Map(hits.map(h => [`${h.box}|${h.lead_id}`, h])).values()];
+  if (unique.length === 1) return { ...unique[0], confidence: 'unique' };
+  return { ...unique.sort((a, b) => Number(b.lead_id) - Number(a.lead_id))[0], confidence: 'ambiguous', matches: unique.length };
+}
+
 /**
  * Split a vendor_lead_code into the box + lead_id it encodes.
  *
@@ -837,4 +911,5 @@ module.exports = {
   listDayRecordings, phoneFromLocation, listDayDispositions, leadStatusSearch,
   leadFieldStatus, leadFieldCustomer, fillLeadStatuses, resolveDispos,
   leadCustomFields, listCustomFieldNames, discoverCustomFieldNames, leadFromVendorCode,
+  leadsByPhoneOnBox, findLeadByPhone,
 };
