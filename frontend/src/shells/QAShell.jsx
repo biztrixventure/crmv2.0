@@ -391,6 +391,54 @@ function outcomeAutoFill(cfg, a, extra) {
   return hit ? { [co.key]: hit } : {};
 }
 
+// Where a header column fetches its value from, chosen explicitly in the
+// Scorecards editor. The fuzzy name-matching in metaAutoFill is a guess that
+// holds only until somebody renames a header — and renaming headers is now the
+// point of the editor, so the guess would break silently. A column may name its
+// own source, and an explicit source always beats the guess.
+const AUTOFILL_SOURCES = [
+  { v: '',               label: 'Auto — match by name' },
+  { v: 'none',           label: 'Leave blank (reviewer types it)' },
+  { v: 'agent_name',     label: 'Agent name' },
+  { v: 'duration',       label: 'Call duration' },
+  { v: 'call_id',        label: 'Call / Lead ID' },
+  { v: 'phone',          label: 'Customer phone (CLI)' },
+  { v: 'date',           label: 'Call date' },
+  { v: 'disposition',    label: 'Disposition' },
+  { v: 'customer_name',  label: 'Customer name' },
+  { v: 'zip',            label: 'ZIP' },
+  { v: 'state',          label: 'State' },
+  { v: 'fronter_center', label: 'Fronter center' },
+  { v: 'center_name',    label: 'Center (evaluated party)' },
+];
+
+function sourceAutoFill(cfg, a, extra) {
+  const out = {};
+  const rec = a?.recording_ref || {};
+  const ex = extra || {};
+  const pick = {
+    agent_name:     () => a?.agent_name || a?.agent_display || a?.subject_name || '',
+    duration:       () => ((a?.duration ?? rec.duration) != null ? fmtDur(a?.duration ?? rec.duration) : ''),
+    call_id:        () => rec.lead_id || a?.lead_id || a?.call_id || '',
+    phone:          () => a?.customer_phone || rec.phone || ex.customer_phone || '',
+    date:           () => { const d = a?.subject_date || a?.call_date || rec.start_time || a?.created_at; return d ? new Date(d).toLocaleDateString() : ''; },
+    disposition:    () => ex.disposition || a?.disposition || a?.dispo || rec.disposition || '',
+    customer_name:  () => a?.customer_name || ex.customer_name || '',
+    zip:            () => a?.customer_zip || '',
+    state:          () => a?.customer_state || '',
+    fronter_center: () => ex.fronter_center || '',
+    center_name:    () => ex.center_name || ex.fronter_center || '',
+  };
+  for (const f of (cfg?.meta_fields || [])) {
+    const s = f.source;
+    if (!s) continue;                       // '' / undefined → leave the fuzzy pass in charge
+    if (s === 'none') { out[f.key] = ''; continue; }
+    const fn = pick[s];
+    if (fn) out[f.key] = fn();
+  }
+  return out;
+}
+
 // ── scorecard form ────────────────────────────────────────────────────────────
 function ScoreForm({ assignment, onScored }) {
   const [scorecard, setScorecard] = useState(null);   // null = loading, false = none, obj = loaded
@@ -436,6 +484,8 @@ function ScoreForm({ assignment, onScored }) {
         initialValues={{
           ...metaAutoFill(scorecard.criteria, assignment),
           ...crmAutoFill(scorecard.criteria, crm?.fields, crm?.extra),
+          // An explicitly-configured source wins over both guesses above.
+          ...sourceAutoFill(scorecard.criteria, assignment, crm?.extra),
           ...outcomeAutoFill(scorecard.criteria, assignment, crm?.extra),
         }}
         busy={busy}
@@ -1528,9 +1578,190 @@ function CallOutcomeEditor({ value, onChange }) {
   );
 }
 
+// ── Sheet-header editor ──────────────────────────────────────────────────────
+// The scorecard AS THE SPREADSHEET IT IS: one header cell per column, left to
+// right, in the exact order SheetScoreRow renders them when a reviewer scores a
+// call. Rename a header in place, move it, delete it, add one — and for the
+// detail columns, say where the value is fetched from.
+//
+// This replaces reading a stack of vertical lists and trying to picture the
+// sheet. The row of cells IS the sheet's header row.
+//
+// Note meta_fields — the detail columns (Fronter_Center, Call_ID, CLI, Date) —
+// had NO editor anywhere before this. They could only be changed by editing the
+// JSON directly, which is why "change the names of the header" was impossible.
+const SHEET_GROUPS = [
+  { id: 'meta',     label: 'Details',         short: 'detail',   tint: '#0891b2', path: ['meta_fields'],            meta: true,
+    info: 'Context columns filled in automatically from the call and the CRM record — agent, centre, duration, phone. Pick the source per column; the reviewer can still edit any cell.' },
+  { id: 'rating',   label: 'Ratings',         short: 'rating',   tint: '#2563eb', path: ['rating_criteria'],
+    info: 'The graded questions. The reviewer scores each on the rating scale; those marked “in base” are summed into the Base Score.' },
+  { id: 'autofail', label: 'Auto-Fail',       short: 'Y/N',      tint: '#dc2626', path: ['autofail', 'fields'],
+    info: 'Hard compliance rules. A single Yes fails the whole call regardless of the ratings.' },
+  { id: 'penalty',  label: 'Penalties',       short: 'Y/N',      tint: '#d97706', path: ['penalty_flags'],          penalty: true,
+    info: 'Mistakes that cost points without failing the call. Each Yes subtracts its point value.' },
+  { id: 'quality',  label: 'Sale compliance', short: 'Y/N',      tint: '#059669', path: ['quality_score', 'fields'],
+    info: 'A Yes/No checklist scored as a percentage — the Quality score is the share answered Yes.' },
+  { id: 'tracking', label: 'Tracking',        short: 'Y/N',      tint: '#6b7280', path: ['tracking_flags'],
+    info: 'Answered for reporting only. Never changes the score.' },
+];
+
+const atPath = (obj, path) => path.reduce((o, k) => (o == null ? o : o[k]), obj);
+
+function SheetHeaderEditor({ cfg, patch, ratingMin, ratingScale }) {
+  const [openCol, setOpenCol] = useState(null);   // `${groupId}:${index}` whose options are expanded
+
+  const groups = SHEET_GROUPS.filter(g => Array.isArray(atPath(cfg, g.path)) || g.id === 'meta' || g.id === 'rating');
+
+  const setList = (g, next) => patch(n => {
+    if (g.path.length === 1) n[g.path[0]] = next;
+    else { n[g.path[0]] = n[g.path[0]] || {}; n[g.path[0]][g.path[1]] = next; }
+  });
+  const listOf = (g) => atPath(cfg, g.path) || [];
+
+  const rename = (g, i, label) => setList(g, listOf(g).map((f, j) => j === i
+    // The key is the stable identity every saved review's raw_value is stored
+    // under. Renaming the LABEL must never renumber it, or a rename silently
+    // orphans the history. New fields get a key from their first label.
+    ? { ...f, label, key: f.key || slug(label) }
+    : f));
+  const setField = (g, i, p) => setList(g, listOf(g).map((f, j) => j === i ? { ...f, ...p } : f));
+  const move = (g, i, d) => {
+    const l = [...listOf(g)]; const t = i + d;
+    if (t < 0 || t >= l.length) return;
+    [l[i], l[t]] = [l[t], l[i]];
+    setList(g, l);
+  };
+  const remove = (g, i) => setList(g, listOf(g).filter((_, j) => j !== i));
+  const add = (g) => {
+    const defaults = g.id === 'rating' ? { included_in_base: true, min: ratingMin, scale: ratingScale }
+      : g.id === 'penalty' ? { penalty: -5 } : {};
+    const label = 'New column';
+    setList(g, [...listOf(g), { key: slug(`${g.id} ${listOf(g).length + 1}`), label, ...defaults }]);
+  };
+
+  const cell = { minWidth: 152, maxWidth: 152 };
+
+  return (
+    <div className="mb-3">
+      <div className="flex items-center gap-2 mb-2 flex-wrap">
+        <span className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>Sheet header</span>
+        <InfoTip w={330} text="This is the header row of the sheet your reviewers fill in, left to right — exactly the order they see while scoring. Click a name to rename it, use ‹ › to move a column, and ✕ to delete it." />
+        {groups.map(g => (
+          <span key={g.id} className="inline-flex items-center gap-1 text-[10px] font-bold" style={{ color: 'var(--color-text-tertiary)' }}>
+            <span className="w-2 h-2 rounded-full" style={{ background: g.tint }} />{g.label}
+          </span>
+        ))}
+      </div>
+
+      <div className="rounded-xl" style={{ border: '1px solid var(--color-border)', overflowX: 'auto', background: 'var(--color-surface)' }}>
+        <div className="flex items-stretch" style={{ width: 'max-content' }}>
+          {groups.map(g => {
+            const list = listOf(g);
+            return (
+              <div key={g.id} className="flex items-stretch" style={{ borderRight: '2px solid var(--color-border)' }}>
+                {list.map((f, i) => {
+                  const key = `${g.id}:${i}`;
+                  const open = openCol === key;
+                  return (
+                    <div key={key} className="flex flex-col" style={{ ...cell, borderRight: '1px solid var(--color-border)' }}>
+                      {/* the coloured cap is the column's type, at a glance */}
+                      <div style={{ height: 3, background: g.tint }} />
+                      <div className="px-1.5 pt-1.5 pb-1 flex flex-col gap-1 h-full">
+                        <input
+                          value={f.label ?? ''}
+                          onChange={e => rename(g, i, e.target.value)}
+                          title={`Column key: ${f.key} — this is what saved reviews are stored under and it never changes when you rename`}
+                          className="text-[11px] font-bold w-full"
+                          style={{ background: 'transparent', border: '1px solid transparent', borderRadius: 6, padding: '3px 4px', color: 'var(--color-text)' }}
+                          onFocus={e => { e.target.style.borderColor = 'var(--color-primary-600)'; e.target.style.background = 'var(--color-bg)'; }}
+                          onBlur={e => { e.target.style.borderColor = 'transparent'; e.target.style.background = 'transparent'; }}
+                        />
+                        <div className="flex items-center gap-0.5">
+                          <span className="text-[9px] font-bold px-1 rounded" style={{ background: `color-mix(in srgb, ${g.tint} 14%, transparent)`, color: g.tint }}>{g.short}</span>
+                          <button onClick={() => move(g, i, -1)} disabled={i === 0} title="Move left"
+                            className="px-1 text-[11px] font-bold" style={{ color: i === 0 ? 'var(--color-text-tertiary)' : 'var(--color-text-secondary)', opacity: i === 0 ? 0.4 : 1 }}>‹</button>
+                          <button onClick={() => move(g, i, 1)} disabled={i === list.length - 1} title="Move right"
+                            className="px-1 text-[11px] font-bold" style={{ color: i === list.length - 1 ? 'var(--color-text-tertiary)' : 'var(--color-text-secondary)', opacity: i === list.length - 1 ? 0.4 : 1 }}>›</button>
+                          {(g.meta || g.penalty || g.id === 'rating') && (
+                            <button onClick={() => setOpenCol(open ? null : key)} title="Column options"
+                              className="px-1 text-[11px] font-bold" style={{ color: open ? g.tint : 'var(--color-text-tertiary)' }}>⚙</button>
+                          )}
+                          <button onClick={() => remove(g, i)} title="Delete this column" className="ml-auto">
+                            <XCircle size={12} style={{ color: 'var(--color-error-600)' }} />
+                          </button>
+                        </div>
+
+                        {open && g.meta && (
+                          <label className="flex flex-col gap-0.5 text-[9px] font-bold" style={{ color: 'var(--color-text-tertiary)' }}>
+                            FETCH FROM
+                            <ThemedSelect value={f.source || ''} onChange={e => setField(g, i, { source: e.target.value })}
+                              style={{ ...inp, width: '100%', fontSize: 11, padding: '3px 6px' }}>
+                              {AUTOFILL_SOURCES.map(s => <option key={s.v} value={s.v}>{s.label}</option>)}
+                            </ThemedSelect>
+                          </label>
+                        )}
+                        {open && g.id === 'rating' && (
+                          <label className="flex items-center gap-1 text-[9px] font-bold" style={{ color: 'var(--color-text-tertiary)' }}>
+                            <input type="checkbox" checked={f.included_in_base !== false} onChange={e => setField(g, i, { included_in_base: e.target.checked })} /> IN BASE
+                          </label>
+                        )}
+                        {open && g.penalty && (
+                          <label className="flex items-center gap-1 text-[9px] font-bold" style={{ color: 'var(--color-text-tertiary)' }}>
+                            PTS
+                            <input type="number" value={f.penalty ?? -5} onChange={e => setField(g, i, { penalty: +e.target.value })}
+                              style={{ ...inp, width: 52, fontSize: 11, padding: '2px 4px' }} />
+                          </label>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+                {/* add a column to THIS group, so a new one lands in the right section */}
+                <button onClick={() => add(g)} title={`Add a ${g.label} column`}
+                  className="flex flex-col items-center justify-center px-2 text-[10px] font-bold gap-0.5"
+                  style={{ minWidth: 54, color: g.tint, background: `color-mix(in srgb, ${g.tint} 6%, transparent)` }}>
+                  <Plus size={13} /> {g.short === 'detail' ? 'detail' : g.label.split(' ')[0].toLowerCase()}
+                </button>
+              </div>
+            );
+          })}
+
+          {/* trailing computed / verdict columns — real columns on the sheet, but
+              their values are produced by the formula, not typed, so only the
+              heading is editable here. */}
+          {cfg.call_outcome && (
+            <div className="flex flex-col" style={{ ...cell, borderRight: '1px solid var(--color-border)' }}>
+              <div style={{ height: 3, background: '#7c3aed' }} />
+              <div className="px-1.5 pt-1.5 pb-1 flex flex-col gap-1">
+                <input value={cfg.call_outcome.label ?? ''} onChange={e => patch(n => { n.call_outcome.label = e.target.value; })}
+                  className="text-[11px] font-bold w-full"
+                  style={{ background: 'transparent', border: '1px solid transparent', borderRadius: 6, padding: '3px 4px', color: 'var(--color-text)' }} />
+                <span className="text-[9px] font-bold px-1 rounded self-start" style={{ background: 'color-mix(in srgb, #7c3aed 14%, transparent)', color: '#7c3aed' }}>dropdown</span>
+              </div>
+            </div>
+          )}
+          {['Base_Score', 'Auto_Fail', 'Total_Penalty', 'Final_Score'].map(h => (
+            <div key={h} className="flex flex-col" style={{ minWidth: 104, borderRight: '1px solid var(--color-border)', background: 'var(--color-surface-hover)' }}>
+              <div style={{ height: 3, background: 'var(--color-text-tertiary)' }} />
+              <div className="px-2 pt-1.5 pb-1">
+                <div className="text-[11px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>{h}</div>
+                <span className="text-[9px] font-bold" style={{ color: 'var(--color-text-tertiary)' }}>computed</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="text-[10px] mt-1.5" style={{ color: 'var(--color-text-tertiary)' }}>
+        Scroll sideways to see every column. Renaming a header never breaks reviews already scored — the stored column key stays the same.
+      </div>
+    </div>
+  );
+}
+
 function ScorecardEditor({ scorecard, companyId, onClose, onSaved }) {
   const [cfg, setCfg] = useState(() => {
     const c = JSON.parse(JSON.stringify(scorecard.criteria || {}));
+    c.meta_fields = c.meta_fields || [];
     c.rating_criteria = c.rating_criteria || [];
     c.penalty_flags = c.penalty_flags || [];
     c.tracking_flags = c.tracking_flags || [];
@@ -1541,6 +1772,10 @@ function ScorecardEditor({ scorecard, companyId, onClose, onSaved }) {
   const [name, setName] = useState(scorecard.name);
   const [passT, setPassT] = useState(scorecard.pass_threshold ?? '');
   const [busy, setBusy] = useState(false);
+  // 'sheet' — the header row as the reviewer sees it (default; this is the sheet).
+  // 'sections' — the original stacked lists, kept because per-type bulk edits and
+  // the call-outcome option list are easier there.
+  const [view, setView] = useState('sheet');
   const isGlobal = !scorecard.company_id;
   const hasQuality = !!(cfg.quality_score && Array.isArray(cfg.quality_score.fields));
   // Rating range taken from the first rating (default 1–5 per the WaveTech sheets).
@@ -1569,9 +1804,17 @@ function ScorecardEditor({ scorecard, companyId, onClose, onSaved }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={onClose}>
-      <div className="rounded-2xl p-5 overflow-auto" style={{ width: 'min(720px, 96vw)', maxHeight: '90vh', background: 'var(--color-bg)', border: '1px solid var(--color-border)' }} onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-3">
+      <div className="rounded-2xl p-5 overflow-auto" style={{ width: view === 'sheet' ? 'min(1180px, 97vw)' : 'min(720px, 96vw)', maxHeight: '90vh', background: 'var(--color-bg)', border: '1px solid var(--color-border)' }} onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
           <div className="text-base font-bold" style={{ color: 'var(--color-text)' }}>Edit scorecard fields <MethodPill m={scorecard.method} /></div>
+          <div className="flex items-center gap-1 p-1 rounded-xl ml-auto" style={{ background: 'var(--color-surface-hover)', border: '1px solid var(--color-border)' }}>
+            {[['sheet', 'Sheet header'], ['sections', 'By type']].map(([k, l]) => (
+              <button key={k} onClick={() => setView(k)}
+                title={k === 'sheet' ? 'The header row exactly as the reviewer sees it, left to right' : 'The same fields grouped by question type'}
+                className="px-2.5 py-1 rounded-lg text-[11px] font-bold"
+                style={{ background: view === k ? 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))' : 'transparent', color: view === k ? '#fff' : 'var(--color-text-secondary)' }}>{l}</button>
+            ))}
+          </div>
           <button onClick={onClose}><XCircle size={20} style={{ color: 'var(--color-text-tertiary)' }} /></button>
         </div>
         {isGlobal && <div className="text-[11px] mb-3 p-2 rounded-lg" style={{ background: 'rgba(217,119,6,0.1)', color: 'var(--color-warning-600)' }}>This is the shared template. Saving creates an editable copy for <b>your company only</b> — the template stays intact.</div>}
@@ -1609,6 +1852,11 @@ function ScorecardEditor({ scorecard, companyId, onClose, onSaved }) {
           </label>
         </div>
 
+        {view === 'sheet' && <SheetHeaderEditor cfg={cfg} patch={patch} ratingMin={ratingMin} ratingScale={ratingScale} />}
+
+        {view === 'sections' && <>
+        <FieldRows title="Details (auto-filled columns)" tint="#0891b2" fields={cfg.meta_fields} extra={{ kind: 'detail' }} onChange={v => patch(n => { n.meta_fields = v; })}
+          info="The context columns at the front of the sheet — agent, centre, date, phone, duration. They fill in automatically from the call and the CRM record; set the exact source per column in the Sheet header view." />
         <FieldRows title={`Ratings (score ${ratingMin}–${ratingScale})`} tint="#2563eb" fields={cfg.rating_criteria} extra={{ kind: `${ratingMin}–${ratingScale} rating`, rating: true, defaults: { included_in_base: true, min: ratingMin, scale: ratingScale } }} onChange={v => patch(n => { n.rating_criteria = v; })}
           info={`The main graded questions. The reviewer rates each ${ratingMin}–${ratingScale}; the ones marked “in base” are summed into the Base Score (then turned into a %). Use these for things like tone, script adherence, rebuttals.`} />
         <FieldRows title="Compliance — Auto-Fail (Yes / No)" tint="#dc2626" fields={cfg.autofail.fields} extra={{ kind: 'Y / N' }} onChange={v => patch(n => { n.autofail.fields = v; })}
@@ -1619,6 +1867,10 @@ function ScorecardEditor({ scorecard, companyId, onClose, onSaved }) {
           info="A Yes/No checklist scored as a percentage — the Quality score is the share of items answered Yes. Used on closer/RCM sale reviews to measure sale-compliance separately from the 0–4 ratings." />}
         <FieldRows title="Tracking only (Yes / No, no score effect)" tint="#6b7280" fields={cfg.tracking_flags} extra={{ kind: 'Y / N' }} onChange={v => patch(n => { n.tracking_flags = v; })}
           info="Questions you want the reviewer to answer for reporting, but that must NOT change the score. Pure data collection — shows up in reports, never adds or removes points." />
+        </>}
+
+        {/* The outcome list belongs to both views — the Sheet header can rename
+            the column, but the option list is only editable here. */}
         <CallOutcomeEditor value={cfg.call_outcome} onChange={co => patch(n => { if (co) n.call_outcome = co; else delete n.call_outcome; })} />
 
         <div className="flex items-center justify-end gap-2 mt-2">
