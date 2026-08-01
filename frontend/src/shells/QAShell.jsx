@@ -414,6 +414,45 @@ const AUTOFILL_SOURCES = [
   { v: 'center_name',    label: 'Center (evaluated party)' },
 ];
 
+// ── VICIdial STANDARD lead fields ────────────────────────────────────────────
+// The vehicle data is NOT in this dialer's custom fields — it is written into
+// standard lead columns that the campaign repurposes. Straight off the agent
+// screen: Address2 = VOLKSWAGEN (make), Address3 = PASSAT SE (model),
+// Province = 2012 (year), while Address1/City/State/PostCode stay the real
+// address.
+//
+// So the mapping menu must offer the standard columns, not only custom fields —
+// otherwise the exact data being asked for is unmappable. This list is static on
+// purpose: standard columns exist on every VICIdial box, so the menu is never
+// empty and never waits on a dialer round-trip to render.
+const VICI_STANDARD_FIELDS = [
+  ['address2',    'Address 2 — car MAKE on your dialer'],
+  ['address3',    'Address 3 — car MODEL on your dialer'],
+  ['province',    'Province — car YEAR on your dialer'],
+  ['first_name',  'First name'],
+  ['last_name',   'Last name'],
+  ['middle_initial', 'Middle initial'],
+  ['address1',    'Address 1'],
+  ['city',        'City'],
+  ['state',       'State'],
+  ['postal_code', 'Post code / ZIP'],
+  ['phone_number', 'Phone number'],
+  ['alt_phone',   'Alt. phone'],
+  ['email',       'Email'],
+  ['comments',    'Comments'],
+  ['security_phrase', 'Security phrase'],
+  ['title',       'Title'],
+  ['gender',      'Gender'],
+  ['date_of_birth', 'Date of birth'],
+  ['vendor_lead_code', 'Vendor lead code'],
+  ['source_id',   'Source ID'],
+  ['status',      'Lead status'],
+  ['user',        'Dialer user'],
+  ['list_id',     'List ID'],
+  ['called_count', 'Times called'],
+  ['entry_date',  'Lead entry date'],
+];
+
 // Fields whose source is a dialer field, so ScoreForm knows what to ask for.
 // `vici:<field>` — a VICIdial lead field (standard or a list custom field, which
 // is where the vehicle data lives). One HTTP round-trip per field, so we only
@@ -1749,16 +1788,22 @@ function SheetHeaderEditor({ cfg, patch, ratingMin, ratingScale }) {
                             <ThemedSelect value={f.source || ''} onChange={e => setField(g, i, { source: e.target.value })}
                               style={{ ...inp, width: '100%', fontSize: 11, padding: '3px 6px' }}>
                               {AUTOFILL_SOURCES.map(s => <option key={s.v} value={s.v}>{s.label}</option>)}
-                              {(viciNames || []).map(n => <option key={`vici:${n}`} value={`vici:${n}`}>Dialer · {n}</option>)}
+                              {/* Standard lead columns — always offered, because
+                                  this dialer keeps the vehicle data in them. */}
+                              {VICI_STANDARD_FIELDS.map(([n, l]) => <option key={`vici:${n}`} value={`vici:${n}`}>Dialer · {l}</option>)}
+                              {/* Custom fields, when a box was reachable to list them. */}
+                              {(viciNames || []).filter(n => !VICI_STANDARD_FIELDS.some(([s]) => s === n))
+                                .map(n => <option key={`vicic:${n}`} value={`vici:${n}`}>Dialer (custom) · {n}</option>)}
                               {/* A source already saved but no longer offered (box
                                   down, or the list changed) must still show, or
                                   opening the editor would silently reset it. */}
-                              {f.source && f.source.startsWith('vici:') && !(viciNames || []).includes(f.source.slice(5))
+                              {f.source && f.source.startsWith('vici:')
+                                && !(viciNames || []).includes(f.source.slice(5))
+                                && !VICI_STANDARD_FIELDS.some(([s]) => s === f.source.slice(5))
                                 && <option value={f.source}>Dialer · {f.source.slice(5)}</option>}
                               {f.source && f.source.startsWith('crm:') && <option value={f.source}>CRM · {f.source.slice(4)}</option>}
                             </ThemedSelect>
-                            {viciNames === null && <span className="text-[9px] font-normal" style={{ color: 'var(--color-text-tertiary)' }}>loading dialer fields…</span>}
-                            {viciNames && !viciNames.length && <span className="text-[9px] font-normal" style={{ color: 'var(--color-text-tertiary)' }}>no dialer fields found</span>}
+                            {viciNames === null && <span className="text-[9px] font-normal" style={{ color: 'var(--color-text-tertiary)' }}>checking for custom fields…</span>}
                           </label>
                         )}
                         {open && g.id === 'rating' && (
