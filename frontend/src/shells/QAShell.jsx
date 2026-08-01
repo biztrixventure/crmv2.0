@@ -17,6 +17,10 @@ import { Donut, Bars, Lines, PALETTE } from '../components/QA/Charts';
 import { isSheetConfig } from '../utils/qaSheetFormula';
 import ThemedSelect from '../components/UI/Select';
 import FilterBar, { FilterSelect } from '../components/UI/FilterBar';
+// Chat reached every other shell through AppHeader / AdminHeader. QA is an
+// isolated shell with its own header, so it was the one place the launcher was
+// never mounted — the feature was live for the QA team, just unreachable.
+import ChatLauncher from '../components/Chat/ChatLauncher';
 import { useHistoryTab } from '../hooks/useHistoryTab';
 import { useNavFocus } from '../contexts/FocusContext';
 
@@ -3903,6 +3907,7 @@ function QAAgentView({ user, logout }) {
         <div className="ml-auto flex items-center gap-3">
           {Array.isArray(methods) && methods.length > 0 && <span className="flex items-center gap-1">{methods.map(m => <MethodPill key={m} m={m} />)}</span>}
           <CompanyPicker companies={companies} all={all} companyId={companyId} onChange={setCompanyId} />
+          <ChatLauncher />
           <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}><Shield size={13} className="inline mr-1" />{user?.role}</span>
           <button onClick={logout} className="flex items-center gap-1 text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}><LogOut size={14} />Logout</button>
         </div>
@@ -3984,6 +3989,7 @@ export default function QAShell() {
         </nav>
         <div className="ml-auto flex items-center gap-3">
           <CompanyPicker companies={companies} all={all} companyId={companyId} onChange={setCompanyId} />
+          <ChatLauncher />
           <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}><Shield size={13} className="inline mr-1" />{user?.role}</span>
           <button onClick={logout} className="flex items-center gap-1 text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}><LogOut size={14} />Logout</button>
         </div>
