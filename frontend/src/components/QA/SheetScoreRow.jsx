@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Loader2, Send, CheckCircle2, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
-import { computeSheetReview, truncPct1 } from '../../utils/qaSheetFormula';
+import { computeSheetReview, truncPct1, resolveSheetFields } from '../../utils/qaSheetFormula';
 import ThemedSelect from '../UI/Select';
+import ThemedDate from '../UI/ThemedDate';
 
 // ============================================================================
 // SheetScoreRow — horizontal, spreadsheet-style scoring strip for sheet_v2
@@ -125,22 +126,47 @@ export default function SheetScoreRow({ config, initialValues = {}, initialNotes
     : (out.quality_score != null ? `${out.quality_score}%` : '—');
 
   // ── build the flat, ordered column list (matches the sheet's left→right order)
+  //
+  // ONE source of order and type: resolveSheetFields. A field carries its own
+  // scoring `role` (which coloured band it lands in) and its own `input` (which
+  // widget the reviewer gets) — independently — so a column moved to another
+  // group keeps its widget, and a column can be Y/N, 0–4, 1–5 or 5/10/15/20/25
+  // wherever it sits. Cards written before that (no role/input) resolve to
+  // exactly the six-array order this used to hard-code.
+  const sheetFields = resolveSheetFields(config);
+  const ROLE_GROUP = { meta: 'meta', score: 'rating', autofail: 'autofail', penalty: 'penalty', tracking: 'tracking', quality: 'quality' };
   const columns = [];
-  (config.meta_fields || []).forEach(f => columns.push({ key: f.key, label: f.label, group: 'meta', kind: 'text', w: 130 }));
-  (config.rating_criteria || []).forEach(rc => columns.push({ key: rc.key, label: `${rc.label}${rc.included_in_base === false ? ' *' : ''}`, group: 'rating', kind: 'rating', scale: rc.scale ?? 4, min: rc.min ?? 0, w: 108 }));
-  ((config.autofail || {}).fields || []).forEach(f => columns.push({ key: f.key, label: f.label, group: 'autofail', kind: 'yn', w: 108 }));
-  (config.penalty_flags || []).forEach(f => columns.push({ key: f.key, label: `${f.label} (${f.penalty ?? -5})`, group: 'penalty', kind: 'yn', w: 108 }));
-  (config.tracking_flags || []).forEach(f => columns.push({ key: f.key, label: `${f.label} (tracking)`, group: 'tracking', kind: 'yn', w: 108 }));
-  ((config.quality_score || {}).fields || []).forEach(f => columns.push({ key: f.key, label: f.label, group: 'quality', kind: 'yn', w: 116 }));
-  if (config.call_outcome) columns.push({ key: config.call_outcome.key, label: config.call_outcome.label, group: 'outcome', kind: 'outcome', options: config.call_outcome.options || [], w: 130 });
+  // The outcome / verdict dropdowns are singletons (call_outcome, manual_status)
+  // that used to be appended after every field. A card can now place them
+  // anywhere by carrying a field with role 'outcome'/'verdict'; the config still
+  // owns the options and the scoring. Cards that don't → appended as before.
+  const outcomeCol = () => config.call_outcome && ({ key: config.call_outcome.key, label: config.call_outcome.label, group: 'outcome', kind: 'outcome', options: config.call_outcome.options || [], w: 130 });
+  const verdictCol = () => config.manual_status && ({ key: config.manual_status.key, label: config.manual_status.label, group: 'verdict', kind: 'verdict', options: config.manual_status.options || ['Pass', 'Fail'], passValue: config.manual_status.pass_value || 'Pass', w: 132 });
+  let outcomePlaced = false, verdictPlaced = false;
+  for (const f of sheetFields) {
+    if (f.role === 'outcome') { const c = outcomeCol(); if (c && !outcomePlaced) { columns.push(c); outcomePlaced = true; } continue; }
+    if (f.role === 'verdict') { const c = verdictCol(); if (c && !verdictPlaced) { columns.push(c); verdictPlaced = true; } continue; }
+    const group = ROLE_GROUP[f.role] || 'meta';
+    const suffix = f.role === 'penalty' ? ` (${f.penalty ?? -5})`
+      : f.role === 'tracking' ? ' (tracking)'
+        : (f.role === 'score' && f.included_in_base === false) ? ' *' : '';
+    const label = `${f.label ?? f.key}${suffix}`;
+    const kind = f.input.kind;
+    const w = kind === 'text' || kind === 'date' ? 130 : (group === 'quality' ? 116 : 108);
+    if (kind === 'scale') columns.push({ key: f.key, label, group, kind: 'rating', scale: f.input.max, min: f.input.min, w });
+    else if (kind === 'choice') columns.push({ key: f.key, label, group, kind: 'choice', options: f.input.options || [], w: Math.max(w, 116) });
+    else columns.push({ key: f.key, label, group, kind, w });
+  }
+  const roleCount = (r) => sheetFields.filter(f => f.role === r).length;
+  if (config.call_outcome && !outcomePlaced) columns.push(outcomeCol());
   // manual verdict input (fronter RCM: the evaluator's "QA Overall Status")
-  if (config.manual_status) columns.push({ key: config.manual_status.key, label: config.manual_status.label, group: 'verdict', kind: 'verdict', options: config.manual_status.options || ['Pass', 'Fail'], passValue: config.manual_status.pass_value || 'Pass', w: 132 });
+  if (config.manual_status && !verdictPlaced) columns.push(verdictCol());
   // computed (read-only, live). Only show a computed column when its inputs exist.
-  if ((config.rating_criteria || []).length) columns.push({ key: '__base', label: 'Base_Score', group: 'computed', kind: 'calc', w: 92, text: `${basePct}%`, bar: basePct / 100, tint: '#2563eb' });
-  if (((config.autofail || {}).fields || []).length) columns.push({ key: '__af', label: 'Auto_Fail', group: 'computed', kind: 'flag', w: 84, text: out.autofail_result, ok: out.autofail_result === 'Pass' });
-  if ((config.penalty_flags || []).length) columns.push({ key: '__pen', label: 'Total_Penalty', group: 'computed', kind: 'num', w: 92, text: out.total_penalty ?? 0, neg: (out.total_penalty || 0) < 0 });
+  if (roleCount('score')) columns.push({ key: '__base', label: 'Base_Score', group: 'computed', kind: 'calc', w: 92, text: `${basePct}%`, bar: basePct / 100, tint: '#2563eb' });
+  if (roleCount('autofail')) columns.push({ key: '__af', label: 'Auto_Fail', group: 'computed', kind: 'flag', w: 84, text: out.autofail_result, ok: out.autofail_result === 'Pass' });
+  if (roleCount('penalty')) columns.push({ key: '__pen', label: 'Total_Penalty', group: 'computed', kind: 'num', w: 92, text: out.total_penalty ?? 0, neg: (out.total_penalty || 0) < 0 });
   if (config.final_score_formula === 'base_plus_penalty_truncated') columns.push({ key: '__final', label: 'Final_Score', group: 'computed', kind: 'calc', w: 92, text: out.final_score ?? '—', bar: Math.max(0, Math.min(1, (Number(out.final_score) || 0) / 100)), tint: '#16a34a' });
-  if (config.quality_score) columns.push({ key: '__q', label: 'Quality Score', group: 'computed', kind: 'calc', w: 96, text: out.quality_score == null ? 'N/A' : `${out.quality_score}%`, bar: (out.quality_score || 0) / 100, tint: '#16a34a' });
+  if (roleCount('quality')) columns.push({ key: '__q', label: 'Quality Score', group: 'computed', kind: 'calc', w: 96, text: out.quality_score == null ? 'N/A' : `${out.quality_score}%`, bar: (out.quality_score || 0) / 100, tint: '#16a34a' });
   if (config.call_outcome) columns.push({ key: '__os', label: 'Call_Outcome_Score', group: 'computed', kind: 'num', w: 92, text: out.call_outcome_score });
   columns.push({ key: '__status', label: 'QA Overall Status', group: 'computed', kind: 'status', w: 112, text: status, pass: verdictDriven ? out.passed : null });
 
@@ -151,8 +177,25 @@ export default function SheetScoreRow({ config, initialValues = {}, initialNotes
   const renderCell = (c) => {
     switch (c.kind) {
       case 'text': return <input value={values[c.key] ?? ''} onChange={e => set(c.key, e.target.value)} disabled={readOnly} style={selStyle} placeholder="—" />;
+      case 'date': return <ThemedDate value={values[c.key] ?? ''} onChange={e => set(c.key, e.target.value)} disabled={readOnly} style={selStyle} />;
       case 'rating': return <Rating value={values[c.key]} scale={c.scale} min={c.min} onChange={v => set(c.key, v)} disabled={readOnly} />;
       case 'yn': return <YN value={values[c.key]} onChange={v => set(c.key, v)} disabled={readOnly} />;
+      // A fixed list of scoring options (e.g. 5/10/15/20/25). Coloured by where
+      // the pick sits in its own list, so a 25 reads as strong and a 5 as weak
+      // exactly like the 0–4 data bar does.
+      case 'choice': {
+        const idx = c.options.findIndex(o => String(o) === String(values[c.key] ?? ''));
+        const frac = idx < 0 || c.options.length < 2 ? null : idx / (c.options.length - 1);
+        const hue = frac == null ? null : Math.round(frac * 120);
+        return (
+          <div className="rounded" style={{ background: hue == null ? 'transparent' : `hsla(${hue},70%,45%,0.14)` }}>
+            <ThemedSelect value={values[c.key] ?? ''} onChange={e => set(c.key, e.target.value)} disabled={readOnly}
+              style={{ ...selStyle, fontWeight: 700 }}>
+              <option value="">—</option>{c.options.map(o => <option key={o} value={o}>{o}</option>)}
+            </ThemedSelect>
+          </div>
+        );
+      }
       case 'outcome': return (
         <ThemedSelect value={values[c.key] ?? ''} onChange={e => set(c.key, e.target.value)} disabled={readOnly} style={selStyle}>
           <option value="">—</option>{c.options.map(o => <option key={o} value={o}>{o}</option>)}
@@ -189,8 +232,8 @@ export default function SheetScoreRow({ config, initialValues = {}, initialNotes
     }
   };
 
-  const metaKeys = (config.meta_fields || []).map(f => f.key);
-  const afKeys = ((config.autofail || {}).fields || []).map(f => f.key);
+  const metaKeys = sheetFields.filter(f => f.role === 'meta').map(f => f.key);
+  const afKeys = sheetFields.filter(f => f.role === 'autofail').map(f => f.key);
   const submit = () => {
     // Auto-Fail (compliance) fields must be answered Y/N before submitting — a
     // blank one is ambiguous and drives the whole call's pass/fail, so require an

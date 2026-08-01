@@ -23,7 +23,7 @@ const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { isSuperAdmin, hasPermission, getUserCompanies } = require('../models/helpers');
 const { getConfig, setConfig, getAllConfig } = require('../utils/businessConfig');
-const { isSheetConfig, computeSheetReview, isY } = require('../utils/qaSheetFormula');
+const { isSheetConfig, computeSheetReview, isY, resolveSheetFields, fieldPoints } = require('../utils/qaSheetFormula');
 const { listCandidatesByLeadId, listCandidatesByPhone, listCandidatesForSale, locationForRecording, listDayRecordings, getBoxes, fillLeadStatuses, resolveDispos, leadFieldCustomer, leadCustomFields, discoverCustomFieldNames, leadFromVendorCode } = require('../utils/dialerBoxes');
 const { materializeCompany } = require('../utils/qaMaterializer');
 const { autoAssignCompany } = require('../utils/qaAutoAssign');
@@ -1732,14 +1732,22 @@ async function replaceSheetScores(reviewId, cfg, values, out) {
     if (raw === undefined) return;
     rows.push({ review_id: reviewId, criterion_key: key, raw_value: raw == null ? null : String(raw), points: points ?? 0, note: null });
   };
-  for (const rc of (cfg.rating_criteria || [])) {
-    const n = parseInt(values[rc.key], 10);
-    add(rc.key, values[rc.key], Number.isFinite(n) ? Math.max(0, Math.min(rc.scale ?? 4, n)) : 0);
+  // Driven by resolveSheetFields, NOT by the six v1 arrays: a card saved in the
+  // new flat shape (or one whose column was moved to another group) must still
+  // file every answered cell under its own key, or the review's history and the
+  // per-criterion reports lose that column silently.
+  const singletonKeys = new Set([cfg.call_outcome && cfg.call_outcome.key, cfg.manual_status && cfg.manual_status.key].filter(Boolean));
+  for (const f of resolveSheetFields(cfg)) {
+    if (f.role === 'meta') continue;                                                     // context text, not a score
+    // a placed outcome/verdict column is the SAME cell as the singleton below —
+    // writing it twice would collide on (review_id, criterion_key)
+    if (f.role === 'outcome' || f.role === 'verdict' || singletonKeys.has(f.key)) continue;
+    const raw = values[f.key];
+    if (f.role === 'score')   { add(f.key, raw, fieldPoints(f, raw)); continue; }
+    if (f.role === 'penalty') { add(f.key, raw, isY(raw) ? (f.penalty ?? -5) : 0); continue; }
+    if (f.role === 'quality') { add(f.key, raw, isY(raw) ? 1 : 0); continue; }
+    add(f.key, raw, 0);                                                                  // autofail + tracking: raw only
   }
-  for (const f of ((cfg.autofail || {}).fields || [])) add(f.key, values[f.key], 0);
-  for (const f of (cfg.penalty_flags  || [])) add(f.key, values[f.key], isY(values[f.key]) ? (f.penalty ?? -5) : 0);
-  for (const f of (cfg.tracking_flags || [])) add(f.key, values[f.key], 0);              // tracking-only, no formula
-  for (const f of ((cfg.quality_score || {}).fields || [])) add(f.key, values[f.key], isY(values[f.key]) ? 1 : 0);
   if (cfg.call_outcome) add(cfg.call_outcome.key, values[cfg.call_outcome.key], out.call_outcome_score ?? 0);
   if (cfg.manual_status) add(cfg.manual_status.key, values[cfg.manual_status.key], out.passed == null ? 0 : (out.passed ? 1 : 0));
   await supabaseAdmin.from('qa_review_scores').delete().eq('review_id', reviewId);
@@ -2027,11 +2035,26 @@ router.get('/reports/agent', asyncHandler(async (req, res) => {
   const cards = Object.fromEntries((cardRes.data || []).map(c => [c.id, c.criteria]));
   const agentCrit = {};
   const bump = (key, label, group, val) => { if (val == null || val === '') return; const g = (agentCrit[key] ||= { label, group, misses: 0, seen: 0 }); g.seen++; if (bad[group](val)) g.misses++; };
+  // role → the miss-detector group above. 'meta' and 'tracking' have no notion
+  // of a miss, so they never enter the per-criterion report.
+  const GROUP_OF_ROLE = { score: 'rating', autofail: 'autofail', penalty: 'penalty', quality: 'quality' };
   for (const r of cur) { const c = cards[r.scorecard_id]; if (!c || Array.isArray(c)) continue; const v = valsBy[r.id] || {};
-    for (const f of (c.rating_criteria || [])) bump(f.key, f.label, 'rating', v[f.key]);
-    for (const f of ((c.autofail || {}).fields || [])) bump(f.key, f.label, 'autofail', v[f.key]);
-    for (const f of (c.penalty_flags || [])) bump(f.key, f.label, 'penalty', v[f.key]);
-    for (const f of ((c.quality_score || {}).fields || [])) bump(f.key, f.label, 'quality', v[f.key]);
+    for (const f of resolveSheetFields(c)) {
+      const group = GROUP_OF_ROLE[f.role];
+      if (!group) continue;
+      // A scored column is a "miss" low on ITS OWN range. `bad.rating` reads the
+      // raw number, which is right for a 0–4 / 1–5 scale but meaningless for a
+      // 5/10/15/20/25 choice — there, compare the points against the top option.
+      if (group === 'rating' && f.input && f.input.kind === 'choice') {
+        const raw = v[f.key];
+        if (raw == null || raw === '') continue;
+        const top = Math.max(0, ...(f.input.options || []).map(o => fieldPoints(f, o)));
+        const g = (agentCrit[f.key] ||= { label: f.label, group, misses: 0, seen: 0 });
+        g.seen++; if (top > 0 && fieldPoints(f, raw) / top <= 0.5) g.misses++;
+        continue;
+      }
+      bump(f.key, f.label, group, v[f.key]);
+    }
   }
 
   // TEAM (same scope + window) → rank + per-criterion team miss rates
