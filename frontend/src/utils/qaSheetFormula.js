@@ -10,7 +10,8 @@
 // ============================================================================
 
 const norm  = (v) => String(v ?? '').trim().toUpperCase();
-export const isY = (v) => norm(v) === 'Y';
+// 'YES' counts as Y too — the client's sheets spell some flag columns Yes/No.
+export const isY = (v) => { const s = norm(v); return s === 'Y' || s === 'YES'; };
 const blank = (v) => norm(v) === '';
 
 export function isSheetConfig(criteria) {
@@ -178,7 +179,9 @@ export function computeSheetReview(cfg, values = {}) {
   const qFields = roleOf('quality');
   if (qFields.length) {
     if (co && String(outcomeRaw ?? '').trim() === '') quality_score = null;
-    else if (autofail_result !== 'Pass') quality_score = 0;
+    // only a REAL auto-fail zeroes the checklist — null means the card has no
+    // gate at all, which `!== 'Pass'` wrongly treated as a failure
+    else if (autofail_result === 'Fail') quality_score = 0;
     else {
       const yes = qFields.filter(f => isY(v(f.key))).length;
       quality_score = Math.round((yes / qFields.length) * 1000) / 10;

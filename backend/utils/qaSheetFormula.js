@@ -56,7 +56,11 @@
 // ============================================================================
 
 const norm  = (v) => String(v ?? '').trim().toUpperCase();
-const isY   = (v) => norm(v) === 'Y';          // TRIM(UPPER(...)) tolerance, per the sheet
+// TRIM(UPPER(...)) tolerance, per the sheet. 'YES' counts too: the client's own
+// sheets spell some flag columns Yes/No rather than Y/N, and a column that reads
+// "Yes" must never score as if it were unanswered because a later edit moved it
+// into a scoring group.
+const isY   = (v) => { const s = norm(v); return s === 'Y' || s === 'YES'; };
 const blank = (v) => norm(v) === '';
 
 // criteria object (not array) + model marker = sheet_v2 scorecard
@@ -248,7 +252,11 @@ function computeSheetReview(cfg, values = {}) {
   const qFields = roleOf('quality');
   if (qFields.length) {
     if (co && String(outcomeRaw ?? '').trim() === '') quality_score = null;      // no outcome set → no scoring
-    else if (autofail_result !== 'Pass') quality_score = 0;
+    // Only a REAL auto-fail zeroes the checklist. autofail_result is null when
+    // the card has no gate at all, and `!== 'Pass'` treated that as a failure —
+    // so a checklist on a gate-less card scored 0 forever. No live card was in
+    // that state, but moving the last auto-fail column off a card now creates it.
+    else if (autofail_result === 'Fail') quality_score = 0;
     else {
       const yes = qFields.filter(f => isY(v(f.key))).length;                     // blank/N both count as not-Y
       quality_score = Math.round((yes / qFields.length) * 1000) / 10;            // e.g. 71.4

@@ -194,6 +194,23 @@ console.log('\n══ FIELD MODEL v2 (role + input) ══');
   check('yn scoring — N uses points.N (-2), blank stays 0', computeSheetReview(cfg, { a: '', b: 'N' }).base_sum, -2);
 }
 
+// 4b. Yes/No spelling — the client's sheets write "Yes" where ours write "Y".
+{
+  const cfg = { model: 'sheet_v2', base_score_divisor: 1, fields: [
+    { key: 'a', label: 'A', role: 'score', included_in_base: true, input: { kind: 'choice', options: ['Yes', 'No'] , points: { Yes: 1, No: 0 } } },
+  ] };
+  check('"Yes" scores via its points map', computeSheetReview(cfg, { a: 'Yes' }).base_sum, 1);
+  const gate = { model: 'sheet_v2', fields: [{ key: 'g', label: 'G', role: 'autofail', input: { kind: 'choice', options: ['Yes', 'No'] } }] };
+  check('"Yes" passes an auto-fail gate (not read as unanswered)', computeSheetReview(gate, { g: 'Yes' }).autofail_result, 'Pass');
+  check('" yes " tolerated like " y "', computeSheetReview(gate, { g: ' yes ' }).autofail_result, 'Pass');
+  check('"No" still fails the gate', computeSheetReview(gate, { g: 'No' }).autofail_result, 'Fail');
+  const q = { model: 'sheet_v2', quality_score: { fields: [] }, fields: [
+    { key: 'q1', label: 'Q1', role: 'quality', input: { kind: 'yn' } },
+    { key: 'q2', label: 'Q2', role: 'quality', input: { kind: 'yn' } },
+  ] };
+  check('Yes/Y mix counts as 2 of 2 on the checklist', computeSheetReview(q, { q1: 'Yes', q2: 'Y' }).quality_score, 100);
+}
+
 // 5. Moving a column between groups changes ONLY that column's behaviour.
 {
   const base = { model: 'sheet_v2', base_score_divisor: 10, final_score_formula: 'base_plus_penalty_truncated', fields: [

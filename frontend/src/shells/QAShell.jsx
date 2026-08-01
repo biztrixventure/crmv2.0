@@ -1782,6 +1782,15 @@ const P = {
   meta:   (key, label, source) => ({ key, label, role: 'meta', input: { kind: 'text' }, ...(source ? { source } : {}) }),
   date:   (key, label, source) => ({ key, label, role: 'meta', input: { kind: 'date' }, ...(source ? { source } : {}) }),
   score:  (key, label, min, max) => ({ key, label, role: 'score', input: { kind: 'scale', min, max, step: 1 } }),
+  // A weighted band: the reviewer picks from a fixed list and the pick IS the
+  // points (0/5/10/15/20). `max` is the column's ceiling, so a "(10)" column
+  // offers 0,5,10 and a "(20)" column offers 0,5,10,15,20 — exactly the
+  // per-column dropdowns the client's sheet defines in Working!I.
+  band:   (key, label, max, step = 5) => ({
+    key, label, role: 'score', included_in_base: true,
+    input: { kind: 'choice', options: Array.from({ length: Math.floor(max / step) + 1 }, (_, i) => String(i * step)) },
+  }),
+  choice: (key, label, role, options) => ({ key, label, role, input: { kind: 'choice', options } }),
   yn:     (key, label, role) => ({ key, label, role, input: { kind: 'yn' } }),
   pen:    (key, label) => ({ key, label, role: 'penalty', penalty: -5, input: { kind: 'yn' } }),
   outcome: (key, label) => ({ key, label, role: 'outcome', input: { kind: 'choice', options: [] } }),
@@ -1793,7 +1802,10 @@ const SHEET_PRESETS = {
   closer_dispo: {
     label: 'Closer — Unclosed Sale (23 columns)',
     divisor: 25,
-    outcome: { key: 'call_outcome', label: 'Call Outcome', options: ['Closed', 'Call Back', 'No Conversation'], closed_value: 'Closed' },
+    outcome: { key: 'call_outcome', label: 'Call Outcome', options: ['Closed', 'Callback', 'No Conversation'], closed_value: 'Closed' },
+    // "Call Status" is the reviewer's verdict, not a detail column — the sample
+    // row fills it "Pass". As manual_status it drives QA Overall Status.
+    manual_status: { key: 'call_status', label: 'Call Status', options: ['Pass', 'Fail'], pass_value: 'Pass' },
     fields: () => [
       P.meta('date', 'Date', 'date'),
       P.meta('center_name', 'Center Name', 'center_name'),
@@ -1805,14 +1817,13 @@ const SHEET_PRESETS = {
       P.score('closer_pricing_explanation_effectiveness', 'Closer_Pricing_Explanation_Effectiveness', 1, 5),
       P.score('closer_rebuttal_responsiveness', 'Closer_Rebuttal_Responsiveness', 1, 5),
       P.score('closer_closing_intent_strength', 'Closer_Closing_Intent_Strength', 1, 5),
-      // Call Status stays free text until the client confirms its option list —
-      // an invented dropdown would quietly force reviewers into wrong answers.
-      P.meta('call_status', 'Call Status'),
+      P.verdict('call_status', 'Call Status'),
       P.outcome('call_outcome', 'Call Outcome'),
       P.date('callbak_date', 'Callbak Date'),
       P.meta('comments', 'Comments', 'vici:comments'),
       P.meta('additional_comments', 'Additional Comments', 'none'),
-      P.yn('wrong_dispo', 'Wrong Dispo', 'tracking'),
+      // the sample row writes "Yes", not "Y" — the engine accepts both
+      P.choice('wrong_dispo', 'Wrong Dispo', 'tracking', ['Yes', 'No']),
       P.meta('evaluated_by', 'Evaluated by', 'reviewer_name'),
       P.meta('customers_name', "Customer's Name", 'customer_name'),
       P.meta('zip', 'ZIP', 'zip'),
@@ -1822,37 +1833,41 @@ const SHEET_PRESETS = {
     ],
   },
 
-  // TRA — "Fronter" tab of the Master Evaluation Sheet. 5 ratings 0–4 over the
-  // sheet's /30 divisor (max reachable 20 — replicated as found, see the engine).
+  // TRA — "TRA for scorecard.xlsx", Data tab. A WEIGHTED sheet, not the 0–4
+  // rating model the older WaveTech Fronter tab used: six columns, each picked
+  // from its own band list, and Score is their plain sum (=G+H+I+J+K+L,
+  // verified against the file's rows: 5+10+15+20+10+15 = 75).
+  //
+  // The bands are the file's, unchanged, and they total 95 — so the divisor is
+  // 100 and Base_Score prints the same number the sheet's Score column prints
+  // (75 → 75.0%), with a perfect call reading 95%, exactly as the sheet does.
+  //
+  // Pass/fail is NOT derived from the score here: "Final Status" is a manual
+  // Pass/Fail dropdown and it is authoritative. "Status" (Standard / Below
+  // Standard) rides along for reporting and never moves the number.
   tra: {
-    label: 'Fronter — TRA (WaveTech “Fronter” tab)',
-    divisor: 30,
-    outcome: { key: 'call_out_come', label: 'Call_Out_Come', options: [...WAVETECH_OUTCOMES], closed_value: 'Passed' },
+    label: 'Fronter — TRA (weighted, from “TRA for scorecard”)',
+    divisor: 100,
+    manual_status: { key: 'final_status', label: 'Final Status', options: ['Pass', 'Fail'], pass_value: 'Pass' },
     fields: () => [
-      P.meta('call_id', 'Call_ID', 'call_id'),
-      P.meta('date', 'Date', 'date'),
-      P.meta('fronter_center', 'Fronter_Center', 'fronter_center'),
+      P.date('date', 'Date', 'date'),
+      P.meta('fronter_agent_name', 'Agents', 'agent_name'),
+      P.meta('fronter_center', 'Company', 'fronter_center'),
       P.meta('cli', 'CLI', 'phone'),
-      P.meta('fronter_agent_name', 'Fronter_Agent_Name', 'agent_name'),
-      P.meta('fronter_call_duration', 'Fronter_Call_Duration', 'duration'),
-      P.score('communication_energy_level', 'Fronter_Communication_Energy_Level', 0, 4),
-      P.score('customer_product_understanding', 'Fronter_Customer_Product_Understanding_Call_Purpose', 0, 4),
-      P.score('rebuttal_usage', 'Fronter_Rebuttal_Usage', 0, 4),
-      P.score('pronunciation_clarity', 'Fronter_Communication_Pronunciation_Clarity', 0, 4),
-      P.score('sales_intent', 'Fronter_Sales_Intent', 0, 4),
-      P.yn('qualifying_questions_asked', 'Fronter_Qualifiying_Questions_Asked', 'autofail'),
-      P.yn('compliance_consent_to_transfer', 'Fronter_Compliance_Consent_to_Transfer', 'autofail'),
-      P.yn('compliance_misrepresentation', 'Fronter_Compliance_Misrepresentation', 'autofail'),
-      P.pen('poor_listening', 'Fronter_Communication_Poor_Listening'),
-      P.pen('mumbling', 'Fronter_Communication_Mumbling'),
-      P.pen('low_confidence', 'Fronter_Communication_Low_Confidence'),
-      P.pen('over_explanation', 'Fronter_Comm_Over_Explanation'),
-      P.pen('one_way_interaction', 'Fronter_Communication_One_Way_Interaction'),
-      P.pen('rebuttal_inaccuracy', 'Fronter_Rebuttal_Inaccuracy'),
-      P.pen('transfer_aggressive_pushy', 'Fronter_Transfer_Aggressive_Pushy'),
-      P.meta('evaluated_by', 'Evaluated by', 'reviewer_name'),
-      P.outcome('call_out_come', 'Call_Out_Come'),
+      P.meta('fronter_call_duration', 'Duration', 'duration'),
+      P.band('greeting_cro_energy', 'Greeting/CRO energy (10)', 10),
+      P.band('communication', 'Communication (20)', 20),
+      P.band('customer_understanding', 'Customer Understanding (20)', 20),
+      P.band('qualifying_questions', "Qualifying Q's (20)", 20),
+      P.band('misguide', 'Misguide (10)', 10),
+      P.band('use_of_rebuttals', 'Use of Rebuttals (15)', 15),
       P.meta('comments', 'Comments', 'vici:comments'),
+      P.verdict('final_status', 'Final Status'),
+      P.choice('status', 'Status', 'tracking', ['Standard', 'Below Standard']),
+      P.meta('reason_of_rejection', 'Reason of rejection'),
+      P.meta('evaluated_by', 'Evaluator Name', 'reviewer_name'),
+      P.meta('closer_call_duration', 'Closer Call Duration', 'none'),
+      P.meta('closer_disposition', 'Closer Disposition', 'disposition'),
     ],
   },
 
