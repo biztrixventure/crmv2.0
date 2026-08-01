@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Loader2, Send, CheckCircle2, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { computeSheetReview, truncPct1 } from '../../utils/qaSheetFormula';
@@ -70,14 +70,51 @@ function Rating({ value, scale = 4, min = 0, onChange, disabled }) {
   );
 }
 
+// Which way the reviewer reads the sheet. Remembered per browser: an agent who
+// prefers the vertical form should not have to re-pick it on every call.
+const VIEW_KEY = 'qa.sheetView';
+const readView = () => { try { return localStorage.getItem(VIEW_KEY) === 'v' ? 'v' : 'h'; } catch { return 'h'; } };
+
 export default function SheetScoreRow({ config, initialValues = {}, initialNotes = '', readOnly = false, busy = false, submitLabel = 'Submit review', onSubmit, headerRight = null }) {
   const [values, setValues] = useState(() => ({ ...initialValues }));
   const [notes, setNotes] = useState(initialNotes || '');
   const [afMissing, setAfMissing] = useState(() => new Set());   // required Auto-Fail fields left blank on a submit attempt
+  const [touched, setTouched] = useState(() => new Set());       // cells the reviewer edited — never overwritten
+  const [view, setView] = useState(readView);
+  const setViewPersist = (v) => { setView(v); try { localStorage.setItem(VIEW_KEY, v); } catch { /* private mode — just don't remember */ } };
   const set = (k, val) => {
     setValues(m => ({ ...m, [k]: val }));
+    setTouched(s => { const n = new Set(s); n.add(k); return n; });
     setAfMissing(s => { if (!s.has(k)) return s; const n = new Set(s); n.delete(k); return n; });   // clear the flag once answered
   };
+
+  // Auto-filled details arrive LATE. The CRM fields and the dialer lookup are
+  // separate round-trips that land after this component mounts, and seeding
+  // state once in useState meant anything not yet arrived was simply dropped —
+  // the parent's only way to get it in was remounting the whole form, which
+  // throws away everything already typed. THIS is why details "weren't
+  // fetching": they were fetched, then discarded.
+  //
+  // Merge instead: fill a cell only when the reviewer has not touched it and it
+  // is still empty, so a late answer can never overwrite a real one.
+  const seed = JSON.stringify(initialValues || {});
+  useEffect(() => {
+    const inc = initialValues || {};
+    setValues(prev => {
+      let changed = false;
+      const next = { ...prev };
+      for (const [k, v] of Object.entries(inc)) {
+        if (v === undefined || v === null || v === '') continue;
+        if (touched.has(k)) continue;
+        if (next[k] !== undefined && String(next[k]).trim() !== '') continue;
+        next[k] = v; changed = true;
+      }
+      return changed ? next : prev;
+    });
+    // Keyed on the SERIALIZED values: initialValues is a fresh object literal on
+    // every parent render, so depending on its identity would loop forever. Its
+    // content changing is the real signal.
+  }, [seed]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const out = useMemo(() => computeSheetReview(config, values), [config, values]);
   const divisor = config.base_score_divisor || 30;
@@ -173,13 +210,62 @@ export default function SheetScoreRow({ config, initialValues = {}, initialNotes
     <div key={c.key} className="flex-shrink-0" style={{ width: c.w, borderRight: '1px solid var(--color-border)', ...extra }}>{children}</div>
   );
 
+  // Vertical layout: the SAME columns, the same order, the same state — just
+  // stacked and grouped instead of scrolled sideways. Nothing is dropped or
+  // reordered, so a reviewer switching views is reading one sheet, not two
+  // different forms. Computed columns render as read-only rows at the end of
+  // their group exactly as they sit at the end of the row.
+  const verticalGroups = [];
+  for (const c of columns) {
+    const last = verticalGroups[verticalGroups.length - 1];
+    if (last && last.group === c.group) last.cols.push(c);
+    else verticalGroups.push({ group: c.group, cols: [c] });
+  }
+
+  const ViewToggle = (
+    <div className="flex items-center gap-1 p-0.5 rounded-lg" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+      {[['h', 'Row'], ['v', 'List']].map(([k, l]) => (
+        <button key={k} onClick={() => setViewPersist(k)} type="button"
+          title={k === 'h' ? 'Spreadsheet row — one call left to right, like the Excel sheet' : 'Vertical list — one question per line, easier on a narrow screen'}
+          className="px-2 py-0.5 rounded text-[10px] font-bold"
+          style={{ background: view === k ? 'var(--color-primary-600)' : 'transparent', color: view === k ? '#fff' : 'var(--color-text-secondary)' }}>{l}</button>
+      ))}
+    </div>
+  );
+
   return (
     <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--color-border)', background: 'var(--color-surface)' }}>
-      {config.sheet && (
-        <div className="flex items-center justify-between px-3 py-1.5 text-[11px] font-bold" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)', borderBottom: '1px solid var(--color-border)' }}>
-          <span>{config.sheet}</span>{headerRight}
+      <div className="flex items-center justify-between gap-2 px-3 py-1.5 text-[11px] font-bold" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)', borderBottom: '1px solid var(--color-border)' }}>
+        <span className="truncate">{config.sheet || 'Scorecard'}</span>
+        <span className="flex items-center gap-2 flex-shrink-0">{headerRight}{ViewToggle}</span>
+      </div>
+
+      {view === 'v' ? (
+        <div className="p-2 space-y-3">
+          {verticalGroups.map((g, gi) => (
+            <div key={gi} className="rounded-lg overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
+              <div className="px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wider"
+                style={{ background: GROUP_BAND[g.group], color: 'var(--color-text-secondary)' }}>
+                {GROUP_LABEL[g.group] || g.group}
+              </div>
+              {g.cols.map(c => (
+                <div key={c.key}
+                  className="flex items-center gap-3 px-2.5 py-1.5"
+                  style={{
+                    borderTop: '1px solid var(--color-border)',
+                    background: GROUP_TINT[c.group],
+                    ...(c.group === 'autofail' && afMissing.has(c.key) ? { boxShadow: 'inset 0 0 0 2px var(--color-error-600)' } : {}),
+                  }}>
+                  <div className="text-[12px] font-bold leading-tight flex-1 min-w-0" style={{ color: 'var(--color-text-secondary)' }}>
+                    {pretty(c.label)}
+                  </div>
+                  <div className="flex-shrink-0" style={{ width: 160 }}>{renderCell(c)}</div>
+                </div>
+              ))}
+            </div>
+          ))}
         </div>
-      )}
+      ) : (
       <div className="overflow-x-auto">
         <div style={{ minWidth: 'max-content' }}>
           {/* group band */}
@@ -207,6 +293,7 @@ export default function SheetScoreRow({ config, initialValues = {}, initialNotes
           </div>
         </div>
       </div>
+      )}
 
       <div className="flex items-end gap-2 p-2.5" style={{ borderTop: '1px solid var(--color-border)' }}>
         <div className="flex-1">
