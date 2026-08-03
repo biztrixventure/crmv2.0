@@ -403,10 +403,18 @@ const toDateInput = (v) => {
 };
 const forInput = (f, v) => (f?.input?.kind === 'date' ? toDateInput(v) : v);
 
-function metaAutoFill(cfg, a) {
+function metaAutoFill(cfg, a, extra = {}) {
   const out = {};
   const rec = a.recording_ref || {};
   const dispo = a.disposition || a.dispo || rec.disposition || '';
+  // TRA reviews the FRONTER, so its "Company" is the fronter's centre; a closer
+  // card wants the evaluated party's own. Both are resolved server-side by
+  // /crm-fields — this just picks the right one per card instead of relying on a
+  // column being named exactly like the field.
+  const fronterSide = a.subject_role === 'fronter' || a.method === 'tra' || a.work_type === 'tra';
+  const centre = fronterSide
+    ? (extra.fronter_center || extra.center_name || '')
+    : (extra.center_name || extra.fronter_center || '');
   for (const f of metaFieldsOf(cfg)) {
     const k = `${f.key} ${f.label || ''}`.toLowerCase();
     // Center stays out of the fuzzy pass — it is RESOLVED, not guessed:
@@ -414,7 +422,7 @@ function metaAutoFill(cfg, a) {
     // transfer's company) and center_name (the evaluated party's company), and
     // crmAutoFill below fills them by exact normalized-name match. No link → the
     // cell stays blank rather than naming the wrong center.
-    if (/center|company/.test(k)) continue;
+    if (/cent(er|re)|company/.test(k)) { if (centre) out[f.key] = centre; }
     else if (/call.?id|lead.?id|call_id/.test(k)) out[f.key] = rec.lead_id || a.lead_id || a.call_id || '';
     else if (/date/.test(k)) { const d = a.subject_date || a.call_date || rec.start_time || a.created_at; out[f.key] = forInput(f, d ? new Date(d).toLocaleDateString() : ''); }
     else if (/agent/.test(k)) out[f.key] = a.agent_name || a.agent_display || a.subject_name || '';   // BEFORE the /name/ rule
@@ -722,7 +730,7 @@ function ScoreForm({ assignment, onScored }) {
         initialValues={{
           // callCtx, not the bare assignment: it carries the resolved recording,
           // so Duration / Date / who-hung-up fill from the actual dialer call.
-          ...metaAutoFill(scorecard.criteria, callCtx),
+          ...metaAutoFill(scorecard.criteria, callCtx, crm?.extra || {}),
           ...crmAutoFill(scorecard.criteria, crm?.fields, crm?.extra),
           // An explicitly-configured source wins over both guesses above.
           ...sourceAutoFill(scorecard.criteria, callCtx, crm, vici, reviewerName),
@@ -3110,18 +3118,46 @@ function DayRecordingsTab({ canAssign, companyId, scoped }) {
 const GROUP_TINT2 = { rating: 'rgba(37,99,235,0.10)', autofail: 'rgba(220,38,38,0.10)', penalty: 'rgba(217,119,6,0.10)', quality: 'rgba(22,163,74,0.10)', tracking: 'rgba(107,114,128,0.12)', outcome: 'rgba(124,58,237,0.10)', computed: 'rgba(22,163,74,0.16)', meta: 'var(--color-surface-hover)' };
 function flattenFields(cfg) {
   if (!cfg || Array.isArray(cfg)) return [];
-  const f = [];
-  (cfg.rating_criteria || []).forEach(c => f.push({ ...c, group: 'rating', kind: 'rating' }));
-  ((cfg.autofail || {}).fields || []).forEach(c => f.push({ ...c, group: 'autofail', kind: 'yn' }));
-  (cfg.penalty_flags || []).forEach(c => f.push({ ...c, group: 'penalty', kind: 'yn' }));
-  ((cfg.quality_score || {}).fields || []).forEach(c => f.push({ ...c, group: 'quality', kind: 'yn' }));
-  (cfg.tracking_flags || []).forEach(c => f.push({ ...c, group: 'tracking', kind: 'yn' }));
-  if (cfg.call_outcome) f.push({ key: cfg.call_outcome.key, label: cfg.call_outcome.label, group: 'outcome', kind: 'text' });
-  return f;
+  const out = [];
+  for (const f of resolveSheetFields(cfg)) {
+    if (f.role === 'meta') continue;                     // context columns aren't scored
+    if (f.role === 'outcome' || f.role === 'verdict') {
+      out.push({ key: f.key, label: f.label, group: 'outcome', kind: 'text' });
+      continue;
+    }
+    const kind = f.input?.kind === 'scale' ? 'rating' : f.input?.kind === 'yn' ? 'yn' : 'text';
+    out.push({ ...f, group: f.role === 'score' ? 'rating' : f.role, kind });
+  }
+  if (cfg.call_outcome && !out.some(x => x.key === cfg.call_outcome.key)) {
+    out.push({ key: cfg.call_outcome.key, label: cfg.call_outcome.label, group: 'outcome', kind: 'text' });
+  }
+  return out;
 }
+// Y is not always spelled 'Y'. The client's own sheets write Yes/No, so a cell
+// holding "Yes" was being read as NOT-Y and printed as **N** — the completed
+// table said the opposite of what the reviewer picked. Anything unrecognised is
+// now shown verbatim instead of being forced into a Y/N it never was.
+const ynState = (v) => {
+  const s = String(v ?? '').trim().toUpperCase();
+  if (s === 'Y' || s === 'YES' || s === 'TRUE' || s === '1') return true;
+  if (s === 'N' || s === 'NO' || s === 'FALSE' || s === '0') return false;
+  return null;
+};
+// A green tick is a JUDGEMENT, so it has to follow the column's meaning:
+// answering Yes to "Wrong Dispo" or a penalty flag is a FAULT, while Yes on a
+// compliance gate or a checklist is the good answer. Colouring every Y green
+// made a wrong disposition look like a pass.
+const YES_IS_GOOD = { autofail: true, quality: true, penalty: false, tracking: null, meta: null };
 const CellVal = ({ f, v }) => {
   if (v == null || v === '') return <span style={{ color: 'var(--color-text-tertiary)' }}>·</span>;
-  if (f.kind === 'yn') { const y = String(v).trim().toUpperCase() === 'Y'; return <span className="font-bold" style={{ color: y ? '#059669' : 'var(--color-text-tertiary)' }}>{y ? 'Y' : 'N'}</span>; }
+  if (f.kind === 'yn') {
+    const yes = ynState(v);
+    if (yes == null) return <span style={{ color: 'var(--color-text-secondary)' }}>{v}</span>;
+    const good = YES_IS_GOOD[f.group];
+    const color = good == null ? 'var(--color-text-secondary)'
+      : (yes === good ? '#059669' : 'var(--color-error-600)');
+    return <span className="font-bold" style={{ color }}>{yes ? 'Y' : 'N'}</span>;
+  }
   if (f.kind === 'rating') return <span className="font-bold tabular-nums" style={{ color: 'var(--color-text)' }}>{v}</span>;
   return <span style={{ color: 'var(--color-text-secondary)' }}>{v}</span>;
 };

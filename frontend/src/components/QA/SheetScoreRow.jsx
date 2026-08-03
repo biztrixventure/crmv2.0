@@ -36,13 +36,23 @@ const GROUP_LABEL = {
   tracking: 'Tracking', quality: 'Sale Compliance', outcome: 'Outcome', verdict: 'QA Verdict', computed: 'Score',
 };
 
+// A select can only show a value that is IN its option list: a cell holding
+// "Yes" against Y/N options renders as blank, so a saved review looked
+// unanswered. Normalise on read (the client's sheets spell it Yes/No), keep
+// writing the CRM's Y/N.
+const ynNorm = (v) => {
+  const s = String(v ?? '').trim().toUpperCase();
+  if (s === 'Y' || s === 'YES' || s === 'TRUE' || s === '1') return 'Y';
+  if (s === 'N' || s === 'NO' || s === 'FALSE' || s === '0') return 'N';
+  return '';
+};
 function YN({ value, onChange, disabled }) {
-  const y = String(value || '').toUpperCase() === 'Y';
-  const n = String(value || '').toUpperCase() === 'N';
+  const v = ynNorm(value);
+  const y = v === 'Y', n = v === 'N';
   return (
     <div className="relative">
       <div className="absolute inset-0 rounded pointer-events-none" style={{ background: y ? 'rgba(22,163,74,0.14)' : n ? 'rgba(220,38,38,0.10)' : 'transparent' }} />
-      <ThemedSelect value={value ?? ''} onChange={e => onChange(e.target.value)} disabled={disabled} style={{ ...selStyle, position: 'relative', fontWeight: 700, color: y ? '#059669' : n ? '#dc2626' : 'var(--color-text)' }}>
+      <ThemedSelect value={v} onChange={e => onChange(e.target.value)} disabled={disabled} style={{ ...selStyle, position: 'relative', fontWeight: 700, color: y ? '#059669' : n ? '#dc2626' : 'var(--color-text)' }}>
         <option value="">—</option><option value="Y">Y</option><option value="N">N</option>
       </ThemedSelect>
     </div>

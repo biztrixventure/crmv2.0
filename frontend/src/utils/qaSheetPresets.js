@@ -74,8 +74,10 @@ export const SHEET_PRESETS = {
       P.date('callbak_date', 'Callbak Date'),
       P.meta('comments', 'Comments', 'vici:comments'),
       P.meta('additional_comments', 'Additional Comments', 'none'),
-      // the sample row writes "Yes", not "Y" — the engine accepts both
-      P.choice('wrong_dispo', 'Wrong Dispo', 'tracking', ['Yes', 'No']),
+      // Y/N like every other flag in the CRM. The sheet prints Yes/No, but a
+      // Yes/No *stored* value cannot be shown by a Y/N control and read back as
+      // N in the completed table — the engine accepts both, the UI writes Y/N.
+      P.yn('wrong_dispo', 'Wrong Dispo', 'tracking'),
       P.meta('evaluated_by', 'Evaluated by', 'reviewer_name'),
       P.meta('customers_name', "Customer's Name", 'customer_name'),
       P.meta('zip', 'ZIP', 'zip'),
