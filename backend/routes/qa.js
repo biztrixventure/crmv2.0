@@ -3096,6 +3096,23 @@ async function isQaLevel(userId, level) {
   return (data || []).some(r => lvlOfCr(r.custom_roles) === level);
 }
 
+// Users a superadmin has DESIGNATED as quality managers (mig 227) without
+// changing their role. Nobody holds the qa_manager role in practice — the
+// compliance managers do the job — so without this the org chart has no manager
+// to assign a company or a team to. Missing table (227 not applied yet) → empty,
+// never an error: the org chart must keep working mid-rollout.
+async function designatedManagerIds() {
+  const { data, error } = await supabaseAdmin.from('qa_managers').select('user_id');
+  if (error) return [];
+  return (data || []).map(r => r.user_id);
+}
+// A quality manager is EITHER role-based or designated.
+async function isQaManagerUser(userId) {
+  if (await isQaLevel(userId, 'qa_manager')) return true;
+  const { data } = await supabaseAdmin.from('qa_managers').select('user_id').eq('user_id', userId).maybeSingle();
+  return !!data;
+}
+
 // GET /qa/admin/managers — every QA manager with their assigned companies + team,
 // plus the full company list (each tagged with its owning manager) and the full
 // agent list (each tagged with its manager). Drives the compliance org-chart UI.
@@ -3107,9 +3124,12 @@ router.get('/admin/managers', asyncHandler(async (req, res) => {
     const l = lvlOfCr(r.custom_roles);
     if (['qa_manager', 'qa_agent'].includes(l)) (levelByUid[r.user_id] ||= new Set()).add(l);
   }
-  const uids = Object.keys(levelByUid);
-  const managerIds = uids.filter(u => levelByUid[u].has('qa_manager'));
-  const agentIds = uids.filter(u => levelByUid[u].has('qa_agent') && !levelByUid[u].has('qa_manager'));
+  // Managers = the qa_manager ROLE *plus* anyone a superadmin designated (227).
+  // Designation is how this list stops being empty: 0 users hold the role.
+  const designated = await designatedManagerIds();
+  const managerIds = [...new Set([...Object.keys(levelByUid).filter(u => levelByUid[u].has('qa_manager')), ...designated])];
+  const uids = [...new Set([...Object.keys(levelByUid), ...managerIds])];
+  const agentIds = uids.filter(u => levelByUid[u]?.has('qa_agent') && !managerIds.includes(u));
   let names = {};
   if (uids.length) {
     const { data: profs } = await supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').in('user_id', uids);
@@ -3124,6 +3144,7 @@ router.get('/admin/managers', asyncHandler(async (req, res) => {
   const managers = managerIds.map(mid => ({
     manager_id: mid,
     name: names[mid] || mid,
+    designated: designated.includes(mid),        // acting manager, not a qa_manager role
     companies: (comps || []).filter(c => compMgr[c.id] === mid).map(c => ({ id: c.id, name: c.name })),
     agents: agentIds.filter(a => agentMgr[a] === mid).map(a => ({ user_id: a, name: names[a] || a, open_tasks: open[a] || 0 })),
   }));
@@ -3134,6 +3155,74 @@ router.get('/admin/managers', asyncHandler(async (req, res) => {
   });
 }));
 
+// ── Who is ALLOWED to be a quality manager (mig 227) ─────────────────────────
+// SUPERADMIN ONLY. Compliance wires managers to companies and teams, but it does
+// not get to decide who counts as a manager — that stays with the superadmin,
+// which is exactly the ask: "the super admin can select each compliance manager
+// who is going also be the quality manager".
+//
+// GET /qa/admin/manager-candidates — every user who could act as one
+// (compliance_manager or the qa_manager role), flagged with whether they are
+// designated today and what they already own, so turning one off can say what
+// that would strand.
+router.get('/admin/manager-candidates', asyncHandler(async (req, res) => {
+  if (!(await isSuperAdmin(req.user.id))) return res.status(403).json({ error: 'Superadmin only' });
+  const { data: ucr } = await supabaseAdmin.from('user_company_roles').select('user_id, company_id, custom_roles(level)');
+  const CANDIDATE_LEVELS = ['compliance_manager', 'qa_manager'];
+  const byUid = {};
+  for (const r of (ucr || [])) {
+    const l = lvlOfCr(r.custom_roles);
+    if (!CANDIDATE_LEVELS.includes(l)) continue;
+    (byUid[r.user_id] ||= { levels: new Set(), companies: new Set() });
+    byUid[r.user_id].levels.add(l);
+    if (r.company_id) byUid[r.user_id].companies.add(r.company_id);
+  }
+  const designated = await designatedManagerIds();
+  for (const uid of designated) byUid[uid] ||= { levels: new Set(), companies: new Set() };
+  const uids = Object.keys(byUid);
+  let profs = [];
+  if (uids.length) {
+    // NOTE: user_profiles has no email column — selecting one 400s the whole request
+    const { data } = await supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').in('user_id', uids);
+    profs = data || [];
+  }
+  const nameOf = Object.fromEntries(profs.map(p => [p.user_id, profName(p)]));
+  const { data: mc } = await supabaseAdmin.from('qa_manager_companies').select('company_id, manager_id');
+  const { data: tm } = await supabaseAdmin.from('qa_team_members').select('agent_id, manager_id');
+  res.json({
+    candidates: uids.map(uid => ({
+      user_id: uid,
+      name: nameOf[uid] || uid,
+      levels: [...byUid[uid].levels],
+      designated: designated.includes(uid),
+      companies: (mc || []).filter(r => r.manager_id === uid).length,
+      agents: (tm || []).filter(r => r.manager_id === uid).length,
+    })).sort((a, b) => Number(b.designated) - Number(a.designated) || a.name.localeCompare(b.name)),
+  });
+}));
+
+// PUT /qa/admin/manager-designation { user_id, enabled } — make (or unmake) a
+// quality manager. Turning it OFF keeps their company/team wiring rows: a
+// designation flipped off and back on must not silently dissolve a team, and the
+// org chart simply stops listing them until it is on again.
+router.put('/admin/manager-designation', asyncHandler(async (req, res) => {
+  if (!(await isSuperAdmin(req.user.id))) return res.status(403).json({ error: 'Superadmin only' });
+  const userId = req.body?.user_id;
+  const enabled = !!req.body?.enabled;
+  if (!userId) return res.status(400).json({ error: 'user_id required' });
+
+  if (enabled) {
+    const { error } = await supabaseAdmin.from('qa_managers')
+      .upsert({ user_id: userId, designated_by: req.user.id }, { onConflict: 'user_id' });
+    if (error) return res.status(500).json({ error: error.message });
+  } else {
+    const { error } = await supabaseAdmin.from('qa_managers').delete().eq('user_id', userId);
+    if (error) return res.status(500).json({ error: error.message });
+  }
+  logger.info('QA', `${enabled ? 'designated' : 'removed'} quality manager ${userId} by ${req.user.id}`);
+  res.json({ ok: true, user_id: userId, designated: enabled });
+}));
+
 // PUT /qa/admin/manager/:managerId/companies { company_ids:[...] } — set exactly
 // which companies this manager evaluates. One manager per company: assigning a
 // company here MOVES it off any other manager (company_id is the PK).
@@ -3142,7 +3231,9 @@ router.put('/admin/manager/:managerId/companies', asyncHandler(async (req, res) 
   const managerId = req.params.managerId;
   const ids = Array.isArray(req.body?.company_ids) ? [...new Set(req.body.company_ids.filter(Boolean))] : null;
   if (!ids) return res.status(400).json({ error: 'company_ids array required' });
-  if (!(await isQaLevel(managerId, 'qa_manager'))) return res.status(400).json({ error: 'Not a QA manager' });
+  // role-based OR superadmin-designated (227) — a compliance manager acting as
+  // quality manager must be assignable, or the designation buys nothing
+  if (!(await isQaManagerUser(managerId))) return res.status(400).json({ error: 'Not a QA manager' });
   let moved = 0;
   for (const cid of ids) {
     const { data: cur } = await supabaseAdmin.from('qa_manager_companies').select('manager_id').eq('company_id', cid).maybeSingle();
@@ -3166,7 +3257,9 @@ router.put('/admin/manager/:managerId/agents', asyncHandler(async (req, res) => 
   const managerId = req.params.managerId;
   const ids = Array.isArray(req.body?.agent_ids) ? [...new Set(req.body.agent_ids.filter(Boolean))] : null;
   if (!ids) return res.status(400).json({ error: 'agent_ids array required' });
-  if (!(await isQaLevel(managerId, 'qa_manager'))) return res.status(400).json({ error: 'Not a QA manager' });
+  // role-based OR superadmin-designated (227) — a compliance manager acting as
+  // quality manager must be assignable, or the designation buys nothing
+  if (!(await isQaManagerUser(managerId))) return res.status(400).json({ error: 'Not a QA manager' });
   let moved = 0;
   for (const aid of ids) {
     const { data: cur } = await supabaseAdmin.from('qa_team_members').select('manager_id').eq('agent_id', aid).maybeSingle();

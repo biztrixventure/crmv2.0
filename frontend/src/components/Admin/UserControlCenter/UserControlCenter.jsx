@@ -41,7 +41,10 @@ import QaSection from './QaSection';
 import ClientAccessSection from './ClientAccessSection';
 import PwaSection from './PwaSection';
 
-const QA_ROLES = ['qa_agent', 'qa_manager'];
+// compliance_manager is here so the QA tab shows for them: they are the users a
+// superadmin designates as quality managers (mig 227), and in practice nobody
+// holds the qa_manager role at all.
+const QA_ROLES = ['qa_agent', 'qa_manager', 'compliance_manager'];
 
 const LEVEL_COLOR = {
   superadmin: 'var(--color-primary)', readonly_admin: '#8b5cf6',
