@@ -76,11 +76,34 @@ function Rating({ value, scale = 4, min = 0, onChange, disabled }) {
 const VIEW_KEY = 'qa.sheetView';
 const readView = () => { try { return localStorage.getItem(VIEW_KEY) === 'v' ? 'v' : 'h'; } catch { return 'h'; } };
 
-export default function SheetScoreRow({ config, initialValues = {}, initialNotes = '', readOnly = false, busy = false, submitLabel = 'Submit review', onSubmit, headerRight = null }) {
-  const [values, setValues] = useState(() => ({ ...initialValues }));
-  const [notes, setNotes] = useState(initialNotes || '');
+// ── draft persistence ───────────────────────────────────────────────────────
+// A half-scored call must survive the reviewer closing the task — clicking
+// outside the box, opening another one, a stray refresh. Losing twenty typed
+// cells because a dialog was dismissed is the kind of thing that makes people
+// score in a spreadsheet instead. Drafts are per-assignment, local to the
+// browser, and cleared the moment the review is submitted.
+const DRAFT_NS = 'qa.draft.';
+const readDraft = (id) => {
+  if (!id) return null;
+  try { return JSON.parse(localStorage.getItem(DRAFT_NS + id) || 'null'); } catch { return null; }
+};
+const writeDraft = (id, draft) => {
+  if (!id) return;
+  try { localStorage.setItem(DRAFT_NS + id, JSON.stringify(draft)); } catch { /* private mode / quota — the form still works */ }
+};
+export const clearSheetDraft = (id) => { try { localStorage.removeItem(DRAFT_NS + id); } catch { /* nothing to clear */ } };
+
+export default function SheetScoreRow({ config, draftKey = null, initialValues = {}, initialNotes = '', readOnly = false, busy = false, submitLabel = 'Submit review', onSubmit, headerRight = null }) {
+  // A saved draft outranks the auto-filled seed: it is what the reviewer
+  // actually typed. A readOnly view (an already-submitted review) never reads one.
+  const draft = readOnly ? null : readDraft(draftKey);
+  const [values, setValues] = useState(() => ({ ...initialValues, ...(draft?.values || {}) }));
+  const [notes, setNotes] = useState(draft?.notes ?? (initialNotes || ''));
+  const [restored, setRestored] = useState(!!draft);
   const [afMissing, setAfMissing] = useState(() => new Set());   // required Auto-Fail fields left blank on a submit attempt
-  const [touched, setTouched] = useState(() => new Set());       // cells the reviewer edited — never overwritten
+  // A restored cell counts as TOUCHED: the reviewer typed it, so a late-arriving
+  // auto-fill must not overwrite it any more than it would overwrite live typing.
+  const [touched, setTouched] = useState(() => new Set(Object.keys(draft?.values || {})));
   const [view, setView] = useState(readView);
   const setViewPersist = (v) => { setView(v); try { localStorage.setItem(VIEW_KEY, v); } catch { /* private mode — just don't remember */ } };
   const set = (k, val) => {
@@ -117,6 +140,17 @@ export default function SheetScoreRow({ config, initialValues = {}, initialNotes
     // content changing is the real signal.
   }, [seed]);   // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Save the draft as it is typed. Debounced so a fast typist doesn't write to
+  // localStorage on every keystroke, and skipped entirely for a read-only view.
+  useEffect(() => {
+    if (readOnly || !draftKey) return;
+    const t = setTimeout(() => {
+      const hasWork = Object.values(values).some(v => String(v ?? '').trim() !== '') || String(notes || '').trim() !== '';
+      if (hasWork) writeDraft(draftKey, { values, notes, at: new Date().toISOString() });
+    }, 400);
+    return () => clearTimeout(t);
+  }, [values, notes, draftKey, readOnly]);
+
   const out = useMemo(() => computeSheetReview(config, values), [config, values]);
   const divisor = config.base_score_divisor || 30;
   const basePct = truncPct1(out.base_sum, divisor);          // number
@@ -152,8 +186,13 @@ export default function SheetScoreRow({ config, initialValues = {}, initialNotes
         : (f.role === 'score' && f.included_in_base === false) ? ' *' : '';
     const label = `${f.label ?? f.key}${suffix}`;
     const kind = f.input.kind;
-    const w = kind === 'text' || kind === 'date' ? 130 : (group === 'quality' ? 116 : 108);
-    if (kind === 'scale') columns.push({ key: f.key, label, group, kind: 'rating', scale: f.input.max, min: f.input.min, w });
+    // Comment-ish columns hold sentences, not values. A one-line input for
+    // "Additional Comments" means typing through a slot, so those get a real
+    // resizable box — and a wider column to sit in.
+    const long = kind === 'text' && /comment|note|reason|feedback|remark|detail/i.test(`${f.key} ${f.label || ''}`);
+    const w = long ? 230 : (kind === 'text' || kind === 'date' ? 130 : (group === 'quality' ? 116 : 108));
+    if (long) columns.push({ key: f.key, label, group, kind: 'longtext', w });
+    else if (kind === 'scale') columns.push({ key: f.key, label, group, kind: 'rating', scale: f.input.max, min: f.input.min, w });
     else if (kind === 'choice') columns.push({ key: f.key, label, group, kind: 'choice', options: f.input.options || [], w: Math.max(w, 116) });
     else columns.push({ key: f.key, label, group, kind, w });
   }
@@ -177,6 +216,12 @@ export default function SheetScoreRow({ config, initialValues = {}, initialNotes
   const renderCell = (c) => {
     switch (c.kind) {
       case 'text': return <input value={values[c.key] ?? ''} onChange={e => set(c.key, e.target.value)} disabled={readOnly} style={selStyle} placeholder="—" />;
+      // resizable in both directions — drag the corner to give a long comment room
+      case 'longtext': return (
+        <textarea value={values[c.key] ?? ''} onChange={e => set(c.key, e.target.value)} disabled={readOnly}
+          rows={3} placeholder="—" title="Drag the bottom-right corner to make this bigger"
+          style={{ ...selStyle, minHeight: 64, resize: 'both', lineHeight: 1.5, fontFamily: 'inherit' }} />
+      );
       case 'date': return <ThemedDate value={values[c.key] ?? ''} onChange={e => set(c.key, e.target.value)} disabled={readOnly} style={selStyle} />;
       case 'rating': return <Rating value={values[c.key]} scale={c.scale} min={c.min} onChange={v => set(c.key, v)} disabled={readOnly} />;
       case 'yn': return <YN value={values[c.key]} onChange={v => set(c.key, v)} disabled={readOnly} />;
@@ -338,11 +383,26 @@ export default function SheetScoreRow({ config, initialValues = {}, initialNotes
       </div>
       )}
 
-      <div className="flex items-end gap-2 p-2.5" style={{ borderTop: '1px solid var(--color-border)' }}>
-        <div className="flex-1">
-          <div className="text-[11px] sm:text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: 'var(--color-text-tertiary)' }}>Overall notes / coaching feedback</div>
-          <textarea placeholder="Write detailed feedback — multiple lines welcome. Shift+Enter for a new line." value={notes} onChange={e => setNotes(e.target.value)} disabled={readOnly}
-            rows={3} style={{ ...selStyle, width: '100%', minHeight: 64, resize: 'vertical', lineHeight: 1.5, fontFamily: 'inherit' }} />
+      <div className="flex flex-col sm:flex-row sm:items-end gap-2 p-2.5" style={{ borderTop: '1px solid var(--color-border)' }}>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
+            <span className="text-[11px] sm:text-[10px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-tertiary)' }}>Overall notes / coaching feedback</span>
+            {restored && !readOnly && (
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded inline-flex items-center gap-1"
+                style={{ background: 'color-mix(in srgb, var(--color-primary-600) 12%, transparent)', color: 'var(--color-primary-600)' }}
+                title="You had already started scoring this call — your answers were brought back.">
+                draft restored
+                <button type="button" onClick={() => { clearSheetDraft(draftKey); setRestored(false); }}
+                  style={{ textDecoration: 'underline' }} title="Discard the restored draft note">dismiss</button>
+              </span>
+            )}
+          </div>
+          {/* Coaching feedback is the longest thing anyone types here, and it was
+              a 3-row box. Taller by default, and freely resizable in BOTH
+              directions so a reviewer writing a paragraph is not typing through
+              a letterbox. */}
+          <textarea placeholder="Write detailed feedback — multiple lines welcome. Drag the corner to make this bigger." value={notes} onChange={e => setNotes(e.target.value)} disabled={readOnly}
+            rows={6} style={{ ...selStyle, width: '100%', minHeight: 132, resize: 'both', lineHeight: 1.55, fontFamily: 'inherit' }} />
         </div>
         {!readOnly && (
           <button onClick={submit} disabled={busy} className="px-4 py-2 rounded-lg text-sm font-bold text-white flex items-center gap-1.5 flex-shrink-0"

@@ -30,6 +30,7 @@ const { autoAssignCompany } = require('../utils/qaAutoAssign');
 const { WORK_TYPES, workTypeOf, getActiveRules, materializeCloserWork, applyCompanyRules, openCounts } = require('../utils/qaRules');
 const { sampleRcmFromDialer } = require('../utils/qaDialerSampler');
 const { notifyUsers, getUserIdsByLevel } = require('../utils/notificationService');
+const cache = require('../utils/cache');
 const logger = require('../utils/logger');
 const axios = require('axios');
 
@@ -728,6 +729,23 @@ router.get('/assignments/:id/candidates', asyncHandler(async (req, res) => {
     return res.status(403).json({ error: 'This call is not assigned to you.' });
   }
 
+  // ── cache ────────────────────────────────────────────────────────────────
+  // Resolving these hits the dialer live on EVERY open — a fan-out across boxes
+  // plus, when the narrow day window misses, one unbounded retry. That is the
+  // "recordings take really long to fetch". A past day's recordings never
+  // change, so the answer is cacheable: the first open pays, every open after is
+  // instant. An EMPTY result gets a short TTL instead, so a task whose lead gets
+  // linked a minute later isn't stuck with "no recordings" for hours.
+  const CAND_TTL_HIT = 6 * 60 * 60 * 1000;
+  const CAND_TTL_MISS = 3 * 60 * 1000;
+  const cached = cache.get('qa_candidates', a.id);
+  if (cached && !req.query.refresh) {
+    if (a.status === 'pending' && a.assigned_to === req.user.id) {
+      await supabaseAdmin.from('qa_assignments').update({ status: 'in_review' }).eq('id', a.id);
+    }
+    return res.json({ ...cached, cached: true });
+  }
+
   let candidates = [];
   // What the search actually looked for — returned so the UI can explain an empty
   // list instead of showing a bare "no recordings" the reviewer cannot act on.
@@ -836,7 +854,35 @@ router.get('/assignments/:id/candidates', asyncHandler(async (req, res) => {
   if (a.status === 'pending' && a.assigned_to === req.user.id) {
     await supabaseAdmin.from('qa_assignments').update({ status: 'in_review' }).eq('id', a.id);
   }
-  res.json({ assignment_id: a.id, candidates, diag });
+  const payload = { assignment_id: a.id, candidates, diag };
+  cache.set('qa_candidates', a.id, payload, candidates.length ? CAND_TTL_HIT : CAND_TTL_MISS);
+  res.json(payload);
+}));
+
+// POST /qa/candidates/warm { ids: [...] } — resolve these assignments' recordings
+// in the BACKGROUND so the reviewer's first open is already warm.
+//
+// The queue knows which tasks are about to be opened long before one is clicked;
+// paying the dialer round-trip then, instead of at click time, is the difference
+// between "instant" and "a long wait staring at a spinner". Returns immediately —
+// it is a hint, never something the UI waits on.
+router.post('/candidates/warm', asyncHandler(async (req, res) => {
+  if (!(await can(req, 'view_qa_queue'))) return res.status(403).json({ error: 'Forbidden' });
+  const ids = [...new Set((Array.isArray(req.body?.ids) ? req.body.ids : []).filter(Boolean))].slice(0, 25);
+  const todo = ids.filter(id => !cache.get('qa_candidates', id));
+  res.json({ ok: true, warming: todo.length, cached: ids.length - todo.length });
+  if (!todo.length) return;
+
+  // Bounded concurrency: warming must never crowd out the reviewer's own request.
+  (async () => {
+    const base = `${req.protocol}://${req.get('host')}${req.baseUrl}`;
+    for (let i = 0; i < todo.length; i += 3) {
+      await Promise.all(todo.slice(i, i + 3).map(id =>
+        axios.get(`${base}/assignments/${id}/candidates`, {
+          headers: { Authorization: req.headers.authorization || '' }, timeout: 60000,
+        }).catch(() => {})));
+    }
+  })().catch(e => logger.warn('QA', `candidate warm: ${e.message}`));
 }));
 
 // ── recording stream proxy (mirrors compliance/recordings/stream; kept under
@@ -1585,8 +1631,31 @@ router.post('/assignments/from-crm', asyncHandler(async (req, res) => {
   }
 
   // resolve target QA agent(s)
+  //
+  // Three modes, in precedence order:
+  //   allocations [{user_id, count}] — an explicit number of calls PER AGENT.
+  //     The manager decides who gets how many: 40 to one reviewer, 10 to another,
+  //     0 to a third. An equal split cannot express that, and QA workloads are
+  //     rarely equal — people work different shifts and carry different queues.
+  //   distribute_equally             — round-robin across every QA agent.
+  //   assigned_to                    — all of it to one agent.
   let targetAgents = [];
-  if (distributeEqually) {
+  let allocations = null;
+  const rawAlloc = Array.isArray(req.body?.allocations) ? req.body.allocations : null;
+  if (rawAlloc) {
+    allocations = rawAlloc
+      .map(x => ({ user_id: x?.user_id, count: Math.max(0, Math.floor(Number(x?.count) || 0)) }))
+      .filter(x => x.user_id && x.count > 0);
+    if (!allocations.length) return res.status(400).json({ error: 'allocations need at least one agent with a count above zero.' });
+    const total = allocations.reduce((s, x) => s + x.count, 0);
+    if (total > items.length) {
+      return res.status(400).json({
+        error: `You allocated ${total} calls but this day only has ${items.length} in this section.`,
+        available: items.length, allocated: total,
+      });
+    }
+    targetAgents = allocations.map(x => x.user_id);
+  } else if (distributeEqually) {
     const { data: ucr } = await supabaseAdmin.from('user_company_roles')
       .select('user_id, custom_roles(level)').eq('company_id', companyId).eq('is_active', true);
     targetAgents = [...new Set((ucr || []).filter(r => (Array.isArray(r.custom_roles) ? r.custom_roles[0]?.level : r.custom_roles?.level) === 'qa_agent').map(r => r.user_id))];
@@ -1595,11 +1664,19 @@ router.post('/assignments/from-crm', asyncHandler(async (req, res) => {
     targetAgents = [req.body.assigned_to];
   }
 
+  // allocations → a per-item owner list: the first N to agent A, the next M to
+  // agent B, whatever is left unassigned (it stays in the pool to hand out later).
+  let ownerByIndex = null;
+  if (allocations) {
+    ownerByIndex = [];
+    for (const al of allocations) for (let i = 0; i < al.count; i++) ownerByIndex.push(al.user_id);
+  }
+
   const method = WT_TO_METHOD[work_type];
   const subject_role = WT_TO_ROLE[work_type];
   const now = new Date().toISOString();
   let rr = 0;
-  const rows = items.map(it => ({
+  const rows = items.map((it, idx) => ({
     company_id: companyId, method, subject_role, work_type, source: 'day_recording',
     // closer_sales anchors on the SALE only: it and closer_dispo both map to
     // method 'rcm', so carrying transfer_id on both would collide on the
@@ -1611,7 +1688,10 @@ router.post('/assignments/from-crm', asyncHandler(async (req, res) => {
     sale_id: it.sale_id || null,
     recording_date: date,
     subject_agent: work_type === 'tra' ? (it.agent || null) : ((closerAgentsByUser[it.closer_id] || [])[0] || null),
-    assigned_to: targetAgents.length ? targetAgents[rr++ % targetAgents.length] : null,
+    // an allocation names the OWNER of each item outright; anything beyond the
+    // allocated count stays unassigned in the pool
+    assigned_to: ownerByIndex ? (ownerByIndex[idx] || null)
+      : (targetAgents.length ? targetAgents[rr++ % targetAgents.length] : null),
     assigned_by: req.user.id, assigned_at: now,
     sampled: false, status: 'pending',
   }));
@@ -1645,7 +1725,14 @@ router.post('/assignments/from-crm', asyncHandler(async (req, res) => {
       data: { work_type, count: inserted },
     }).catch(() => {});
   }
-  res.json({ ok: true, inserted, skipped, backfilled, agents: targetAgents.length, distributed: distributeEqually, enriching: createdRows.length > 0 });
+  res.json({
+    ok: true, inserted, skipped, backfilled,
+    agents: targetAgents.length, distributed: distributeEqually,
+    allocated: allocations ? allocations.reduce((s, x) => s + x.count, 0) : null,
+    unassigned: ownerByIndex ? Math.max(0, items.length - ownerByIndex.length) : null,
+    available: items.length,
+    enriching: createdRows.length > 0,
+  });
 
   // ── background: enrich customer identity (CRM-first, bounded dialer budget) ──
   if (createdRows.length) {

@@ -11,7 +11,7 @@ import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
 import client from '../api/client';
 import DotGridBg from '../components/UI/DotGridBg';
-import SheetScoreRow from '../components/QA/SheetScoreRow';
+import SheetScoreRow, { clearSheetDraft } from '../components/QA/SheetScoreRow';
 import { QAAgentDashboard, QAManagerDashboard } from '../components/QA/QADashboard';
 import { Donut, Bars, Lines, PALETTE } from '../components/QA/Charts';
 import { isSheetConfig, resolveSheetFields, projectSheetFields, defaultInputFor } from '../utils/qaSheetFormula';
@@ -651,6 +651,8 @@ function ScoreForm({ assignment, onScored }) {
       )}
       <SheetScoreRow
         key={assignment.id + (crm ? ':crm' : '') + (vici ? ':v' : '')}
+        /* keeps a half-scored call alive if the task is closed and reopened */
+        draftKey={assignment.id}
         config={scorecard.criteria}
         initialValues={{
           ...metaAutoFill(scorecard.criteria, assignment),
@@ -672,6 +674,7 @@ function ScoreForm({ assignment, onScored }) {
           setBusy(true);
           try {
             const r = await client.post('qa/reviews', { assignment_id: assignment.id, ...payload });
+            clearSheetDraft(assignment.id);   // submitted — the draft has done its job
             const c = r.data.computed || {};
             toast.success(c.final_score != null
               ? `Review submitted — ${c.passed ? 'Pass' : 'FAIL'} (Final ${c.final_score})`
@@ -2197,8 +2200,12 @@ function ScorecardEditor({ scorecard, companyId, onClose, onSaved }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={onClose}>
-      <div className="rounded-2xl p-5 overflow-auto" style={{ width: view === 'sheet' ? 'min(1180px, 97vw)' : 'min(720px, 96vw)', maxHeight: '90vh', background: 'var(--color-bg)', border: '1px solid var(--color-border)' }} onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-stretch sm:items-center justify-center p-0 sm:p-4" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={onClose}>
+      {/* full-screen on a phone, centred and capped on a desktop: a scorecard
+          is a wide sheet and a 96vw box inside a padded overlay wasted the
+          only screen a reviewer on a tablet actually has */}
+      <div className="p-4 sm:p-5 overflow-auto w-full h-full sm:h-auto rounded-none sm:rounded-2xl"
+        style={{ maxWidth: view === 'sheet' ? 1180 : 720, maxHeight: '100%', background: 'var(--color-bg)', border: '1px solid var(--color-border)' }} onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
           <div className="text-base font-bold" style={{ color: 'var(--color-text)' }}>Edit scorecard fields <MethodPill m={scorecard.method} /></div>
           <div className="flex items-center gap-1 p-1 rounded-xl ml-auto" style={{ background: 'var(--color-surface-hover)', border: '1px solid var(--color-border)' }}>
@@ -2574,6 +2581,7 @@ function CrmDayPanel({ companyId, scoped, canAssign }) {
   const [loading, setLoading] = useState(false);
   const [agents, setAgents] = useState([]);
   const [assignTo, setAssignTo] = useState('__equal__');
+  const [alloc, setAlloc] = useState({});      // agent id → how many calls (custom split)
   const [busy, setBusy] = useState('');
   const allMode = companyId === ALL_CO;
   const co = scoped;
@@ -2593,11 +2601,17 @@ function CrmDayPanel({ companyId, scoped, canAssign }) {
     setBusy(wt);
     try {
       const body = { company_id: co, date, work_type: wt };
-      if (assignTo === '__equal__') body.distribute_equally = true; else body.assigned_to = assignTo;
+      if (assignTo === '__custom__') {
+        const allocations = Object.entries(alloc).map(([user_id, count]) => ({ user_id, count: +count || 0 })).filter(x => x.count > 0);
+        if (!allocations.length) { setBusy(''); return toast.error('Give at least one agent a number of calls.'); }
+        body.allocations = allocations;
+      } else if (assignTo === '__equal__') body.distribute_equally = true;
+      else body.assigned_to = assignTo;
       const r = await client.post('qa/assignments/from-crm', body);
       const label = CRM_WT.find(w => w.key === wt)?.label || wt;
       const bf = r.data.backfilled ? `, linked ${r.data.backfilled} lead id(s)` : '';
-      if (r.data.inserted) toast.success(`Assigned ${r.data.inserted} ${label}${r.data.distributed ? ` split across ${r.data.agents} agent(s)` : ''}${bf}`);
+      const left = r.data.unassigned ? `, ${r.data.unassigned} left in the pool` : '';
+      if (r.data.inserted) toast.success(`Assigned ${r.data.inserted} ${label}${r.data.distributed ? ` split across ${r.data.agents} agent(s)` : ''}${r.data.allocated != null ? ` across ${body.allocations.length} agent(s)` : ''}${left}${bf}`);
       else toast.message(`${r.data.note || 'Nothing new to assign'}${r.data.skipped ? ` (${r.data.skipped} already assigned)` : ''}${bf}`);
       load();
     } catch (e) { toast.error(e.response?.data?.error || 'Assign failed'); }
@@ -2619,11 +2633,42 @@ function CrmDayPanel({ companyId, scoped, canAssign }) {
           <label className="flex items-center gap-1 text-xs ml-auto" style={{ color: 'var(--color-text-secondary)' }}>Assign to
             <ThemedSelect value={assignTo} onChange={e => setAssignTo(e.target.value)} style={{ ...inp, minWidth: 180 }}>
               <option value="__equal__">⚖ All QA agents — equal split</option>
+              <option value="__custom__">✎ Custom — a number each</option>
               {agents.map(a => <option key={a.id} value={a.id}>{a.name}{a.undone ? ` · ${a.undone} to do` : ''}</option>)}
             </ThemedSelect>
           </label>
         )}
       </div>
+
+      {/* Custom split — the manager types how many calls each reviewer gets.
+          An equal split cannot say "40 to her, 10 to him, none to them", and QA
+          workloads are rarely equal: different shifts, different queues. Anything
+          not allocated simply stays in the pool to hand out later. */}
+      {canAssign && assignTo === '__custom__' && (
+        <div className="mb-2 p-2.5 rounded-lg" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+          <div className="flex items-center gap-2 mb-2 flex-wrap">
+            <span className="text-[11px] font-bold" style={{ color: 'var(--color-text)' }}>Calls per agent</span>
+            <InfoTip w={320} text="How many of this section's calls each reviewer receives. They are handed out in order — the first agent's count, then the next agent's, and so on. Leave someone at 0 to skip them. Anything left over stays unassigned in the pool." />
+            {(() => {
+              const total = Object.values(alloc).reduce((s, v) => s + (+v || 0), 0);
+              return <span className="text-[11px] font-bold" style={{ color: total ? 'var(--color-primary-600)' : 'var(--color-text-tertiary)' }}>{total} allocated</span>;
+            })()}
+            <button type="button" onClick={() => setAlloc({})} className="text-[11px] font-bold ml-auto" style={{ color: 'var(--color-text-tertiary)' }}>clear</button>
+          </div>
+          {!agents.length && <div className="text-[11px]" style={{ color: 'var(--color-warning-600)' }}>No QA agents in this company yet.</div>}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5">
+            {agents.map(a => (
+              <label key={a.id} className="flex items-center gap-2 px-2 py-1 rounded" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+                <span className="text-[11px] font-semibold truncate flex-1" style={{ color: 'var(--color-text)' }} title={a.name}>{a.name}</span>
+                {a.undone ? <span className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>{a.undone} to do</span> : null}
+                <input type="number" min="0" inputMode="numeric" value={alloc[a.id] ?? ''} placeholder="0"
+                  onChange={e => setAlloc(m => ({ ...m, [a.id]: e.target.value.replace(/\D/g, '') }))}
+                  style={{ ...inp, width: 64, padding: '3px 6px', fontSize: 12 }} />
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
       {allMode && <div className="text-[11px] mb-1" style={{ color: 'var(--color-warning-600)' }}>Pick one company in the top-right header to score its CRM day.</div>}
       {!data ? <div className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>Pick a past day and press <b>Load day</b> to see its transfers and sales.</div>
         : <>
@@ -3190,8 +3235,9 @@ function AgentQualityFile({ subject, managerView, companyId, onClose }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={onClose}>
-      <div className="rounded-2xl p-5 overflow-auto" style={{ width: 'min(920px, 96vw)', maxHeight: '92vh', background: 'var(--color-bg)', border: '1px solid var(--color-border)' }} onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-stretch sm:items-center justify-center p-0 sm:p-4" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={onClose}>
+      <div className="p-4 sm:p-5 overflow-auto w-full h-full sm:h-auto rounded-none sm:rounded-2xl"
+        style={{ maxWidth: 920, maxHeight: '100%', background: 'var(--color-bg)', border: '1px solid var(--color-border)' }} onClick={e => e.stopPropagation()}>
         {/* header */}
         <div className="flex items-center gap-2.5 mb-3 flex-wrap">
           <span className="inline-flex items-center justify-center rounded-full flex-shrink-0" style={{ width: 34, height: 34, background: 'var(--color-primary-100, #e0e7ff)' }}>
@@ -4057,8 +4103,17 @@ function AgentTasks({ selfId, canOverride, companyId, filterCompany, allowedWt }
   useEffect(() => { client.get('qa/config', { params: { company_id: companyId } }).then(r => setFields({ ...DEFAULT_CARD_FIELDS, ...(r.data.config?.['qa.card_fields'] || {}) })).catch(() => {}); }, [companyId]);
   const load = useCallback(async ({ silent } = {}) => {
     if (!silent) setLoading(true);   // silent refresh never blanks the list
-    try { const r = await client.get('qa/queue', { params: { limit: 200 } }); setItems(r.data.items || []); }
-    catch { if (!silent) setItems([]); }
+    try {
+      const r = await client.get('qa/queue', { params: { limit: 200 } });
+      const items = r.data.items || [];
+      setItems(items);
+      // Warm the recordings for the tasks about to be opened. Resolving them
+      // hits the dialer live, which is why opening a task used to sit on a
+      // spinner; doing it now, in the background, means the first click is
+      // already answered. Fire-and-forget — the queue never waits on it.
+      const ids = items.filter(it => it.status !== 'scored').slice(0, 25).map(it => it.id);
+      if (ids.length) client.post('qa/candidates/warm', { ids }).catch(() => {});
+    } catch { if (!silent) setItems([]); }
     finally { setLoading(false); }
   }, []);
   // After scoring: drop the row locally (the `todo` filter hides scored items) —
