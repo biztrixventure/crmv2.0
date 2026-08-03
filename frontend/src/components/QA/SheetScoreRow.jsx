@@ -92,7 +92,11 @@ const readView = () => { try { return localStorage.getItem(VIEW_KEY) === 'v' ? '
 // cells because a dialog was dismissed is the kind of thing that makes people
 // score in a spreadsheet instead. Drafts are per-assignment, local to the
 // browser, and cleared the moment the review is submitted.
-const DRAFT_NS = 'qa.draft.';
+// v2: drafts saved while Date columns were still auto-filled hold a wrong date
+// that would be restored forever, outranking the fix. Bumping the namespace
+// retires those once. Any draft written from here on can only contain a date the
+// reviewer picked themselves, so it is kept.
+const DRAFT_NS = 'qa.draft.v2.';
 const readDraft = (id) => {
   if (!id) return null;
   try { return JSON.parse(localStorage.getItem(DRAFT_NS + id) || 'null'); } catch { return null; }

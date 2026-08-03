@@ -59,7 +59,7 @@ export const SHEET_PRESETS = {
     // row fills it "Pass". As manual_status it drives QA Overall Status.
     manual_status: { key: 'call_status', label: 'Call Status', options: ['Pass', 'Fail'], pass_value: 'Pass' },
     fields: () => [
-      P.date('date', 'Date', 'date'),
+      P.date('date', 'Date'),
       P.meta('center_name', 'Center Name', 'center_name'),
       P.meta('closer_agent_name', 'Closer_Agent_Name', 'agent_name'),
       P.meta('cli', 'CLI', 'phone'),
@@ -104,7 +104,7 @@ export const SHEET_PRESETS = {
     divisor: 100,
     manual_status: { key: 'final_status', label: 'Final Status', options: ['Pass', 'Fail'], pass_value: 'Pass' },
     fields: () => [
-      P.date('date', 'Date', 'date'),
+      P.date('date', 'Date'),
       P.meta('fronter_agent_name', 'Agents', 'agent_name'),
       P.meta('fronter_center', 'Company', 'fronter_center'),
       P.meta('cli', 'CLI', 'phone'),

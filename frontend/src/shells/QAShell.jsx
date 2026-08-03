@@ -439,21 +439,18 @@ const toDateInput = (v) => {
 };
 const forInput = (f, v) => (f?.input?.kind === 'date' ? toDateInput(v) : v);
 
-// ── the ONLY dates that are the CALL's date ─────────────────────────────────
-// 1. the recording being scored — the actual call time, best there is
-// 2. recording_date — the day the manager loaded work for
-//
-// NOT created_at. A task materialised from the CRM has no recording_date at all,
-// and a transfer's created_at is the moment the row reached the CRM, which for a
-// bulk-imported or late-entered lead is months after the call. Filling a Date
-// column from it produced exactly the "really very back date" reviewers saw.
-// When neither trustworthy source exists we now leave the cell EMPTY for the
-// reviewer to pick, which is the user's own instruction: a blank they fill beats
-// a confident wrong answer they have to notice and correct.
-const callDateOf = (a) => {
-  const rec = a?.recording_ref || {};
-  return rec.start_time || a?.recording_date || '';
-};
+// ── DATE COLUMNS ARE NEVER AUTO-FILLED ──────────────────────────────────────
+// Every source we have for "the day of this call" turned out to be wrong for
+// some task, and each fix only moved the error somewhere else:
+//   created_at        — when the row reached the CRM, months after a
+//                       bulk-imported or late-entered lead was dialled
+//   a recording       — a task whose own day has no clip falls back to any call
+//                       on that number, which for a repeat customer is old
+//   recording_date    — simply absent on anything the materializer created
+// A wrong date that looks filled in is worse than an empty one: it is copied
+// into the sheet without a second glance. So the reviewer picks it — the call is
+// in front of them, with its timestamp on the recording they just played.
+const callDateOf = () => '';
 
 function metaAutoFill(cfg, a, extra = {}) {
   const out = {};
@@ -551,7 +548,6 @@ const AUTOFILL_SOURCES = [
   { v: 'duration',       label: 'Call duration' },
   { v: 'call_id',        label: 'Call / Lead ID' },
   { v: 'phone',          label: 'Customer phone (CLI)' },
-  { v: 'date',           label: 'Call date' },
   { v: 'disposition',    label: 'Disposition' },
   { v: 'customer_name',  label: 'Customer name' },
   { v: 'zip',            label: 'ZIP' },
