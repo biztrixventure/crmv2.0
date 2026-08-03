@@ -779,8 +779,94 @@ async function annotateHangups(candidates = [], phone) {
       hangup_label: hangupLabel(best.hangup_reason),
       call_status: best.call_status || null,
       log_length: best.length || null,
+      // the disposition OF THIS CALL — already in the row we matched, so it
+      // costs nothing extra and is more precise than the lead's current status
+      disposition: (best.lead_status && !SYSTEM_SKIP.has(String(best.lead_status).trim().toUpperCase()))
+        ? String(best.lead_status).trim() : null,
     };
   });
+}
+
+// ── The disposition of a call, by every route the dialer offers ─────────────
+//
+// Researched against the non_agent_api reference, function by function. What can
+// actually answer "what was this call dispositioned as":
+//
+//   phone_number_log   per-CALL rows carrying lead_status + call_status. This is
+//                      the disposition OF THE CALL — the best possible answer —
+//                      but the log holds only recent calls (it has no archive
+//                      mode; checked).
+//   lead_field_info    the lead's CURRENT status from vicidial_list. Weaker (a
+//                      later call can overwrite it) but never archived, so it
+//                      still answers for old calls.
+//   update_lead(no_update=Y)  phone → lead_id, when nothing else linked one.
+//
+// Ruled out, deliberately: call_dispo_report is an aggregate by ingroup/date,
+// not per lead; callid_info and ccc_lead_info both key on a call_id the CRM
+// never captures; lead_status_search searches BY status, which is backwards.
+//
+// Most specific first, and every route is scoped to this customer's own phone or
+// lead — never a nearby call.
+async function resolveDisposition({ phone, vendorCode, leadId, boxId, startTime, agentUser } = {}) {
+  const usable = (s) => (s && !SYSTEM_SKIP.has(String(s).trim().toUpperCase()) ? String(s).trim() : null);
+
+  // 1. the log row for THIS call — the disposition the agent actually set
+  if (phone && startTime) {
+    try {
+      const rows = await callLogRows(phone);
+      const ts = (v) => { const t = Date.parse(String(v || '').replace(' ', 'T')); return Number.isFinite(t) ? t : null; };
+      const start = ts(startTime);
+      const au = String(agentUser || '').trim().toUpperCase();
+      if (start && rows.length) {
+        let best = null, bestDelta = Infinity;
+        for (const r of rows) {
+          const rt = ts(r.call_date);
+          if (rt == null) continue;
+          const delta = Math.abs(rt - start);
+          if (delta > 600000) continue;
+          if (au && r.user && String(r.user).trim().toUpperCase() !== au) continue;
+          if (delta < bestDelta) { best = r; bestDelta = delta; }
+        }
+        const s = usable(best && best.lead_status);
+        if (s) return { code: s, source: 'call_log' };
+      }
+    } catch { /* fall through to the lead's own status */ }
+  }
+
+  // 2. the lead's current status — survives archiving, so old calls still answer
+  try {
+    if (vendorCode) { const s = usable(await leadStatusByCode(vendorCode)); if (s) return { code: s, source: 'lead_status' }; }
+  } catch { /* next route */ }
+  try {
+    if (leadId) {
+      const box = BOXES.find(b => b.id === boxId) || null;
+      const s = usable(await leadFieldStatus(box, leadId));
+      if (s) return { code: s, source: 'lead_status' };
+    }
+  } catch { /* next route */ }
+
+  // 3. nothing linked a lead at all → find one by phone, then read its status
+  if (phone && !leadId && !vendorCode) {
+    try {
+      const hit = await findLeadByPhone({ phone });
+      if (hit && hit.confidence !== 'ambiguous') {
+        const box = BOXES.find(b => b.id === hit.box) || null;
+        const s = usable(await leadFieldStatus(box, hit.lead_id));
+        if (s) return { code: s, source: `lead_lookup:${hit.confidence}` };
+      }
+    } catch { /* nothing more to try */ }
+  }
+
+  // 4. last resort — this number's most recent logged call, whenever it was
+  if (phone) {
+    try {
+      const rows = await callLogRows(phone);
+      const newest = rows.slice().sort((a, b) => String(b.call_date).localeCompare(String(a.call_date)))[0];
+      const s = usable(newest && newest.lead_status);
+      if (s) return { code: s, source: 'call_log_recent' };
+    } catch { /* give up honestly */ }
+  }
+  return null;
 }
 
 // ── Phone → lead_id, without needing a recording ────────────────────────────
@@ -1002,5 +1088,5 @@ module.exports = {
   listDayRecordings, phoneFromLocation, listDayDispositions, leadStatusSearch,
   leadFieldStatus, leadFieldCustomer, fillLeadStatuses, resolveDispos,
   leadCustomFields, listCustomFieldNames, discoverCustomFieldNames, leadFromVendorCode,
-  leadsByPhoneOnBox, findLeadByPhone, annotateHangups,
+  leadsByPhoneOnBox, findLeadByPhone, annotateHangups, resolveDisposition,
 };

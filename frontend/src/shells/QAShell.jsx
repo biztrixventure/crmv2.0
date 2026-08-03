@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, Fragment } from 'react';
+import { createPortal } from 'react-dom';
 import ThemedDate from '../components/UI/ThemedDate';
 import {
   Moon, Sun,
@@ -228,7 +229,15 @@ function ProfileChip({ user }) {
           <span className="block text-[9px] truncate" style={{ color: 'var(--color-text-tertiary)' }}>{user?.role_name || user?.role || ''}</span>
         </span>
       </button>
-      {user && <ProfileModal isOpen={open} onClose={() => setOpen(false)} user={user} />}
+      {/* PORTALLED to <body>. The modal is `fixed z-50`, but it lives inside a
+          header that is `relative z-10` — and a positioned ancestor creates a
+          stacking context, so that z-50 only ever competed INSIDE the header.
+          <main> (also z-10, later in the DOM) painted straight over it, which is
+          why the profile opened behind the page. */}
+      {user && open && createPortal(
+        <ProfileModal isOpen onClose={() => setOpen(false)} user={user} />,
+        document.body,
+      )}
     </>
   );
 }

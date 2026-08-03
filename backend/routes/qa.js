@@ -24,7 +24,7 @@ const { asyncHandler } = require('../middleware/errorHandler');
 const { isSuperAdmin, hasPermission, getUserCompanies } = require('../models/helpers');
 const { getConfig, setConfig, getAllConfig } = require('../utils/businessConfig');
 const { isSheetConfig, computeSheetReview, isY, resolveSheetFields, fieldPoints } = require('../utils/qaSheetFormula');
-const { listCandidatesByLeadId, listCandidatesByPhone, listCandidatesForSale, locationForRecording, listDayRecordings, getBoxes, fillLeadStatuses, resolveDispos, leadFieldCustomer, leadCustomFields, discoverCustomFieldNames, leadFromVendorCode, findLeadByPhone, annotateHangups, leadStatusByCode, leadFieldStatus } = require('../utils/dialerBoxes');
+const { listCandidatesByLeadId, listCandidatesByPhone, listCandidatesForSale, locationForRecording, listDayRecordings, getBoxes, fillLeadStatuses, resolveDispos, leadFieldCustomer, leadCustomFields, discoverCustomFieldNames, leadFromVendorCode, findLeadByPhone, annotateHangups, leadStatusByCode, leadFieldStatus, resolveDisposition } = require('../utils/dialerBoxes');
 const { materializeCompany } = require('../utils/qaMaterializer');
 const { autoAssignCompany } = require('../utils/qaAutoAssign');
 const { WORK_TYPES, workTypeOf, getActiveRules, materializeCloserWork, applyCompanyRules, openCounts } = require('../utils/qaRules');
@@ -2795,25 +2795,16 @@ router.get('/assignments/:id/crm-fields', asyncHandler(async (req, res) => {
   // customer's phone (only when that resolves unambiguously).
   if (!String(extra.disposition || '').trim()) {
     try {
-      let status = null;
-      if (extra.vendor_code) status = await leadStatusByCode(extra.vendor_code);
-      if (!status) {
-        const rec = a.recording_ref || {};
-        let leadId = rec.lead_id || null;
-        let boxId = rec.box_id || null;
-        if (!leadId) {
-          const phone = a.customer_phone || extra.customer_phone || null;
-          if (phone) {
-            const hit = await findLeadByPhone({ phone });
-            if (hit && hit.confidence !== 'ambiguous') { leadId = hit.lead_id; boxId = hit.box; }
-          }
-        }
-        if (leadId) {
-          const box = getBoxes().find(b => b.id === boxId) || null;
-          status = await leadFieldStatus(box, leadId);
-        }
-      }
-      if (status) { extra.disposition = status; extra.disposition_source = 'dialer'; }
+      const rec = a.recording_ref || {};
+      const hit = await resolveDisposition({
+        phone: a.customer_phone || extra.customer_phone || null,
+        vendorCode: extra.vendor_code || null,
+        leadId: rec.lead_id || null,
+        boxId: rec.box_id || null,
+        startTime: rec.start_time || null,
+        agentUser: rec.agent_user || a.subject_agent || null,
+      });
+      if (hit) { extra.disposition = hit.code; extra.disposition_source = hit.source; }
     } catch (e) { logger.warn('QA', `crm-fields dispo: ${e.message}`); }   // never fail the form over this
   }
 
