@@ -68,6 +68,7 @@ const searchRoutes              = require('./routes/search');
 const customerProfileRoutes     = require('./routes/customerProfile');
 const egressRoutes              = require('./routes/egress');
 const qaRoutes                  = require('./routes/qa');
+const qaMediaRoutes             = require('./routes/qaMedia');
 const kanbanRoutes              = require('./routes/kanban');
 const { egressAudit }           = require('./middleware/egressAudit');
 const { requireFeature }        = require('./utils/featureGate');
@@ -431,6 +432,12 @@ app.use('/api/compliance',        authMiddleware, readonlyGuard, egressAudit, co
 app.use('/api/egress',            authMiddleware, readonlyGuard, egressRoutes);
 // QA Department — recording review + scoring. egressAudit so QA recording plays
 // are governed like the rest; each route guards itself by qa_* permission.
+// Ticket-authenticated audio. Mounted BEFORE authMiddleware on purpose: an
+// <audio> element cannot send an Authorization header, so the player would
+// otherwise have to download the whole file over XHR before playing a note.
+// The ticket is signed by the authenticated /api/qa/recordings/ticket, which
+// is where the permission checks and the egress audit happen.
+app.use('/api/qa-media',          qaMediaRoutes);
 app.use('/api/qa',                authMiddleware, readonlyGuard, egressAudit, qaRoutes);
 app.use('/api/audit',             authMiddleware, readonlyGuard, auditRoutes);
 app.use('/api/user-preferences',  authMiddleware, userPreferencesRoutes);

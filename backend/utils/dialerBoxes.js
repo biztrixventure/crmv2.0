@@ -739,15 +739,23 @@ async function annotateHangups(candidates = [], phone) {
     const start = ts(c.start_time || c.start);
     if (!start) return c;
     const au = String(c.agent_user || '').trim().toUpperCase();
-    let best = null, bestDelta = Infinity;
-    for (const r of rows) {
-      const rt = ts(r.call_date);
-      if (rt == null) continue;
-      const delta = Math.abs(rt - start);
-      if (delta > 120000) continue;                                   // >2 min apart → not this call
-      if (au && r.user && String(r.user).trim().toUpperCase() !== au) continue;
-      if (delta < bestDelta) { best = r; bestDelta = delta; }
-    }
+    // Two passes so a clip is not left blank on a technicality. First the strict
+    // match (same agent, within 2 minutes). If the log rows carry a different
+    // agent spelling — or none — fall back to the nearest call in a wider window
+    // on the same phone, which is still the same conversation.
+    const pick = (window, sameAgent) => {
+      let best = null, bestDelta = Infinity;
+      for (const r of rows) {
+        const rt = ts(r.call_date);
+        if (rt == null) continue;
+        const delta = Math.abs(rt - start);
+        if (delta > window) continue;
+        if (sameAgent && au && r.user && String(r.user).trim().toUpperCase() !== au) continue;
+        if (delta < bestDelta) { best = r; bestDelta = delta; }
+      }
+      return best;
+    };
+    const best = pick(120000, true) || pick(600000, false);
     if (!best) return c;
     return {
       ...c,

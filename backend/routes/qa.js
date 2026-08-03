@@ -31,6 +31,7 @@ const { WORK_TYPES, workTypeOf, getActiveRules, materializeCloserWork, applyComp
 const { sampleRcmFromDialer } = require('../utils/qaDialerSampler');
 const { notifyUsers, getUserIdsByLevel } = require('../utils/notificationService');
 const cache = require('../utils/cache');
+const { issueTicket, TTL_SECONDS: TICKET_TTL } = require('../utils/mediaTicket');
 const logger = require('../utils/logger');
 const axios = require('axios');
 
@@ -863,7 +864,10 @@ router.get('/assignments/:id/candidates', asyncHandler(async (req, res) => {
   // Done here, inside the cached result, so it costs one extra call on the first
   // open and nothing afterwards.
   try {
-    const ph = a.customer_phone || (candidates.find(c => c.phone)?.phone) || null;
+    // any phone that identifies this conversation — the task's own, the one the
+    // day-recording carried, or the one parsed out of a clip's filename. A Live
+    // task has no CRM row, so without the last two it would never get a label.
+    const ph = a.customer_phone || rec?.phone || (candidates.find(c => c.phone)?.phone) || null;
     if (ph) candidates = await annotateHangups(candidates, ph);
   } catch (e) { logger.warn('QA', `hangup annotate: ${e.message}`); }
 
@@ -978,6 +982,22 @@ router.get('/recordings/stream', asyncHandler(async (req, res) => {
     }
   };
   return pipe(url, false);
+}));
+
+// POST /qa/recordings/ticket { assignment_id, box_id, lead_id, recording_id }
+// → { url } — a plain, short-lived URL the <audio> element can stream directly.
+//
+// The permission work happens HERE, where the user is known: the same
+// view_qa_queue permission, the same company scope, the same "this call is not
+// assigned to you" rule, and the same egress audit as the blob route. What the
+// player receives is only a signed pointer to one recording for a few minutes.
+router.post('/recordings/ticket', asyncHandler(async (req, res) => {
+  if (!(await can(req, 'view_qa_queue'))) return res.status(403).json({ error: 'Forbidden' });
+  if (!(await recordingAccessOK(req, res))) return;
+  const { box_id, lead_id, recording_id } = req.body || {};
+  if (!box_id || !recording_id) return res.status(400).json({ error: 'box_id and recording_id required' });
+  const ticket = issueTicket({ userId: req.user.id, box_id, lead_id, recording_id });
+  res.json({ url: `/api/qa-media/stream?ticket=${encodeURIComponent(ticket)}`, expires_in: TICKET_TTL });
 }));
 
 // ── on-demand transcription (self-hosted faster-whisper worker) ───────────────

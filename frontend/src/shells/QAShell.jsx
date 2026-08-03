@@ -265,6 +265,29 @@ function Candidates({ assignmentId }) {
   };
 
   // seekTo (seconds) lets a transcript word click jump the audio to that word.
+  // A ticket per recording, kept for the life of the panel. Cheap JSON, and the
+  // reviewer only pays for it once per clip.
+  const ticketRef = useRef({});          // recording_id → streamable url
+  const ticketFor = useCallback(async (c) => {
+    if (ticketRef.current[c.recording_id]) return ticketRef.current[c.recording_id];
+    const r = await client.post('qa/recordings/ticket', {
+      assignment_id: assignmentId, box_id: c.box_id, lead_id: c.lead_id, recording_id: c.recording_id,
+    });
+    // The API can live on another origin (VITE_API_URL), and the server returns
+    // a root-relative path — resolve it against the API base or the <audio> would
+    // ask the FRONTEND host for a route that only exists on the backend.
+    const apiBase = String(client.defaults.baseURL || '').replace(/\/api\/?$/, '');
+    const url = apiBase + r.data.url;
+    ticketRef.current[c.recording_id] = url;
+    return url;
+  }, [assignmentId]);
+
+  // PROGRESSIVE playback. This used to pull the whole mp3 down as a blob before
+  // the first note played — on a long call that is a very long stare at a
+  // spinner, and seeking did nothing until the download finished. Handing the
+  // <audio> element a real URL lets the browser start on the first chunk and
+  // seek with Range requests, so playback begins in about a second regardless of
+  // how long the call is.
   const play = async (c, seekTo = null) => {
     const a = audioRef.current; if (!a) return;
     if (a.dataset.rid === c.recording_id) {
@@ -274,15 +297,20 @@ function Candidates({ assignmentId }) {
     }
     setLoadingId(c.recording_id);
     try {
-      const res = await client.get('qa/recordings/stream', { params: { assignment_id: assignmentId, box_id: c.box_id, lead_id: c.lead_id, recording_id: c.recording_id, location: c.location }, responseType: 'blob' });
-      if (urlRef.current) URL.revokeObjectURL(urlRef.current);
-      const url = URL.createObjectURL(res.data); urlRef.current = url;
-      a.src = url; a.dataset.rid = c.recording_id; setAudioRid(c.recording_id); setCurTime(0); a.load();
+      const url = await ticketFor(c);
+      a.src = url; a.dataset.rid = c.recording_id; setAudioRid(c.recording_id); setCurTime(0);
       if (seekTo != null) { const onMeta = () => { a.currentTime = seekTo; a.removeEventListener('loadedmetadata', onMeta); }; a.addEventListener('loadedmetadata', onMeta); }
       a.play().catch(() => {});
     } catch { toast.error('Could not load that recording'); }
     finally { setLoadingId(null); }
   };
+
+  // Fetch the first clip's ticket as soon as the list lands, so the very first
+  // Play is a click with nothing to wait for.
+  useEffect(() => {
+    const first = (rows || [])[0];
+    if (first) ticketFor(first).catch(() => {});
+  }, [rows, ticketFor]);
 
   if (rows === null) return <div className="text-center py-6"><Loader2 className="animate-spin inline" style={{ color: 'var(--color-text-tertiary)' }} /><div className="text-xs mt-1" style={{ color: 'var(--color-text-tertiary)' }}>Loading recordings…</div></div>;
   if (!rows.length) return (
@@ -2877,10 +2905,12 @@ function DayRecordingsTab({ canAssign, companyId, scoped }) {
     if (a.dataset.rid === c.recording_id) { a.paused ? a.play() : a.pause(); return; }
     setLoadingRid(c.recording_id);
     try {
-      const res = await client.get('qa/recordings/stream', { params: { box_id: c.box_id, lead_id: c.lead_id, recording_id: c.recording_id, location: c.location }, responseType: 'blob' });
-      if (urlRef.current) URL.revokeObjectURL(urlRef.current);
-      const url = URL.createObjectURL(res.data); urlRef.current = url;
-      a.src = url; a.dataset.rid = c.recording_id; a.load(); a.play().catch(() => {});
+      // Same progressive path as the reviewer's player: a signed URL the browser
+      // can stream, instead of downloading the whole clip before it plays. The
+      // manager browses HUNDREDS of these a day.
+      const r = await client.post('qa/recordings/ticket', { box_id: c.box_id, lead_id: c.lead_id, recording_id: c.recording_id });
+      const apiBase = String(client.defaults.baseURL || '').replace(/\/api\/?$/, '');
+      a.src = apiBase + r.data.url; a.dataset.rid = c.recording_id; a.play().catch(() => {});
     } catch { toast.error('Could not load that recording'); }
     finally { setLoadingRid(null); }
   };
