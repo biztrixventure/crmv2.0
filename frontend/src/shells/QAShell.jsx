@@ -26,6 +26,7 @@ import FilterBar, { FilterSelect } from '../components/UI/FilterBar';
 // never mounted — the feature was live for the QA team, just unreachable.
 import ChatLauncher from '../components/Chat/ChatLauncher';
 import ProfileModal from '../components/Profile/ProfileModal';
+import { getClip, putClip, clipKey } from '../utils/audioCache';
 import { useHistoryTab } from '../hooks/useHistoryTab';
 import { useNavFocus } from '../contexts/FocusContext';
 
@@ -272,6 +273,7 @@ function Candidates({ assignmentId }) {
   const [txOpen, setTxOpen]   = useState({});   // recording_id → panel open
   const [curTime, setCurTime] = useState(0);    // player position → drives word highlight
   const [audioRid, setAudioRid] = useState(null); // rid currently loaded in the <audio>
+  const [cachedRid, setCachedRid] = useState(null); // rid held in IndexedDB (plays with no network)
 
   useEffect(() => {
     let dead = false;
@@ -330,11 +332,32 @@ function Candidates({ assignmentId }) {
       return;
     }
     setLoadingId(c.recording_id);
-    try {
-      const url = await ticketFor(c);
-      a.src = url; a.dataset.rid = c.recording_id; setAudioRid(c.recording_id); setCurTime(0);
+    const startAt = (src, cached) => {
+      if (urlRef.current) { URL.revokeObjectURL(urlRef.current); urlRef.current = null; }
+      if (cached) urlRef.current = src;
+      a.src = src; a.dataset.rid = c.recording_id; setAudioRid(c.recording_id); setCurTime(0);
+      setCachedRid(cached ? c.recording_id : null);
       if (seekTo != null) { const onMeta = () => { a.currentTime = seekTo; a.removeEventListener('loadedmetadata', onMeta); }; a.addEventListener('loadedmetadata', onMeta); }
       a.play().catch(() => {});
+    };
+    try {
+      // 1. Already in the browser? Play the local Blob: nothing crosses the
+      //    network, and because it is a COMPLETE file the reviewer can scrub
+      //    anywhere instantly — streaming can only seek as far as the recording
+      //    host is willing to serve by Range.
+      const key = clipKey(c.box_id, c.recording_id);
+      const hit = await getClip(key);
+      if (hit) { startAt(URL.createObjectURL(hit), true); return; }
+
+      // 2. First time: stream it so playback starts in about a second…
+      const url = await ticketFor(c);
+      startAt(url, false);
+
+      // 3. …and keep a copy while they listen, so the next open — after a tab
+      //    switch, a refresh, tomorrow — costs the dialer nothing at all.
+      fetch(url).then(r => (r.ok ? r.blob() : null)).then(b => {
+        if (b) putClip(key, b).then(ok => { if (ok && audioRef.current?.dataset.rid === c.recording_id) setCachedRid(c.recording_id); });
+      }).catch(() => { /* streaming already works; caching is a bonus */ });
     } catch { toast.error('Could not load that recording'); }
     finally { setLoadingId(null); }
   };
@@ -441,8 +464,25 @@ function Candidates({ assignmentId }) {
               className="text-[11px] px-2 py-0.5 rounded font-bold transition-colors"
               style={{ background: rate === s ? 'var(--color-primary-600)' : 'var(--color-surface-hover)', color: rate === s ? '#fff' : 'var(--color-text-secondary)' }}>{s}×</button>
           ))}
-          <button onClick={() => { if (audioRef.current) audioRef.current.currentTime = Math.max(0, audioRef.current.currentTime - 10); }} className="text-[11px] px-2 py-0.5 rounded font-bold ml-1" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }} title="Back 10s">« 10s</button>
-          <button onClick={() => { if (audioRef.current) audioRef.current.currentTime += 10; }} className="text-[11px] px-2 py-0.5 rounded font-bold" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }} title="Forward 10s">10s »</button>
+          {/* Jump controls. The scrub bar handles fine seeking; these are for
+              working through a call — skip the hold, re-hear the disclosure. */}
+          {[-30, -10, 10, 30].map(n => (
+            <button key={n}
+              onClick={() => { const a = audioRef.current; if (a) a.currentTime = Math.max(0, Math.min(a.duration || Infinity, a.currentTime + n)); }}
+              className="text-[11px] px-2 py-0.5 rounded font-bold" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}
+              title={n < 0 ? `Back ${-n} seconds` : `Forward ${n} seconds`}>
+              {n < 0 ? `« ${-n}s` : `${n}s »`}
+            </button>
+          ))}
+          {/* Held in the browser: replays cost the dialer nothing and scrubbing
+              is instant because the whole file is local. */}
+          {cachedRid && cachedRid === audioRid && (
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded ml-auto"
+              title="This recording is saved in your browser — replaying it does not re-fetch from the dialer, and you can jump anywhere in it instantly."
+              style={{ background: 'color-mix(in srgb, var(--color-success-600) 14%, transparent)', color: 'var(--color-success-600)' }}>
+              saved offline
+            </span>
+          )}
         </div>
       </div>
     </div>
@@ -2984,12 +3024,23 @@ function DayRecordingsTab({ canAssign, companyId, scoped }) {
     if (a.dataset.rid === c.recording_id) { a.paused ? a.play() : a.pause(); return; }
     setLoadingRid(c.recording_id);
     try {
-      // Same progressive path as the reviewer's player: a signed URL the browser
-      // can stream, instead of downloading the whole clip before it plays. The
-      // manager browses HUNDREDS of these a day.
+      // Same two-stage path as the reviewer's player: a local copy when we have
+      // one (no network, instant scrubbing), otherwise stream it and keep a copy
+      // while it plays. The manager browses HUNDREDS of these a day, and they
+      // re-open the same clips constantly.
+      const key = clipKey(c.box_id, c.recording_id);
+      const hit = await getClip(key);
+      if (hit) {
+        if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+        urlRef.current = URL.createObjectURL(hit);
+        a.src = urlRef.current; a.dataset.rid = c.recording_id; a.play().catch(() => {});
+        return;
+      }
       const r = await client.post('qa/recordings/ticket', { box_id: c.box_id, lead_id: c.lead_id, recording_id: c.recording_id });
       const apiBase = String(client.defaults.baseURL || '').replace(/\/api\/?$/, '');
-      a.src = apiBase + r.data.url; a.dataset.rid = c.recording_id; a.play().catch(() => {});
+      const url = apiBase + r.data.url;
+      a.src = url; a.dataset.rid = c.recording_id; a.play().catch(() => {});
+      fetch(url).then(res => (res.ok ? res.blob() : null)).then(b => { if (b) putClip(key, b); }).catch(() => {});
     } catch { toast.error('Could not load that recording'); }
     finally { setLoadingRid(null); }
   };
