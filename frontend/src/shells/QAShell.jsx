@@ -355,7 +355,7 @@ function Candidates({ assignmentId }) {
                 {/* WHO HUNG UP — visible before the clip is even played, because
                     it changes how the call should be read. Red when the agent
                     dropped it, neutral when the customer did. */}
-                {c.hangup_label && (
+                {c.hangup_label ? (
                   <span className="text-[9px] font-bold px-1.5 py-0.5 rounded whitespace-nowrap"
                     title={`Dialer hangup reason: ${c.hangup_reason}${c.call_status ? ` · status ${c.call_status}` : ''}`}
                     style={/^AGENT/i.test(c.hangup_reason || '')
@@ -363,7 +363,15 @@ function Candidates({ assignmentId }) {
                       : { background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}>
                     {c.hangup_label}
                   </span>
-                )}
+                ) : c.hangup_unavailable ? (
+                  // an older call whose log rows the dialer no longer serves —
+                  // say that, instead of a blank the reviewer reads as "nobody"
+                  <span className="text-[9px] font-bold px-1.5 py-0.5 rounded whitespace-nowrap"
+                    title="The dialer's call log no longer holds this call, so who hung up cannot be read for it."
+                    style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-tertiary)' }}>
+                    hangup n/a
+                  </span>
+                ) : null}
               </div>
               <div className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{fmtTime(c.start_time)} · box {c.box_id} · rec {c.recording_id}</div>
             </div>
@@ -478,6 +486,12 @@ function crmAutoFill(cfg, fields, extra) {
   for (const [k, v] of Object.entries(src)) if (v != null && v !== '' && typeof v !== 'object') byNorm[normKey(k)] = v;
   const out = {};
   for (const f of metaFieldsOf(cfg)) {
+    // NEVER let a CRM row's own timestamp fill a Date column. /crm-fields returns
+    // extra.date = the transfer's created_at, and this pass runs AFTER the one
+    // that put the CALL's day there — so a bulk-imported or late-entered
+    // transfer (dialled long before it reached the CRM) overwrote a correct date
+    // with one months out. The call's day is decided upstream; leave it alone.
+    if (/date/.test(`${f.key} ${f.label || ''}`.toLowerCase())) continue;
     for (const cand of [normKey(f.key), normKey(f.label)]) { if (byNorm[cand] != null) { out[f.key] = forInput(f, String(byNorm[cand])); break; } }
   }
   return out;
@@ -676,7 +690,15 @@ function ScoreForm({ assignment, onScored }) {
         const all = r.data.candidates || [];
         const leg = assignment.subject_role === 'fronter' ? 'fronter' : 'closer';
         const mine = all.filter(c => c.leg === leg);
-        const pool = mine.length ? mine : all;
+        let pool = mine.length ? mine : all;
+        // Prefer a clip from THIS TASK'S DAY. The phone search widens to every
+        // call ever made to that number when the narrow window finds nothing, so
+        // a repeat customer can drag in a recording from months ago — and that
+        // clip's timestamp then fills the Date column with the wrong date
+        // entirely. Same day first; only fall back if the day has nothing.
+        const day = dayOfDate(assignment.subject_date || assignment.recording_date || assignment.created_at);
+        const sameDay = day ? pool.filter(c => dayOfDate(c.start_time) === day) : [];
+        if (sameDay.length) pool = sameDay;
         setBestRec(pool.slice().sort((x, y) => (y.duration || 0) - (x.duration || 0))[0] || null);
       })
       .catch(() => { if (alive) setBestRec(null); });
@@ -689,6 +711,11 @@ function ScoreForm({ assignment, onScored }) {
     ...assignment,
     recording_ref: (assignment.recording_ref && assignment.recording_ref.recording_id) ? assignment.recording_ref : (bestRec || assignment.recording_ref),
     duration: assignment.duration ?? bestRec?.duration ?? null,
+    // The day this task is FOR, decided here rather than left to whichever
+    // fallback a fill rule reaches first. recording_date is the day the manager
+    // loaded; a recording's timestamp is only a fallback, and a CRM row's
+    // created_at is never the call time.
+    subject_date: assignment.subject_date || assignment.recording_date || bestRec?.start_time || assignment.created_at || null,
   };
 
   // The CRM fields the fronter/closer already entered → auto-fill matching
@@ -3173,20 +3200,14 @@ const ynState = (v) => {
   if (s === 'N' || s === 'NO' || s === 'FALSE' || s === '0') return false;
   return null;
 };
-// A green tick is a JUDGEMENT, so it has to follow the column's meaning:
-// answering Yes to "Wrong Dispo" or a penalty flag is a FAULT, while Yes on a
-// compliance gate or a checklist is the good answer. Colouring every Y green
-// made a wrong disposition look like a pass.
-const YES_IS_GOOD = { autofail: true, quality: true, penalty: false, tracking: null, meta: null };
+// Y is green, N is red — the same convention the scoring form uses, so a flag
+// reads identically whether you are filling it in or reading it back.
 const CellVal = ({ f, v }) => {
   if (v == null || v === '') return <span style={{ color: 'var(--color-text-tertiary)' }}>·</span>;
   if (f.kind === 'yn') {
     const yes = ynState(v);
     if (yes == null) return <span style={{ color: 'var(--color-text-secondary)' }}>{v}</span>;
-    const good = YES_IS_GOOD[f.group];
-    const color = good == null ? 'var(--color-text-secondary)'
-      : (yes === good ? '#059669' : 'var(--color-error-600)');
-    return <span className="font-bold" style={{ color }}>{yes ? 'Y' : 'N'}</span>;
+    return <span className="font-bold" style={{ color: yes ? '#059669' : 'var(--color-error-600)' }}>{yes ? 'Y' : 'N'}</span>;
   }
   if (f.kind === 'rating') return <span className="font-bold tabular-nums" style={{ color: 'var(--color-text)' }}>{v}</span>;
   return <span style={{ color: 'var(--color-text-secondary)' }}>{v}</span>;

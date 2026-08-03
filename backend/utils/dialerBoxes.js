@@ -733,7 +733,10 @@ async function annotateHangups(candidates = [], phone) {
   if (!candidates.length || !phone) return candidates;
   let rows = [];
   try { rows = await callLogRows(phone); } catch { return candidates; }
-  if (!rows.length) return candidates;
+  // The dialer's call log keeps only recent calls (no archive is reachable
+  // through the API). Say so on the clip rather than leaving a silent blank the
+  // reviewer reads as "nobody hung up".
+  if (!rows.length) return candidates.map(c => ({ ...c, hangup_unavailable: true }));
   const ts = (v) => { const t = Date.parse(String(v || '').replace(' ', 'T')); return Number.isFinite(t) ? t : null; };
   return candidates.map(c => {
     const start = ts(c.start_time || c.start);
@@ -755,7 +758,20 @@ async function annotateHangups(candidates = [], phone) {
       }
       return best;
     };
-    const best = pick(120000, true) || pick(600000, false);
+    // Widening ladder. A back-dated task is the hard case: the clip is real, but
+    // the log rows for it are older, sometimes recorded against a different
+    // agent login, and phone_number_log has no archive mode at all (checked —
+    // the API exposes only the live log). So: exact, then same-agent-any-time,
+    // then the same DAY, then a lone row for that number. Each step is still the
+    // same phone — never another customer's call.
+    const sameDayRows = rows.filter(r => {
+      const rt = ts(r.call_date);
+      return rt != null && new Date(rt).toISOString().slice(0, 10) === new Date(start).toISOString().slice(0, 10);
+    });
+    const best = pick(120000, true)
+      || pick(600000, false)
+      || (sameDayRows.length === 1 ? sameDayRows[0] : null)
+      || (rows.length === 1 ? rows[0] : null);
     if (!best) return c;
     return {
       ...c,
