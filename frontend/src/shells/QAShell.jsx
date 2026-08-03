@@ -3993,7 +3993,7 @@ function CompanyReviewConfig({ companyId, onChange }) {
 const CARD_FIELDS = [
   ['customer_name', 'Customer name'], ['customer_phone', 'Phone'], ['zip', 'ZIP'],
   ['state', 'State'], ['address', 'Address'], ['agent', 'Agent'],
-  ['call_date', 'Call date'], ['plan', 'Plan / vehicle'],
+  ['call_date', 'Call date'], ['plan', 'Plan / vehicle'], ['disposition', 'Closer disposition'],
 ];
 const DEFAULT_CARD_FIELDS = Object.fromEntries(CARD_FIELDS.map(([k]) => [k, true]));
 
@@ -4388,7 +4388,7 @@ function AgentTasks({ selfId, canOverride, companyId, filterCompany, allowedWt }
         : <div className="flex-1 overflow-auto rounded-xl" style={{ border: '1px solid var(--color-border)' }}>
             <table className="w-full text-sm" style={{ borderCollapse: 'collapse' }}>
               <thead className="sticky top-0 z-10" style={{ background: 'var(--color-surface-hover)' }}>
-                <tr>{['Method', 'Customer / Phone', 'Agent reviewed', 'Location', 'Date', 'Score', ''].map(h => <th key={h} className="text-left px-3 py-2 text-[11px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>{h}</th>)}</tr>
+                <tr>{['Method', 'Customer / Phone', 'Agent reviewed', 'Location', 'Date', 'Dispo', 'Score', ''].map(h => <th key={h} className="text-left px-3 py-2 text-[11px] font-bold uppercase" style={{ color: 'var(--color-text-tertiary)' }}>{h}</th>)}</tr>
               </thead>
               <tbody>
                 {shown.map(a => (
@@ -4402,6 +4402,13 @@ function AgentTasks({ selfId, canOverride, companyId, filterCompany, allowedWt }
                     <td className="px-3 py-2 text-[12px]" style={{ color: 'var(--color-text-secondary)' }}>{show('agent') ? agentLabel(a) : '—'}</td>
                     <td className="px-3 py-2 text-[12px]" style={{ color: 'var(--color-text-secondary)' }}>{(show('state') || show('zip')) ? ([show('state') && a.customer_state, show('zip') && a.customer_zip].filter(Boolean).join(' ') || '—') : '—'}</td>
                     <td className="px-3 py-2 whitespace-nowrap text-[12px]" style={{ color: 'var(--color-text-secondary)' }}>{show('call_date') ? fmtDate(a.subject_date) : '—'}</td>
+                    {/* the closer's disposition CODE, as the dialer and the
+                        client's sheets write it — no translation to invent */}
+                    <td className="px-3 py-2 whitespace-nowrap text-[12px]">
+                      {show('disposition') && a.disposition
+                        ? <span className="font-bold px-1.5 py-0.5 rounded" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}>{a.disposition}</span>
+                        : <span style={{ color: 'var(--color-text-tertiary)' }}>—</span>}
+                    </td>
                     <td className="px-3 py-2 whitespace-nowrap"><ScoreCell a={a} /></td>
                     <td className="px-2 py-2"><ChevronRight size={15} style={{ color: 'var(--color-text-tertiary)' }} /></td>
                   </tr>

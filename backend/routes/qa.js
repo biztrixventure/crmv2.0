@@ -255,8 +255,8 @@ router.get('/queue', asyncHandler(async (req, res) => {
   const sIds = [...new Set((data || []).map(r => r.sale_id).filter(Boolean))];
   const [tRes, sRes, aRes] = await Promise.all([
     // transfers have NO customer_name column — pull form_data and derive it.
-    tIds.length ? supabaseAdmin.from('transfers').select('id, normalized_phone, form_data, vicidial_vendor_code, created_at, created_by').in('id', tIds) : Promise.resolve({ data: [] }),
-    sIds.length ? supabaseAdmin.from('sales').select('id, customer_name, customer_phone, sale_date, closer_id, transfer_id').in('id', sIds) : Promise.resolve({ data: [] }),
+    tIds.length ? supabaseAdmin.from('transfers').select('id, normalized_phone, form_data, vicidial_vendor_code, created_at, created_by, latest_disposition').in('id', tIds) : Promise.resolve({ data: [] }),
+    sIds.length ? supabaseAdmin.from('sales').select('id, customer_name, customer_phone, sale_date, closer_id, transfer_id, closer_disposition').in('id', sIds) : Promise.resolve({ data: [] }),
     Promise.resolve({ data: [] }),
   ]);
   const tById = Object.fromEntries((tRes.data || []).map(t => [t.id, t]));
@@ -304,6 +304,11 @@ router.get('/queue', asyncHandler(async (req, res) => {
       // the NEXT day: load 2 August, the agent's queue says 3 August. The reports
       // path already preferred recording_date; the queue never did.
       subject_date: r.recording_date || rec?.start_time || t?.created_at || s?.sale_date || r.created_at,
+      // The closer's disposition, in order of authority: frozen at assign time →
+      // the sale's own → the transfer's → whatever the recording carried. This is
+      // what fills the scorecard's Closer Disposition column, so a task that had
+      // one in the CRM shows it immediately, with no dialer round-trip.
+      disposition: r.sale_meta?.closer_disposition || s?.closer_disposition || t?.latest_disposition || rec?.disposition || null,
       vendor_code: t?.vicidial_vendor_code || null,
       agent_display: r.subject_agent || null,     // reviewed agent's dialer id/login (raw RCM)
       // reviewed agent's real name: recording name → CRM subject (fronter on a
@@ -1492,7 +1497,10 @@ async function buildCrmDay(companyId, date) {
   const b = dayBounds(date);
   if (!b) return null;
   const { data: transfers } = await supabaseAdmin.from('transfers')
-    .select('id, vicidial_vendor_code, vicidial_agent, normalized_phone, created_at, created_by, assigned_closer_id')
+    // latest_disposition: the closer's outcome the CRM already holds. It was
+    // never selected, so the day carried no disposition at all and every task
+    // built from it started blank — the value was there the whole time.
+    .select('id, vicidial_vendor_code, vicidial_agent, normalized_phone, created_at, created_by, assigned_closer_id, latest_disposition')
     .eq('company_id', companyId).gte('created_at', b.start).lt('created_at', b.end);
   const tids = (transfers || []).map(t => t.id);
   // Which of the day's transfers already produced a real sale (any sold status).
@@ -1513,13 +1521,13 @@ async function buildCrmDay(companyId, date) {
   // transferred today usually closes a day or two later — so this is NOT a subset
   // of TRA and is counted by sale date, matching the CRM's daily sales.
   const { data: closedToday } = await supabaseAdmin.from('sales')
-    .select('id, transfer_id, customer_phone, normalized_phone, sale_date, closer_id, status, vicidial_vendor_code, transfers!inner(company_id)')
+    .select('id, transfer_id, customer_phone, normalized_phone, sale_date, closer_id, status, vicidial_vendor_code, closer_disposition, transfers!inner(company_id)')
     .eq('transfers.company_id', companyId).eq('sale_date', b.day).in('status', SOLD_SALE_STATUSES);
 
-  const tra = (transfers || []).map(t => ({ transfer_id: t.id, subject_role: 'fronter', phone: t.normalized_phone, agent: t.vicidial_agent || null, date: b.day, has_code: !!t.vicidial_vendor_code }));
-  const closer_sales = (closedToday || []).map(s => ({ sale_id: s.id, transfer_id: s.transfer_id, subject_role: 'closer', phone: s.customer_phone || s.normalized_phone, closer_id: s.closer_id || null, date: b.day, has_code: !!s.vicidial_vendor_code, status: s.status }));
+  const tra = (transfers || []).map(t => ({ transfer_id: t.id, subject_role: 'fronter', phone: t.normalized_phone, agent: t.vicidial_agent || null, date: b.day, has_code: !!t.vicidial_vendor_code, disposition: t.latest_disposition || null }));
+  const closer_sales = (closedToday || []).map(s => ({ sale_id: s.id, transfer_id: s.transfer_id, subject_role: 'closer', phone: s.customer_phone || s.normalized_phone, closer_id: s.closer_id || null, date: b.day, has_code: !!s.vicidial_vendor_code, status: s.status, disposition: s.closer_disposition || null }));
   const closer_dispo = (transfers || []).filter(t => !soldTransferIds.has(t.id))
-    .map(t => ({ transfer_id: t.id, subject_role: 'closer', phone: t.normalized_phone, closer_id: t.assigned_closer_id || null, date: b.day, has_code: false }));
+    .map(t => ({ transfer_id: t.id, subject_role: 'closer', phone: t.normalized_phone, closer_id: t.assigned_closer_id || null, date: b.day, has_code: false, disposition: t.latest_disposition || null }));
   return { day: b.day, tra, closer_sales, closer_dispo };
 }
 
@@ -1720,6 +1728,11 @@ router.post('/assignments/from-crm', asyncHandler(async (req, res) => {
     transfer_id: work_type === 'closer_sales' ? null : (it.transfer_id || null),
     sale_id: it.sale_id || null,
     recording_date: date,
+    // The closer's disposition AS IT WAS when the work was handed out. Stored on
+    // the task itself so the scorecard never has to go looking for it: the CRM
+    // knew it at assign time, and a QA review should be scored against what the
+    // call was dispositioned as, not what the lead's status drifted to later.
+    sale_meta: it.disposition ? { closer_disposition: it.disposition } : null,
     subject_agent: work_type === 'tra' ? (it.agent || null) : ((closerAgentsByUser[it.closer_id] || [])[0] || null),
     // an allocation names the OWNER of each item outright; anything beyond the
     // allocated count stays unassigned in the pool
