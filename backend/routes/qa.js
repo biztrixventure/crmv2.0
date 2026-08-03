@@ -24,7 +24,7 @@ const { asyncHandler } = require('../middleware/errorHandler');
 const { isSuperAdmin, hasPermission, getUserCompanies } = require('../models/helpers');
 const { getConfig, setConfig, getAllConfig } = require('../utils/businessConfig');
 const { isSheetConfig, computeSheetReview, isY, resolveSheetFields, fieldPoints } = require('../utils/qaSheetFormula');
-const { listCandidatesByLeadId, listCandidatesByPhone, listCandidatesForSale, locationForRecording, listDayRecordings, getBoxes, fillLeadStatuses, resolveDispos, leadFieldCustomer, leadCustomFields, discoverCustomFieldNames, leadFromVendorCode, findLeadByPhone, annotateHangups } = require('../utils/dialerBoxes');
+const { listCandidatesByLeadId, listCandidatesByPhone, listCandidatesForSale, locationForRecording, listDayRecordings, getBoxes, fillLeadStatuses, resolveDispos, leadFieldCustomer, leadCustomFields, discoverCustomFieldNames, leadFromVendorCode, findLeadByPhone, annotateHangups, leadStatusByCode, leadFieldStatus } = require('../utils/dialerBoxes');
 const { materializeCompany } = require('../utils/qaMaterializer');
 const { autoAssignCompany } = require('../utils/qaAutoAssign');
 const { WORK_TYPES, workTypeOf, getActiveRules, materializeCloserWork, applyCompanyRules, openCounts } = require('../utils/qaRules');
@@ -2736,7 +2736,7 @@ router.put('/agent-methods', asyncHandler(async (req, res) => {
 router.get('/assignments/:id/crm-fields', asyncHandler(async (req, res) => {
   if (!(await can(req, 'view_qa_queue'))) return res.status(403).json({ error: 'Forbidden' });
   const { data: a } = await supabaseAdmin.from('qa_assignments')
-    .select('id, company_id, transfer_id, sale_id').eq('id', req.params.id).maybeSingle();
+    .select('id, company_id, transfer_id, sale_id, recording_ref, customer_phone').eq('id', req.params.id).maybeSingle();
   if (!a) return res.status(404).json({ error: 'Not found' });
   const allowed = await allowedCompanyIds(req);
   if (allowed && !allowed.includes(a.company_id)) return res.status(403).json({ error: 'Forbidden' });
@@ -2782,6 +2782,41 @@ router.get('/assignments/:id/crm-fields', asyncHandler(async (req, res) => {
     if (nameOf[fronterCompanyId]) extra.fronter_center = nameOf[fronterCompanyId];
     if (nameOf[ownCompanyId])     extra.center_name    = nameOf[ownCompanyId];
   }
+
+  // ── the closer's disposition, from the dialer when the CRM has none ─────────
+  // A transfer only carries latest_disposition once something wrote it back, so
+  // a My-Task review of an untouched transfer showed an empty Disposition column
+  // with nothing able to fill it. The dialer always knows: a lead's CURRENT
+  // status lives in vicidial_list and — unlike the call log — is never archived
+  // away, so it answers for old calls too.
+  //
+  // Three routes to that lead, in order of certainty: the transfer's own
+  // vendor_lead_code, a lead already linked onto the assignment, then the
+  // customer's phone (only when that resolves unambiguously).
+  if (!String(extra.disposition || '').trim()) {
+    try {
+      let status = null;
+      if (extra.vendor_code) status = await leadStatusByCode(extra.vendor_code);
+      if (!status) {
+        const rec = a.recording_ref || {};
+        let leadId = rec.lead_id || null;
+        let boxId = rec.box_id || null;
+        if (!leadId) {
+          const phone = a.customer_phone || extra.customer_phone || null;
+          if (phone) {
+            const hit = await findLeadByPhone({ phone });
+            if (hit && hit.confidence !== 'ambiguous') { leadId = hit.lead_id; boxId = hit.box; }
+          }
+        }
+        if (leadId) {
+          const box = getBoxes().find(b => b.id === boxId) || null;
+          status = await leadFieldStatus(box, leadId);
+        }
+      }
+      if (status) { extra.disposition = status; extra.disposition_source = 'dialer'; }
+    } catch (e) { logger.warn('QA', `crm-fields dispo: ${e.message}`); }   // never fail the form over this
+  }
+
   res.json({ fields, extra });
 }));
 

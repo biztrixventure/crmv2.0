@@ -439,6 +439,22 @@ const toDateInput = (v) => {
 };
 const forInput = (f, v) => (f?.input?.kind === 'date' ? toDateInput(v) : v);
 
+// ── the ONLY dates that are the CALL's date ─────────────────────────────────
+// 1. the recording being scored — the actual call time, best there is
+// 2. recording_date — the day the manager loaded work for
+//
+// NOT created_at. A task materialised from the CRM has no recording_date at all,
+// and a transfer's created_at is the moment the row reached the CRM, which for a
+// bulk-imported or late-entered lead is months after the call. Filling a Date
+// column from it produced exactly the "really very back date" reviewers saw.
+// When neither trustworthy source exists we now leave the cell EMPTY for the
+// reviewer to pick, which is the user's own instruction: a blank they fill beats
+// a confident wrong answer they have to notice and correct.
+const callDateOf = (a) => {
+  const rec = a?.recording_ref || {};
+  return rec.start_time || a?.recording_date || '';
+};
+
 function metaAutoFill(cfg, a, extra = {}) {
   const out = {};
   const rec = a.recording_ref || {};
@@ -460,7 +476,7 @@ function metaAutoFill(cfg, a, extra = {}) {
     // cell stays blank rather than naming the wrong center.
     if (/cent(er|re)|company/.test(k)) { if (centre) out[f.key] = centre; }
     else if (/call.?id|lead.?id|call_id/.test(k)) out[f.key] = rec.lead_id || a.lead_id || a.call_id || '';
-    else if (/date/.test(k)) { const d = a.subject_date || a.call_date || rec.start_time || a.created_at; out[f.key] = forInput(f, d ? new Date(d).toLocaleDateString() : ''); }
+    else if (/date/.test(k)) { const d = callDateOf(a); out[f.key] = forInput(f, d ? new Date(d).toLocaleDateString() : ''); }
     else if (/agent/.test(k)) out[f.key] = a.agent_name || a.agent_display || a.subject_name || '';   // BEFORE the /name/ rule
     else if (/cli|phone|number|caller/.test(k)) out[f.key] = a.customer_phone || rec.phone || '';
     else if (/actual/.test(k)) continue;            // "Call Disposition Actual" — the QA agent enters the real one
@@ -606,7 +622,7 @@ function sourceAutoFill(cfg, a, crm, vici, me) {
     duration:       () => ((a?.duration ?? rec.duration) != null ? fmtDur(a?.duration ?? rec.duration) : ''),
     call_id:        () => rec.lead_id || a?.lead_id || a?.call_id || '',
     phone:          () => a?.customer_phone || rec.phone || ex.customer_phone || '',
-    date:           () => { const d = a?.subject_date || a?.call_date || rec.start_time || a?.created_at; return d ? new Date(d).toLocaleDateString() : ''; },
+    date:           () => { const d = callDateOf(a); return d ? new Date(d).toLocaleDateString() : ''; },
     disposition:    () => ex.disposition || a?.disposition || a?.dispo || rec.disposition || '',
     customer_name:  () => a?.customer_name || ex.customer_name || '',
     zip:            () => a?.customer_zip || '',
@@ -715,7 +731,7 @@ function ScoreForm({ assignment, onScored }) {
     // fallback a fill rule reaches first. recording_date is the day the manager
     // loaded; a recording's timestamp is only a fallback, and a CRM row's
     // created_at is never the call time.
-    subject_date: assignment.subject_date || assignment.recording_date || bestRec?.start_time || assignment.created_at || null,
+    subject_date: bestRec?.start_time || assignment.recording_date || null,
   };
 
   // The CRM fields the fronter/closer already entered → auto-fill matching
