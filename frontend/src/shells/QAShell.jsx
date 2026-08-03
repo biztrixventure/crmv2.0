@@ -24,6 +24,7 @@ import FilterBar, { FilterSelect } from '../components/UI/FilterBar';
 // isolated shell with its own header, so it was the one place the launcher was
 // never mounted — the feature was live for the QA team, just unreachable.
 import ChatLauncher from '../components/Chat/ChatLauncher';
+import ProfileModal from '../components/Profile/ProfileModal';
 import { useHistoryTab } from '../hooks/useHistoryTab';
 import { useNavFocus } from '../contexts/FocusContext';
 
@@ -206,6 +207,30 @@ function WaveViz({ audioRef, active }) {
   }, [active, audioRef]);
   useEffect(() => () => { try { setup.current?.ac.close(); } catch {} setup.current = null; }, []);
   return <canvas ref={canvasRef} height={46} style={{ width: '100%', height: 46, display: 'block', borderRadius: 8, background: 'var(--color-bg-secondary)' }} />;
+}
+
+// The QA shell draws its own header instead of AppHeader — which is also why it
+// never had a profile block, so a reviewer saw their ROLE ("qa_agent") where
+// every other shell shows their name. Same ProfileModal the rest of the CRM uses.
+function ProfileChip({ user }) {
+  const [open, setOpen] = useState(false);
+  const name = [user?.first_name, user?.last_name].filter(Boolean).join(' ').trim() || user?.email || 'My profile';
+  const initial = (user?.first_name?.[0] || user?.email?.[0] || '?').toUpperCase();
+  return (
+    <>
+      <button onClick={() => setOpen(true)} type="button" title="My profile"
+        className="flex items-center gap-2 pl-1 pr-2 py-1 rounded-lg max-w-[190px]"
+        style={{ background: 'var(--color-surface-hover)', border: '1px solid var(--color-border)' }}>
+        <span className="inline-flex items-center justify-center rounded-full flex-shrink-0 text-[11px] font-bold text-white"
+          style={{ width: 24, height: 24, background: 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))' }}>{initial}</span>
+        <span className="min-w-0 text-left leading-tight">
+          <span className="block text-[11px] font-bold truncate" style={{ color: 'var(--color-text)' }}>{name}</span>
+          <span className="block text-[9px] truncate" style={{ color: 'var(--color-text-tertiary)' }}>{user?.role_name || user?.role || ''}</span>
+        </span>
+      </button>
+      {user && <ProfileModal isOpen={open} onClose={() => setOpen(false)} user={user} />}
+    </>
+  );
 }
 
 // The QA shell draws its own header instead of AppHeader, which is why it was the
@@ -4447,7 +4472,7 @@ function QAAgentView({ user, logout }) {
           <CompanyPicker companies={companies} all={all} companyId={companyId} onChange={setCompanyId} />
           <ChatLauncher />
           <ThemeToggle />
-          <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}><Shield size={13} className="inline mr-1" />{user?.role}</span>
+          <ProfileChip user={user} />
           <button onClick={logout} className="flex items-center gap-1 text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}><LogOut size={14} />Logout</button>
         </div>
       </header>
@@ -4530,7 +4555,7 @@ export default function QAShell() {
           <CompanyPicker companies={companies} all={all} companyId={companyId} onChange={setCompanyId} />
           <ChatLauncher />
           <ThemeToggle />
-          <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}><Shield size={13} className="inline mr-1" />{user?.role}</span>
+          <ProfileChip user={user} />
           <button onClick={logout} className="flex items-center gap-1 text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}><LogOut size={14} />Logout</button>
         </div>
       </header>
