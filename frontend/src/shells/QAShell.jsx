@@ -458,7 +458,13 @@ const callDateOf = (a) => {
 function metaAutoFill(cfg, a, extra = {}) {
   const out = {};
   const rec = a.recording_ref || {};
-  const dispo = a.disposition || a.dispo || rec.disposition || '';
+  // The disposition, from wherever this task actually has one. A LIVE task
+  // carries it on the row itself (it came off the dialer call) — which is why it
+  // showed there and nowhere else. A My-Task row has none, and the value that
+  // DOES exist arrives in the CRM payload as `disposition`, under a name no
+  // column is called: "Closer Disposition" never matches "disposition", so the
+  // name-matching pass could not fill it either. Read both here.
+  const dispo = a.disposition || a.dispo || rec.disposition || extra.disposition || '';
   // TRA reviews the FRONTER, so its "Company" is the fronter's centre; a closer
   // card wants the evaluated party's own. Both are resolved server-side by
   // /crm-fields — this just picks the right one per card instead of relying on a
