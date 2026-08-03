@@ -190,7 +190,7 @@ export default function SheetScoreRow({ config, draftKey = null, initialValues =
     // "Additional Comments" means typing through a slot, so those get a real
     // resizable box — and a wider column to sit in.
     const long = kind === 'text' && /comment|note|reason|feedback|remark|detail/i.test(`${f.key} ${f.label || ''}`);
-    const w = long ? 230 : (kind === 'text' || kind === 'date' ? 130 : (group === 'quality' ? 116 : 108));
+    const w = long ? 300 : (kind === 'text' || kind === 'date' ? 130 : (group === 'quality' ? 116 : 108));
     if (long) columns.push({ key: f.key, label, group, kind: 'longtext', w });
     else if (kind === 'scale') columns.push({ key: f.key, label, group, kind: 'rating', scale: f.input.max, min: f.input.min, w });
     else if (kind === 'choice') columns.push({ key: f.key, label, group, kind: 'choice', options: f.input.options || [], w: Math.max(w, 116) });
@@ -219,8 +219,8 @@ export default function SheetScoreRow({ config, draftKey = null, initialValues =
       // resizable in both directions — drag the corner to give a long comment room
       case 'longtext': return (
         <textarea value={values[c.key] ?? ''} onChange={e => set(c.key, e.target.value)} disabled={readOnly}
-          rows={3} placeholder="—" title="Drag the bottom-right corner to make this bigger"
-          style={{ ...selStyle, minHeight: 64, resize: 'both', lineHeight: 1.5, fontFamily: 'inherit' }} />
+          rows={5} placeholder="—" title="Drag the bottom-right corner to make this bigger"
+          style={{ ...selStyle, minHeight: 110, resize: 'both', lineHeight: 1.5, fontFamily: 'inherit' }} />
       );
       case 'date': return <ThemedDate value={values[c.key] ?? ''} onChange={e => set(c.key, e.target.value)} disabled={readOnly} style={selStyle} />;
       case 'rating': return <Rating value={values[c.key]} scale={c.scale} min={c.min} onChange={v => set(c.key, v)} disabled={readOnly} />;
@@ -347,7 +347,7 @@ export default function SheetScoreRow({ config, draftKey = null, initialValues =
                   <div className="text-[12px] font-bold leading-tight flex-1 min-w-0" style={{ color: 'var(--color-text-secondary)' }}>
                     {pretty(c.label)}
                   </div>
-                  <div className="flex-shrink-0" style={{ width: 160 }}>{renderCell(c)}</div>
+                  <div className="flex-shrink-0" style={{ width: c.kind === 'longtext' ? 320 : 160, maxWidth: '55%' }}>{renderCell(c)}</div>
                 </div>
               ))}
             </div>

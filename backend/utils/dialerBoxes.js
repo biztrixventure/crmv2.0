@@ -692,6 +692,73 @@ async function leadCustomFields(box, leadId, fields = []) {
   return out;
 }
 
+// ── Who hung up ─────────────────────────────────────────────────────────────
+// recording_lookup returns start|user|recording_id|lead_id|duration|location and
+// nothing else — no hangup information at all. That lives in phone_number_log,
+// whose rows carry hangup_reason + call_status per call. So the two are matched
+// up: same agent, and a start time within a couple of minutes of the logged call.
+//
+// Only the reasons that answer "who dropped the call" are translated; anything
+// unrecognised passes through verbatim rather than being guessed at.
+const HANGUP_LABELS = {
+  AGENT: 'Agent hung up',
+  CALLER: 'Customer hung up',
+  QUEUETIMEOUT: 'Dropped in queue',
+  AFTERHOURS: 'After hours',
+  TIMEOUT: 'Timed out',
+};
+const hangupLabel = (r) => (r ? (HANGUP_LABELS[String(r).toUpperCase()] || String(r)) : null);
+
+const _hangupCache = new Map();            // phone tail → { at, rows }
+const HANGUP_TTL = 10 * 60 * 1000;
+
+async function callLogRows(phone) {
+  const tail = phoneTail(phone);
+  if (!tail) return [];
+  const hit = _hangupCache.get(tail);
+  if (hit && Date.now() - hit.at < HANGUP_TTL) return hit.rows;
+  const rows = (await Promise.all(BOXES.map(b => phoneCallLog(b, phone)))).flat();
+  _hangupCache.set(tail, { at: Date.now(), rows });
+  return rows;
+}
+
+/**
+ * Attach hangup_reason / hangup_label / call_status to each recording.
+ *
+ * Matching is deliberately conservative: an unmatched clip gets NO label rather
+ * than a plausible-looking wrong one — telling a reviewer the customer hung up
+ * when the agent did would send coaching in exactly the wrong direction.
+ */
+async function annotateHangups(candidates = [], phone) {
+  if (!candidates.length || !phone) return candidates;
+  let rows = [];
+  try { rows = await callLogRows(phone); } catch { return candidates; }
+  if (!rows.length) return candidates;
+  const ts = (v) => { const t = Date.parse(String(v || '').replace(' ', 'T')); return Number.isFinite(t) ? t : null; };
+  return candidates.map(c => {
+    const start = ts(c.start_time || c.start);
+    if (!start) return c;
+    const au = String(c.agent_user || '').trim().toUpperCase();
+    let best = null, bestDelta = Infinity;
+    for (const r of rows) {
+      const rt = ts(r.call_date);
+      if (rt == null) continue;
+      const delta = Math.abs(rt - start);
+      if (delta > 120000) continue;                                   // >2 min apart → not this call
+      if (au && r.user && String(r.user).trim().toUpperCase() !== au) continue;
+      if (delta < bestDelta) { best = r; bestDelta = delta; }
+    }
+    if (!best) return c;
+    return {
+      ...c,
+      hangup_reason: best.hangup_reason || null,
+      hangup_label: hangupLabel(best.hangup_reason),
+      call_status: best.call_status || null,
+      log_length: best.length || null,
+    };
+  });
+}
+
 // ── Phone → lead_id, without needing a recording ────────────────────────────
 // update_lead with no_update=Y performs NO write: it only reports which leads
 // match, and its NOTICE line carries the lead_id we cannot get any other way
@@ -911,5 +978,5 @@ module.exports = {
   listDayRecordings, phoneFromLocation, listDayDispositions, leadStatusSearch,
   leadFieldStatus, leadFieldCustomer, fillLeadStatuses, resolveDispos,
   leadCustomFields, listCustomFieldNames, discoverCustomFieldNames, leadFromVendorCode,
-  leadsByPhoneOnBox, findLeadByPhone,
+  leadsByPhoneOnBox, findLeadByPhone, annotateHangups,
 };

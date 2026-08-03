@@ -24,7 +24,7 @@ const { asyncHandler } = require('../middleware/errorHandler');
 const { isSuperAdmin, hasPermission, getUserCompanies } = require('../models/helpers');
 const { getConfig, setConfig, getAllConfig } = require('../utils/businessConfig');
 const { isSheetConfig, computeSheetReview, isY, resolveSheetFields, fieldPoints } = require('../utils/qaSheetFormula');
-const { listCandidatesByLeadId, listCandidatesByPhone, listCandidatesForSale, locationForRecording, listDayRecordings, getBoxes, fillLeadStatuses, resolveDispos, leadFieldCustomer, leadCustomFields, discoverCustomFieldNames, leadFromVendorCode, findLeadByPhone } = require('../utils/dialerBoxes');
+const { listCandidatesByLeadId, listCandidatesByPhone, listCandidatesForSale, locationForRecording, listDayRecordings, getBoxes, fillLeadStatuses, resolveDispos, leadFieldCustomer, leadCustomFields, discoverCustomFieldNames, leadFromVendorCode, findLeadByPhone, annotateHangups } = require('../utils/dialerBoxes');
 const { materializeCompany } = require('../utils/qaMaterializer');
 const { autoAssignCompany } = require('../utils/qaAutoAssign');
 const { WORK_TYPES, workTypeOf, getActiveRules, materializeCloserWork, applyCompanyRules, openCounts } = require('../utils/qaRules');
@@ -297,7 +297,12 @@ router.get('/queue', asyncHandler(async (req, res) => {
       customer_state: r.customer_state || (t ? scanFormData(t.form_data, 'state') : null) || null,
       customer_address: r.customer_address || (t ? scanFormData(t.form_data, 'address') : null) || null,
       sale_meta: r.sale_meta || null,
-      subject_date: rec?.start_time || t?.created_at || s?.sale_date || r.created_at,
+      // recording_date FIRST — it is the day the manager actually picked, stored
+      // as a plain 'YYYY-MM-DD'. The fallbacks are UTC timestamps, and rendering
+      // one in a UTC+5 browser moves any transfer created after ~19:00 UTC onto
+      // the NEXT day: load 2 August, the agent's queue says 3 August. The reports
+      // path already preferred recording_date; the queue never did.
+      subject_date: r.recording_date || rec?.start_time || t?.created_at || s?.sale_date || r.created_at,
       vendor_code: t?.vicidial_vendor_code || null,
       agent_display: r.subject_agent || null,     // reviewed agent's dialer id/login (raw RCM)
       // reviewed agent's real name: recording name → CRM subject (fronter on a
@@ -854,6 +859,14 @@ router.get('/assignments/:id/candidates', asyncHandler(async (req, res) => {
   if (a.status === 'pending' && a.assigned_to === req.user.id) {
     await supabaseAdmin.from('qa_assignments').update({ status: 'in_review' }).eq('id', a.id);
   }
+  // WHO HUNG UP — the dialer knows (phone_number_log), recording_lookup does not.
+  // Done here, inside the cached result, so it costs one extra call on the first
+  // open and nothing afterwards.
+  try {
+    const ph = a.customer_phone || (candidates.find(c => c.phone)?.phone) || null;
+    if (ph) candidates = await annotateHangups(candidates, ph);
+  } catch (e) { logger.warn('QA', `hangup annotate: ${e.message}`); }
+
   const payload = { assignment_id: a.id, candidates, diag };
   cache.set('qa_candidates', a.id, payload, candidates.length ? CAND_TTL_HIT : CAND_TTL_MISS);
   res.json(payload);

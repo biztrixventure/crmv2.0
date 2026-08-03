@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, Fragment } from 'react';
 import ThemedDate from '../components/UI/ThemedDate';
 import {
+  Moon, Sun,
   ClipboardCheck, ListChecks, BarChart3, Settings2, Play, Pause, Loader2,
   LogOut, RefreshCw, User, Calendar, CheckCircle2, XCircle,
   ChevronRight, ChevronDown, Send, Shield, Star, Search, Headphones,
@@ -9,6 +10,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
+import { useTheme } from '../contexts/ThemeContext';
 import client from '../api/client';
 import DotGridBg from '../components/UI/DotGridBg';
 import SheetScoreRow, { clearSheetDraft } from '../components/QA/SheetScoreRow';
@@ -206,6 +208,22 @@ function WaveViz({ audioRef, active }) {
   return <canvas ref={canvasRef} height={46} style={{ width: '100%', height: 46, display: 'block', borderRadius: 8, background: 'var(--color-bg-secondary)' }} />;
 }
 
+// The QA shell draws its own header instead of AppHeader, which is why it was the
+// only shell with no light/dark control — reviewers stared at whichever theme
+// they happened to be left in. Same ThemeContext every other shell uses.
+function ThemeToggle() {
+  const { theme, toggleTheme } = useTheme();
+  const dark = theme === 'dark';
+  return (
+    <button onClick={toggleTheme} type="button" title={dark ? 'Switch to light theme' : 'Switch to dark theme'}
+      aria-label={dark ? 'Switch to light theme' : 'Switch to dark theme'}
+      className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+      style={{ background: 'var(--color-surface-hover)', border: '1px solid var(--color-border)' }}>
+      {dark ? <Sun size={15} style={{ color: 'var(--color-accent)' }} /> : <Moon size={15} style={{ color: 'var(--color-text-secondary)' }} />}
+    </button>
+  );
+}
+
 // ── candidate audio player (blob-streamed with auth, like RecordingReviewTab) ──
 function Candidates({ assignmentId }) {
   const [rows, setRows] = useState(null);
@@ -305,7 +323,20 @@ function Candidates({ assignmentId }) {
                 {c.leg && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase" style={c.leg === 'fronter' ? { background: 'rgba(37,99,235,0.16)', color: 'var(--color-primary-600)' } : { background: 'rgba(5,150,105,0.16)', color: '#059669' }}>{c.leg}</span>}
                 {/* the PERSON, not their dialer login — the id is a lookup key,
                     not something a reviewer can recognise mid-call */}
-                <span className="text-xs font-normal" style={{ color: 'var(--color-text-secondary)' }} title={c.agent_user ? `Dialer id ${c.agent_user}` : undefined}>· {c.agent_name || c.agent_user || 'agent ?'}</span></div>
+                <span className="text-xs font-normal" style={{ color: 'var(--color-text-secondary)' }} title={c.agent_user ? `Dialer id ${c.agent_user}` : undefined}>· {c.agent_name || c.agent_user || 'agent ?'}</span>
+                {/* WHO HUNG UP — visible before the clip is even played, because
+                    it changes how the call should be read. Red when the agent
+                    dropped it, neutral when the customer did. */}
+                {c.hangup_label && (
+                  <span className="text-[9px] font-bold px-1.5 py-0.5 rounded whitespace-nowrap"
+                    title={`Dialer hangup reason: ${c.hangup_reason}${c.call_status ? ` · status ${c.call_status}` : ''}`}
+                    style={/^AGENT/i.test(c.hangup_reason || '')
+                      ? { background: 'rgba(220,38,38,0.14)', color: 'var(--color-error-600)' }
+                      : { background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}>
+                    {c.hangup_label}
+                  </span>
+                )}
+              </div>
               <div className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{fmtTime(c.start_time)} · box {c.box_id} · rec {c.recording_id}</div>
             </div>
             {canTranscribe && (
@@ -394,6 +425,8 @@ function metaAutoFill(cfg, a) {
     else if (/zip|postal/.test(k)) out[f.key] = a.customer_zip || '';
     else if (/state/.test(k)) out[f.key] = a.customer_state || '';
     else if (/duration/.test(k)) out[f.key] = a.duration != null ? fmtDur(a.duration) : (rec.duration != null ? fmtDur(rec.duration) : '');
+    // a column literally called "hangup" / "hung up" fills itself
+    else if (/hang.?up/.test(k)) out[f.key] = rec.hangup_label || rec.hangup_reason || '';
   }
   return out;
 }
@@ -456,6 +489,8 @@ const AUTOFILL_SOURCES = [
   // "Evaluated by" had no token at all, so that column could only ever be typed
   // by hand on every single call. It is the one value the browser always knows.
   { v: 'reviewer_name',  label: 'Evaluated by — me (the reviewer)' },
+  // straight off the dialer's call log — 'Agent hung up' / 'Customer hung up'
+  { v: 'hangup_reason',  label: 'Who hung up (dialer)' },
 ];
 
 // ── VICIdial STANDARD lead fields ────────────────────────────────────────────
@@ -529,6 +564,7 @@ function sourceAutoFill(cfg, a, crm, vici, me) {
     fronter_center: () => ex.fronter_center || '',
     center_name:    () => ex.center_name || ex.fronter_center || '',
     reviewer_name:  () => me || '',
+    hangup_reason:  () => rec.hangup_label || rec.hangup_reason || '',
   };
   // EVERY field, not just the details: a dropdown or a Y/N column can name a
   // source too, and an explicitly-mapped column must fill wherever it now sits.
@@ -589,6 +625,35 @@ function ScoreForm({ assignment, onScored }) {
       })
       .catch(e => setLoadErr(e.response?.data?.error || 'Could not load the scorecard (check QA permissions).'));
   }, [assignment.id]);
+
+  // The call itself. A CRM-sourced task has no recording_ref, so Duration and
+  // Date had nothing to read and stayed blank on every method — the reviewer
+  // typed what the player was already showing them. The candidates endpoint
+  // knows: take the reviewed leg's longest clip (the substantive call, not a
+  // redial) and let it stand in as this task's recording.
+  const [bestRec, setBestRec] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    client.get(`qa/assignments/${assignment.id}/candidates`)
+      .then(r => {
+        if (!alive) return;
+        const all = r.data.candidates || [];
+        const leg = assignment.subject_role === 'fronter' ? 'fronter' : 'closer';
+        const mine = all.filter(c => c.leg === leg);
+        const pool = mine.length ? mine : all;
+        setBestRec(pool.slice().sort((x, y) => (y.duration || 0) - (x.duration || 0))[0] || null);
+      })
+      .catch(() => { if (alive) setBestRec(null); });
+    return () => { alive = false; };
+  }, [assignment.id, assignment.subject_role, refetch]);
+
+  // What the auto-fill passes see as "the call": the task's own recording when it
+  // has one, otherwise the clip resolved above.
+  const callCtx = {
+    ...assignment,
+    recording_ref: (assignment.recording_ref && assignment.recording_ref.recording_id) ? assignment.recording_ref : (bestRec || assignment.recording_ref),
+    duration: assignment.duration ?? bestRec?.duration ?? null,
+  };
 
   // The CRM fields the fronter/closer already entered → auto-fill matching
   // columns. Its OWN effect (not the scorecard one) so "Re-fetch details" can
@@ -655,11 +720,13 @@ function ScoreForm({ assignment, onScored }) {
         draftKey={assignment.id}
         config={scorecard.criteria}
         initialValues={{
-          ...metaAutoFill(scorecard.criteria, assignment),
+          // callCtx, not the bare assignment: it carries the resolved recording,
+          // so Duration / Date / who-hung-up fill from the actual dialer call.
+          ...metaAutoFill(scorecard.criteria, callCtx),
           ...crmAutoFill(scorecard.criteria, crm?.fields, crm?.extra),
           // An explicitly-configured source wins over both guesses above.
-          ...sourceAutoFill(scorecard.criteria, assignment, crm, vici, reviewerName),
-          ...outcomeAutoFill(scorecard.criteria, assignment, crm?.extra),
+          ...sourceAutoFill(scorecard.criteria, callCtx, crm, vici, reviewerName),
+          ...outcomeAutoFill(scorecard.criteria, callCtx, crm?.extra),
         }}
         headerRight={
           <button onClick={() => setRefetch(n => n + 1)} type="button"
@@ -4274,11 +4341,12 @@ function QAAgentView({ user, logout }) {
           {Array.isArray(methods) && methods.length > 0 && <span className="flex items-center gap-1">{methods.map(m => <MethodPill key={m} m={m} />)}</span>}
           <CompanyPicker companies={companies} all={all} companyId={companyId} onChange={setCompanyId} />
           <ChatLauncher />
+          <ThemeToggle />
           <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}><Shield size={13} className="inline mr-1" />{user?.role}</span>
           <button onClick={logout} className="flex items-center gap-1 text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}><LogOut size={14} />Logout</button>
         </div>
       </header>
-      <main className="flex-1 p-5 overflow-hidden relative z-10">
+      <main className="flex-1 p-2 sm:p-5 overflow-hidden relative z-10">
         {/* Agents only see the work-type sections their manager CHECKED for them
             (their bound methods) — in both Live and My tasks. `methods` = null
             while loading (treated as no gate); the manager view is ungated. */}
@@ -4356,11 +4424,12 @@ export default function QAShell() {
         <div className="ml-auto flex items-center gap-3">
           <CompanyPicker companies={companies} all={all} companyId={companyId} onChange={setCompanyId} />
           <ChatLauncher />
+          <ThemeToggle />
           <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}><Shield size={13} className="inline mr-1" />{user?.role}</span>
           <button onClick={logout} className="flex items-center gap-1 text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}><LogOut size={14} />Logout</button>
         </div>
       </header>
-      <main className="flex-1 p-5 overflow-hidden relative z-10">
+      <main className="flex-1 p-2 sm:p-5 overflow-hidden relative z-10">
         {tab === 'dashboard' && <div className="h-full overflow-auto"><QAManagerDashboard companyId={scoped} onOpenReports={() => canReports && setTab('reports')} /></div>}
         {tab === 'live' && <LiveTab scoped={scoped} selfId={user?.id} canOverride={canOverride} isManager={isSuper || canAssign} />}
         {tab === 'day' && <>
