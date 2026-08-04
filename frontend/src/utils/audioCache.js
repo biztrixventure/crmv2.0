@@ -96,6 +96,28 @@ export async function prune(maxBytes = MAX_BYTES) {
   } catch { /* eviction is best-effort */ }
 }
 
+/**
+ * Which of these keys are already held — ONE read for a whole list, so the UI
+ * can mark every saved clip up front instead of firing a lookup per row.
+ */
+export async function cachedKeys(keys = []) {
+  const want = new Set((keys || []).filter(Boolean));
+  if (!want.size) return new Set();
+  try {
+    const all = await tx('readonly', (s) => s.getAllKeys());
+    return new Set((Array.isArray(all) ? all : []).filter(k => want.has(k)));
+  } catch { return new Set(); }
+}
+
+/** { count, bytes } — what a "clear saved audio" control reports. */
+export async function cacheStats() {
+  try {
+    const rows = await tx('readonly', (s) => s.getAll());
+    const list = Array.isArray(rows) ? rows : [];
+    return { count: list.length, bytes: list.reduce((n, r) => n + (r.size || 0), 0) };
+  } catch { return { count: 0, bytes: 0 }; }
+}
+
 /** Bytes currently held — lets a "clear cached audio" control report a size. */
 export async function cacheSize() {
   try {

@@ -43,9 +43,12 @@ router.get('/stream', async (req, res) => {
     res.status(upstream.status === 206 ? 206 : 200);
     res.setHeader('Content-Type', 'audio/mpeg');
     res.setHeader('Accept-Ranges', 'bytes');
-    // private: this is one user's ticket. Replaying the same clip in the same
-    // session should not re-cross the network, but no shared cache may keep it.
-    res.setHeader('Cache-Control', 'private, max-age=600');
+    // private: one user's ticket, so no shared cache may keep it — but the
+    // reviewer's OWN browser should. The player streams the clip and then copies
+    // it into IndexedDB; with a long window that copy is served from the
+    // browser's HTTP cache instead of crossing the network a second time. It
+    // also covers the re-requests a seek can trigger before the copy is stored.
+    res.setHeader('Cache-Control', 'private, max-age=3600');
     if (upstream.headers['content-length']) res.setHeader('Content-Length', upstream.headers['content-length']);
     if (upstream.headers['content-range']) res.setHeader('Content-Range', upstream.headers['content-range']);
     upstream.data.pipe(res);

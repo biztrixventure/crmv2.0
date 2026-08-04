@@ -26,7 +26,7 @@ import FilterBar, { FilterSelect } from '../components/UI/FilterBar';
 // never mounted — the feature was live for the QA team, just unreachable.
 import ChatLauncher from '../components/Chat/ChatLauncher';
 import ProfileModal from '../components/Profile/ProfileModal';
-import { getClip, putClip, clipKey } from '../utils/audioCache';
+import { getClip, putClip, clipKey, cachedKeys, cacheStats, clearCache } from '../utils/audioCache';
 import { useHistoryTab } from '../hooks/useHistoryTab';
 import { useNavFocus } from '../contexts/FocusContext';
 
@@ -274,6 +274,9 @@ function Candidates({ assignmentId }) {
   const [curTime, setCurTime] = useState(0);    // player position → drives word highlight
   const [audioRid, setAudioRid] = useState(null); // rid currently loaded in the <audio>
   const [cachedRid, setCachedRid] = useState(null); // rid held in IndexedDB (plays with no network)
+  const [savedRids, setSavedRids] = useState(() => new Set());   // every clip in this list already held locally
+  const [cacheInfo, setCacheInfo] = useState({ count: 0, bytes: 0 });
+  const refreshCacheInfo = useCallback(() => { cacheStats().then(setCacheInfo).catch(() => {}); }, []);
 
   useEffect(() => {
     let dead = false;
@@ -353,11 +356,28 @@ function Candidates({ assignmentId }) {
       const url = await ticketFor(c);
       startAt(url, false);
 
-      // 3. …and keep a copy while they listen, so the next open — after a tab
-      //    switch, a refresh, tomorrow — costs the dialer nothing at all.
-      fetch(url).then(r => (r.ok ? r.blob() : null)).then(b => {
-        if (b) putClip(key, b).then(ok => { if (ok && audioRef.current?.dataset.rid === c.recording_id) setCachedRid(c.recording_id); });
-      }).catch(() => { /* streaming already works; caching is a bonus */ });
+      // 3. …and keep a copy, so the next open — after a tab switch, a refresh,
+      //    tomorrow — costs the dialer nothing at all.
+      //
+      //    Started only ONCE PLAYBACK IS UNDER WAY. Firing it immediately made
+      //    the copy compete for bandwidth with the audio it was copying, which
+      //    is the one moment the reviewer is actually waiting. The response is
+      //    served from the browser's HTTP cache in the normal case, so this is
+      //    usually not a second trip over the network at all.
+      const a2 = a;
+      const startCopy = () => {
+        a2.removeEventListener('playing', startCopy);
+        fetch(url).then(r => (r.ok ? r.blob() : null)).then(b => {
+          if (!b) return;
+          putClip(key, b).then(ok => {
+            if (!ok) return;
+            setSavedRids(prev => new Set(prev).add(c.recording_id));
+            refreshCacheInfo();
+            if (audioRef.current?.dataset.rid === c.recording_id) setCachedRid(c.recording_id);
+          });
+        }).catch(() => { /* streaming already works; caching is a bonus */ });
+      };
+      a2.addEventListener('playing', startCopy);
     } catch { toast.error('Could not load that recording'); }
     finally { setLoadingId(null); }
   };
@@ -368,6 +388,23 @@ function Candidates({ assignmentId }) {
     const first = (rows || [])[0];
     if (first) ticketFor(first).catch(() => {});
   }, [rows, ticketFor]);
+
+  // Which of these are already in the browser? One read for the whole list, so
+  // the reviewer can see at a glance which clips play instantly with no dialer
+  // round-trip — and which are still going to cost one.
+  useEffect(() => {
+    const list = rows || [];
+    if (!list.length) { setSavedRids(new Set()); return; }
+    let alive = true;
+    cachedKeys(list.map(c => clipKey(c.box_id, c.recording_id)))
+      .then(keys => {
+        if (!alive) return;
+        setSavedRids(new Set(list.filter(c => keys.has(clipKey(c.box_id, c.recording_id))).map(c => c.recording_id)));
+      })
+      .catch(() => {});
+    refreshCacheInfo();
+    return () => { alive = false; };
+  }, [rows, refreshCacheInfo]);
 
   if (rows === null) return <div className="text-center py-6"><Loader2 className="animate-spin inline" style={{ color: 'var(--color-text-tertiary)' }} /><div className="text-xs mt-1" style={{ color: 'var(--color-text-tertiary)' }}>Loading recordings…</div></div>;
   if (!rows.length) return (
@@ -430,7 +467,16 @@ function Candidates({ assignmentId }) {
                   </span>
                 ) : null}
               </div>
-              <div className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{fmtTime(c.start_time)} · box {c.box_id} · rec {c.recording_id}</div>
+              <div className="text-[11px] flex items-center gap-1.5 flex-wrap" style={{ color: 'var(--color-text-tertiary)' }}>
+                <span>{fmtTime(c.start_time)} · box {c.box_id} · rec {c.recording_id}</span>
+                {/* already in this browser → pressing play costs the dialer
+                    nothing and starts immediately */}
+                {savedRids.has(c.recording_id) && (
+                  <span className="text-[9px] font-bold px-1.5 py-0.5 rounded"
+                    title="Saved in your browser — this plays instantly and is never fetched from the dialer again."
+                    style={{ background: 'color-mix(in srgb, var(--color-success-600) 14%, transparent)', color: 'var(--color-success-600)' }}>saved</span>
+                )}
+              </div>
             </div>
             {canTranscribe && (
               <button onClick={() => transcribe(c)} disabled={txBusy === c.recording_id}
@@ -480,7 +526,17 @@ function Candidates({ assignmentId }) {
             <span className="text-[10px] font-bold px-1.5 py-0.5 rounded ml-auto"
               title="This recording is saved in your browser — replaying it does not re-fetch from the dialer, and you can jump anywhere in it instantly."
               style={{ background: 'color-mix(in srgb, var(--color-success-600) 14%, transparent)', color: 'var(--color-success-600)' }}>
-              saved offline
+              playing from your browser
+            </span>
+          )}
+          {/* What is being held, and a way out of it. Cached audio is the
+              reviewer's disk — they should be able to see it and drop it. */}
+          {cacheInfo.count > 0 && (
+            <span className={`text-[10px] flex items-center gap-1 ${cachedRid && cachedRid === audioRid ? '' : 'ml-auto'}`} style={{ color: 'var(--color-text-tertiary)' }}>
+              {cacheInfo.count} saved · {(cacheInfo.bytes / (1024 * 1024)).toFixed(0)} MB
+              <button onClick={() => { clearCache().then(() => { setSavedRids(new Set()); setCachedRid(null); refreshCacheInfo(); }); }}
+                className="font-bold" style={{ color: 'var(--color-text-secondary)', textDecoration: 'underline' }}
+                title="Delete every recording saved in this browser. They will be fetched again next time they are played.">clear</button>
             </span>
           )}
         </div>
