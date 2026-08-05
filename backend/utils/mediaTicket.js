@@ -22,7 +22,18 @@
 // ============================================================================
 const crypto = require('crypto');
 
-const TTL_SECONDS = 10 * 60;   // long enough to play a long call, short enough to be worthless later
+// A REVIEW SESSION, not a single play. Ten minutes was the cause of "once the
+// call finishes I cannot move it forward again": the <audio> element keeps the
+// same src for the life of the panel, and every seek issues a FRESH Range
+// request against it. On a call of any length the ticket had already expired by
+// the end of the first listen, so the seek got a 403, the browser could not
+// fetch the bytes for the new position, and the playhead snapped straight back.
+//
+// The exposure is unchanged in kind — a ticket still names ONE recording, is
+// HMAC-signed, and the media route always re-resolves the location from the
+// dialer, so it can never be pointed anywhere else. It is now worth that single
+// clip for a working day instead of for ten minutes.
+const TTL_SECONDS = 8 * 60 * 60;
 
 // The service-role key is always configured (the app cannot boot without it),
 // but a dedicated secret can be set so rotating one never rotates the other.

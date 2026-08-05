@@ -306,9 +306,16 @@ function Candidates({ assignmentId }) {
   // seekTo (seconds) lets a transcript word click jump the audio to that word.
   // A ticket per recording, kept for the life of the panel. Cheap JSON, and the
   // reviewer only pays for it once per clip.
-  const ticketRef = useRef({});          // recording_id → streamable url
-  const ticketFor = useCallback(async (c) => {
-    if (ticketRef.current[c.recording_id]) return ticketRef.current[c.recording_id];
+  const ticketRef = useRef({});          // recording_id → { url, at }
+  // A ticket is a signed permission with an expiry, and the <audio> element keeps
+  // whatever src it was given for as long as the panel is open — issuing a new
+  // Range request for EVERY seek. A URL cached forever therefore stops being
+  // accepted part-way through a session, and the reviewer sees the playhead
+  // refuse to move. Re-issue anything older than half an hour, and on demand.
+  const TICKET_FRESH_MS = 30 * 60 * 1000;
+  const ticketFor = useCallback(async (c, { force = false } = {}) => {
+    const hit = ticketRef.current[c.recording_id];
+    if (!force && hit && Date.now() - hit.at < TICKET_FRESH_MS) return hit.url;
     const r = await client.post('qa/recordings/ticket', {
       assignment_id: assignmentId, box_id: c.box_id, lead_id: c.lead_id, recording_id: c.recording_id,
     });
@@ -317,7 +324,7 @@ function Candidates({ assignmentId }) {
     // ask the FRONTEND host for a route that only exists on the backend.
     const apiBase = String(client.defaults.baseURL || '').replace(/\/api\/?$/, '');
     const url = apiBase + r.data.url;
-    ticketRef.current[c.recording_id] = url;
+    ticketRef.current[c.recording_id] = { url, at: Date.now() };
     return url;
   }, [assignmentId]);
 
@@ -381,6 +388,50 @@ function Candidates({ assignmentId }) {
     } catch { toast.error('Could not load that recording'); }
     finally { setLoadingId(null); }
   };
+
+  // ── keeping a call scrubbable after it has been played through ─────────────
+  // Two things left the playhead stuck once a reviewer had listened to the end
+  // and started again. A STREAMED source can only seek where the recording host
+  // is willing to serve a Range — and the signed ticket in that URL expires,
+  // after which every seek is refused outright and the position snaps back.
+  //
+  // So: the moment the local copy exists, hand the element the COMPLETE file —
+  // it seeks anywhere, instantly, with no network at all — and if a stream does
+  // fail, mint a fresh ticket and put the playhead back where it was.
+  const rowFor = useCallback((rid) => (rows || []).find(x => String(x.recording_id) === String(rid)) || null, [rows]);
+  const reload = (a, src, at, resume) => {
+    a.src = src;
+    const onMeta = () => {
+      a.removeEventListener('loadedmetadata', onMeta);
+      try { a.currentTime = at; } catch { /* browser refused the seek */ }
+      if (resume) a.play().catch(() => {});
+    };
+    a.addEventListener('loadedmetadata', onMeta);
+    a.load();
+  };
+  const swapToLocal = useCallback(async () => {
+    const a = audioRef.current;
+    if (!a || urlRef.current) return;                 // already playing the local file
+    const rid = a.dataset.rid; const c = rowFor(rid);
+    if (!c) return;
+    const hit = await getClip(clipKey(c.box_id, c.recording_id)).catch(() => null);
+    if (!hit || audioRef.current?.dataset.rid !== rid) return;
+    urlRef.current = URL.createObjectURL(hit);
+    reload(a, urlRef.current, a.currentTime || 0, false);
+    setCachedRid(rid);
+  }, [rowFor]);
+  const recovering = useRef(false);
+  const recoverStream = useCallback(async () => {
+    const a = audioRef.current;
+    if (!a || urlRef.current || recovering.current) return;   // a local Blob cannot expire
+    const rid = a.dataset.rid; const c = rowFor(rid);
+    if (!c) return;
+    recovering.current = true;
+    const at = a.currentTime || 0, resume = !a.paused;
+    try { reload(a, await ticketFor(c, { force: true }), at, resume); }
+    catch { toast.error('That recording link expired — press play again'); }
+    finally { recovering.current = false; }
+  }, [rowFor, ticketFor]);
 
   // Fetch the first clip's ticket as soon as the list lands, so the very first
   // Play is a click with nothing to wait for.
@@ -501,7 +552,12 @@ function Candidates({ assignmentId }) {
         <WaveViz audioRef={audioRef} active={!!playingRid} />
         <audio ref={audioRef} controls className="w-full mt-2"
           onPlay={() => setPlayingRid(audioRef.current?.dataset.rid || null)}
-          onPause={() => setPlayingRid(null)} onEnded={() => setPlayingRid(null)}
+          onPause={() => setPlayingRid(null)}
+          // the end of the first listen is exactly when the reviewer starts
+          // dragging around the call, so that is when we switch to the complete
+          // local file — from here every seek is instant and cannot be refused
+          onEnded={() => { setPlayingRid(null); swapToLocal(); }}
+          onError={recoverStream}
           onTimeUpdate={() => setCurTime(audioRef.current?.currentTime || 0)} />
         <div className="flex items-center gap-1.5 mt-2">
           <span className="text-[10px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-tertiary)' }}>Speed</span>
@@ -3029,6 +3085,11 @@ function DayRecordingsTab({ canAssign, companyId, scoped }) {
   const [dispoRemaining, setDispoRemaining] = useState(0);
   const [loadingRid, setLoadingRid] = useState(null);
   const [playingRid, setPlayingRid] = useState(null);
+  // Whether the player is showing at all. This used to be `urlRef.current`, a
+  // ref that is ONLY set for a locally-cached clip — so a streamed call played
+  // with the transport hidden and there was no scrub bar to move at all. It is
+  // state now, set for either source.
+  const [loadedRid, setLoadedRid] = useState(null);
 
   useEffect(() => () => { if (urlRef.current) URL.revokeObjectURL(urlRef.current); }, []);
   useEffect(() => { if (canAssign && agentScope) client.get('qa/agents', { params: { company_id: agentScope } }).then(r => setAgents(r.data.agents || [])).catch(() => {}); else setAgents([]); }, [canAssign, agentScope]);
@@ -3075,10 +3136,16 @@ function DayRecordingsTab({ canAssign, companyId, scoped }) {
     finally { if (loadTokenRef.current === token) setLoading(false); }
   };
 
+  // the clip currently loaded, so an expired stream can be re-ticketed without
+  // hunting for it back through the grouped rows
+  const nowPlayingRef = useRef(null);
+  const streamingRef = useRef(false);   // true = playing a ticketed URL, not a local Blob
+
   const play = async (c) => {
     const a = audioRef.current; if (!a) return;
     if (a.dataset.rid === c.recording_id) { a.paused ? a.play() : a.pause(); return; }
     setLoadingRid(c.recording_id);
+    nowPlayingRef.current = c;
     try {
       // Same two-stage path as the reviewer's player: a local copy when we have
       // one (no network, instant scrubbing), otherwise stream it and keep a copy
@@ -3089,16 +3156,52 @@ function DayRecordingsTab({ canAssign, companyId, scoped }) {
       if (hit) {
         if (urlRef.current) URL.revokeObjectURL(urlRef.current);
         urlRef.current = URL.createObjectURL(hit);
-        a.src = urlRef.current; a.dataset.rid = c.recording_id; a.play().catch(() => {});
+        streamingRef.current = false;
+        a.src = urlRef.current; a.dataset.rid = c.recording_id; setLoadedRid(c.recording_id); a.play().catch(() => {});
         return;
       }
       const r = await client.post('qa/recordings/ticket', { box_id: c.box_id, lead_id: c.lead_id, recording_id: c.recording_id });
       const apiBase = String(client.defaults.baseURL || '').replace(/\/api\/?$/, '');
       const url = apiBase + r.data.url;
-      a.src = url; a.dataset.rid = c.recording_id; a.play().catch(() => {});
+      streamingRef.current = true;
+      a.src = url; a.dataset.rid = c.recording_id; setLoadedRid(c.recording_id); a.play().catch(() => {});
       fetch(url).then(res => (res.ok ? res.blob() : null)).then(b => { if (b) putClip(key, b); }).catch(() => {});
     } catch { toast.error('Could not load that recording'); }
     finally { setLoadingRid(null); }
+  };
+
+  // Same two guards as the reviewer's player: once the clip has been heard
+  // through, play the COMPLETE local file so every seek is instant; and if a
+  // ticketed stream stops being accepted, re-ticket it and restore the position.
+  const reloadAt = (a, src, at, resume) => {
+    a.src = src;
+    const onMeta = () => {
+      a.removeEventListener('loadedmetadata', onMeta);
+      try { a.currentTime = at; } catch { /* browser refused the seek */ }
+      if (resume) a.play().catch(() => {});
+    };
+    a.addEventListener('loadedmetadata', onMeta);
+    a.load();
+  };
+  const swapToLocal = async () => {
+    const a = audioRef.current; const c = nowPlayingRef.current;
+    if (!a || !c || !streamingRef.current) return;
+    const hit = await getClip(clipKey(c.box_id, c.recording_id)).catch(() => null);
+    if (!hit || a.dataset.rid !== c.recording_id) return;
+    if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+    urlRef.current = URL.createObjectURL(hit);
+    streamingRef.current = false;
+    reloadAt(a, urlRef.current, a.currentTime || 0, false);
+  };
+  const recoverStream = async () => {
+    const a = audioRef.current; const c = nowPlayingRef.current;
+    if (!a || !c || !streamingRef.current) return;
+    const at = a.currentTime || 0, resume = !a.paused;
+    try {
+      const r = await client.post('qa/recordings/ticket', { box_id: c.box_id, lead_id: c.lead_id, recording_id: c.recording_id });
+      const apiBase = String(client.defaults.baseURL || '').replace(/\/api\/?$/, '');
+      reloadAt(a, apiBase + r.data.url, at, resume);
+    } catch { toast.error('That recording link expired — press play again'); }
   };
 
   // group first, then filter at the GROUP level (a number's dispo = its best; a
@@ -3324,8 +3427,9 @@ function DayRecordingsTab({ canAssign, companyId, scoped }) {
           </table>
         </div>
       )}
-      <audio ref={audioRef} controls className="w-full mt-2" style={{ display: urlRef.current ? 'block' : 'none' }}
-        onPlay={() => setPlayingRid(audioRef.current?.dataset.rid || null)} onPause={() => setPlayingRid(null)} onEnded={() => setPlayingRid(null)} />
+      <audio ref={audioRef} controls className="w-full mt-2" style={{ display: loadedRid ? 'block' : 'none' }}
+        onPlay={() => setPlayingRid(audioRef.current?.dataset.rid || null)} onPause={() => setPlayingRid(null)}
+        onEnded={() => { setPlayingRid(null); swapToLocal(); }} onError={recoverStream} />
     </div>
   );
 }

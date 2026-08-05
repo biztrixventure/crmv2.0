@@ -24,7 +24,7 @@ const { asyncHandler } = require('../middleware/errorHandler');
 const { isSuperAdmin, hasPermission, getUserCompanies } = require('../models/helpers');
 const { getConfig, setConfig, getAllConfig } = require('../utils/businessConfig');
 const { isSheetConfig, computeSheetReview, isY, resolveSheetFields, fieldPoints } = require('../utils/qaSheetFormula');
-const { listCandidatesByLeadId, listCandidatesByPhone, listCandidatesForSale, locationForRecording, listDayRecordings, getBoxes, fillLeadStatuses, resolveDispos, leadFieldCustomer, leadCustomFields, discoverCustomFieldNames, leadFromVendorCode, findLeadByPhone, annotateHangups, leadStatusByCode, leadFieldStatus, resolveDisposition } = require('../utils/dialerBoxes');
+const { listCandidatesByLeadId, listCandidatesByPhone, listCandidatesByPhoneLeads, listCandidatesForSale, locationForRecording, listDayRecordings, getBoxes, fillLeadStatuses, resolveDispos, leadFieldCustomer, leadCustomFields, discoverCustomFieldNames, leadFromVendorCode, findLeadByPhone, annotateHangups, leadStatusByCode, leadFieldStatus, resolveDisposition } = require('../utils/dialerBoxes');
 const { materializeCompany } = require('../utils/qaMaterializer');
 const { autoAssignCompany } = require('../utils/qaAutoAssign');
 const { WORK_TYPES, workTypeOf, getActiveRules, materializeCloserWork, applyCompanyRules, openCounts } = require('../utils/qaRules');
@@ -874,128 +874,126 @@ router.get('/assignments/:id/candidates', asyncHandler(async (req, res) => {
   // to be declared inside the branch, so that read threw a ReferenceError which
   // the surrounding try/catch swallowed — no clip ever got a hangup label.
   const rec = a.recording_ref || null;
-  if (rec && rec.recording_id) {
-    // day-recording assignment — the EXACT clip is known. Show it + its grouped
-    // parts (all dials of this number by this agent) + any other legs on the lead.
-    const push = (x) => { if (x && x.recording_id && !candidates.some(c => c.box_id === x.box_id && c.recording_id === x.recording_id)) candidates.push(x); };
-    push({ box_id: rec.box_id, start_time: rec.start_time, recording_id: rec.recording_id, lead_id: rec.lead_id, duration: rec.duration, location: rec.location, agent_user: rec.agent_user, phone_matches: true });
-    for (const p of (rec.parts || [])) push({ box_id: p.box_id, start_time: p.start_time, recording_id: p.recording_id, lead_id: p.lead_id, duration: p.duration, location: p.location, agent_user: p.agent_user, phone_matches: true });
-    // Sibling legs on the same lead. Scoped to the box the clip came from — the
-    // lead_id is unique per cluster only, so an unscoped sweep can pull a
-    // different customer who happens to hold that number on another box.
-    const leadIds = [...new Set([rec.lead_id, ...(rec.parts || []).map(p => p.lead_id)].filter(Boolean))];
-    const leadBoxIds = [...new Set([rec.box_id, ...(rec.parts || []).map(p => p.box_id)].filter(Boolean))];
-    // No box on the clip → the sweep is estate-wide, so the phone has to confirm
-    // each leg belongs to this customer.
-    const scope = leadBoxIds.length ? { boxIds: leadBoxIds } : { phone: a.customer_phone || rec.phone || null };
-    for (const lid of leadIds) {
-      try { const legs = await listCandidatesByLeadId(lid, scope); for (const l of legs) push(l); } catch { /* keep known clips */ }
-    }
-    candidates.sort((x, y) => String(x.start_time).localeCompare(String(y.start_time)));
-  } else {
-    // CRM / materialized assignment. A transfer has TWO reviewable legs — the
-    // FRONTER's transfer call and the CLOSER's call after the transfer — both to
-    // the same customer phone, on the same dialer day. QA scores each leg (TRA =
-    // fronter; closed/unclosed = closer) but must SEE BOTH. We UNION every source
-    // so neither leg is ever missed, then tag each clip fronter/closer:
-    //   1. lead-code + mapped-agent+date+phone (listCandidatesForSale)
-    //   2. a day-bounded phone search (mapping-free) — ALWAYS merged, so the
-    //      closer's leg still appears even when the closer isn't dialer-mapped
-    //      (previously this only ran when source 1 was EMPTY, so a found fronter
-    //      leg suppressed the closer leg entirely).
-    // Nothing is stored — this resolves live from the dialer on every open.
-    let leadCode = null, phone = null, saleDate = null, createdAt = null, transferId = a.transfer_id || null;
-    const fronterUids = new Set(), closerUids = new Set();
-    if (a.sale_id) {
-      const { data: s } = await supabaseAdmin.from('sales').select('transfer_id, customer_phone, sale_date, closer_id').eq('id', a.sale_id).maybeSingle();
-      if (s) { transferId = transferId || s.transfer_id || null; phone = s.customer_phone || null; saleDate = s.sale_date || null; if (s.closer_id) closerUids.add(s.closer_id); }
-    }
-    if (transferId) {
-      const { data: t } = await supabaseAdmin.from('transfers').select('vicidial_vendor_code, normalized_phone, created_at, created_by, assigned_closer_id').eq('id', transferId).maybeSingle();
-      if (t) { leadCode = t.vicidial_vendor_code || null; phone = phone || t.normalized_phone || null; createdAt = t.created_at || null; if (t.created_by) fronterUids.add(t.created_by); if (t.assigned_closer_id) closerUids.add(t.assigned_closer_id); }
-    }
-    // dialer agent ids PER LEG (for tagging) + combined (for resolution)
-    const idsFor = async (uids) => {
-      if (!uids.size) return [];
-      const { data } = await supabaseAdmin.from('user_profiles').select('vicidial_agent_ids').in('user_id', [...uids]);
-      return [...new Set((data || []).flatMap(p => p.vicidial_agent_ids || []).filter(Boolean))].map(x => String(x).toUpperCase());
-    };
-    const [fronterIds, closerIds] = await Promise.all([idsFor(fronterUids), idsFor(closerUids)]);
-    const agentIds = [...new Set([...fronterIds, ...closerIds])];
-    const date = createdAt ? String(createdAt).slice(0, 10) : (saleDate ? String(saleDate).slice(0, 10) : null);
 
-    // Last-resort identifiers off the ASSIGNMENT itself. resolveCustomer already
-    // denormalised the phone onto the row, and recording_date/created_at carry the
-    // day — so a transfer whose own phone or timestamp is missing can still be
-    // searched instead of silently returning nothing.
-    if (!phone) phone = a.customer_phone || null;
-    const dayOf = (v) => (v ? String(v).slice(0, 10) : null);
-    const searchDate = date || dayOf(a.recording_date) || dayOf(a.created_at);
-
-    const byKey = new Map();
-    const merge = (rows) => { for (const r of (rows || [])) { const k = `${r.box_id}|${r.recording_id}`; if (!byKey.has(k)) byKey.set(k, r); } };
-
-    // ── source 0: THE LEAD ITSELF ──────────────────────────────────────────────
-    // The exact route, and the one that needs no agent mapping and no date guess:
-    // recording_lookup takes a lead_id natively and returns every leg on it. The
-    // lead comes from the task's own recording_ref, the transfer's vendor code,
-    // or — when neither exists — a phone lookup whose answer is PERSISTED, so a
-    // task pays for that once and is lead-linked from then on (Live tasks
-    // included: they carry recording_ref.lead_id already).
-    let lead = null;
-    try { lead = await resolveAssignmentLead(a, { phone }); } catch (e) { logger.warn('QA', `candidates lead: ${e.message}`); }
-    // it looks at the sale row too, so it can find a phone this branch could not
-    if (!phone && lead?.phone) phone = lead.phone;
-    if (lead?.leadId) {
-      // A lead_id identifies the call outright only when exactly ONE box is in
-      // play. Two clusters share the WTI prefix and reuse lead ids between them,
-      // so anything less certain has to be confirmed by the customer's phone.
-      const scoped = lead.boxIds?.length === 1
-        ? { boxIds: lead.boxIds }
-        : { boxIds: lead.boxIds?.length ? lead.boxIds : null, phone };
-      try { merge(await listCandidatesByLeadId(lead.leadId, scoped)); }
-      catch (e) { logger.warn('QA', `candidates lead_id: ${e.message}`); }
-    }
-
-    // ── source 1: vendor code + the mapped agents' day (kept — it also catches
-    // the closer's CROSS-BOX leg, which never appears under the lead's own id) ──
-    try { merge(await listCandidatesForSale({ code: leadCode, phone, agentIds, date: searchDate, dialerAt: createdAt })); }
-    catch (e) { logger.warn('QA', `candidates resolve: ${e.message}`); }
-    // mapping-free phone catch-all, bounded to the call day ±1 so a repeat
-    // customer's calls on other days never bleed in — this is what surfaces the
-    // closer's leg when the closer has no vicidial_agent_ids mapped.
-    if (phone) {
-      const dn = searchDate ? Date.parse(`${searchDate}T00:00:00Z`) : null;
-      const df = dn ? new Date(dn - 86400000).toISOString().slice(0, 10) : null;
-      const dt = dn ? new Date(dn + 86400000).toISOString().slice(0, 10) : null;
-      try { merge(await listCandidatesByPhone({ phone, dateFrom: df, dateTo: dt })); }
-      catch (e) { logger.warn('QA', `candidates phone: ${e.message}`); }
-      // Still nothing? The ±1 day window assumes the CRM timestamp is the call
-      // time. It is not, for a bulk-imported or late-entered transfer — the lead
-      // was dialled days before it reached the CRM. Retry unbounded, once, only
-      // when the bounded search came back empty, so the normal path keeps its
-      // narrow window and a repeat customer's other days never bleed in.
-      if (!byKey.size) {
-        try { merge(await listCandidatesByPhone({ phone })); }
-        catch (e) { logger.warn('QA', `candidates phone wide: ${e.message}`); }
-      }
-    }
-    diag = {
-      phone: phone ? `••••${String(phone).slice(-4)}` : null, date: searchDate,
-      lead_code: !!leadCode, mapped_agents: agentIds.length,
-      // which lead was searched and how it was reached — so an empty list can say
-      // "no dialer lead is linked" instead of leaving the reviewer guessing
-      lead_id: lead?.leadId || null, linked_by: lead?.linkedBy || null,
-    };
-    // tag each clip's leg by whose dialer id recorded it (fronter vs closer)
-    candidates = [...byKey.values()]
-      .map(c => {
-        const au = String(c.agent_user || '').toUpperCase();
-        const leg = fronterIds.includes(au) ? 'fronter' : closerIds.includes(au) ? 'closer' : null;
-        return { ...c, leg };
-      })
-      .sort((x, y) => String(x.start_time).localeCompare(String(y.start_time)));
+  // ══ EVERY method searches EVERY source ═══════════════════════════════════════
+  // There used to be two branches: a day/Live task showed its own clip and the
+  // legs on its lead, a CRM task ran the phone/agent searches. So which
+  // recordings a reviewer could see depended on how the task happened to be
+  // created, and a Live task never saw the other side of its own conversation.
+  //
+  // Now there is ONE path. Whatever identifies the call — a known clip, a lead
+  // id, a vendor code, a phone — every source that can use it runs, and they run
+  // CONCURRENTLY rather than one after another: they are independent dialer
+  // round-trips, and awaiting them in series was most of the wait.
+  let leadCode = null, phone = null, saleDate = null, createdAt = null, transferId = a.transfer_id || null;
+  const fronterUids = new Set(), closerUids = new Set();
+  if (a.sale_id) {
+    const { data: s } = await supabaseAdmin.from('sales').select('transfer_id, customer_phone, sale_date, closer_id, vicidial_vendor_code').eq('id', a.sale_id).maybeSingle();
+    if (s) { transferId = transferId || s.transfer_id || null; phone = s.customer_phone || null; saleDate = s.sale_date || null; leadCode = s.vicidial_vendor_code || null; if (s.closer_id) closerUids.add(s.closer_id); }
   }
+  if (transferId) {
+    const { data: t } = await supabaseAdmin.from('transfers').select('vicidial_vendor_code, normalized_phone, created_at, created_by, assigned_closer_id').eq('id', transferId).maybeSingle();
+    if (t) { leadCode = leadCode || t.vicidial_vendor_code || null; phone = phone || t.normalized_phone || null; createdAt = t.created_at || null; if (t.created_by) fronterUids.add(t.created_by); if (t.assigned_closer_id) closerUids.add(t.assigned_closer_id); }
+  }
+  // dialer agent ids PER LEG (for tagging) + combined (for resolution)
+  const idsFor = async (uids) => {
+    if (!uids.size) return [];
+    const { data } = await supabaseAdmin.from('user_profiles').select('vicidial_agent_ids').in('user_id', [...uids]);
+    return [...new Set((data || []).flatMap(p => p.vicidial_agent_ids || []).filter(Boolean))].map(x => String(x).toUpperCase());
+  };
+  const [fronterIds, closerIds] = await Promise.all([idsFor(fronterUids), idsFor(closerUids)]);
+  const agentIds = [...new Set([...fronterIds, ...closerIds])];
+  const date = createdAt ? String(createdAt).slice(0, 10) : (saleDate ? String(saleDate).slice(0, 10) : null);
+
+  // Last-resort identifiers off the ASSIGNMENT itself. resolveCustomer already
+  // denormalised the phone onto the row, and recording_date/created_at carry the
+  // day — so a transfer whose own phone or timestamp is missing can still be
+  // searched instead of silently returning nothing. A Live/day task carries the
+  // number parsed out of its own clip filename.
+  if (!phone) phone = a.customer_phone || rec?.phone || null;
+  const dayOf = (v) => (v ? String(v).slice(0, 10) : null);
+  const searchDate = date || dayOf(a.recording_date) || dayOf(a.created_at) || dayOf(rec?.start_time);
+
+  const byKey = new Map();
+  const merge = (rows) => { for (const r of (rows || [])) { const k = `${r.box_id}|${r.recording_id}`; if (r.recording_id && !byKey.has(k)) byKey.set(k, r); } };
+
+  // The clip the task was built from, and its grouped redials. Certain, already
+  // in hand, no dialer call — merged first so they are never displaced.
+  if (rec && rec.recording_id) {
+    merge([{ box_id: rec.box_id, start_time: rec.start_time, recording_id: rec.recording_id, lead_id: rec.lead_id, duration: rec.duration, location: rec.location, agent_user: rec.agent_user, phone_matches: true }]);
+    merge((rec.parts || []).map(p => ({ box_id: p.box_id, start_time: p.start_time, recording_id: p.recording_id, lead_id: p.lead_id, duration: p.duration, location: p.location, agent_user: p.agent_user, phone_matches: true })));
+  }
+
+  // The lead behind the task — recording_ref, then a vendor code, then the dialer
+  // by phone (persisted, so a task pays for that lookup once).
+  let lead = null;
+  try { lead = await resolveAssignmentLead(a, { phone }); } catch (e) { logger.warn('QA', `candidates lead: ${e.message}`); }
+  if (!phone && lead?.phone) phone = lead.phone;
+
+  // Every lead we can name, with the cluster(s) it is on. A lead_id identifies a
+  // call outright only when exactly ONE box is in play — two clusters share the
+  // WTI prefix and reuse lead ids between them — so anything less certain is
+  // confirmed by the customer's phone instead.
+  const leadTargets = new Map();   // leadId → boxIds[]
+  const addLead = (id, boxIds) => {
+    if (!id) return;
+    const cur = leadTargets.get(String(id)) || [];
+    leadTargets.set(String(id), [...new Set([...cur, ...(boxIds || []).filter(Boolean)])]);
+  };
+  if (rec) { addLead(rec.lead_id, [rec.box_id]); for (const p of (rec.parts || [])) addLead(p.lead_id, [p.box_id]); }
+  if (lead?.leadId) addLead(lead.leadId, lead.boxIds);
+
+  const dn = searchDate ? Date.parse(`${searchDate}T00:00:00Z`) : null;
+  const df = dn ? new Date(dn - 86400000).toISOString().slice(0, 10) : null;
+  const dt = dn ? new Date(dn + 86400000).toISOString().slice(0, 10) : null;
+  const safe = (p) => p.catch((e) => { logger.warn('QA', `candidates source: ${e.message}`); return []; });
+
+  const sources = [
+    // every leg on every known lead
+    ...[...leadTargets.entries()].map(([leadId, boxIds]) =>
+      safe(listCandidatesByLeadId(leadId, boxIds.length === 1 ? { boxIds } : { boxIds: boxIds.length ? boxIds : null, phone }))),
+    // vendor code + the mapped agents' day — also catches the closer's CROSS-BOX
+    // leg, which never appears under the lead's own id
+    safe(listCandidatesForSale({ code: leadCode, phone, agentIds, date: searchDate, dialerAt: createdAt })),
+  ];
+  if (phone) {
+    // day-bounded call-log search: mapping-free, so the closer's leg shows even
+    // when the closer has no vicidial_agent_ids
+    sources.push(safe(listCandidatesByPhone({ phone, dateFrom: df, dateTo: dt })));
+    // and the widest route of all — every LEAD this number created on every
+    // cluster, then every leg on each. vicidial_list is not archived, so this is
+    // the only source that still answers for older calls once the call log has
+    // rolled off.
+    sources.push(safe(listCandidatesByPhoneLeads({ phone })));
+  }
+  (await Promise.all(sources)).forEach(merge);
+
+  // Nothing at all? The ±1 day window assumes the CRM timestamp is the call time.
+  // It is not, for a bulk-imported or late-entered transfer. One unbounded retry,
+  // only when everything else came back empty.
+  if (!byKey.size && phone) {
+    try { merge(await listCandidatesByPhone({ phone })); }
+    catch (e) { logger.warn('QA', `candidates phone wide: ${e.message}`); }
+  }
+
+  diag = {
+    phone: phone ? `••••${String(phone).slice(-4)}` : null, date: searchDate,
+    lead_code: !!leadCode, mapped_agents: agentIds.length,
+    // which lead was searched and how it was reached — so an empty list can say
+    // "no dialer lead is linked" instead of leaving the reviewer guessing
+    lead_id: lead?.leadId || null, linked_by: lead?.linkedBy || null,
+    leads_searched: leadTargets.size,
+  };
+  // tag each clip's leg by whose dialer id recorded it (fronter vs closer), and
+  // mark the one the task was actually created from
+  candidates = [...byKey.values()]
+    .map(c => {
+      const au = String(c.agent_user || '').toUpperCase();
+      const leg = fronterIds.includes(au) ? 'fronter' : closerIds.includes(au) ? 'closer' : null;
+      const is_task_clip = !!(rec && rec.recording_id && c.box_id === rec.box_id && String(c.recording_id) === String(rec.recording_id));
+      return { ...c, leg, is_task_clip };
+    })
+    .sort((x, y) => String(x.start_time).localeCompare(String(y.start_time)));
   // Every clip must name the PERSON who took the call. The dialer only ever
   // returns agent_user (the login, e.g. "1042"), and nothing here resolved it —
   // which is why the recordings list showed an id where a name belongs. The queue

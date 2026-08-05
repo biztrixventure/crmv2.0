@@ -78,6 +78,36 @@ const SYSTEM_SKIP = new Set([
 const axios = require('axios');
 const logger = require('./logger');
 
+// ── one unreachable box must not slow every lookup ──────────────────────────
+// Every search here fans out across all boxes and waits for the slowest. Measured:
+// one cluster in the estate answers nothing and simply hangs until the request
+// times out, so a phone lookup that healthy boxes finish in under a second took
+// THIRTY seconds — the whole "recordings take forever" experience, caused by a
+// box that had no answer to give anyway.
+//
+// So a box that times out is taken out of the rotation for a few minutes. Only
+// timeouts and connection failures count: an empty result or a permission error
+// is a real answer, and the box stays in. It re-tests itself automatically when
+// the window lapses, so a cluster coming back up needs no intervention.
+const BREAKER_FAILS = 2;
+const BREAKER_MS = 3 * 60 * 1000;
+const _boxHealth = new Map();   // boxId → { fails, until }
+const boxIsDown = (id) => { const h = _boxHealth.get(id); return !!(h && h.until > Date.now()); };
+const boxAnswered = (id) => { if (_boxHealth.has(id)) _boxHealth.delete(id); };
+function boxTimedOut(id, why) {
+  const h = _boxHealth.get(id) || { fails: 0, until: 0 };
+  h.fails += 1;
+  if (h.fails >= BREAKER_FAILS) {
+    h.until = Date.now() + BREAKER_MS;
+    h.fails = 0;
+    logger.warn('DIALER', `box ${id} unreachable (${why}) — skipping it for ${BREAKER_MS / 60000} min`);
+  }
+  _boxHealth.set(id, h);
+}
+// A hang is what costs the reviewer time; a real answer is always fast.
+const isTimeout = (e) => e && (e.code === 'ECONNABORTED' || e.code === 'ETIMEDOUT' || e.code === 'ECONNREFUSED' || e.code === 'ENOTFOUND' || /timeout/i.test(e.message || ''));
+const BOX_TIMEOUT = 10000;
+
 // phone_number_log on one box for a phone → parsed call rows (any order). Uses
 // axios (always present) — bare global fetch isn't guaranteed on every Node.
 // The phone-number variants a call may be logged under in vicidial_log: the bare
@@ -100,12 +130,14 @@ function phoneVariants(phone) {
 async function phoneCallLogDetailed(box, phone) {
   const variants = phoneVariants(phone);
   if (!variants.length) return { rows: [], error: null };
+  if (boxIsDown(box.id)) return { rows: [], error: null };
   const params = {
     source: 'crm', user: box.user, pass: box.pass, function: 'phone_number_log',
     phone_number: variants.join(','), type: 'ALL', detail: 'ALL', stage: 'pipe',
   };
   try {
-    const r = await axios.get(`${box.base}/vicidial/non_agent_api.php`, { params, timeout: 15000, responseType: 'text' });
+    const r = await axios.get(`${box.base}/vicidial/non_agent_api.php`, { params, timeout: BOX_TIMEOUT, responseType: 'text' });
+    boxAnswered(box.id);
     const text = (typeof r.data === 'string' ? r.data : String(r.data || '')).trim();
     if (!text) return { rows: [], error: null };
     if (/NO RECORDS FOUND/i.test(text)) return { rows: [], error: null };
@@ -119,6 +151,7 @@ async function phoneCallLogDetailed(box, phone) {
     }).filter(r => r.call_date);
     return { rows, error: null };
   } catch (e) {
+    if (isTimeout(e)) boxTimedOut(box.id, 'phone_number_log');
     return { rows: [], error: { box: box.id, message: e.message, permission: false } };
   }
 }
@@ -276,11 +309,13 @@ async function recordingLookup(box, params) {
   return rows;
 }
 async function _recordingLookupRaw(box, params) {
+  if (boxIsDown(box.id)) return [];
   try {
     const r = await axios.get(`${box.base}/vicidial/non_agent_api.php`, {
       params: { source: 'crm', user: box.user, pass: box.pass, function: 'recording_lookup', stage: 'pipe', duration: 'Y', ...params },
-      timeout: 20000, responseType: 'text',
+      timeout: BOX_TIMEOUT, responseType: 'text',
     });
+    boxAnswered(box.id);
     const text = (typeof r.data === 'string' ? r.data : String(r.data || '')).trim();
     if (!text || /NO RECORDINGS|ERROR|NOTICE|PERMISSION/i.test(text)) return [];
     return text.split(/\r?\n/).filter(Boolean).map(l => {
@@ -460,6 +495,48 @@ async function listCandidatesByPhone({ phone, dateFrom, dateTo } = {}) {
     .sort((a, b) => String(a.start_time).localeCompare(String(b.start_time)));
 }
 
+/**
+ * EVERY recording tied to a customer's number — the widest honest search there is.
+ *
+ * The other phone route (listCandidatesByPhone) reads phone_number_log, which the
+ * dialer keeps only for recent days and never archives. So for anything older it
+ * finds nothing, and a reviewer sees "no recordings" for a call that plainly
+ * happened. This goes the other way round: update_lead(no_update=Y) names every
+ * LEAD that phone created on each cluster — vicidial_list is not archived — and
+ * recording_lookup then returns every leg on each of those leads.
+ *
+ * That is what finally surfaces the legs no other source can reach: the closer's
+ * CROSS-BOX leg (a different lead_id, on a different cluster, under an agent the
+ * CRM may never have mapped) and every redial of the same customer.
+ *
+ * Bounded per box so one much-dialled number cannot fan out without limit.
+ */
+async function listCandidatesByPhoneLeads({ phone, maxLeadsPerBox = 6 } = {}) {
+  const tail = phoneTail(phone);
+  if (!tail) return [];
+  const perBox = await Promise.all(BOXES.map(async (b) => {
+    let leads = [];
+    try { leads = await leadsByPhoneOnBox(b, phone, { records: 10 }); } catch { return []; }
+    const ids = [...new Set(leads.map(l => l.lead_id).filter(Boolean))].slice(0, maxLeadsPerBox);
+    const res = await Promise.all(ids.map(id => recordingLookup(b, { lead_id: id })));
+    return res.flat().map(r => ({ ...r, box_id: b.id }));
+  }));
+  const byId = new Map();
+  for (const r of perBox.flat()) {
+    const k = r.box_id + '|' + r.recording_id;
+    if (!byId.has(k)) byId.set(k, r);
+  }
+  return [...byId.values()]
+    .map(r => ({
+      box_id: r.box_id, start_time: r.start, recording_id: r.recording_id, lead_id: r.lead_id,
+      duration: r.duration, location: r.location, agent_user: r.user,
+      // the lead was found BY this number, so its legs are this customer's calls;
+      // the flag still says whether the filename carries the number itself
+      phone_matches: !!(tail && onlyDigits(r.location).includes(tail)),
+    }))
+    .sort((a, b) => String(a.start_time).localeCompare(String(b.start_time)));
+}
+
 // Direct LEAD-ID search across ALL boxes — recording_lookup accepts lead_id
 // natively, so this returns EVERY leg on the lead (fronter + closer + redials)
 // with NO agent-mapping requirement and NO phone filter: pure raw data straight
@@ -627,15 +704,17 @@ async function _leadFieldOnBox(box, leadId) {
   const key = `lf|${box.id}|${leadId}`;
   const hit = _lssCache.get(key);
   if (hit && Date.now() - hit.at < LSS_TTL) return hit.status;
+  if (boxIsDown(box.id)) return null;
   let status = null;
   try {
     const r = await axios.get(`${box.base}/vicidial/non_agent_api.php`, {
       params: { source: 'crm', user: box.user, pass: box.pass, function: 'lead_field_info', field_name: 'status', lead_id: leadId },
-      timeout: 15000, responseType: 'text',
+      timeout: BOX_TIMEOUT, responseType: 'text',
     });
+    boxAnswered(box.id);
     const text = (typeof r.data === 'string' ? r.data : String(r.data || '')).trim();
     if (text && !/^ERROR|^NOTICE/i.test(text)) status = (text.split(/\r?\n/)[0].trim() || null);
-  } catch { /* box unreachable → null */ }
+  } catch (e) { if (isTimeout(e)) boxTimedOut(box.id, 'lead_field_info'); }
   status = status ? status.toUpperCase() : null;
   _lssCache.set(key, { at: Date.now(), status });
   return status;
@@ -660,15 +739,17 @@ async function _leadFieldValue(box, leadId, field) {
   const key = `lfv|${box.id}|${leadId}|${field}`;
   const hit = _lssCache.get(key);
   if (hit && Date.now() - hit.at < LSS_TTL) return hit.val;
+  if (boxIsDown(box.id)) return null;
   let val = null;
   try {
     const r = await axios.get(`${box.base}/vicidial/non_agent_api.php`, {
       params: { source: 'crm', user: box.user, pass: box.pass, function: 'lead_field_info', field_name: field, lead_id: leadId },
-      timeout: 12000, responseType: 'text',
+      timeout: BOX_TIMEOUT, responseType: 'text',
     });
+    boxAnswered(box.id);
     const text = (typeof r.data === 'string' ? r.data : String(r.data || '')).trim();
     if (text && !/^ERROR|^NOTICE/i.test(text)) val = (text.split(/\r?\n/)[0].trim() || null);
-  } catch { /* box unreachable → null */ }
+  } catch (e) { if (isTimeout(e)) boxTimedOut(box.id, 'lead_field_info'); }
   _lssCache.set(key, { at: Date.now(), val });
   return val;
 }
@@ -965,8 +1046,12 @@ async function resolveDisposition({ phone, vendorCode, leadId, boxId, startTime,
 async function leadsByPhoneOnBox(box, phone, { records = 10 } = {}) {
   const variants = phoneVariants(phone);
   if (!box || !variants.length) return [];
-  const out = [];
-  for (const v of variants) {
+  if (boxIsDown(box.id)) return [];
+  // The two number forms are asked CONCURRENTLY. They used to run one after the
+  // other, so a box that hangs cost two full timeouts back to back — that alone
+  // was 30 seconds on every phone search in the estate.
+  const perVariant = await Promise.all(variants.map(async (v) => {
+    const found = [];
     try {
       const r = await axios.get(`${box.base}/vicidial/non_agent_api.php`, {
         params: {
@@ -974,10 +1059,11 @@ async function leadsByPhoneOnBox(box, phone, { records = 10 } = {}) {
           search_method: 'PHONE_NUMBER', search_location: 'SYSTEM',
           phone_number: v, records, no_update: 'Y',
         },
-        timeout: 15000, responseType: 'text',
+        timeout: BOX_TIMEOUT, responseType: 'text',
       });
+      boxAnswered(box.id);
       const text = (typeof r.data === 'string' ? r.data : String(r.data || '')).trim();
-      if (!text || /NO MATCHES FOUND/i.test(text)) continue;
+      if (!text || /NO MATCHES FOUND/i.test(text)) return found;
       for (const line of text.split(/\r?\n/)) {
         if (!/LEADS FOUND IN THE SYSTEM/i.test(line)) continue;
         // Split from the FIRST PIPE, not the first colon — "NOTICE:" carries a
@@ -988,12 +1074,15 @@ async function leadsByPhoneOnBox(box, phone, { records = 10 } = {}) {
         const cells = line.slice(pipe + 1).split('|').map(s => s.trim());
         const [user, lead_id, vendor_lead_code, lphone, list_id] = cells;
         if (!/^\d+$/.test(String(lead_id || ''))) continue;
-        out.push({ box: box.id, prefix: box.prefix, user, lead_id: String(lead_id), vendor_lead_code, phone: lphone, list_id });
+        found.push({ box: box.id, prefix: box.prefix, user, lead_id: String(lead_id), vendor_lead_code, phone: lphone, list_id });
       }
-      if (out.length) break;          // a 10-digit hit is enough; don't re-ask with 1+10
-    } catch { /* box unreachable → try the next variant/box */ }
-  }
-  return out;
+    } catch (e) { if (isTimeout(e)) boxTimedOut(box.id, 'update_lead'); }
+    return found;
+  }));
+  // both forms can name the same lead — one entry per lead_id
+  const byLead = new Map();
+  for (const hit of perVariant.flat()) if (!byLead.has(hit.lead_id)) byLead.set(hit.lead_id, hit);
+  return [...byLead.values()];
 }
 
 /**
@@ -1171,7 +1260,7 @@ module.exports = {
   refreshBoxes,
   lookupCallsByPhone, lookupCallsByPhoneDiag, latestDisposition, leadStatusByCode, leadAgentByCode, findSaleRecording,
   resolveLeadIdByAgentDate,
-  listCandidatesForSale, listCandidatesByPhone, listCandidatesByLeadId, locationForRecording,
+  listCandidatesForSale, listCandidatesByPhone, listCandidatesByLeadId, listCandidatesByPhoneLeads, locationForRecording,
   listDayRecordings, phoneFromLocation, listDayDispositions, leadStatusSearch,
   leadFieldStatus, leadFieldCustomer, fillLeadStatuses, resolveDispos,
   leadCustomFields, listCustomFieldNames, discoverCustomFieldNames, leadFromVendorCode, parseVendorCode,
