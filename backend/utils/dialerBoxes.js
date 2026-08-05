@@ -14,7 +14,48 @@ const FALLBACK_BOXES = [
 ];
 // Mutable live copies (the functions below read these synchronously).
 let BOXES = FALLBACK_BOXES.map(b => ({ ...b }));
-let BOX_BY_PREFIX = Object.fromEntries(FALLBACK_BOXES.map(b => [b.prefix, b.id]));
+
+// PREFIX → **every** box carrying it. Two live boxes really do share one prefix
+// (wavetechpk and wavetech are both WTI), and the old prefix→id object silently
+// kept whichever loaded last: every lead on the other cluster was looked up on
+// the wrong box, came back empty, and fell through to the phone search. WTI is
+// the largest group in the estate, so that was most of the misses.
+let BOXES_BY_PREFIX = new Map();
+function indexPrefixes() {
+  const m = new Map();
+  for (const b of BOXES) {
+    const p = String(b.prefix || '').toUpperCase();
+    if (!p) continue;
+    if (!m.has(p)) m.set(p, []);
+    m.get(p).push(b.id);
+  }
+  BOXES_BY_PREFIX = m;
+}
+indexPrefixes();
+const boxesForPrefix = (prefix) => (BOXES_BY_PREFIX.get(String(prefix || '').toUpperCase()) || [])
+  .map(id => BOXES.find(b => b.id === id)).filter(Boolean);
+
+/**
+ * The ONE way a vendor_lead_code is read. Two regexes used to disagree about
+ * whether the prefix was required (`[A-Za-z]+` vs `[A-Za-z]*`), so the 189
+ * digits-only codes in the table took different paths in different callers.
+ * One rule now: the prefix is OPTIONAL, and `exact` says whether it actually
+ * named a box.
+ *   exact === true  → boxes are the clusters this lead really lives on
+ *   exact === false → nothing named a box (bare digits, or a prefix no box
+ *                     claims). Callers decide: a RECORDING search may widen to
+ *                     every box as long as it keeps only phone-matching rows,
+ *                     a DISPOSITION lookup must not guess (a lead_id is only
+ *                     unique per cluster — the same number is a different
+ *                     customer elsewhere).
+ */
+function parseVendorCode(code) {
+  const m = String(code || '').match(/^([A-Za-z]*)(\d+)$/);
+  if (!m) return null;
+  const prefix = (m[1] || '').toUpperCase();
+  const boxes = prefix ? boxesForPrefix(prefix) : [];
+  return { prefix, leadId: m[2], boxes, exact: boxes.length > 0 };
+}
 
 // Statuses that are NOT a closer outcome — no customer contact (A/N/DAIR…),
 // in-progress/system states, and the transfer event itself (XFER and friends).
@@ -87,7 +128,7 @@ async function phoneCallLog(box, phone) {
   return (await phoneCallLogDetailed(box, phone)).rows;
 }
 
-// Refresh the live BOXES + BOX_BY_PREFIX from the vicidial_boxes table so a
+// Refresh the live BOXES + prefix index from the vicidial_boxes table so a
 // superadmin can change a dialer's URL / creds / prefix from Settings. Keeps the
 // current (hardcoded/seed) values if the table is missing or empty.
 async function refreshBoxes() {
@@ -98,7 +139,7 @@ async function refreshBoxes() {
       .eq('is_active', true).order('sort_order', { ascending: true });
     if (error || !data || !data.length) return;
     BOXES = data.map(b => ({ id: b.name, base: String(b.base_url || '').replace(/\/+$/, ''), user: b.api_user, pass: b.api_pass, prefix: (b.prefix || '').toUpperCase(), validationUrl: String(b.validation_url || '').trim() }));
-    BOX_BY_PREFIX = Object.fromEntries(BOXES.map(b => [b.prefix, b.id]));
+    indexPrefixes();
   } catch { /* keep current values */ }
 }
 // Load once on boot, then keep fresh (60s) — cheap single-row read.
@@ -106,54 +147,73 @@ refreshBoxes();
 setInterval(refreshBoxes, 60 * 1000).unref?.();
 
 // The current vendor-code prefixes (for building dispo-match candidates).
-const boxPrefixes = () => Object.keys(BOX_BY_PREFIX);
+const boxPrefixes = () => [...BOXES_BY_PREFIX.keys()];
 
 // The lead's CURRENT status persists in vicidial_list (NOT archived like the call
 // log), so for a coded transfer we can read the disposition directly by lead_id —
 // works for OLD transfers the call-log lookup can no longer see. Returns the raw
 // status code, or null. (Cross-cluster note: this is the status on the lead's own
 // box; for same-box closers it IS the closer's disposition.)
-async function leadStatusByCode(code) {
-  const m = String(code || '').match(/^([A-Za-z]*)(\d+)$/);
-  if (!m) return null;
-  const box = BOXES.find(b => b.id === BOX_BY_PREFIX[(m[1] || '').toUpperCase()]);
-  const leadId = m[2];
-  if (!box || !leadId) return null;
+// One lead field, read LIVE (no cache) — a disposition is exactly the thing a
+// "fetch dispo" click expects to be current.
+async function _leadFieldFresh(box, leadId, field) {
   try {
     const r = await axios.get(`${box.base}/vicidial/non_agent_api.php`, {
-      params: { source: 'crm', user: box.user, pass: box.pass, function: 'lead_field_info', field_name: 'status', lead_id: leadId },
+      params: { source: 'crm', user: box.user, pass: box.pass, function: 'lead_field_info', field_name: field, lead_id: leadId },
       timeout: 15000, responseType: 'text',
     });
     const text = (typeof r.data === 'string' ? r.data : String(r.data || '')).trim();
     if (!text || /^ERROR|^NOTICE/m.test(text)) return null;
-    const status = text.split(/\r?\n/)[0].trim();
-    // Surface the lead's real disposition INCLUDING call-outcome codes (A/N/DAIR…)
-    // — only true in-progress/system states are skipped. This is the closer's
-    // recorded outcome on a transferred lead; "no record without a dispo".
-    return (status && !SYSTEM_SKIP.has(status.toUpperCase())) ? status : null;
+    return text.split(/\r?\n/)[0].trim() || null;
   } catch { return null; }
+}
+
+/**
+ * WHICH box a coded lead is really on.
+ *
+ * A lead_id is unique per CLUSTER, not across the estate — measured: WTI493911
+ * is one customer on wavetechpk and a completely different one, from a year
+ * earlier, on wavetech. So when a prefix is claimed by more than one box the
+ * code alone cannot identify the lead, and the customer's phone has to settle
+ * it. No phone to check with → no box, because reporting a stranger's
+ * disposition as this call's is worse than reporting none.
+ */
+async function boxForCode(p, phone) {
+  if (!p || !p.boxes.length) return null;
+  if (p.boxes.length === 1) return p.boxes[0];
+  const tail = phoneTail(phone);
+  if (!tail) return null;
+  for (const box of p.boxes) {
+    const lp = await _leadFieldValue(box, p.leadId, 'phone_number');   // identity — safe to cache
+    if (lp && phoneTail(lp) === tail) return box;
+  }
+  return null;
+}
+
+async function leadStatusByCode(code, { phone } = {}) {
+  const p = parseVendorCode(code);
+  // No prefix / a prefix no box claims → we will NOT pick a box for it.
+  if (!p || !p.exact) return null;
+  const box = await boxForCode(p, phone);
+  if (!box) return null;
+  const status = await _leadFieldFresh(box, p.leadId, 'status');
+  // Surface the lead's real disposition INCLUDING call-outcome codes (A/N/DAIR…)
+  // — only true in-progress/system states are skipped. This is the closer's
+  // recorded outcome on a transferred lead; "no record without a dispo".
+  return (status && !SYSTEM_SKIP.has(status.toUpperCase())) ? status : null;
 }
 
 // The lead's last agent (vicidial_list.user) by code — used to attribute a
 // fetched-by-lead-code disposition to a closer so their name shows. Persists in
 // vicidial_list like the status does, so it works for old leads too.
-async function leadAgentByCode(code) {
-  const m = String(code || '').match(/^([A-Za-z]*)(\d+)$/);
-  if (!m) return null;
-  const box = BOXES.find(b => b.id === BOX_BY_PREFIX[(m[1] || '').toUpperCase()]);
-  const leadId = m[2];
-  if (!box || !leadId) return null;
-  try {
-    const r = await axios.get(`${box.base}/vicidial/non_agent_api.php`, {
-      params: { source: 'crm', user: box.user, pass: box.pass, function: 'lead_field_info', field_name: 'user', lead_id: leadId },
-      timeout: 15000, responseType: 'text',
-    });
-    const text = (typeof r.data === 'string' ? r.data : String(r.data || '')).trim();
-    if (!text || /^ERROR|^NOTICE/m.test(text)) return null;
-    const user = text.split(/\r?\n/)[0].trim();
-    // VICIdial's system/non-agent owners aren't real closers
-    return (user && !/^(VDAD|VDCL|admin|-+)$/i.test(user)) ? user : null;
-  } catch { return null; }
+async function leadAgentByCode(code, { phone } = {}) {
+  const p = parseVendorCode(code);
+  if (!p || !p.exact) return null;          // same rule as leadStatusByCode — never guess the box
+  const box = await boxForCode(p, phone);
+  if (!box) return null;
+  const user = await _leadFieldFresh(box, p.leadId, 'user');
+  // VICIdial's system/non-agent owners aren't real closers
+  return (user && !/^(VDAD|VDCL|admin|-+)$/i.test(user)) ? user : null;
 }
 
 // Pull every call for a phone across all boxes, newest first.
@@ -279,11 +339,14 @@ async function findSaleRecording({ code, phone, agentIds = [], date, dialerAt, c
   //    ONLY the closer's own legs (drops the fronter's original call).
   let pool = [];
   let fromLeadId = false;
-  const m = String(code || '').match(/^([A-Za-z]+)(\d+)$/);
-  if (m) {
-    const box = BOXES.find(b => b.id === BOX_BY_PREFIX[(m[1] || '').toUpperCase()]);
-    if (box) {
-      const raw = await recordingLookup(box, { lead_id: m[2] });
+  const parsed = parseVendorCode(code);
+  if (parsed && parsed.exact) {
+    // EVERY box carrying this prefix — two clusters share WTI, and the lead only
+    // lives on one of them. When more than one box answers, the same lead_id is
+    // a DIFFERENT customer on the other cluster, so the phone decides.
+    let raw = (await Promise.all(parsed.boxes.map(b => recordingLookup(b, { lead_id: parsed.leadId })))).flat();
+    if (parsed.boxes.length > 1) raw = raw.filter(matchesPhone);
+    if (raw.length) {
       raw.forEach(r => addDay(r.start));   // real call day, from ANY leg on this lead
       const mine = raw.filter(byCloser);
       if (mine.length) { pool = mine; fromLeadId = true; }
@@ -292,8 +355,8 @@ async function findSaleRecording({ code, phone, agentIds = [], date, dialerAt, c
       // to the closer empties the pool. Fall through to the agent+date branch
       // (queries every box by the closer's agent) instead of dead-ending on the
       // fronter's call.
-      else if (raw.length) {
-        logger.info('PORTAL_REC', `lead_id ${m[1]}${m[2]}: no closer leg on lead box (cross-box?) — falling through to agent+date`);
+      else {
+        logger.info('PORTAL_REC', `lead_id ${parsed.prefix}${parsed.leadId}: no closer leg on lead box (cross-box?) — falling through to agent+date`);
       }
     }
   }
@@ -337,10 +400,20 @@ async function listCandidatesForSale({ code, phone, agentIds = [], date, dialerA
   const byId = new Map();   // box|recording_id -> row
   const add = (r, boxId) => { const k = boxId + '|' + r.recording_id; if (!byId.has(k)) byId.set(k, { ...r, box_id: boxId }); };
 
-  const m = String(code || '').match(/^([A-Za-z]+)(\d+)$/);
-  if (m) {
-    const box = BOXES.find(b => b.id === BOX_BY_PREFIX[m[1].toUpperCase()]);
-    if (box) { const raw = await recordingLookup(box, { lead_id: m[2] }); raw.forEach(r => { addDay(r.start); add(r, box.id); }); }
+  // Lead-id route. A code identifies a lead outright only when exactly ONE box
+  // claims its prefix. Otherwise — two clusters share the prefix, or there is no
+  // prefix at all (bare digits) — the lead_id belongs to a different customer
+  // somewhere else too, so we still ask every candidate box but keep only the
+  // legs whose filename carries THIS customer's phone.
+  const parsed = parseVendorCode(code);
+  if (parsed) {
+    const boxes = parsed.exact ? parsed.boxes : (tail ? BOXES : []);
+    const needPhone = !parsed.exact || boxes.length > 1;
+    const res = await Promise.all(boxes.map(b => recordingLookup(b, { lead_id: parsed.leadId }).then(rows => ({ b, rows }))));
+    res.forEach(({ b, rows }) => rows.forEach(r => {
+      if (needPhone && !(tail && onlyDigits(r.location).includes(tail))) return;
+      addDay(r.start); add(r, b.id);
+    }));
   }
   if (agentSet.size && days.size && tail) {
     const ids = [...agentSet], dl = [...days];
@@ -391,24 +464,34 @@ async function listCandidatesByPhone({ phone, dateFrom, dateTo } = {}) {
 // natively, so this returns EVERY leg on the lead (fronter + closer + redials)
 // with NO agent-mapping requirement and NO phone filter: pure raw data straight
 // off each dialer. Optional date range filters on the recording start day.
-async function listCandidatesByLeadId(leadId, { dateFrom, dateTo } = {}) {
+// `boxIds` scopes the search to the cluster(s) the lead is KNOWN to live on (a
+// lead_id is unique per box, so an unscoped search can return another cluster's
+// customer under the same number). `phone`, when given, additionally keeps only
+// legs whose filename carries that number — the safety net for a lead reached
+// without a prefix. Both optional: the compliance manual search passes neither
+// and still gets the raw cross-box dump it is meant to.
+async function listCandidatesByLeadId(leadId, { dateFrom, dateTo, boxIds = null, phone = null } = {}) {
   const id = onlyDigits(leadId);
   if (!id) return [];
   const from = dateFrom ? String(dateFrom).slice(0, 10) : null;
   const to   = dateTo   ? String(dateTo).slice(0, 10)   : null;
+  const tail = phone ? phoneTail(phone) : null;
+  const boxes = (boxIds && boxIds.length) ? BOXES.filter(b => boxIds.includes(b.id)) : BOXES;
   const byId = new Map();
-  const res = await Promise.all(BOXES.map(b => recordingLookup(b, { lead_id: id }).then(rows => ({ b, rows }))));
+  const res = await Promise.all(boxes.map(b => recordingLookup(b, { lead_id: id }).then(rows => ({ b, rows }))));
   res.forEach(({ b, rows }) => rows.forEach(r => {
     const day = String(r.start || '').slice(0, 10);
     if (from && day && day < from) return;
     if (to && day && day > to) return;
+    if (tail && !onlyDigits(r.location).includes(tail)) return;
     const k = b.id + '|' + r.recording_id;
     if (!byId.has(k)) byId.set(k, { ...r, box_id: b.id });
   }));
   return [...byId.values()]
     .map(r => ({
       box_id: r.box_id, start_time: r.start, recording_id: r.recording_id, lead_id: r.lead_id,
-      duration: r.duration, location: r.location, agent_user: r.user, phone_matches: false,
+      duration: r.duration, location: r.location, agent_user: r.user,
+      phone_matches: !!(tail && onlyDigits(r.location).includes(tail)),
     }))
     .sort((a, b) => String(a.start_time).localeCompare(String(b.start_time)));
 }
@@ -835,7 +918,7 @@ async function resolveDisposition({ phone, vendorCode, leadId, boxId, startTime,
 
   // 2. the lead's current status — survives archiving, so old calls still answer
   try {
-    if (vendorCode) { const s = usable(await leadStatusByCode(vendorCode)); if (s) return { code: s, source: 'lead_status' }; }
+    if (vendorCode) { const s = usable(await leadStatusByCode(vendorCode, { phone })); if (s) return { code: s, source: 'lead_status' }; }
   } catch { /* next route */ }
   try {
     if (leadId) {
@@ -953,13 +1036,17 @@ async function findLeadByPhone({ phone, agentIds = [], preferBoxId = null } = {}
  * box prefix + lead_id. Without this, every CRM-sourced task had no lead to look
  * up, so dialer-mapped columns silently filled nothing.
  *
- * Same parse as leadStatusByCode: letters = prefix, digits = lead_id.
+ * Same parse as leadStatusByCode (parseVendorCode — one rule for both).
+ * `boxIds` carries EVERY cluster on this prefix, because two of them share WTI;
+ * `boxId` stays the first for the callers that only want one. `exact` is false
+ * when the code named no box at all (bare digits) — then `boxIds` is empty and
+ * the caller must fall back to a phone-verified search rather than a guess.
  */
 function leadFromVendorCode(code) {
-  const m = String(code || '').match(/^([A-Za-z]*)(\d+)$/);
-  if (!m) return null;
-  const boxId = BOX_BY_PREFIX[(m[1] || '').toUpperCase()] || null;
-  return m[2] ? { boxId, leadId: m[2] } : null;
+  const p = parseVendorCode(code);
+  if (!p) return null;
+  const boxIds = p.boxes.map(b => b.id);
+  return { boxId: boxIds[0] || null, boxIds, leadId: p.leadId, exact: p.exact };
 }
 
 /** Custom-field names across the boxes for the given lists — the mapping menu. */
@@ -1087,6 +1174,6 @@ module.exports = {
   listCandidatesForSale, listCandidatesByPhone, listCandidatesByLeadId, locationForRecording,
   listDayRecordings, phoneFromLocation, listDayDispositions, leadStatusSearch,
   leadFieldStatus, leadFieldCustomer, fillLeadStatuses, resolveDispos,
-  leadCustomFields, listCustomFieldNames, discoverCustomFieldNames, leadFromVendorCode,
+  leadCustomFields, listCustomFieldNames, discoverCustomFieldNames, leadFromVendorCode, parseVendorCode,
   leadsByPhoneOnBox, findLeadByPhone, annotateHangups, resolveDisposition,
 };

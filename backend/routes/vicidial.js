@@ -679,10 +679,13 @@ async function fetchAndApplyDispo(tr) {
     // 2) By lead code — status persists in vicidial_list even after the call log
     //    archives. Also pull the lead's agent so the CLOSER's name is attributed.
     if (tr.vicidial_vendor_code) {
-      const code = await leadStatusByCode(tr.vicidial_vendor_code);
+      // the phone is passed so an ambiguous prefix (two boxes share WTI) resolves
+      // to the box this customer's lead is actually on, not the other cluster's
+      // different customer holding the same lead_id
+      const code = await leadStatusByCode(tr.vicidial_vendor_code, { phone: norm });
       if (code) {
         const dispoName = await lookupDispoName(tr.company_id, code) || code;
-        const agentUser = await leadAgentByCode(tr.vicidial_vendor_code);
+        const agentUser = await leadAgentByCode(tr.vicidial_vendor_code, { phone: norm });
         const { userId: closerUserId } = agentUser ? await resolveAgent(agentUser) : { userId: null };
         await applyCloserDispo({ transfer: tr, dispoCompanyId: tr.company_id, closerUserId, dispoName, rawDispo: code, talk: NaN });
         return { ok: true, source: 'lead', disposition_name: dispoName, agent: agentUser || null };
@@ -1238,7 +1241,7 @@ api.post('/backfill/coded', superOnly, asyncHandler(async (req, res) => {
   for (const tr of (rows || [])) {
     lastCursor = tr.created_at;
     try {
-      const code = await leadStatusByCode(tr.vicidial_vendor_code);   // real status or null
+      const code = await leadStatusByCode(tr.vicidial_vendor_code, { phone: tr.normalized_phone });   // real status or null
       if (code) {
         const dispoName = await lookupDispoName(tr.company_id, code) || code;
         await applyCloserDispo({ transfer: tr, dispoCompanyId: tr.company_id, closerUserId: null, dispoName, rawDispo: code, talk: NaN });

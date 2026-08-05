@@ -726,11 +726,120 @@ router.post('/assignments/:id/assign', asyncHandler(async (req, res) => {
   res.json({ assignment: data });
 }));
 
+// ── the dialer lead behind a QA task — ONE resolver, used by every route ──────
+//
+// A task reaches its lead by three routes, most certain first:
+//   1. recording_ref.lead_id   — the clip itself named it (RCM / Live / day tasks)
+//   2. the transfer's vicidial_vendor_code (prefix + lead_id) — 89% of CRM tasks
+//   3. ask the dialer by phone — update_lead(no_update=Y), a read-only lookup
+//
+// Route 3 is the expensive one, so its answer is ATTACHED to the assignment (and
+// filled into the transfer's empty vendor code) — one lookup ever, not one per
+// open. Attaching invalidates the cached candidate list: that list was built
+// without a lead, and leaving it in place would make the fix look like it did
+// nothing for the next six hours.
+//
+// An AMBIGUOUS phone match is never persisted. Writing the wrong lead onto a
+// transfer mislinks a customer's whole call history — far worse than a blank.
+async function resolveAssignmentLead(a, { phone = null, allowPhoneLookup = true } = {}) {
+  const rec = a.recording_ref || {};
+  let leadId = rec.lead_id || null;
+  let boxId = rec.box_id || null;
+  let boxIds = boxId ? [boxId] : [];
+  let linkedBy = leadId ? (rec.linked_by || 'recording') : null;
+  let resolved = null;
+
+  let transferId = a.transfer_id || null;
+  let sale = null;
+  if (a.sale_id) {
+    const { data: s } = await supabaseAdmin.from('sales')
+      .select('id, transfer_id, vicidial_vendor_code, customer_phone').eq('id', a.sale_id).maybeSingle();
+    sale = s || null;
+    transferId = transferId || s?.transfer_id || null;
+  }
+  let transfer = null;
+  if (transferId) {
+    const { data: t } = await supabaseAdmin.from('transfers')
+      .select('id, vicidial_vendor_code, normalized_phone').eq('id', transferId).maybeSingle();
+    transfer = t || null;
+  }
+  phone = phone || a.customer_phone || sale?.customer_phone || transfer?.normalized_phone || rec.phone || null;
+
+  // 2nd route: a vendor_lead_code. boxIds carries EVERY cluster on that prefix —
+  // two of them share WTI, and the lead is on exactly one.
+  //
+  // The SALE's code first when the task is sale-anchored: backfillLeadIds writes
+  // the closer's own leg there, while the transfer's code is the FRONTER's leg.
+  // For a closer review those are different calls, and the sale's is the one
+  // being scored.
+  if (!leadId) {
+    for (const [code, src] of [[sale?.vicidial_vendor_code, 'sale_code'], [transfer?.vicidial_vendor_code, 'vendor_code']]) {
+      const parsed = code ? leadFromVendorCode(code) : null;
+      if (!parsed || !parsed.leadId) continue;
+      leadId = parsed.leadId;
+      boxIds = parsed.boxIds;
+      boxId = boxId || parsed.boxId;
+      linkedBy = parsed.exact ? src : `${src}_unprefixed`;
+      break;
+    }
+  }
+
+  // 3rd route: ASK THE DIALER BY PHONE, narrowed to the evaluated agent's own
+  // dialer ids so a number dialled by several centres resolves to THIS call.
+  if (!leadId && phone && allowPhoneLookup) {
+    // subject_agent is sometimes the dialer id and sometimes the person's name,
+    // so try it BOTH ways: as an id it goes straight in; as a name it resolves
+    // through the profile's mapped ids (a closer can hold several — WaveTech
+    // agents are dual-id). .overlaps is how the rest of this file matches them.
+    const agentIds = new Set();
+    const subject = String(a.subject_agent || rec.agent_user || '').trim();
+    if (subject) {
+      if (/^[\w-]{1,12}$/.test(subject)) agentIds.add(subject);
+      const { data: byId } = await supabaseAdmin.from('user_profiles')
+        .select('vicidial_agent_ids').overlaps('vicidial_agent_ids', [subject, subject.toUpperCase()]).limit(2);
+      const { data: byName } = await supabaseAdmin.from('user_profiles')
+        .select('vicidial_agent_ids, first_name, last_name')
+        .not('vicidial_agent_ids', 'is', null).limit(500);
+      for (const p of (byId || [])) for (const id of (p.vicidial_agent_ids || [])) agentIds.add(String(id));
+      const want = subject.toLowerCase();
+      for (const p of (byName || [])) {
+        const full = `${p.first_name || ''} ${p.last_name || ''}`.trim().toLowerCase();
+        if (full && full === want) for (const id of (p.vicidial_agent_ids || [])) agentIds.add(String(id));
+      }
+    }
+    try {
+      resolved = await findLeadByPhone({ phone, agentIds: [...agentIds], preferBoxId: boxId });
+    } catch (e) { logger.warn('QA', `phone→lead ${a.id}: ${e.message}`); }
+    if (resolved && resolved.confidence !== 'ambiguous') {
+      leadId = resolved.lead_id;
+      boxId = resolved.box || boxId;
+      boxIds = boxId ? [boxId] : [];
+      linkedBy = `phone:${resolved.confidence}`;
+      const nextRef = { ...rec, box_id: boxId, lead_id: leadId, linked_by: linkedBy, linked_at: new Date().toISOString() };
+      await supabaseAdmin.from('qa_assignments').update({ recording_ref: nextRef }).eq('id', a.id);
+      // the CRM row's code is FILLED IN when empty, never overwritten — the rest
+      // of the CRM (recordings, dispo recovery) trusts it to identify the call
+      if (resolved.prefix) {
+        const vendor = `${resolved.prefix}${leadId}`;
+        if (transfer && !String(transfer.vicidial_vendor_code || '').trim()) {
+          await supabaseAdmin.from('transfers').update({ vicidial_vendor_code: vendor }).eq('id', transfer.id);
+        }
+        if (sale && !String(sale.vicidial_vendor_code || '').trim()) {
+          await supabaseAdmin.from('sales').update({ vicidial_vendor_code: vendor }).eq('id', sale.id);
+        }
+      }
+      cache.invalidate('qa_candidates', a.id);   // that list was built lead-less
+      logger.info('QA', `linked assignment ${a.id} → lead ${leadId} on ${boxId} (${linkedBy})`);
+    }
+  }
+  return { leadId, boxId, boxIds, linkedBy, phone, transfer, resolved };
+}
+
 // ── recording candidates for an assignment (reuses the shared dialer lib) ──────
 router.get('/assignments/:id/candidates', asyncHandler(async (req, res) => {
   if (!(await can(req, 'view_qa_queue'))) return res.status(403).json({ error: 'Forbidden' });
   const { data: a } = await supabaseAdmin.from('qa_assignments')
-    .select('id, company_id, method, subject_role, transfer_id, sale_id, status, assigned_to, recording_ref, customer_phone, recording_date, created_at')
+    .select('id, company_id, method, subject_role, transfer_id, sale_id, status, assigned_to, recording_ref, customer_phone, recording_date, created_at, subject_agent')
     .eq('id', req.params.id).maybeSingle();
   if (!a) return res.status(404).json({ error: 'Assignment not found' });
   const allowed = await allowedCompanyIds(req);
@@ -761,16 +870,26 @@ router.get('/assignments/:id/candidates', asyncHandler(async (req, res) => {
   // What the search actually looked for — returned so the UI can explain an empty
   // list instead of showing a bare "no recordings" the reviewer cannot act on.
   let diag = null;
-  if (a.recording_ref && a.recording_ref.recording_id) {
+  // ROUTE-level, not block-level: the hangup pass below reads rec?.phone. It used
+  // to be declared inside the branch, so that read threw a ReferenceError which
+  // the surrounding try/catch swallowed — no clip ever got a hangup label.
+  const rec = a.recording_ref || null;
+  if (rec && rec.recording_id) {
     // day-recording assignment — the EXACT clip is known. Show it + its grouped
     // parts (all dials of this number by this agent) + any other legs on the lead.
-    const rec = a.recording_ref;
     const push = (x) => { if (x && x.recording_id && !candidates.some(c => c.box_id === x.box_id && c.recording_id === x.recording_id)) candidates.push(x); };
     push({ box_id: rec.box_id, start_time: rec.start_time, recording_id: rec.recording_id, lead_id: rec.lead_id, duration: rec.duration, location: rec.location, agent_user: rec.agent_user, phone_matches: true });
     for (const p of (rec.parts || [])) push({ box_id: p.box_id, start_time: p.start_time, recording_id: p.recording_id, lead_id: p.lead_id, duration: p.duration, location: p.location, agent_user: p.agent_user, phone_matches: true });
+    // Sibling legs on the same lead. Scoped to the box the clip came from — the
+    // lead_id is unique per cluster only, so an unscoped sweep can pull a
+    // different customer who happens to hold that number on another box.
     const leadIds = [...new Set([rec.lead_id, ...(rec.parts || []).map(p => p.lead_id)].filter(Boolean))];
+    const leadBoxIds = [...new Set([rec.box_id, ...(rec.parts || []).map(p => p.box_id)].filter(Boolean))];
+    // No box on the clip → the sweep is estate-wide, so the phone has to confirm
+    // each leg belongs to this customer.
+    const scope = leadBoxIds.length ? { boxIds: leadBoxIds } : { phone: a.customer_phone || rec.phone || null };
     for (const lid of leadIds) {
-      try { const legs = await listCandidatesByLeadId(lid); for (const l of legs) push(l); } catch { /* keep known clips */ }
+      try { const legs = await listCandidatesByLeadId(lid, scope); for (const l of legs) push(l); } catch { /* keep known clips */ }
     }
     candidates.sort((x, y) => String(x.start_time).localeCompare(String(y.start_time)));
   } else {
@@ -815,6 +934,31 @@ router.get('/assignments/:id/candidates', asyncHandler(async (req, res) => {
 
     const byKey = new Map();
     const merge = (rows) => { for (const r of (rows || [])) { const k = `${r.box_id}|${r.recording_id}`; if (!byKey.has(k)) byKey.set(k, r); } };
+
+    // ── source 0: THE LEAD ITSELF ──────────────────────────────────────────────
+    // The exact route, and the one that needs no agent mapping and no date guess:
+    // recording_lookup takes a lead_id natively and returns every leg on it. The
+    // lead comes from the task's own recording_ref, the transfer's vendor code,
+    // or — when neither exists — a phone lookup whose answer is PERSISTED, so a
+    // task pays for that once and is lead-linked from then on (Live tasks
+    // included: they carry recording_ref.lead_id already).
+    let lead = null;
+    try { lead = await resolveAssignmentLead(a, { phone }); } catch (e) { logger.warn('QA', `candidates lead: ${e.message}`); }
+    // it looks at the sale row too, so it can find a phone this branch could not
+    if (!phone && lead?.phone) phone = lead.phone;
+    if (lead?.leadId) {
+      // A lead_id identifies the call outright only when exactly ONE box is in
+      // play. Two clusters share the WTI prefix and reuse lead ids between them,
+      // so anything less certain has to be confirmed by the customer's phone.
+      const scoped = lead.boxIds?.length === 1
+        ? { boxIds: lead.boxIds }
+        : { boxIds: lead.boxIds?.length ? lead.boxIds : null, phone };
+      try { merge(await listCandidatesByLeadId(lead.leadId, scoped)); }
+      catch (e) { logger.warn('QA', `candidates lead_id: ${e.message}`); }
+    }
+
+    // ── source 1: vendor code + the mapped agents' day (kept — it also catches
+    // the closer's CROSS-BOX leg, which never appears under the lead's own id) ──
     try { merge(await listCandidatesForSale({ code: leadCode, phone, agentIds, date: searchDate, dialerAt: createdAt })); }
     catch (e) { logger.warn('QA', `candidates resolve: ${e.message}`); }
     // mapping-free phone catch-all, bounded to the call day ±1 so a repeat
@@ -836,7 +980,13 @@ router.get('/assignments/:id/candidates', asyncHandler(async (req, res) => {
         catch (e) { logger.warn('QA', `candidates phone wide: ${e.message}`); }
       }
     }
-    diag = { phone: phone ? `••••${String(phone).slice(-4)}` : null, date: searchDate, lead_code: !!leadCode, mapped_agents: agentIds.length };
+    diag = {
+      phone: phone ? `••••${String(phone).slice(-4)}` : null, date: searchDate,
+      lead_code: !!leadCode, mapped_agents: agentIds.length,
+      // which lead was searched and how it was reached — so an empty list can say
+      // "no dialer lead is linked" instead of leaving the reviewer guessing
+      lead_id: lead?.leadId || null, linked_by: lead?.linkedBy || null,
+    };
     // tag each clip's leg by whose dialer id recorded it (fronter vs closer)
     candidates = [...byKey.values()]
       .map(c => {
@@ -2854,77 +3004,10 @@ router.get('/assignments/:id/vici-fields', asyncHandler(async (req, res) => {
   // transfer or sale, and their lead lives in the transfer's vicidial_vendor_code
   // (box prefix + lead_id). Without this fallback three quarters of all tasks had
   // no lead at all, so every dialer-mapped column stayed empty with no clue why.
-  const rec = a.recording_ref || {};
-  let leadId = rec.lead_id || null;
-  let boxId = rec.box_id || null;
-  let linkedBy = leadId ? (rec.linked_by || 'recording') : null;
-  let transferId = a.transfer_id || null;
-  let phone = a.customer_phone || null;
-
-  if (!transferId && a.sale_id) {
-    const { data: s } = await supabaseAdmin.from('sales').select('transfer_id').eq('id', a.sale_id).maybeSingle();
-    transferId = s?.transfer_id || null;
-  }
-  let transfer = null;
-  if (transferId) {
-    const { data: t } = await supabaseAdmin.from('transfers')
-      .select('id, vicidial_vendor_code, normalized_phone').eq('id', transferId).maybeSingle();
-    transfer = t || null;
-    phone = phone || t?.normalized_phone || null;
-  }
-
-  // 2nd route: the transfer's vendor_lead_code (box prefix + lead_id).
-  if (!leadId && transfer) {
-    const parsed = leadFromVendorCode(transfer.vicidial_vendor_code);
-    if (parsed) { leadId = parsed.leadId; boxId = boxId || parsed.boxId; linkedBy = 'vendor_code'; }
-  }
-
-  // 3rd route: ASK THE DIALER BY PHONE. Nothing linked this call to a lead, but
-  // every task has a customer phone, and update_lead(no_update=Y) will name the
-  // lead behind it. Narrowed by the evaluated agent's own dialer ids so a number
-  // dialled by several centres resolves to THIS agent's call.
-  let resolved = null;
-  if (!leadId && phone) {
-    // subject_agent is sometimes the dialer id and sometimes the person's name,
-    // so try it BOTH ways: as an id it goes straight in; as a name it resolves
-    // through the profile's mapped ids (a closer can hold several — WaveTech
-    // agents are dual-id). .overlaps is how the rest of this file matches them.
-    const agentIds = new Set();
-    const subject = String(a.subject_agent || '').trim();
-    if (subject) {
-      if (/^[\w-]{1,12}$/.test(subject)) agentIds.add(subject);
-      const { data: byId } = await supabaseAdmin.from('user_profiles')
-        .select('vicidial_agent_ids').overlaps('vicidial_agent_ids', [subject, subject.toUpperCase()]).limit(2);
-      const { data: byName } = await supabaseAdmin.from('user_profiles')
-        .select('vicidial_agent_ids, first_name, last_name')
-        .not('vicidial_agent_ids', 'is', null).limit(500);
-      for (const p of (byId || [])) for (const id of (p.vicidial_agent_ids || [])) agentIds.add(String(id));
-      const want = subject.toLowerCase();
-      for (const p of (byName || [])) {
-        const full = `${p.first_name || ''} ${p.last_name || ''}`.trim().toLowerCase();
-        if (full && full === want) for (const id of (p.vicidial_agent_ids || [])) agentIds.add(String(id));
-      }
-    }
-    try {
-      resolved = await findLeadByPhone({ phone, agentIds: [...agentIds], preferBoxId: boxId });
-    } catch (e) { logger.warn('QA', `phone→lead ${req.params.id}: ${e.message}`); }
-    if (resolved && resolved.confidence !== 'ambiguous') {
-      leadId = resolved.lead_id;
-      boxId = resolved.box || boxId;
-      linkedBy = `phone:${resolved.confidence}`;
-      // ATTACH IT, so this costs one lookup ever rather than one per open. The
-      // assignment always gets the stamp; the transfer's vendor code is only
-      // FILLED IN when empty — never overwritten, because that field is what the
-      // rest of the CRM (recordings, dispo recovery) trusts to identify the call.
-      const nextRef = { ...rec, box_id: boxId, lead_id: leadId, linked_by: linkedBy, linked_at: new Date().toISOString() };
-      await supabaseAdmin.from('qa_assignments').update({ recording_ref: nextRef }).eq('id', a.id);
-      if (transfer && !String(transfer.vicidial_vendor_code || '').trim() && resolved.prefix) {
-        await supabaseAdmin.from('transfers')
-          .update({ vicidial_vendor_code: `${resolved.prefix}${leadId}` }).eq('id', transfer.id);
-      }
-      logger.info('QA', `linked assignment ${a.id} → lead ${leadId} on ${boxId} (${linkedBy})`);
-    }
-  }
+  // All three routes to the lead — recording_ref, the transfer's vendor code,
+  // then the dialer by phone (which persists what it finds). resolveAssignmentLead
+  // is the single implementation; this route used to own it.
+  const { leadId, boxId, linkedBy, phone, resolved } = await resolveAssignmentLead(a);
 
   // `reason` so the UI can say WHY a mapped column is empty instead of leaving
   // the reviewer to guess whether it is broken or simply has nothing to fetch.
