@@ -2388,7 +2388,13 @@ router.get('/reviews', asyncHandler(async (req, res) => {
       final_score: r.final_score, quality_score: r.quality_score, passed: r.passed, call_outcome: r.call_outcome,
       values: scoresByReview[r.id] || {},
       points: pointsByReview[r.id] || {},        // what each column actually scored
-      notes: notesByReview[r.id] || {},          // the reviewer's comment per column
+      notes: notesByReview[r.id] || {},          // per-column note (legacy weighted cards)
+      // The sheet's CONTEXT columns — "Comments", "Additional Comments", "Reason
+      // of rejection" and the like. They carry role 'meta', which the scores
+      // table deliberately does not hold, so they are submitted separately and
+      // live here. They were stored on every review and returned by nothing,
+      // which is why the reviewer's written comments appeared nowhere.
+      meta: (r.meta && typeof r.meta === 'object') ? r.meta : {},
       overall_notes: r.overall_notes,
       edit_history: r.edit_history || null,
     };
@@ -2873,14 +2879,20 @@ router.get('/reports', asyncHandler(async (req, res) => {
       if (m.points != null) { a.sum += Number(m.points) || 0; a.scored++; }
       if (m.note) a.notes++;
     }
-    by_criterion = Object.values(agg).map(a => ({
-      key: a.key, label: a.label, max_points: a.max_points,
-      answered: a.answered, yes: a.yes, no: a.no, na: a.na, notes: a.notes,
-      // a "miss rate" over the answered-and-decided marks only — N/A columns are
-      // not failures and must not drag the number down
-      miss_rate: (a.yes + a.no) ? Math.round((a.no / (a.yes + a.no)) * 100) : null,
-      avg_points: a.scored ? Math.round((a.sum / a.scored) * 100) / 100 : null,
-    })).sort((x, y) => (y.miss_rate ?? -1) - (x.miss_rate ?? -1) || y.answered - x.answered);
+    by_criterion = Object.values(agg).map(a => {
+      // A miss rate only means something for a column that can be passed or
+      // failed. A free-text or date column has no wrong answer, and counting
+      // "anything that isn't Y" as a miss would have reported every one of them
+      // at 100% and parked them at the top of the worst-first list.
+      const decidable = kindOf[a.key] === 'yn' || roleOfKey[a.key] === 'autofail' || roleOfKey[a.key] === 'penalty' || roleOfKey[a.key] === 'quality';
+      return {
+        key: a.key, label: a.label, max_points: a.max_points, kind: kindOf[a.key] || null, role: roleOfKey[a.key] || null,
+        answered: a.answered, yes: decidable ? a.yes : null, no: decidable ? a.no : null, na: a.na, notes: a.notes,
+        // over the answered-and-decided marks only — N/A is not a failure
+        miss_rate: decidable && (a.yes + a.no) ? Math.round((a.no / (a.yes + a.no)) * 100) : null,
+        avg_points: a.scored ? Math.round((a.sum / a.scored) * 100) / 100 : null,
+      };
+    }).sort((x, y) => (y.miss_rate ?? -1) - (x.miss_rate ?? -1) || y.answered - x.answered);
   }
 
   res.json({ summary, by_agent, by_reviewer, time_series, buckets, method_split, work_type_split, role_split, by_criterion, agents, reviewers });

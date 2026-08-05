@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, Fragment } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from 'react';
 import { createPortal } from 'react-dom';
 import ThemedDate from '../components/UI/ThemedDate';
 import {
@@ -1753,10 +1753,15 @@ function ColumnReport({ rows, loading, canExportQa, from, to }) {
               const tint = miss == null ? 'var(--color-text-tertiary)' : miss >= 40 ? 'var(--color-error-600)' : miss >= 15 ? 'var(--color-warning-600)' : 'var(--color-success-600)';
               return (
                 <tr key={r.key} style={{ borderTop: '1px solid var(--color-border)' }}>
-                  <td className="px-3 py-1.5" style={{ color: 'var(--color-text)' }}>{r.label}</td>
+                  <td className="px-3 py-1.5" style={{ color: 'var(--color-text)' }}>
+                    {r.label}
+                    {/* a column with no right answer is still worth counting, but it
+                        is not a pass/fail — say so rather than showing blanks */}
+                    {miss == null && <span className="ml-1.5 text-[10px] font-bold px-1 py-0.5 rounded" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-tertiary)' }}>not scored</span>}
+                  </td>
                   <td className="px-3 py-1.5 text-right tabular-nums" style={{ color: 'var(--color-text-secondary)' }}>{r.answered}</td>
-                  <td className="px-3 py-1.5 text-right tabular-nums" style={{ color: 'var(--color-success-600)' }}>{r.yes}</td>
-                  <td className="px-3 py-1.5 text-right tabular-nums" style={{ color: 'var(--color-error-600)' }}>{r.no}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums" style={{ color: 'var(--color-success-600)' }}>{r.yes ?? '—'}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums" style={{ color: 'var(--color-error-600)' }}>{r.no ?? '—'}</td>
                   <td className="px-3 py-1.5 text-right tabular-nums" style={{ color: 'var(--color-text-tertiary)' }}>{r.na}</td>
                   <td className="px-3 py-1.5 text-right tabular-nums font-bold" style={{ color: tint }}>
                     {miss == null ? '—' : `${miss}%`}
@@ -1828,7 +1833,7 @@ function ReviewSheet({ companyId, workType, subjectRole, reviewerId, agentSel, d
       r.call_date ? new Date(r.call_date).toLocaleDateString() : '',
       SLOT_LABEL[r.work_type] || r.work_type || r.method || '',
       r.agent || r.subject_name || '', r.subject_role || '', r.reviewer_name || '', r.customer_name || '',
-      ...cols.flatMap(c => [r.values?.[c.key] ?? '', r.notes?.[c.key] ?? '']),
+      ...cols.flatMap(c => [(c.fromMeta ? r.meta?.[c.key] : r.values?.[c.key]) ?? '', r.notes?.[c.key] ?? '']),
       ...COMPUTED.map(c => r[c.key] ?? ''),
       r.passed === true ? 'Pass' : r.passed === false ? 'Fail' : (r.autofail_result || ''),
       r.overall_notes || '',
@@ -1893,10 +1898,21 @@ function ReviewSheet({ companyId, workType, subjectRole, reviewerId, agentSel, d
                           the reason behind the mark, which is the part a manager
                           actually coaches from. Dotted underline = hover for it. */}
                       {cols.map(c => {
+                        // a context column's value lives in `meta`, not in the marks
+                        const raw = c.fromMeta ? r.meta?.[c.key] : r.values?.[c.key];
                         const note = r.notes?.[c.key];
+                        const isComment = c.fromMeta && String(raw ?? '').trim() !== '';
                         return (
-                          <td key={c.key} style={note ? { ...td, borderBottom: '1px dotted var(--color-primary-600)', cursor: 'help' } : td} title={note || undefined}>
-                            {r.values?.[c.key] ?? '—'}
+                          <td key={c.key}
+                            style={{
+                              ...td,
+                              ...(note ? { borderBottom: '1px dotted var(--color-primary-600)', cursor: 'help' } : null),
+                              // written comments get room to be read instead of a
+                              // one-line slot that cuts them off
+                              ...(c.fromMeta ? { whiteSpace: 'normal', minWidth: 160, maxWidth: 280, color: isComment ? 'var(--color-text)' : 'var(--color-text-tertiary)' } : null),
+                            }}
+                            title={note || (isComment ? String(raw) : undefined)}>
+                            {raw == null || String(raw).trim() === '' ? '—' : String(raw)}
                             {note && <span className="ml-1" style={{ color: 'var(--color-primary-600)', fontWeight: 800 }}>*</span>}
                           </td>
                         );
@@ -3581,7 +3597,12 @@ function flattenFields(cfg) {
   if (!cfg || Array.isArray(cfg)) return [];
   const out = [];
   for (const f of resolveSheetFields(cfg)) {
-    if (f.role === 'meta') continue;                     // context columns aren't scored
+    // Context columns — "Comments", "Additional Comments", "Reason of rejection".
+    // They carry no score, which is why they used to be dropped here entirely;
+    // but they hold what the reviewer actually WROTE about the call, so a
+    // marking sheet without them is missing the part a manager reads. Kept, and
+    // marked so the renderer reads them from `meta` rather than the marks.
+    if (f.role === 'meta') { out.push({ key: f.key, label: f.label ?? f.key, group: 'meta', kind: 'text', fromMeta: true }); continue; }
     if (f.role === 'outcome' || f.role === 'verdict') {
       out.push({ key: f.key, label: f.label, group: 'outcome', kind: 'text' });
       continue;
