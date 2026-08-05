@@ -1681,7 +1681,110 @@ const COMPUTED = [
   { key: 'quality_score',   label: 'Quality_Score' },
 ];
 
-function ReviewSheet({ companyId, method, subjectRole, reviewerId, agentSel, dateFrom, dateTo, canExportQa }) {
+// ── By column ────────────────────────────────────────────────────────────────
+// The report that answers "what is the team actually getting wrong". The score
+// charts say a call went badly; only this says WHICH question it went badly on.
+// Sorted worst-first, because that is the coaching order.
+function ColumnReport({ rows, loading, canExportQa, from, to }) {
+  const [sortKey, setSortKey] = useState('miss_rate');
+  const [dir, setDir] = useState('desc');
+  const sortBy = (k) => { if (k === sortKey) setDir(d => (d === 'asc' ? 'desc' : 'asc')); else { setSortKey(k); setDir('desc'); } };
+  const sorted = useMemo(() => {
+    const v = (r) => {
+      const x = r[sortKey];
+      return typeof x === 'string' ? x.toLowerCase() : (x ?? -1);
+    };
+    return [...(rows || [])].sort((a, b) => {
+      const A = v(a), B = v(b);
+      if (A === B) return String(a.label).localeCompare(String(b.label));
+      return (A < B ? -1 : 1) * (dir === 'asc' ? 1 : -1);
+    });
+  }, [rows, sortKey, dir]);
+
+  if (loading && !rows?.length) return <div className="text-center py-16"><Loader2 className="animate-spin inline" size={22} style={{ color: 'var(--color-text-tertiary)' }} /></div>;
+  if (!rows?.length) return <div className="text-center py-16 text-sm" style={{ color: 'var(--color-text-tertiary)' }}>No column marks in this range. This view builds from the individual scorecard answers your QA team recorded.</div>;
+
+  const COLS = [
+    ['label', 'Scorecard column', 'left'],
+    ['answered', 'Marked', 'right'],
+    ['yes', 'Pass', 'right'],
+    ['no', 'Miss', 'right'],
+    ['na', 'N/A', 'right'],
+    ['miss_rate', 'Miss rate', 'right'],
+    ['avg_points', 'Avg pts', 'right'],
+    ['max_points', 'Max pts', 'right'],
+    ['notes', 'Comments', 'right'],
+  ];
+  const worst = Math.max(0, ...sorted.map(r => r.miss_rate ?? 0));
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <SectionTitle>Every scorecard column, worst first</SectionTitle>
+        {canExportQa && (
+          <button onClick={() => {
+            const head = COLS.map(c => c[1]).join(',');
+            const esc = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+            const lines = [head, ...sorted.map(r => COLS.map(c => esc(r[c[0]])).join(','))];
+            const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+            const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+            a.download = `qa-column-marking_${from}_${to}.csv`; a.click(); URL.revokeObjectURL(a.href);
+          }} className="flex items-center gap-1 text-[11px] font-bold px-2.5 py-1.5 rounded-lg"
+            style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}>
+            <Download size={13} /> CSV
+          </button>
+        )}
+      </div>
+      <div className="rounded-xl overflow-auto" style={{ border: '1px solid var(--color-border)', background: 'var(--color-surface)' }}>
+        <table className="w-full text-sm" style={{ borderCollapse: 'collapse' }}>
+          <thead className="sticky top-0 z-10" style={{ background: 'var(--color-surface-hover)' }}>
+            <tr>
+              {COLS.map(([k, label, align]) => (
+                <th key={k} onClick={() => sortBy(k)}
+                  className={`px-3 py-2 text-[11px] font-bold uppercase select-none cursor-pointer text-${align}`}
+                  style={{ color: sortKey === k ? 'var(--color-primary-600)' : 'var(--color-text-tertiary)' }}>
+                  <span className="inline-flex items-center gap-0.5">{label}{sortKey === k && <ChevronDown size={11} style={{ transform: dir === 'asc' ? 'rotate(180deg)' : 'none' }} />}</span>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map(r => {
+              const miss = r.miss_rate;
+              const tint = miss == null ? 'var(--color-text-tertiary)' : miss >= 40 ? 'var(--color-error-600)' : miss >= 15 ? 'var(--color-warning-600)' : 'var(--color-success-600)';
+              return (
+                <tr key={r.key} style={{ borderTop: '1px solid var(--color-border)' }}>
+                  <td className="px-3 py-1.5" style={{ color: 'var(--color-text)' }}>{r.label}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums" style={{ color: 'var(--color-text-secondary)' }}>{r.answered}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums" style={{ color: 'var(--color-success-600)' }}>{r.yes}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums" style={{ color: 'var(--color-error-600)' }}>{r.no}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums" style={{ color: 'var(--color-text-tertiary)' }}>{r.na}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums font-bold" style={{ color: tint }}>
+                    {miss == null ? '—' : `${miss}%`}
+                    {/* a bar so the worst columns are findable without reading numbers */}
+                    {miss != null && worst > 0 && (
+                      <span className="inline-block ml-1.5 align-middle rounded" style={{ width: 40, height: 5, background: 'var(--color-surface-hover)' }}>
+                        <span className="block rounded h-full" style={{ width: `${Math.round((miss / worst) * 100)}%`, background: tint }} />
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-3 py-1.5 text-right tabular-nums" style={{ color: 'var(--color-text-secondary)' }}>{r.avg_points ?? '—'}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums" style={{ color: 'var(--color-text-tertiary)' }}>{r.max_points ?? '—'}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums" style={{ color: 'var(--color-text-tertiary)' }}>{r.notes || ''}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-[11px] mt-2" style={{ color: 'var(--color-text-tertiary)' }}>
+        Miss rate counts only the marks that were decided — an N/A is not a failure and never drags the number down.
+        Open <b>Marking sheet</b> for the individual calls behind any column.
+      </p>
+    </div>
+  );
+}
+
+function ReviewSheet({ companyId, workType, subjectRole, reviewerId, agentSel, dateFrom, dateTo, canExportQa }) {
   const [d, setD] = useState(null);
   const [loading, setLoading] = useState(true);
   // `agentSel` is the row from data.agents. /qa/reviews keys the reviewed person
@@ -1694,7 +1797,7 @@ function ReviewSheet({ companyId, method, subjectRole, reviewerId, agentSel, dat
     setLoading(true);
     const params = {};
     if (companyId)   params.company_id = companyId;
-    if (method)      params.method = method;
+    if (workType)    params.work_type = workType;
     if (subjectRole) params.subject_role = subjectRole;
     if (reviewerId)  params.reviewer_id = reviewerId;
     if (subjectId)   params.subject_user_id = subjectId;
@@ -1703,7 +1806,7 @@ function ReviewSheet({ companyId, method, subjectRole, reviewerId, agentSel, dat
     if (dateTo)      params.date_to = dateTo;
     client.get('qa/reviews', { params })
       .then(r => setD(r.data)).catch(() => setD(null)).finally(() => setLoading(false));
-  }, [companyId, method, subjectRole, reviewerId, subjectId, agentLabel, dateFrom, dateTo]);
+  }, [companyId, workType, subjectRole, reviewerId, subjectId, agentLabel, dateFrom, dateTo]);
 
   if (loading && !d) return <div className="text-center py-16"><Loader2 className="animate-spin inline" size={22} style={{ color: 'var(--color-text-tertiary)' }} /></div>;
   const rows = d?.reviews || [];
@@ -1714,13 +1817,18 @@ function ReviewSheet({ companyId, method, subjectRole, reviewerId, agentSel, dat
   for (const r of rows) (groups[r.scorecard_id || 'none'] ||= []).push(r);
 
   const csv = (cardId, cols, list, cardName) => {
-    const head = ['Date', 'Reviewed', 'Side', 'QA agent', 'Customer', ...cols.map(c => c.label), ...COMPUTED.map(c => c.label), 'Result', 'Notes'];
+    // every column exports its MARK and, right after it, the comment the reviewer
+    // left on that mark — the export is the record, so it carries the reasons too
+    const head = ['Date', 'Method', 'Reviewed', 'Side', 'QA agent', 'Customer',
+      ...cols.flatMap(c => [c.label, `${c.label} — comment`]),
+      ...COMPUTED.map(c => c.label), 'Result', 'Notes'];
     const esc = v => { const s = String(v ?? ''); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
     const lines = [head.map(esc).join(',')];
     for (const r of list) lines.push([
       r.call_date ? new Date(r.call_date).toLocaleDateString() : '',
+      SLOT_LABEL[r.work_type] || r.work_type || r.method || '',
       r.agent || r.subject_name || '', r.subject_role || '', r.reviewer_name || '', r.customer_name || '',
-      ...cols.map(c => r.values?.[c.key] ?? ''),
+      ...cols.flatMap(c => [r.values?.[c.key] ?? '', r.notes?.[c.key] ?? '']),
       ...COMPUTED.map(c => r[c.key] ?? ''),
       r.passed === true ? 'Pass' : r.passed === false ? 'Fail' : (r.autofail_result || ''),
       r.overall_notes || '',
@@ -1764,24 +1872,43 @@ function ReviewSheet({ companyId, method, subjectRole, reviewerId, agentSel, dat
               <table style={{ borderCollapse: 'collapse', width: 'max-content', minWidth: '100%' }}>
                 <thead style={{ position: 'sticky', top: 0, zIndex: 1, background: 'var(--color-surface-hover)' }}>
                   <tr>
-                    {['Date', 'Reviewed', 'Side', 'QA agent', 'Customer'].map(h => <th key={h} style={th}>{h}</th>)}
+                    {['Date', 'Method', 'Reviewed', 'Side', 'QA agent', 'Customer'].map(h => <th key={h} style={th}>{h}</th>)}
                     {cols.map(c => <th key={c.key} style={th}>{c.label}</th>)}
                     {COMPUTED.map(c => <th key={c.key} style={{ ...th, color: 'var(--color-primary-600)' }}>{c.label}</th>)}
                     <th style={th}>Result</th>
+                    <th style={th}>Reviewer notes</th>
                   </tr>
                 </thead>
                 <tbody>
                   {list.map(r => (
                     <tr key={r.id}>
                       <td style={td}>{r.call_date ? new Date(r.call_date).toLocaleDateString() : '—'}</td>
+                      <td style={td}><MethodPill m={r.work_type || r.method} /></td>
                       <td style={{ ...td, color: 'var(--color-text)', fontWeight: 600 }}>{r.agent || r.subject_name || '—'}</td>
                       <td style={td}>{r.subject_role || '—'}</td>
                       <td style={td}>{r.reviewer_name || '—'}</td>
                       <td style={td}>{r.customer_name || '—'}</td>
-                      {cols.map(c => <td key={c.key} style={td}>{r.values?.[c.key] ?? '—'}</td>)}
+                      {/* the mark, plus the reviewer's comment ON THAT COLUMN. The
+                          comment was recorded and then shown nowhere at all — it is
+                          the reason behind the mark, which is the part a manager
+                          actually coaches from. Dotted underline = hover for it. */}
+                      {cols.map(c => {
+                        const note = r.notes?.[c.key];
+                        return (
+                          <td key={c.key} style={note ? { ...td, borderBottom: '1px dotted var(--color-primary-600)', cursor: 'help' } : td} title={note || undefined}>
+                            {r.values?.[c.key] ?? '—'}
+                            {note && <span className="ml-1" style={{ color: 'var(--color-primary-600)', fontWeight: 800 }}>*</span>}
+                          </td>
+                        );
+                      })}
                       {COMPUTED.map(c => <td key={c.key} style={{ ...td, fontWeight: 700, color: 'var(--color-text)' }}>{r[c.key] ?? '—'}</td>)}
                       <td style={{ ...td, fontWeight: 800, color: r.passed === false ? 'var(--color-error-600)' : r.passed === true ? 'var(--color-success-600)' : 'var(--color-text-tertiary)' }}>
                         {r.passed === true ? 'Pass' : r.passed === false ? 'Fail' : (r.autofail_result || '—')}
+                      </td>
+                      {/* the reviewer's summary of the call — recorded on every
+                          review and previously only reachable by reopening it */}
+                      <td style={{ ...td, whiteSpace: 'normal', minWidth: 200, maxWidth: 320 }} title={r.overall_notes || undefined}>
+                        {r.overall_notes || <span style={{ color: 'var(--color-text-tertiary)' }}>—</span>}
                       </td>
                     </tr>
                   ))}
@@ -1799,10 +1926,13 @@ function ReportsTab({ companyId, companyName = '' }) {
   const { canExport } = useAuth();
   const today = new Date().toISOString().slice(0, 10);
   const monthAgo = new Date(Date.now() - 29 * 864e5).toISOString().slice(0, 10);
-  const [f, setF] = useState({ method: '', agent: '', reviewer: '', subject_role: '', date_from: monthAgo, date_to: today });
+  // work_type, NOT method: `method` only ever holds tra|rcm, so filtering by it
+  // could not tell closed sale from unclosed sale from RCM — three of the four
+  // kinds of work were invisible as separate things.
+  const [f, setF] = useState({ work_type: '', agent: '', reviewer: '', subject_role: '', date_from: monthAgo, date_to: today });
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [mode, setMode] = useState('team');   // 'team' overview | 'agent' single-user report | 'sheet' marking sheet
+  const [mode, setMode] = useState('team');   // 'team' overview | 'agent' single-user report | 'sheet' marking sheet | 'columns' per-question marking
 
   const load = useCallback(() => {
     setLoading(true);
@@ -1820,10 +1950,15 @@ function ReportsTab({ companyId, companyName = '' }) {
     { label: 'Pass', value: s.passed || 0, color: '#16a34a' },
     { label: 'Fail', value: s.failed || 0, color: '#dc2626' },
   ];
+  // all FOUR kinds of work. This chart used to show two, because closed sale and
+  // unclosed sale are both stored under method 'rcm'.
+  const wts = data?.work_type_split || {};
   const methodSplit = [
-    { label: 'TRA', value: data?.method_split?.tra || 0, color: PALETTE[0] },
-    { label: 'RCM', value: data?.method_split?.rcm || 0, color: PALETTE[4] },
-  ];
+    { label: 'TRA', value: wts.tra || 0, color: '#2563eb' },
+    { label: 'Closed sale', value: wts.closer_sales || 0, color: '#059669' },
+    { label: 'Unclosed', value: wts.closer_dispo || 0, color: '#dc2626' },
+    { label: 'RCM', value: wts.rcm || 0, color: '#d97706' },
+  ].filter(x => x.value > 0 || !Object.values(wts).some(Boolean));
   const bucketBars = (data?.buckets || []).map((b, i) => ({ label: b.label, value: b.n, color: ['#dc2626', '#d97706', '#2563eb', '#16a34a'][i] }));
   const scoreSeries = [{ name: 'Avg score', color: PALETTE[0], points: ts.map(d => ({ x: d.date, y: d.avg_score })) }];
   if ((s.passed || 0) + (s.failed || 0) > 0) scoreSeries.push({ name: 'Pass rate', color: '#16a34a', points: ts.map(d => ({ x: d.date, y: d.pass_rate == null ? 0 : d.pass_rate })) });
@@ -1855,19 +1990,20 @@ function ReportsTab({ companyId, companyName = '' }) {
         }}
         // Clearing resets the selects; FilterBar itself resets the date range, so
         // don't touch the dates here or the two writes fight each other.
-        onClearAll={() => setF(o => ({ ...o, method: '', agent: '', reviewer: '', subject_role: '' }))}
+        onClearAll={() => setF(o => ({ ...o, work_type: '', agent: '', reviewer: '', subject_role: '' }))}
         activeChips={[
           f.subject_role && { key: 'side', label: f.subject_role === 'fronter' ? 'Fronters only' : 'Closers only', onRemove: () => setF(o => ({ ...o, subject_role: '', agent: '' })) },
           f.agent && { key: 'agent', label: `Agent: ${(data?.agents || []).find(a => a.key === f.agent)?.name || f.agent}`, onRemove: () => set('agent', '') },
-          f.method && { key: 'method', label: `Method: ${f.method.toUpperCase()}`, onRemove: () => set('method', '') },
+          f.work_type && { key: 'work_type', label: `Method: ${SLOT_LABEL[f.work_type] || f.work_type}`, onRemove: () => set('work_type', '') },
           f.reviewer && { key: 'reviewer', label: `QA agent: ${(data?.reviewers || []).find(r => r.id === f.reviewer)?.name || f.reviewer}`, onRemove: () => set('reviewer', '') },
         ].filter(Boolean)}
         statusPills={<>
           <div className="flex items-center gap-1 p-1 rounded-xl" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-            {[['team', 'Team overview'], ['agent', 'Single agent'], ['sheet', 'Marking sheet']].map(([k, l]) => (
+            {[['team', 'Team overview'], ['agent', 'Single agent'], ['columns', 'By column'], ['sheet', 'Marking sheet']].map(([k, l]) => (
               <button key={k} onClick={() => setMode(k)}
                 title={k === 'team' ? 'Charts + tables across the whole team'
                      : k === 'agent' ? 'Pick one reviewed fronter/closer for their full performance report'
+                     : k === 'columns' ? 'Every scorecard question, and how the team was actually marked on it'
                      : 'The scored rows exactly as the QA agent filled them in — one column per scorecard field'}
                 className="px-3 py-1 rounded-lg text-xs font-bold"
                 style={{ background: mode === k ? 'var(--gradient-sidebar, linear-gradient(135deg,#2563eb,#7c3aed))' : 'transparent', color: mode === k ? '#fff' : 'var(--color-text-secondary)' }}>{l}</button>
@@ -1890,7 +2026,10 @@ function ReportsTab({ companyId, companyName = '' }) {
           <option value="">{mode === 'agent' ? 'Pick an agent…' : 'All agents'}</option>
           {(data?.agents || []).map(a => <option key={a.key} value={a.key}>{a.name}{!f.subject_role && a.role ? ` · ${a.role}` : ''}</option>)}
         </FilterSelect>
-        <FilterSelect value={f.method} onChange={e => set('method', e.target.value)} title="Method"><option value="">TRA + RCM</option><option value="tra">TRA</option><option value="rcm">RCM</option></FilterSelect>
+        <FilterSelect value={f.work_type} onChange={e => set('work_type', e.target.value)} title="Method — all four kinds of QA work">
+          <option value="">All methods</option>
+          {Object.entries(SLOT_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+        </FilterSelect>
         <FilterSelect value={f.reviewer} onChange={e => set('reviewer', e.target.value)} title="Scored by — which QA agent did the marking">
           <option value="">Any QA agent</option>
           {(data?.reviewers || []).map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
@@ -1932,10 +2071,12 @@ function ReportsTab({ companyId, companyName = '' }) {
         </>}
       />
 
-      {mode === 'sheet'
+      {mode === 'columns'
+        ? <ColumnReport rows={data?.by_criterion || []} loading={loading} canExportQa={canExport('qa')} from={f.date_from} to={f.date_to} />
+        : mode === 'sheet'
         ? <ReviewSheet
             companyId={companyId}
-            method={f.method}
+            workType={f.work_type}
             subjectRole={f.subject_role}
             reviewerId={f.reviewer}
             agentSel={(data?.agents || []).find(a => a.key === f.agent) || null}
@@ -3746,7 +3887,7 @@ function AgentQualityFile({ subject, managerView, companyId, onClose }) {
                     {reviews.map(r => (
                       <tr key={r.id} style={{ borderTop: '1px solid var(--color-border)' }}>
                         <td className="px-3 py-1.5 whitespace-nowrap text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>{r.reviewed_at ? new Date(r.reviewed_at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : ''}</td>
-                        <td className="px-2 py-1.5"><MethodPill m={r.method} /></td>
+                        <td className="px-2 py-1.5"><MethodPill m={r.work_type || r.method} /></td>
                         <td className="px-2 py-1.5">
                           <span className="font-semibold" style={{ color: 'var(--color-text)' }}>{r.customer_name || '—'}</span>
                           {r.customer_phone && <span className="text-[10px] tabular-nums ml-1.5" style={{ color: 'var(--color-text-tertiary)' }}>{r.customer_phone}</span>}
@@ -4042,7 +4183,7 @@ function CompletedTab({ managerView, companyId, selfId, canOverride }) {
                             className="cursor-pointer transition-colors hover:bg-[var(--color-surface-hover)]"
                             style={{ borderTop: '1px solid var(--color-border)' }}>
                             <td className="px-3 py-1.5 whitespace-nowrap text-[11px] tabular-nums" style={{ color: 'var(--color-text-tertiary)', width: 70 }}>{r.reviewed_at ? new Date(r.reviewed_at).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) : ''}</td>
-                            <td className="px-2 py-1.5"><MethodPill m={r.method} /></td>
+                            <td className="px-2 py-1.5"><MethodPill m={r.work_type || r.method} /></td>
                             <td className="px-2 py-1.5">
                               <div className="font-semibold truncate" style={{ color: 'var(--color-text)', maxWidth: 180 }}>{r.customer_name || '—'}</div>
                               {r.customer_phone && <div className="text-[10px] tabular-nums" style={{ color: 'var(--color-text-tertiary)' }}>{r.customer_phone}</div>}
@@ -4605,7 +4746,9 @@ function AgentTasks({ selfId, canOverride, companyId, filterCompany, allowedWt }
                 {shown.map(a => (
                   <tr key={a.id} onClick={() => setOpen(a)} className="cursor-pointer transition-colors hover:bg-[var(--color-surface-hover)]"
                     style={{ borderTop: '1px solid var(--color-border)', background: open?.id === a.id ? 'var(--color-surface-hover)' : undefined }}>
-                    <td className="px-3 py-2 whitespace-nowrap"><MethodPill m={a.method} /> <StatusPill s={a.status} /></td>
+                    {/* the WORK TYPE, not `method` — method holds only tra|rcm, so a
+                        closed- or unclosed-sale task was showing an "RCM" tag */}
+                    <td className="px-3 py-2 whitespace-nowrap"><MethodPill m={wtOf(a)} /> <StatusPill s={a.status} /></td>
                     <td className="px-3 py-2">
                       <div className="font-semibold truncate" style={{ color: 'var(--color-text)', maxWidth: 200 }}>{show('customer_name') ? (a.customer_name || '—') : '—'}</div>
                       {show('customer_phone') && a.customer_phone && <div className="text-[11px] tabular-nums" style={{ color: 'var(--color-text-tertiary)' }}>{a.customer_phone}</div>}

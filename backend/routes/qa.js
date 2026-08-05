@@ -23,7 +23,21 @@ const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { isSuperAdmin, hasPermission, getUserCompanies } = require('../models/helpers');
 const { getConfig, setConfig, getAllConfig } = require('../utils/businessConfig');
-const { isSheetConfig, computeSheetReview, isY, resolveSheetFields, fieldPoints } = require('../utils/qaSheetFormula');
+const { isSheetConfig, computeSheetReview, isY, resolveSheetFields, fieldPoints, defaultInputFor } = require('../utils/qaSheetFormula');
+
+// The MOST a column can score — the denominator for "how is this question doing".
+// fieldPoints(f) answers what a GIVEN value scored, so calling it without one
+// returns 0 for everything; the ceiling has to come from the input definition.
+function maxPointsOf(f) {
+  const input = (f && f.input) || defaultInputFor(f && f.role, f) || {};
+  if (input.kind === 'scale') { const n = Number(input.max); return Number.isFinite(n) ? n : 4; }
+  if (input.kind === 'yn') { const n = Number(input.points?.Y); return Number.isFinite(n) ? n : 1; }
+  if (input.kind === 'choice') {
+    const vals = Object.values(input.points || {}).map(Number).filter(Number.isFinite);
+    return vals.length ? Math.max(...vals) : null;
+  }
+  return null;   // free text has no ceiling
+}
 const { listCandidatesByLeadId, listCandidatesByPhone, listCandidatesByPhoneLeads, listCandidatesForSale, locationForRecording, listDayRecordings, getBoxes, fillLeadStatuses, resolveDispos, leadFieldCustomer, leadCustomFields, discoverCustomFieldNames, leadFromVendorCode, findLeadByPhone, annotateHangups, leadStatusByCode, leadFieldStatus, resolveDisposition } = require('../utils/dialerBoxes');
 const { materializeCompany } = require('../utils/qaMaterializer');
 const { autoAssignCompany } = require('../utils/qaAutoAssign');
@@ -108,6 +122,83 @@ async function dialerAgentNameMap(agentIds) {
     if (nm && !map[A]) map[A] = nm;
   }
   return map;
+}
+
+// ── whose call was this: a FRONTER's or a CLOSER's? ─────────────────────────
+// The work type answers this for three of the four: a TRA task is by definition
+// the fronter's transfer call, and closed/unclosed sale work is by definition
+// the closer's. RCM is the odd one — it is a RANDOM raw dialer call, so it can
+// belong to either side, and the person who took it is the only thing that says
+// which. It was being decided by the work type anyway, and inconsistently: the
+// day-recording path stamped every RCM review 'fronter' while Live stamped every
+// one 'closer'. That is why fronters turned up in the closers' report.
+//
+// So RCM asks the AGENT. Their dialer login maps to a CRM profile, which carries
+// their company role, and that role is the answer. Unmapped or unknown → null,
+// which reads as "not attributed" rather than a confident wrong side.
+const CLOSER_LEVELS = new Set(['closer', 'closer_manager']);
+const FRONTER_LEVELS = new Set(['fronter', 'fronter_manager']);
+
+// The side a KNOWN CRM user works. This is ground truth about the person, and it
+// outranks any rule based on the kind of task: if a fronter's call was filed as
+// closer work, the fronter still belongs in the fronters' report.
+async function rolesForUsers(userIds) {
+  const ids = [...new Set((userIds || []).filter(Boolean))];
+  if (!ids.length) return {};
+  const out = {};
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data } = await supabaseAdmin.from('user_company_roles')
+      .select('user_id, custom_roles(level)').in('user_id', ids.slice(i, i + 200)).eq('is_active', true);
+    for (const r of (data || [])) {
+      const lvl = Array.isArray(r.custom_roles) ? r.custom_roles[0]?.level : r.custom_roles?.level;
+      if (!lvl) continue;
+      if (CLOSER_LEVELS.has(lvl)) out[r.user_id] = 'closer';
+      else if (FRONTER_LEVELS.has(lvl) && !out[r.user_id]) out[r.user_id] = 'fronter';
+    }
+  }
+  return out;
+}
+async function rolesForDialerAgents(agentIds) {
+  const want = [...new Set((agentIds || []).filter(Boolean).flatMap(a => [String(a), String(a).toUpperCase()]))];
+  if (!want.length) return {};
+  const { data: profs } = await supabaseAdmin.from('user_profiles')
+    .select('user_id, vicidial_agent_ids').overlaps('vicidial_agent_ids', want);
+  const byUser = {};
+  for (const p of (profs || [])) byUser[p.user_id] = p.vicidial_agent_ids || [];
+  const userIds = Object.keys(byUser);
+  if (!userIds.length) return {};
+  const { data: ucr } = await supabaseAdmin.from('user_company_roles')
+    .select('user_id, custom_roles(level)').in('user_id', userIds).eq('is_active', true);
+  const roleByUser = {};
+  for (const r of (ucr || [])) {
+    const lvl = Array.isArray(r.custom_roles) ? r.custom_roles[0]?.level : r.custom_roles?.level;
+    if (!lvl) continue;
+    // a closer role wins over a fronter one — someone who closes at all is judged
+    // on the closing side; anything else (admin/manager) leaves them unattributed
+    if (CLOSER_LEVELS.has(lvl)) roleByUser[r.user_id] = 'closer';
+    else if (FRONTER_LEVELS.has(lvl) && !roleByUser[r.user_id]) roleByUser[r.user_id] = 'fronter';
+  }
+  const out = {};
+  for (const [uid, ids] of Object.entries(byUser)) {
+    if (!roleByUser[uid]) continue;
+    for (const a of ids) out[String(a).toUpperCase()] = roleByUser[uid];
+  }
+  return out;
+}
+
+// The work type a task/review really is. `method` only ever holds tra|rcm —
+// closed-sale and unclosed-sale work BOTH map to 'rcm' — so anything that
+// reports or badges by method alone collapses four kinds of work into two and
+// labels closed/unclosed sale reviews "RCM". The assignment's own work_type is
+// authoritative; older rows predate the column and are derived from their shape.
+function workTypeOfRow(asg, review) {
+  if (asg?.work_type) return asg.work_type;
+  const method = review?.method || asg?.method;
+  if (method === 'tra') return 'tra';
+  if (asg?.sale_id) return 'closer_sales';
+  const role = review?.subject_role || asg?.subject_role;
+  if (asg?.transfer_id) return role === 'closer' ? 'closer_dispo' : 'tra';
+  return 'rcm';
 }
 
 // A QA MANAGER can pull the dialer, see the pool, and assign. A qa_agent cannot —
@@ -660,7 +751,11 @@ router.post('/live/open', asyncHandler(async (req, res) => {
   if (!a) {
     const cust = await resolveCustomer({ companyId, transferId: kind === 'transfer' ? id : null, saleId: kind === 'sale' ? id : null });
     const row = {
-      company_id: companyId, method, subject_role,
+      // work_type was NOT stored here, only the collapsed `method` — and since
+      // closed sale, unclosed sale and RCM all collapse to 'rcm', every Live task
+      // came back as "RCM" in the queue and the reports. It is the real work type
+      // that has to be recorded.
+      company_id: companyId, method, subject_role, work_type: wt,
       [col]: id, sampled: false, status: 'pending',
       customer_name: cust.customer_name, customer_phone: cust.customer_phone,
       customer_zip: cust.customer_zip, customer_state: cust.customer_state, customer_address: cust.customer_address,
@@ -1509,7 +1604,10 @@ router.get('/agents', asyncHandler(async (req, res) => {
 // and either a single assigned_to OR distribute_equally:true (round-robin the
 // calls evenly across all the company's QA agents).
 const WT_TO_METHOD = { tra: 'tra', rcm: 'rcm', closer_sales: 'rcm', closer_dispo: 'rcm' };
-const WT_TO_ROLE   = { tra: 'fronter', rcm: 'fronter', closer_sales: 'closer', closer_dispo: 'closer' };
+// RCM is deliberately null: a random raw dialer call belongs to whoever took it,
+// and that is resolved per row from the agent (rolesForDialerAgents). Hard-coding
+// it here is what put fronters in the closers' report.
+const WT_TO_ROLE   = { tra: 'fronter', rcm: null, closer_sales: 'closer', closer_dispo: 'closer' };
 router.post('/assignments/from-recordings', asyncHandler(async (req, res) => {
   if (!(await can(req, 'assign_qa_tasks'))) return res.status(403).json({ error: 'Forbidden' });
   const { company_id, assigned_to, date } = req.body || {};
@@ -1551,8 +1649,12 @@ router.post('/assignments/from-recordings', asyncHandler(async (req, res) => {
   const cleanPart = (p) => ({ box_id: p.box_id, recording_id: String(p.recording_id), lead_id: p.lead_id || null, location: p.location || null, start_time: p.start_time || null, duration: p.duration ?? null, agent_user: p.agent_user || null });
   let skippedNoCompany = 0;
   let rr = 0;   // round-robin cursor for equal distribution
+  // RCM is a random raw call, so the side it belongs to is the AGENT's, not the
+  // work type's. Resolved once for the whole batch, then per row.
+  const roleByAgent = subject_role === null ? await rolesForDialerAgents(recordings.map(r => r?.agent_user)) : {};
+  const roleFor = (r) => subject_role !== null ? subject_role : (roleByAgent[String(r.agent_user || '').toUpperCase()] || null);
   const rows = recordings.filter(r => r && r.box_id && r.recording_id).map(r => ({
-    company_id: rowCompany(r), method, subject_role, work_type, source: 'day_recording',
+    company_id: rowCompany(r), method, subject_role: roleFor(r), work_type, source: 'day_recording',
     transfer_id: r.transfer_id || null,
     // recording_ref = the primary clip + its sibling legs/redials (grouped by
     // number+agent) as `parts`, so the reviewer can hear every attempt like the
@@ -1975,12 +2077,26 @@ async function resolveSubjectUser(a) {
     const { data: t } = await supabaseAdmin.from('transfers').select('created_by').eq('id', a.transfer_id).maybeSingle();
     if (t?.created_by) return t.created_by;
   }
+  let fronterAgent = null;
   if (a.subject_role === 'closer') {
     if (a.sale_id) { const { data: s } = await supabaseAdmin.from('sales').select('closer_id').eq('id', a.sale_id).maybeSingle(); if (s?.closer_id) return s.closer_id; }
-    if (a.transfer_id) { const { data: t } = await supabaseAdmin.from('transfers').select('assigned_closer_id').eq('id', a.transfer_id).maybeSingle(); if (t?.assigned_closer_id) return t.assigned_closer_id; }
+    if (a.transfer_id) {
+      const { data: t } = await supabaseAdmin.from('transfers').select('assigned_closer_id, vicidial_agent').eq('id', a.transfer_id).maybeSingle();
+      if (t?.assigned_closer_id) return t.assigned_closer_id;
+      // No closer on the transfer. The dialer-agent fallback below would then
+      // resolve the transfer's OWN agent — the FRONTER — and file a fronter's
+      // review under the closers. Measured: 7 reviews were attributed that way.
+      // Remember who that is so the fallback can refuse them.
+      fronterAgent = t?.vicidial_agent ? String(t.vicidial_agent).toUpperCase() : null;
+    }
   }
   // day-recording task: map the dialer agent id → the CRM user who owns it
   const agent = a.subject_agent || a.recording_ref?.agent_user;
+  if (agent && fronterAgent && String(agent).toUpperCase() === fronterAgent) {
+    // this is the fronter who made the transfer, not the closer being reviewed —
+    // no subject is better than the wrong one
+    return null;
+  }
   if (agent) {
     const { data: profs } = await supabaseAdmin.from('user_profiles').select('user_id, vicidial_agent_ids').contains('vicidial_agent_ids', [String(agent).toUpperCase()]);
     if (profs && profs.length) return profs[0].user_id;
@@ -2187,8 +2303,9 @@ router.get('/reviews', asyncHandler(async (req, res) => {
   if (req.query.mine === 'true' || !managerView) q = q.eq('reviewer_id', req.user.id);
   if (req.query.company_id)  q = q.eq('company_id', req.query.company_id);
   if (req.query.method)      q = q.eq('method', req.query.method);
-  // fronter / closer side of the REVIEWED person — same split the charts use
-  if (req.query.subject_role === 'fronter' || req.query.subject_role === 'closer') q = q.eq('subject_role', req.query.subject_role);
+  // NOTE: the fronter/closer split is applied AFTER hydration, not here. The
+  // stored subject_role was set from the work type, so filtering on it in SQL is
+  // exactly what showed fronters inside the closers' list.
   if (req.query.reviewer_id && managerView) q = q.eq('reviewer_id', req.query.reviewer_id);
   // per-AGENT quality file: every review of one reviewed user (CRM subject)
   if (req.query.subject_user_id) q = q.eq('subject_user_id', req.query.subject_user_id);
@@ -2206,13 +2323,20 @@ router.get('/reviews', asyncHandler(async (req, res) => {
   const userIds = [...new Set([...reviews.map(r => r.reviewer_id), ...reviews.map(r => r.subject_user_id)].filter(Boolean))];
 
   const [scoreRes, cardRes, assignRes, profRes] = await Promise.all([
-    supabaseAdmin.from('qa_review_scores').select('review_id, criterion_key, raw_value, points').in('review_id', rIds),
+    // `note` is the reviewer's comment ON THAT COLUMN — the substance of the
+    // coaching. It was stored but never returned, so the sheet showed marks with
+    // no reasons anywhere.
+    supabaseAdmin.from('qa_review_scores').select('review_id, criterion_key, raw_value, points, note').in('review_id', rIds),
     scIds.length ? supabaseAdmin.from('qa_scorecards').select('id, name, method, criteria, pass_threshold').in('id', scIds) : Promise.resolve({ data: [] }),
-    aIds.length ? supabaseAdmin.from('qa_assignments').select('id, transfer_id, sale_id, recording_ref, subject_agent, recording_date').in('id', aIds) : Promise.resolve({ data: [] }),
+    aIds.length ? supabaseAdmin.from('qa_assignments').select('id, transfer_id, sale_id, recording_ref, subject_agent, recording_date, work_type, method, subject_role').in('id', aIds) : Promise.resolve({ data: [] }),
     userIds.length ? supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').in('user_id', userIds) : Promise.resolve({ data: [] }),
   ]);
-  const scoresByReview = {};
-  for (const s of scoreRes.data || []) { (scoresByReview[s.review_id] = scoresByReview[s.review_id] || {})[s.criterion_key] = s.raw_value; }
+  const scoresByReview = {}, pointsByReview = {}, notesByReview = {};
+  for (const s of scoreRes.data || []) {
+    (scoresByReview[s.review_id] = scoresByReview[s.review_id] || {})[s.criterion_key] = s.raw_value;
+    if (s.points != null) (pointsByReview[s.review_id] = pointsByReview[s.review_id] || {})[s.criterion_key] = s.points;
+    if (s.note) (notesByReview[s.review_id] = notesByReview[s.review_id] || {})[s.criterion_key] = s.note;
+  }
   const scorecards = Object.fromEntries((cardRes.data || []).map(c => [c.id, c]));
   const assignById = Object.fromEntries((assignRes.data || []).map(a => [a.id, a]));
   const nameById = Object.fromEntries((profRes.data || []).map(p => [p.user_id, `${p.first_name || ''} ${p.last_name || ''}`.trim() || p.user_id]));
@@ -2232,14 +2356,27 @@ router.get('/reviews', asyncHandler(async (req, res) => {
   const dialerNames = await dialerAgentNameMap(Object.values(assignById)
     .flatMap(a => [a.subject_agent, a.recording_ref?.agent_user]).filter(Boolean));
 
+  // the reviewed person's REAL side, for the RCM reviews whose stored role came
+  // from the work type rather than from who took the call
+  const agentRoles = await rolesForDialerAgents(Object.values(assignById)
+    .flatMap(a => [a.subject_agent, a.recording_ref?.agent_user]).filter(Boolean));
+  const userRoles = await rolesForUsers(reviews.map(r => r.subject_user_id));
+
   const out = reviews.map(r => {
     const a = assignById[r.assignment_id] || {};
     const rec = a.recording_ref || null;
     const t = a.transfer_id ? tById[a.transfer_id] : null;
     const s = a.sale_id ? sById[a.sale_id] : null;
     const dialerId = a.subject_agent || rec?.agent_user || null;
+    const work_type = workTypeOfRow(a, r);
+    // The reviewed PERSON's own role first — it is the only ground truth, and a
+    // fronter belongs among the fronters however the task was filed. Then their
+    // dialer login's owner. Only then what the work type implies.
+    const subject_role = userRoles[r.subject_user_id]
+      || agentRoles[String(dialerId || '').toUpperCase()]
+      || (work_type === 'tra' ? 'fronter' : work_type === 'rcm' ? (r.subject_role || null) : 'closer');
     return {
-      id: r.id, assignment_id: r.assignment_id, method: r.method, subject_role: r.subject_role,
+      id: r.id, assignment_id: r.assignment_id, method: r.method, work_type, subject_role,
       scorecard_id: r.scorecard_id, status: r.status, reviewed_at: r.created_at,
       reviewer_id: r.reviewer_id, reviewer_name: nameById[r.reviewer_id] || null,
       subject_user_id: r.subject_user_id, subject_name: nameById[r.subject_user_id] || null,
@@ -2250,7 +2387,10 @@ router.get('/reviews', asyncHandler(async (req, res) => {
       base_score: r.base_score, autofail_result: r.autofail_result, total_penalty: r.total_penalty,
       final_score: r.final_score, quality_score: r.quality_score, passed: r.passed, call_outcome: r.call_outcome,
       values: scoresByReview[r.id] || {},
+      points: pointsByReview[r.id] || {},        // what each column actually scored
+      notes: notesByReview[r.id] || {},          // the reviewer's comment per column
       overall_notes: r.overall_notes,
+      edit_history: r.edit_history || null,
     };
   });
   // dialer-label subject filter (day-recording reviews with no CRM subject link) —
@@ -2259,6 +2399,14 @@ router.get('/reviews', asyncHandler(async (req, res) => {
   if (req.query.agent) {
     const a = String(req.query.agent).trim().toLowerCase();
     rows = out.filter(r => String(r.agent || '').trim().toLowerCase() === a);
+  }
+  // work type is only knowable after hydration (it lives on the assignment, and
+  // older rows are derived) — so it filters here rather than in the query
+  if (WORK_TYPES.includes(req.query.work_type)) rows = rows.filter(r => r.work_type === req.query.work_type);
+  // the corrected role likewise: filtering in SQL would use the stored value,
+  // which is the one that put fronters among the closers
+  if (req.query.subject_role === 'fronter' || req.query.subject_role === 'closer') {
+    rows = rows.filter(r => r.subject_role === req.query.subject_role);
   }
   res.json({ reviews: rows, scorecards, manager_view: managerView, truncated, cap: SHEET_CAP });
 }));
@@ -2518,7 +2666,12 @@ router.delete('/scorecards/:id', asyncHandler(async (req, res) => {
 // pass/fail) + the reviewed-agent & reviewer lists for the selectors. ──────────
 router.get('/reports', asyncHandler(async (req, res) => {
   if (!(await can(req, 'view_qa_reports'))) return res.status(403).json({ error: 'Forbidden' });
-  const EMPTY = { summary: { reviews: 0 }, by_agent: [], by_reviewer: [], time_series: [], buckets: [], method_split: { tra: 0, rcm: 0 }, agents: [], reviewers: [] };
+  const EMPTY = {
+    summary: { reviews: 0 }, by_agent: [], by_reviewer: [], time_series: [], buckets: [],
+    method_split: { tra: 0, rcm: 0 },
+    work_type_split: { tra: 0, rcm: 0, closer_sales: 0, closer_dispo: 0 },
+    by_criterion: [], agents: [], reviewers: [],
+  };
   const allowed = await allowedCompanyIds(req);
   if (allowed && !allowed.length) return res.json(EMPTY);
   // Apply filters, then page through EVERY matching review (1000-row chunks) so
@@ -2527,6 +2680,9 @@ router.get('/reports', asyncHandler(async (req, res) => {
   const applyFilters = (q) => {
     if (allowed)              q = q.in('company_id', allowed);
     if (req.query.company_id) q = q.eq('company_id', req.query.company_id);
+    // `method` collapses closed sale + unclosed sale + RCM into 'rcm', so it is
+    // kept only for old callers — work_type is the real filter and is applied
+    // after hydration, where the four kinds of work are distinguishable.
     if (req.query.method)     q = q.eq('method', req.query.method);
     if (req.query.date_from)  q = q.gte('created_at', req.query.date_from);
     if (req.query.date_to)    q = q.lte('created_at', `${req.query.date_to}T23:59:59.999Z`);
@@ -2546,20 +2702,52 @@ router.get('/reports', asyncHandler(async (req, res) => {
   }
   if (!rows.length) return res.json(EMPTY);
 
-  // Fronter / closer split. Applied BEFORE the agent selector is built, so
-  // picking "Fronters" narrows the dropdown to fronters instead of leaving
-  // closers in a list that can only ever return an empty report.
-  if (req.query.subject_role === 'fronter' || req.query.subject_role === 'closer') {
-    rows = rows.filter(r => r.subject_role === req.query.subject_role);
-    if (!rows.length) return res.json(EMPTY);
-  }
-
   // reviewed-agent identity from the linked assignment (dialer login + real name)
   const aIds = [...new Set(rows.map(r => r.assignment_id).filter(Boolean))];
   let asgById = {};
   if (aIds.length) {
-    const { data: asg } = await supabaseAdmin.from('qa_assignments').select('id, subject_agent, subject_user_id, recording_ref').in('id', aIds);
+    const { data: asg } = await supabaseAdmin.from('qa_assignments')
+      .select('id, subject_agent, subject_user_id, recording_ref, work_type, method, subject_role, sale_id, transfer_id').in('id', aIds);
     asgById = Object.fromEntries((asg || []).map(a => [a.id, a]));
+  }
+
+  // ── the real work type and the real side, per review ───────────────────────
+  // Both were being read straight off the review, where `method` holds only
+  // tra|rcm and `subject_role` was stamped from the work type. That is why the
+  // report could only ever show two kinds of work, and why fronters appeared
+  // among the closers.
+  const agentRoles = await rolesForDialerAgents(Object.values(asgById)
+    .flatMap(a => [a.subject_agent, a.recording_ref?.agent_user]).filter(Boolean));
+  const userRoles = await rolesForUsers([...rows.map(r => r.subject_user_id), ...Object.values(asgById).map(a => a.subject_user_id)]);
+  const dialerIdOf = (r) => { const a = asgById[r.assignment_id] || {}; return a.subject_agent || a.recording_ref?.agent_user || null; };
+  const wtOf = (r) => workTypeOfRow(asgById[r.assignment_id], r);
+  const roleOf = (r) => {
+    // 1. the reviewed PERSON's own role — the only ground truth here
+    const a = asgById[r.assignment_id] || {};
+    const byUser = userRoles[r.subject_user_id] || userRoles[a.subject_user_id];
+    if (byUser) return byUser;
+    // 2. their dialer login's owner
+    const byAgent = agentRoles[String(dialerIdOf(r) || '').toUpperCase()];
+    if (byAgent) return byAgent;
+    // 3. what the work implies
+    const wt = wtOf(r);
+    if (wt === 'tra') return 'fronter';
+    if (wt === 'closer_sales' || wt === 'closer_dispo') return 'closer';
+    return r.subject_role || null;
+  };
+
+  // work type filters here, not in SQL — it lives on the assignment and older
+  // rows have to be derived from their shape
+  if (WORK_TYPES.includes(req.query.work_type)) {
+    rows = rows.filter(r => wtOf(r) === req.query.work_type);
+    if (!rows.length) return res.json(EMPTY);
+  }
+  // Fronter / closer split. Applied BEFORE the agent selector is built, so
+  // picking "Fronters" narrows the dropdown to fronters instead of leaving
+  // closers in a list that can only ever return an empty report.
+  if (req.query.subject_role === 'fronter' || req.query.subject_role === 'closer') {
+    rows = rows.filter(r => roleOf(r) === req.query.subject_role);
+    if (!rows.length) return res.json(EMPTY);
   }
   const agentKey = (r) => { const a = asgById[r.assignment_id] || {}; return String(a.subject_agent || r.subject_user_id || 'unknown'); };
   // names for subjects + reviewers
@@ -2583,10 +2771,17 @@ router.get('/reports', asyncHandler(async (req, res) => {
     const sid = a.subject_user_id || r.subject_user_id || null;
     if (!agentsMap[k]) agentsMap[k] = { name: agentName(r), subject_user_id: sid, fronter: 0, closer: 0 };
     else if (!agentsMap[k].subject_user_id && sid) agentsMap[k].subject_user_id = sid;
-    agentsMap[k][r.subject_role === 'closer' ? 'closer' : 'fronter']++;
+    const role = roleOf(r);
+    if (role === 'closer' || role === 'fronter') agentsMap[k][role]++;
   }
   const agents = Object.entries(agentsMap)
-    .map(([key, v]) => ({ key, name: v.name, subject_user_id: v.subject_user_id, role: v.closer > v.fronter ? 'closer' : 'fronter' }))
+    .map(([key, v]) => ({
+      key, name: v.name, subject_user_id: v.subject_user_id,
+      fronter: v.fronter, closer: v.closer,
+      // whichever side they actually work; a person with neither is left
+      // unattributed rather than defaulted into the fronters
+      role: v.closer > v.fronter ? 'closer' : v.fronter > 0 ? 'fronter' : null,
+    }))
     .sort((a, b) => a.name.localeCompare(b.name));
   const reviewersMap = {};
   for (const r of rows) if (r.reviewer_id) reviewersMap[r.reviewer_id] = uname[r.reviewer_id] || 'Unknown';
@@ -2615,8 +2810,15 @@ router.get('/reports', asyncHandler(async (req, res) => {
   // dominant role per reviewed agent (fronter/closer) so Reports can split the
   // people charts into Closers vs Fronters.
   const roleCount = {};
-  for (const r of rows) { const k = agentKey(r); (roleCount[k] ||= { fronter: 0, closer: 0 }); if (r.subject_role === 'closer') roleCount[k].closer++; else roleCount[k].fronter++; }
-  const by_agent = roll(agentKey, agentName).map(a => ({ ...a, role: (roleCount[a.key]?.closer || 0) > (roleCount[a.key]?.fronter || 0) ? 'closer' : 'fronter' }));
+  for (const r of rows) {
+    const k = agentKey(r); (roleCount[k] ||= { fronter: 0, closer: 0 });
+    const role = roleOf(r);
+    if (role === 'closer' || role === 'fronter') roleCount[k][role]++;
+  }
+  const by_agent = roll(agentKey, agentName).map(a => {
+    const rc = roleCount[a.key] || { fronter: 0, closer: 0 };
+    return { ...a, role: rc.closer > rc.fronter ? 'closer' : rc.fronter > 0 ? 'fronter' : null, fronter: rc.fronter, closer: rc.closer };
+  });
   const by_reviewer = roll(r => r.reviewer_id || 'unknown', r => r.reviewer_id ? (uname[r.reviewer_id] || 'Unknown') : 'Unknown').map(x => ({ reviewer_id: x.key === 'unknown' ? null : x.key, name: x.name, reviews: x.reviews, avg_score: x.avg_score, pass_rate: x.pass_rate }));
 
   const ts = {};
@@ -2626,8 +2828,62 @@ router.get('/reports', asyncHandler(async (req, res) => {
   const buckets = [{ label: '0–59', min: 0, max: 59, n: 0 }, { label: '60–79', min: 60, max: 79, n: 0 }, { label: '80–89', min: 80, max: 89, n: 0 }, { label: '90–100', min: 90, max: 100, n: 0 }];
   for (const r of rows) { const s = scoreOf(r); const b = buckets.find(b => s >= b.min && s <= b.max); if (b) b.n++; }
   const method_split = { tra: rows.filter(r => r.method === 'tra').length, rcm: rows.filter(r => r.method === 'rcm').length };
+  // The real four. `method_split` could only ever show two, because closed sale,
+  // unclosed sale and RCM all store method 'rcm'.
+  const work_type_split = { tra: 0, rcm: 0, closer_sales: 0, closer_dispo: 0 };
+  for (const r of rows) { const wt = wtOf(r); if (work_type_split[wt] != null) work_type_split[wt]++; }
+  const role_split = { fronter: 0, closer: 0, unattributed: 0 };
+  for (const r of rows) { const role = roleOf(r); role_split[role === 'closer' ? 'closer' : role === 'fronter' ? 'fronter' : 'unattributed']++; }
 
-  res.json({ summary, by_agent, by_reviewer, time_series, buckets, method_split, agents, reviewers });
+  // ── COLUMN-BY-COLUMN marking ───────────────────────────────────────────────
+  // How every scorecard column was actually marked across the whole selection:
+  // how often it was answered, how often it was a miss, and what it averaged.
+  // This is the view that tells a manager WHICH question the team keeps failing,
+  // rather than only that a score was low.
+  let by_criterion = [];
+  const rIdsAll = rows.map(r => r.id);
+  if (rIdsAll.length) {
+    const marks = [];
+    for (let i = 0; i < rIdsAll.length; i += 500) {
+      const { data } = await supabaseAdmin.from('qa_review_scores')
+        .select('review_id, criterion_key, raw_value, points, note').in('review_id', rIdsAll.slice(i, i + 500));
+      marks.push(...(data || []));
+    }
+    // label + max points per criterion, from the scorecards actually used
+    const scIds = [...new Set(rows.map(r => r.scorecard_id).filter(Boolean))];
+    const labelOf = {}, maxOf = {};
+    if (scIds.length) {
+      const { data: cards } = await supabaseAdmin.from('qa_scorecards').select('id, criteria').in('id', scIds);
+      for (const c of (cards || [])) {
+        for (const f of resolveSheetFields(c.criteria || {})) {
+          if (f.key && !labelOf[f.key]) { labelOf[f.key] = f.label || f.key; maxOf[f.key] = maxPointsOf(f); }
+        }
+      }
+    }
+    const agg = {};
+    for (const m of marks) {
+      const k = m.criterion_key;
+      (agg[k] ||= { key: k, label: labelOf[k] || k, max_points: maxOf[k] ?? null, answered: 0, yes: 0, no: 0, na: 0, sum: 0, scored: 0, notes: 0 });
+      const a = agg[k];
+      a.answered++;
+      const v = String(m.raw_value ?? '').trim().toLowerCase();
+      if (isY(m.raw_value)) a.yes++;
+      else if (v === 'na' || v === 'n/a' || v === '') a.na++;
+      else a.no++;
+      if (m.points != null) { a.sum += Number(m.points) || 0; a.scored++; }
+      if (m.note) a.notes++;
+    }
+    by_criterion = Object.values(agg).map(a => ({
+      key: a.key, label: a.label, max_points: a.max_points,
+      answered: a.answered, yes: a.yes, no: a.no, na: a.na, notes: a.notes,
+      // a "miss rate" over the answered-and-decided marks only — N/A columns are
+      // not failures and must not drag the number down
+      miss_rate: (a.yes + a.no) ? Math.round((a.no / (a.yes + a.no)) * 100) : null,
+      avg_points: a.scored ? Math.round((a.sum / a.scored) * 100) / 100 : null,
+    })).sort((x, y) => (y.miss_rate ?? -1) - (x.miss_rate ?? -1) || y.answered - x.answered);
+  }
+
+  res.json({ summary, by_agent, by_reviewer, time_series, buckets, method_split, work_type_split, role_split, by_criterion, agents, reviewers });
 }));
 
 // ── config (per-company qa.* overrides) ───────────────────────────────────────
