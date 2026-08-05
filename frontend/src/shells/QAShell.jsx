@@ -1710,12 +1710,16 @@ function ColumnReport({ rows, loading, canExportQa, from, to }) {
     ['yes', 'Pass', 'right'],
     ['no', 'Miss', 'right'],
     ['na', 'N/A', 'right'],
-    ['miss_rate', 'Miss rate', 'right'],
-    ['avg_points', 'Avg pts', 'right'],
-    ['max_points', 'Max pts', 'right'],
+    ['weak_pct', 'Weak', 'right'],
+    ['avg_points', 'Avg', 'right'],
+    ['max_points', 'Out of', 'right'],
     ['notes', 'Comments', 'right'],
   ];
-  const worst = Math.max(0, ...sorted.map(r => r.miss_rate ?? 0));
+  const worst = Math.max(0, ...sorted.map(r => r.weak_pct ?? 0));
+  // A column marked once cannot rank against one marked two hundred times.
+  // It still belongs in the table, but it is dimmed so it never reads as the
+  // team's biggest problem on the strength of a single call.
+  const THIN = 5;
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
@@ -1749,26 +1753,30 @@ function ColumnReport({ rows, loading, canExportQa, from, to }) {
           </thead>
           <tbody>
             {sorted.map(r => {
-              const miss = r.miss_rate;
-              const tint = miss == null ? 'var(--color-text-tertiary)' : miss >= 40 ? 'var(--color-error-600)' : miss >= 15 ? 'var(--color-warning-600)' : 'var(--color-success-600)';
+              const weak = r.weak_pct;
+              const thin = r.answered < THIN;
+              const tint = weak == null ? 'var(--color-text-tertiary)' : weak >= 40 ? 'var(--color-error-600)' : weak >= 15 ? 'var(--color-warning-600)' : 'var(--color-success-600)';
               return (
-                <tr key={r.key} style={{ borderTop: '1px solid var(--color-border)' }}>
+                <tr key={r.key} style={{ borderTop: '1px solid var(--color-border)', opacity: thin ? 0.55 : 1 }}>
                   <td className="px-3 py-1.5" style={{ color: 'var(--color-text)' }}>
                     {r.label}
-                    {/* a column with no right answer is still worth counting, but it
-                        is not a pass/fail — say so rather than showing blanks */}
-                    {miss == null && <span className="ml-1.5 text-[10px] font-bold px-1 py-0.5 rounded" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-tertiary)' }}>not scored</span>}
+                    {/* free text and dates have no right answer — say so, rather
+                        than showing blanks that read as missing data */}
+                    {weak == null && <span className="ml-1.5 text-[10px] font-bold px-1 py-0.5 rounded" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-tertiary)' }}>not scored</span>}
+                    {thin && weak != null && <span className="ml-1.5 text-[10px] font-bold px-1 py-0.5 rounded" title={`Only ${r.answered} mark(s) — too few to rank on`} style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-tertiary)' }}>thin</span>}
                   </td>
                   <td className="px-3 py-1.5 text-right tabular-nums" style={{ color: 'var(--color-text-secondary)' }}>{r.answered}</td>
                   <td className="px-3 py-1.5 text-right tabular-nums" style={{ color: 'var(--color-success-600)' }}>{r.yes ?? '—'}</td>
                   <td className="px-3 py-1.5 text-right tabular-nums" style={{ color: 'var(--color-error-600)' }}>{r.no ?? '—'}</td>
                   <td className="px-3 py-1.5 text-right tabular-nums" style={{ color: 'var(--color-text-tertiary)' }}>{r.na}</td>
-                  <td className="px-3 py-1.5 text-right tabular-nums font-bold" style={{ color: tint }}>
-                    {miss == null ? '—' : `${miss}%`}
+                  <td className="px-3 py-1.5 text-right tabular-nums font-bold" style={{ color: tint }}
+                    title={r.miss_rate != null ? `${r.miss_rate}% of decided marks were a miss`
+                      : r.score_pct != null ? `Averaging ${r.avg_points} out of ${r.max_points} (${r.score_pct}%)` : undefined}>
+                    {weak == null ? '—' : `${weak}%`}
                     {/* a bar so the worst columns are findable without reading numbers */}
-                    {miss != null && worst > 0 && (
+                    {weak != null && worst > 0 && (
                       <span className="inline-block ml-1.5 align-middle rounded" style={{ width: 40, height: 5, background: 'var(--color-surface-hover)' }}>
-                        <span className="block rounded h-full" style={{ width: `${Math.round((miss / worst) * 100)}%`, background: tint }} />
+                        <span className="block rounded h-full" style={{ width: `${Math.round((weak / worst) * 100)}%`, background: tint }} />
                       </span>
                     )}
                   </td>
@@ -1782,8 +1790,10 @@ function ColumnReport({ rows, loading, canExportQa, from, to }) {
         </table>
       </div>
       <p className="text-[11px] mt-2" style={{ color: 'var(--color-text-tertiary)' }}>
-        Miss rate counts only the marks that were decided — an N/A is not a failure and never drags the number down.
-        Open <b>Marking sheet</b> for the individual calls behind any column.
+        <b>Weak</b> is one comparable number per column, so a scorecard that mixes both kinds still ranks in one list:
+        for a Yes/No column it is the share of decided marks that were a miss (an N/A is not a failure and never counts against it);
+        for a 1–5 rating it is how far below full marks the column averages. Free-text and date columns score neither.
+        Dimmed rows have fewer than {THIN} marks — too thin to rank on. Open <b>Marking sheet</b> for the calls behind any column.
       </p>
     </div>
   );

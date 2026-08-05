@@ -107,6 +107,11 @@ async function assignmentInScope(a, allowed) {
   return !!(t?.company_id && allowed.includes(t.company_id));
 }
 const leadDigits = (code) => { const m = String(code || '').match(/(\d+)\s*$/); return m ? m[1] : null; };
+// Last 10 digits — how a dialer filename's number is matched to a CRM one.
+// backfillLeadIds has called this since it was written, and it was never defined
+// in this file, so the very first call threw and the whole lead-id backfill was
+// swallowed by its caller's catch. It has therefore never linked a single lead.
+const phoneTail = (p) => { const d = String(p || '').replace(/\D/g, ''); return d.length >= 10 ? d.slice(-10) : d; };
 
 // dialer agent id(s) → the CRM user's real NAME (vicidial_agent_ids mapping).
 // Reviewed agents must show as people, not dialer codes like TMC100277.
@@ -2698,7 +2703,10 @@ router.get('/reports', asyncHandler(async (req, res) => {
   for (let from = 0; from < 1_000_000; from += 1000) {
     const { data, error } = await applyFilters(
       supabaseAdmin.from('qa_reviews')
-        .select('id, company_id, method, subject_role, subject_user_id, reviewer_id, assignment_id, total_score, max_score, final_score, quality_score, passed, created_at')
+        // scorecard_id is needed to label the per-column breakdown and to know
+        // each column's input kind — without it every column reported as an
+        // unlabelled, unscorable raw key.
+        .select('id, company_id, method, subject_role, subject_user_id, reviewer_id, assignment_id, scorecard_id, total_score, max_score, final_score, quality_score, passed, created_at')
         .order('created_at', { ascending: false })
     ).range(from, from + 999);
     if (error) return res.status(500).json({ error: error.message });
@@ -2712,8 +2720,15 @@ router.get('/reports', asyncHandler(async (req, res) => {
   const aIds = [...new Set(rows.map(r => r.assignment_id).filter(Boolean))];
   let asgById = {};
   if (aIds.length) {
-    const { data: asg } = await supabaseAdmin.from('qa_assignments')
-      .select('id, subject_agent, subject_user_id, recording_ref, work_type, method, subject_role, sale_id, transfer_id').in('id', aIds);
+    // NOTE: qa_assignments has NO subject_user_id column — the reviewed CRM user
+    // lives on qa_reviews. Selecting it here made PostgREST reject the whole
+    // query ("column qa_assignments.subject_user_id does not exist"), the error
+    // was discarded, and asgById was left EMPTY on every single call. That is
+    // why Reports showed no work types, no fronter/closer split and no agent
+    // names: none of the assignment context ever arrived.
+    const { data: asg, error: asgErr } = await supabaseAdmin.from('qa_assignments')
+      .select('id, subject_agent, recording_ref, work_type, method, subject_role, sale_id, transfer_id').in('id', aIds);
+    if (asgErr) logger.warn('QA', `reports assignments fetch: ${asgErr.message}`);   // never swallow it again
     asgById = Object.fromEntries((asg || []).map(a => [a.id, a]));
   }
 
@@ -2724,13 +2739,13 @@ router.get('/reports', asyncHandler(async (req, res) => {
   // among the closers.
   const agentRoles = await rolesForDialerAgents(Object.values(asgById)
     .flatMap(a => [a.subject_agent, a.recording_ref?.agent_user]).filter(Boolean));
-  const userRoles = await rolesForUsers([...rows.map(r => r.subject_user_id), ...Object.values(asgById).map(a => a.subject_user_id)]);
+  const userRoles = await rolesForUsers(rows.map(r => r.subject_user_id));
   const dialerIdOf = (r) => { const a = asgById[r.assignment_id] || {}; return a.subject_agent || a.recording_ref?.agent_user || null; };
   const wtOf = (r) => workTypeOfRow(asgById[r.assignment_id], r);
   const roleOf = (r) => {
     // 1. the reviewed PERSON's own role — the only ground truth here
     const a = asgById[r.assignment_id] || {};
-    const byUser = userRoles[r.subject_user_id] || userRoles[a.subject_user_id];
+    const byUser = userRoles[r.subject_user_id];
     if (byUser) return byUser;
     // 2. their dialer login's owner
     const byAgent = agentRoles[String(dialerIdOf(r) || '').toUpperCase()];
@@ -2757,13 +2772,13 @@ router.get('/reports', asyncHandler(async (req, res) => {
   }
   const agentKey = (r) => { const a = asgById[r.assignment_id] || {}; return String(a.subject_agent || r.subject_user_id || 'unknown'); };
   // names for subjects + reviewers
-  const userIds = [...new Set([...rows.map(r => r.subject_user_id), ...rows.map(r => r.reviewer_id), ...Object.values(asgById).map(a => a.subject_user_id)].filter(Boolean))];
+  const userIds = [...new Set([...rows.map(r => r.subject_user_id), ...rows.map(r => r.reviewer_id)].filter(Boolean))];
   let uname = {};
   if (userIds.length) {
     const { data: up } = await supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').in('user_id', userIds);
     uname = Object.fromEntries((up || []).map(p => [p.user_id, `${p.first_name || ''} ${p.last_name || ''}`.trim()]));
   }
-  const agentName = (r) => { const a = asgById[r.assignment_id] || {}; return (a.recording_ref && a.recording_ref.agent_name) || uname[a.subject_user_id] || uname[r.subject_user_id] || (agentKey(r) === 'unknown' ? 'Unknown' : agentKey(r)); };
+  const agentName = (r) => { const a = asgById[r.assignment_id] || {}; return (a.recording_ref && a.recording_ref.agent_name) || uname[r.subject_user_id] || (agentKey(r) === 'unknown' ? 'Unknown' : agentKey(r)); };
 
   // full reviewed-agent list for the selector (BEFORE applying the agent filter).
   // Carry subject_user_id per agent so the single-agent deep report (which keys on
@@ -2774,7 +2789,7 @@ router.get('/reports', asyncHandler(async (req, res) => {
   for (const r of rows) {
     const k = agentKey(r);
     const a = asgById[r.assignment_id] || {};
-    const sid = a.subject_user_id || r.subject_user_id || null;
+    const sid = r.subject_user_id || null;
     if (!agentsMap[k]) agentsMap[k] = { name: agentName(r), subject_user_id: sid, fronter: 0, closer: 0 };
     else if (!agentsMap[k].subject_user_id && sid) agentsMap[k].subject_user_id = sid;
     const role = roleOf(r);
@@ -2857,12 +2872,20 @@ router.get('/reports', asyncHandler(async (req, res) => {
     }
     // label + max points per criterion, from the scorecards actually used
     const scIds = [...new Set(rows.map(r => r.scorecard_id).filter(Boolean))];
-    const labelOf = {}, maxOf = {};
+    // kindOf / roleOfKey decide whether a column can be "missed" at all — a
+    // free-text column has no wrong answer. They MUST be declared here, beside
+    // labelOf: the miss-rate calculation below reads them.
+    const labelOf = {}, maxOf = {}, kindOf = {}, roleOfKey = {};
     if (scIds.length) {
       const { data: cards } = await supabaseAdmin.from('qa_scorecards').select('id, criteria').in('id', scIds);
       for (const c of (cards || [])) {
         for (const f of resolveSheetFields(c.criteria || {})) {
-          if (f.key && !labelOf[f.key]) { labelOf[f.key] = f.label || f.key; maxOf[f.key] = maxPointsOf(f); }
+          if (f.key && !labelOf[f.key]) {
+            labelOf[f.key] = f.label || f.key;
+            maxOf[f.key] = maxPointsOf(f);
+            kindOf[f.key] = ((f.input || defaultInputFor(f.role, f)) || {}).kind || null;
+            roleOfKey[f.key] = f.role || null;
+          }
         }
       }
     }
@@ -2880,19 +2903,33 @@ router.get('/reports', asyncHandler(async (req, res) => {
       if (m.note) a.notes++;
     }
     by_criterion = Object.values(agg).map(a => {
-      // A miss rate only means something for a column that can be passed or
-      // failed. A free-text or date column has no wrong answer, and counting
-      // "anything that isn't Y" as a miss would have reported every one of them
-      // at 100% and parked them at the top of the worst-first list.
-      const decidable = kindOf[a.key] === 'yn' || roleOfKey[a.key] === 'autofail' || roleOfKey[a.key] === 'penalty' || roleOfKey[a.key] === 'quality';
+      const kind = kindOf[a.key] || null, role = roleOfKey[a.key] || null;
+      // Two kinds of column measure weakness in two different ways, and the
+      // report has to speak both:
+      //   yn / autofail / penalty / quality → a MISS RATE (how often failed)
+      //   scale / numeric choice            → an AVERAGE against the column's
+      //                                       maximum (a 1–5 rating has no
+      //                                       "miss", it has a level)
+      // Free text and dates have no wrong answer and score neither. Treating
+      // "not Y" as a miss reported every text column at 100% and buried the
+      // real weak spots underneath them.
+      const decidable = kind === 'yn' || role === 'autofail' || role === 'penalty' || role === 'quality';
+      const avg = a.scored ? Math.round((a.sum / a.scored) * 100) / 100 : null;
+      const max = a.max_points;
+      const rated = !decidable && avg != null && max != null && max > 0;
+      const miss_rate = decidable && (a.yes + a.no) ? Math.round((a.no / (a.yes + a.no)) * 100) : null;
+      const score_pct = rated ? Math.round((avg / max) * 100) : null;
       return {
-        key: a.key, label: a.label, max_points: a.max_points, kind: kindOf[a.key] || null, role: roleOfKey[a.key] || null,
+        key: a.key, label: a.label, max_points: max, kind, role,
         answered: a.answered, yes: decidable ? a.yes : null, no: decidable ? a.no : null, na: a.na, notes: a.notes,
-        // over the answered-and-decided marks only — N/A is not a failure
-        miss_rate: decidable && (a.yes + a.no) ? Math.round((a.no / (a.yes + a.no)) * 100) : null,
-        avg_points: a.scored ? Math.round((a.sum / a.scored) * 100) / 100 : null,
+        miss_rate,                       // pass/fail columns only
+        score_pct,                       // rating columns only — avg as % of max
+        avg_points: avg,
+        // ONE comparable "how weak is this column" number, so worst-first works
+        // across a scorecard that mixes Y/N compliance with 1–5 ratings.
+        weak_pct: miss_rate != null ? miss_rate : (score_pct != null ? 100 - score_pct : null),
       };
-    }).sort((x, y) => (y.miss_rate ?? -1) - (x.miss_rate ?? -1) || y.answered - x.answered);
+    }).sort((x, y) => (y.weak_pct ?? -1) - (x.weak_pct ?? -1) || y.answered - x.answered);
   }
 
   res.json({ summary, by_agent, by_reviewer, time_series, buckets, method_split, work_type_split, role_split, by_criterion, agents, reviewers });
