@@ -107,6 +107,26 @@ async function assignmentInScope(a, allowed) {
   return !!(t?.company_id && allowed.includes(t.company_id));
 }
 const leadDigits = (code) => { const m = String(code || '').match(/(\d+)\s*$/); return m ? m[1] : null; };
+
+// ── batched .in() ────────────────────────────────────────────────────────────
+// PostgREST puts an .in() list in the QUERY STRING, so a long one overflows the
+// URL and the request fails — this project has been bitten before and settled on
+// 150 ids per request. The marking sheet loads up to 2000 reviews and was
+// passing all 2000 ids in one go (~74KB of URL), which is well past that.
+// Chunks run CONCURRENTLY, so splitting costs no extra wall-clock.
+const IN_CHUNK = 150;
+async function selectIn(table, columns, column, ids) {
+  const list = [...new Set((ids || []).filter(Boolean))];
+  if (!list.length) return [];
+  const chunks = [];
+  for (let i = 0; i < list.length; i += IN_CHUNK) chunks.push(list.slice(i, i + IN_CHUNK));
+  const results = await Promise.all(chunks.map(async (c) => {
+    const { data, error } = await supabaseAdmin.from(table).select(columns).in(column, c);
+    if (error) { logger.warn('QA', `selectIn ${table}.${column}: ${error.message}`); return []; }
+    return data || [];
+  }));
+  return results.flat();
+}
 // Last 10 digits — how a dialer filename's number is matched to a CRM one.
 // backfillLeadIds has called this since it was written, and it was never defined
 // in this file, so the very first call threw and the whole lead-id backfill was
@@ -2327,15 +2347,18 @@ router.get('/reviews', asyncHandler(async (req, res) => {
   const scIds = [...new Set(reviews.map(r => r.scorecard_id).filter(Boolean))];
   const userIds = [...new Set([...reviews.map(r => r.reviewer_id), ...reviews.map(r => r.subject_user_id)].filter(Boolean))];
 
-  const [scoreRes, cardRes, assignRes, profRes] = await Promise.all([
+  // every one of these id lists can reach the sheet's 2000-row cap, so they all
+  // go through the chunked helper rather than one oversized URL
+  const [scoreRows, cardRows, assignRows, profRows] = await Promise.all([
     // `note` is the reviewer's comment ON THAT COLUMN — the substance of the
     // coaching. It was stored but never returned, so the sheet showed marks with
     // no reasons anywhere.
-    supabaseAdmin.from('qa_review_scores').select('review_id, criterion_key, raw_value, points, note').in('review_id', rIds),
-    scIds.length ? supabaseAdmin.from('qa_scorecards').select('id, name, method, criteria, pass_threshold').in('id', scIds) : Promise.resolve({ data: [] }),
-    aIds.length ? supabaseAdmin.from('qa_assignments').select('id, transfer_id, sale_id, recording_ref, subject_agent, recording_date, work_type, method, subject_role').in('id', aIds) : Promise.resolve({ data: [] }),
-    userIds.length ? supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').in('user_id', userIds) : Promise.resolve({ data: [] }),
+    selectIn('qa_review_scores', 'review_id, criterion_key, raw_value, points, note', 'review_id', rIds),
+    selectIn('qa_scorecards', 'id, name, method, criteria, pass_threshold', 'id', scIds),
+    selectIn('qa_assignments', 'id, transfer_id, sale_id, recording_ref, subject_agent, recording_date, work_type, method, subject_role', 'id', aIds),
+    selectIn('user_profiles', 'user_id, first_name, last_name', 'user_id', userIds),
   ]);
+  const scoreRes = { data: scoreRows }, cardRes = { data: cardRows }, assignRes = { data: assignRows }, profRes = { data: profRows };
   const scoresByReview = {}, pointsByReview = {}, notesByReview = {};
   for (const s of scoreRes.data || []) {
     (scoresByReview[s.review_id] = scoresByReview[s.review_id] || {})[s.criterion_key] = s.raw_value;
@@ -2349,13 +2372,13 @@ router.get('/reviews', asyncHandler(async (req, res) => {
   // hydrate customer/phone from recording_ref → transfer → sale (batched)
   const tIds = [...new Set(Object.values(assignById).map(a => a.transfer_id).filter(Boolean))];
   const sIds = [...new Set(Object.values(assignById).map(a => a.sale_id).filter(Boolean))];
-  const [tRes, sRes] = await Promise.all([
+  const [tRows, sRows] = await Promise.all([
     // transfers have NO customer_name column — derive it from form_data.
-    tIds.length ? supabaseAdmin.from('transfers').select('id, normalized_phone, form_data, created_at').in('id', tIds) : Promise.resolve({ data: [] }),
-    sIds.length ? supabaseAdmin.from('sales').select('id, customer_name, customer_phone, sale_date').in('id', sIds) : Promise.resolve({ data: [] }),
+    selectIn('transfers', 'id, normalized_phone, form_data, created_at', 'id', tIds),
+    selectIn('sales', 'id, customer_name, customer_phone, sale_date', 'id', sIds),
   ]);
-  const tById = Object.fromEntries((tRes.data || []).map(t => [t.id, t]));
-  const sById = Object.fromEntries((sRes.data || []).map(s => [s.id, s]));
+  const tById = Object.fromEntries(tRows.map(t => [t.id, t]));
+  const sById = Object.fromEntries(sRows.map(s => [s.id, s]));
 
   // reviewed agents must show as PEOPLE — resolve dialer ids → CRM user names
   const dialerNames = await dialerAgentNameMap(Object.values(assignById)
@@ -2363,9 +2386,11 @@ router.get('/reviews', asyncHandler(async (req, res) => {
 
   // the reviewed person's REAL side, for the RCM reviews whose stored role came
   // from the work type rather than from who took the call
-  const agentRoles = await rolesForDialerAgents(Object.values(assignById)
-    .flatMap(a => [a.subject_agent, a.recording_ref?.agent_user]).filter(Boolean));
-  const userRoles = await rolesForUsers(reviews.map(r => r.subject_user_id));
+  // independent lookups — run together rather than one after the other
+  const [agentRoles, userRoles] = await Promise.all([
+    rolesForDialerAgents(Object.values(assignById).flatMap(a => [a.subject_agent, a.recording_ref?.agent_user]).filter(Boolean)),
+    rolesForUsers(reviews.map(r => r.subject_user_id)),
+  ]);
 
   const out = reviews.map(r => {
     const a = assignById[r.assignment_id] || {};
@@ -2726,10 +2751,9 @@ router.get('/reports', asyncHandler(async (req, res) => {
     // was discarded, and asgById was left EMPTY on every single call. That is
     // why Reports showed no work types, no fronter/closer split and no agent
     // names: none of the assignment context ever arrived.
-    const { data: asg, error: asgErr } = await supabaseAdmin.from('qa_assignments')
-      .select('id, subject_agent, recording_ref, work_type, method, subject_role, sale_id, transfer_id').in('id', aIds);
-    if (asgErr) logger.warn('QA', `reports assignments fetch: ${asgErr.message}`);   // never swallow it again
-    asgById = Object.fromEntries((asg || []).map(a => [a.id, a]));
+    const asg = await selectIn('qa_assignments',
+      'id, subject_agent, recording_ref, work_type, method, subject_role, sale_id, transfer_id', 'id', aIds);
+    asgById = Object.fromEntries(asg.map(a => [a.id, a]));
   }
 
   // ── the real work type and the real side, per review ───────────────────────
@@ -2737,9 +2761,11 @@ router.get('/reports', asyncHandler(async (req, res) => {
   // tra|rcm and `subject_role` was stamped from the work type. That is why the
   // report could only ever show two kinds of work, and why fronters appeared
   // among the closers.
-  const agentRoles = await rolesForDialerAgents(Object.values(asgById)
-    .flatMap(a => [a.subject_agent, a.recording_ref?.agent_user]).filter(Boolean));
-  const userRoles = await rolesForUsers(rows.map(r => r.subject_user_id));
+  // independent lookups — run together rather than one after the other
+  const [agentRoles, userRoles] = await Promise.all([
+    rolesForDialerAgents(Object.values(asgById).flatMap(a => [a.subject_agent, a.recording_ref?.agent_user]).filter(Boolean)),
+    rolesForUsers(rows.map(r => r.subject_user_id)),
+  ]);
   const dialerIdOf = (r) => { const a = asgById[r.assignment_id] || {}; return a.subject_agent || a.recording_ref?.agent_user || null; };
   const wtOf = (r) => workTypeOfRow(asgById[r.assignment_id], r);
   const roleOf = (r) => {
@@ -3395,15 +3421,42 @@ router.get('/my-companies', asyncHandler(async (req, res) => {
   // company-wide for an agent was the "321 pending that won't clear" bug — the
   // unassigned pool + other agents' tasks are not this agent's work.
   const mgr = await isManager(req);
-  const out = [];
-  for (const c of (data || [])) {
-    const methods = await getConfig(c.id, 'qa.methods', []);
-    let cq = supabaseAdmin.from('qa_assignments')
-      .select('*', { count: 'exact', head: true }).eq('company_id', c.id).in('status', ['pending', 'in_review']);
-    if (!mgr) cq = cq.eq('assigned_to', req.user.id);
-    const { count } = await cq;
-    out.push({ id: c.id, name: c.name, company_type: c.company_type, qa_enabled: Array.isArray(methods) && methods.length > 0, pending: count || 0 });
-  }
+  const companies = data || [];
+  const ids = companies.map(c => c.id);
+
+  // TWO queries for the whole list, not two PER COMPANY.
+  //
+  // This used to loop: a getConfig and a count for each company, awaited one
+  // after another. With a handful of companies that was a dozen-plus sequential
+  // round-trips at ~445ms each — most of this endpoint's measured 9.5s. Both
+  // answers can be fetched for every company at once and grouped in memory.
+  const [cfgRes, cntRes] = await Promise.all([
+    ids.length
+      ? supabaseAdmin.from('business_config').select('scope, value')
+          .eq('key', 'qa.methods').in('scope', ids.map(id => `company:${id}`))
+      : Promise.resolve({ data: [] }),
+    (() => {
+      // status rows rather than N head-counts — one pass, grouped below
+      let cq = supabaseAdmin.from('qa_assignments').select('company_id')
+        .in('status', ['pending', 'in_review']);
+      if (ids.length) cq = cq.in('company_id', ids);
+      if (!mgr) cq = cq.eq('assigned_to', req.user.id);   // an agent's badge is THEIR work only
+      return cq;
+    })(),
+  ]);
+  const methodsByCompany = new Map((cfgRes.data || [])
+    .map(r => [String(r.scope || '').replace(/^company:/, ''), r.value]));
+  const pendingByCompany = new Map();
+  for (const r of (cntRes.data || [])) pendingByCompany.set(r.company_id, (pendingByCompany.get(r.company_id) || 0) + 1);
+
+  const out = companies.map(c => {
+    const methods = methodsByCompany.get(c.id);
+    return {
+      id: c.id, name: c.name, company_type: c.company_type,
+      qa_enabled: Array.isArray(methods) && methods.length > 0,
+      pending: pendingByCompany.get(c.id) || 0,
+    };
+  });
   res.json({ companies: out, all: allowed === null });
 }));
 

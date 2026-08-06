@@ -100,10 +100,15 @@ const hasPermission = async (userId, companyId, permissionName) => {
 const invalidateUserPerms = (userId, companyId) => {
   if (userId && companyId) cache.invalidate('perms', `${userId}|${companyId}`);
   else cache.invalidateNamespace('perms');
+  // the superadmin answer comes from the same role rows, so it goes stale at
+  // exactly the same moments — drop it here too rather than leaving a promotion
+  // or demotion to wait out its own TTL
+  if (userId) cache.invalidate('superadmin', String(userId));
+  else cache.invalidateNamespace('superadmin');
 };
 // Clear ALL cached permissions — use when a ROLE's permissions change (affects
 // every user holding that role).
-const clearPermissionCache = () => cache.invalidateNamespace('perms');
+const clearPermissionCache = () => { cache.invalidateNamespace('perms'); cache.invalidateNamespace('superadmin'); };
 
 // ============================================================================
 // Get All Permissions for User
@@ -246,26 +251,42 @@ const assignUserToCompany = async (userId, companyId, roleId, assignedBy) => {
 // Fast path: check role level in user_company_roles. If none found (system
 // superadmin with no company assignment), fall back to email match.
 // ============================================================================
+// CACHED, because this is the single most-called query in the app.
+//
+// It depends only on the user, yet almost every guarded route asks it three or
+// four times over: `can()` asks, then `isManager()` asks again, then
+// `allowedCompanyIds()` asks a third time and calls `isManager()` which asks a
+// fourth. Uncached, each of those was a real round-trip — measured at ~445ms
+// against this database, so ~1.3-2.2s of every QA request was spent
+// re-answering one question. hasPermission was already cached this way; this
+// was the hole beside it.
+//
+// Same 30s TTL and the same invalidation hook as the permission cache, so a
+// role change takes effect just as quickly as it already did.
+const SUPERADMIN_TTL_MS = 30_000;
 const isSuperAdmin = async (userId) => {
-  try {
-    const { data } = await supabaseAdmin
-      .from('user_company_roles')
-      .select('custom_roles(level)')
-      .eq('user_id', userId)
-      .eq('is_active', true);
+  if (!userId) return false;
+  return cache.remember('superadmin', String(userId), SUPERADMIN_TTL_MS, async () => {
+    try {
+      const { data } = await supabaseAdmin
+        .from('user_company_roles')
+        .select('custom_roles(level)')
+        .eq('user_id', userId)
+        .eq('is_active', true);
 
-    if (data?.some(r => r.custom_roles?.level === 'superadmin')) return true;
+      if (data?.some(r => r.custom_roles?.level === 'superadmin')) return true;
 
-    // System superadmin has no company assignment — check by email against env
-    const emails = (process.env.SUPERADMIN_EMAIL || '').split(',').map(e => e.trim()).filter(Boolean);
-    if (emails.length > 0) {
-      const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(userId);
-      return emails.includes(authUser?.user?.email || '');
+      // System superadmin has no company assignment — check by email against env
+      const emails = (process.env.SUPERADMIN_EMAIL || '').split(',').map(e => e.trim()).filter(Boolean);
+      if (emails.length > 0) {
+        const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(userId);
+        return emails.includes(authUser?.user?.email || '');
+      }
+      return false;
+    } catch {
+      return false;
     }
-    return false;
-  } catch {
-    return false;
-  }
+  });
 };
 
 // ============================================================================

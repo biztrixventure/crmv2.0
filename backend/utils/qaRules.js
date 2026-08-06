@@ -39,15 +39,25 @@ function clampCap(v) {
 async function reviewerCap(companyId) {
   return clampCap(await getConfig(companyId, 'qa.reviewer_cap', 25));
 }
-// current open plate per reviewer id
+// Current open plate per reviewer id.
+//
+// One query for the whole roster, not one COUNT per reviewer. The old shape
+// fanned out N concurrent head-counts — concurrency hid the latency but still
+// opened a connection per reviewer and got worse as the team grew. Fetching the
+// assigned_to column for the open statuses and tallying in memory is a single
+// round-trip, and the rows are tiny.
 async function openCounts(reviewerIds) {
+  const ids = [...new Set(reviewerIds)].filter(Boolean);
   const out = {};
-  await Promise.all([...new Set(reviewerIds)].filter(Boolean).map(async (rid) => {
-    const { count } = await supabaseAdmin.from('qa_assignments')
-      .select('*', { count: 'exact', head: true })
-      .eq('assigned_to', rid).in('status', ['pending', 'in_review']);
-    out[rid] = count || 0;
-  }));
+  for (const id of ids) out[id] = 0;          // an idle reviewer must still report 0
+  if (!ids.length) return out;
+  // chunked for the same reason every .in() here is: the list rides in the URL
+  const CHUNK = 150;
+  const chunks = [];
+  for (let i = 0; i < ids.length; i += CHUNK) chunks.push(ids.slice(i, i + CHUNK));
+  const results = await Promise.all(chunks.map(c => supabaseAdmin.from('qa_assignments')
+    .select('assigned_to').in('assigned_to', c).in('status', ['pending', 'in_review'])));
+  for (const { data } of results) for (const r of (data || [])) if (r.assigned_to in out) out[r.assigned_to]++;
   return out;
 }
 
