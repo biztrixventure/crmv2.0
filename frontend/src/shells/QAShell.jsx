@@ -1662,10 +1662,21 @@ function sheetColumns(card) {
   // the form that produced it.
   const cols = [];
   const seen = new Set();
-  const push = (key, label) => { if (!key || seen.has(key)) return; seen.add(key); cols.push({ key, label: label || key }); };
+  // fromMeta decides WHERE the cell reads its value.
+  //
+  // A sheet column is either a MARK (lives in qa_review_scores → `values`) or a
+  // CONTEXT field (role 'meta' — the date, customer, vehicle, CLI, the written
+  // comments; submitted separately and stored on the review's `meta`). This
+  // helper used to push every column without that flag, so every context column
+  // looked itself up in `values`, found nothing, and rendered an em dash. The
+  // columns were there the whole time — the date, closer agent, CLI, callback
+  // date, comments, evaluated-by, customer, ZIP, make and model — all reading
+  // from the wrong side of the row.
+  const push = (key, label, fromMeta = false) => { if (!key || seen.has(key)) return; seen.add(key); cols.push({ key, label: label || key, fromMeta }); };
   for (const f of resolveSheetFields(c)) {
     if (f.role === 'outcome')  { push(c.call_outcome?.key,  c.call_outcome?.label  || 'Call_Outcome'); continue; }
     if (f.role === 'verdict')  { push(c.manual_status?.key, c.manual_status?.label || 'QA Overall Status'); continue; }
+    if (f.role === 'meta')     { push(f.key, f.label, true); continue; }
     push(f.key, f.label);
   }
   if (c.call_outcome)  push(c.call_outcome.key,  c.call_outcome.label  || 'Call_Outcome');
@@ -1866,7 +1877,20 @@ function ReviewSheet({ companyId, workType, subjectRole, reviewerId, agentSel, d
       )}
       {Object.entries(groups).map(([cardId, list]) => {
         const card = d?.scorecards?.[cardId] || null;
-        const cols = sheetColumns(card);
+        // A scorecard whose fields were later emptied (or a review with no card
+        // at all) would otherwise render a table with NO columns — the reviewer's
+        // work still recorded, and nothing on screen. Measured: three cards in
+        // use have zero fields. Fall back to the columns the DATA proves exist,
+        // so the sheet shows what was marked rather than an empty shell.
+        let cols = sheetColumns(card);
+        if (!cols.length) {
+          const seen = new Set();
+          cols = [];
+          for (const r of list) {
+            for (const k of Object.keys(r.values || {})) if (!seen.has(k)) { seen.add(k); cols.push({ key: k, label: k, fromMeta: false }); }
+            for (const k of Object.keys(r.meta || {}))   if (!seen.has(k)) { seen.add(k); cols.push({ key: k, label: k, fromMeta: true }); }
+          }
+        }
         return (
           <div key={cardId}>
             <div className="flex items-center justify-between mb-1.5 flex-wrap gap-2">
