@@ -13,6 +13,17 @@ import ThemedSelect from '../UI/Select';
  *
  * Props: kind = 'transfer' | 'sale', record (must include .id + current name
  * fields for display), onDone() to refresh the parent.
+ *
+ * The fronter/closer picker used to list EVERY user on the platform, unscoped
+ * by company, with only a static "pick the right company or it'll look wrong"
+ * warning — no actual guardrail. That produced real mismatches (e.g. sale
+ * 000003QI: fronter reassigned to a Wavetech agent on a Mejor-company sale,
+ * cascaded onto the linked transfer too, entirely by an unscoped-dropdown
+ * mis-pick). Default is now scoped to the record's OWN company — GET
+ * /users/lookup already accepted ?company_id, it just wasn't being sent — with
+ * an explicit opt-out for the rare legitimate cross-company move, and a live
+ * per-field warning naming exactly which company a picked user actually
+ * belongs to (not a generic disclaimer nobody reads).
  */
 export default function ReassignOwnership({ kind, record, onDone }) {
   const { user } = useAuth();
@@ -22,16 +33,20 @@ export default function ReassignOwnership({ kind, record, onDone }) {
   const [sel, setSel]         = useState({});      // field → chosen user_id ('' = keep)
   const [companyId, setCompanyId] = useState('');  // '' = keep
   const [cascade, setCascade] = useState(false);
+  const [showAllCompanies, setShowAllCompanies] = useState(false);
   const [busy, setBusy]       = useState(false);
 
   // Hooks must run unconditionally — gate the RENDER, not the hooks.
   const isSuper = user?.role === 'superadmin';
+  const recordCompanyId = record?.company_id || null;
 
   useEffect(() => {
     if (!open || !isSuper) return;
-    client.get('users/lookup').then(r => setUsers(r.data.users || [])).catch(() => {});
+    const scopeToOwnCompany = !showAllCompanies && recordCompanyId;
+    client.get('users/lookup', scopeToOwnCompany ? { params: { company_id: recordCompanyId } } : undefined)
+      .then(r => setUsers(r.data.users || [])).catch(() => {});
     client.get('companies').then(r => setCompanies(r.data.companies || r.data || [])).catch(() => {});
-  }, [open, isSuper]);
+  }, [open, isSuper, showAllCompanies, recordCompanyId]);
 
   // Fields to expose + the current display name for each.
   const fields = useMemo(() => kind === 'transfer'
@@ -45,9 +60,28 @@ export default function ReassignOwnership({ kind, record, onDone }) {
         { key: 'created_by', label: 'Created by', current: record?.created_by_name || '—' },
       ], [kind, record]);
 
+  // Same-company users float to the top of the list when browsing all
+  // companies, so the record's own people are never buried in a 150-user
+  // alphabetical dump.
+  const sortedUsers = useMemo(() => {
+    if (!recordCompanyId) return users;
+    return [...users].sort((a, b) => {
+      const aSame = a.company_id === recordCompanyId, bSame = b.company_id === recordCompanyId;
+      if (aSame !== bSame) return aSame ? -1 : 1;
+      return (a.name || '').localeCompare(b.name || '');
+    });
+  }, [users, recordCompanyId]);
+
   const userOpts = useMemo(() =>
-    users.map(u => ({ value: u.user_id, label: `${u.name}${u.role ? ` · ${String(u.role).replace(/_/g, ' ')}` : ''}${u.company_name ? ` · ${u.company_name}` : ''}` })),
-    [users]);
+    sortedUsers.map(u => ({
+      value: u.user_id,
+      company_id: u.company_id,
+      company_name: u.company_name,
+      label: `${u.name}${u.role ? ` · ${String(u.role).replace(/_/g, ' ')}` : ''}${u.company_name ? ` · ${u.company_name}` : ''}`,
+    })),
+    [sortedUsers]);
+
+  const usersById = useMemo(() => Object.fromEntries(userOpts.map(o => [o.value, o])), [userOpts]);
 
   if (!isSuper) return null;
 
@@ -84,20 +118,41 @@ export default function ReassignOwnership({ kind, record, onDone }) {
 
       {open && (
         <div className="p-3 space-y-3" style={{ backgroundColor: 'var(--color-surface)' }}>
-          {fields.map(f => (
-            <div key={f.key}>
-              <label className="text-xs font-semibold flex items-center justify-between" style={{ color: 'var(--color-text-secondary)' }}>
-                <span>{f.label}</span>
-                <span className="text-[11px] font-normal" style={{ color: 'var(--color-text-tertiary)' }}>now: {f.current}</span>
-              </label>
-              <ThemedSelect value={sel[f.key] || ''} onChange={e => setSel(s => ({ ...s, [f.key]: e.target.value }))}
-                className="input w-full text-sm py-1.5 mt-1">
-                <option value="">— keep current —</option>
-                <option value="__clear__">— unassign (clear) —</option>
-                {userOpts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </ThemedSelect>
-            </div>
-          ))}
+          {recordCompanyId && (
+            <label className="flex items-start gap-2 text-xs cursor-pointer" style={{ color: 'var(--color-text-secondary)' }}>
+              <input type="checkbox" checked={showAllCompanies} onChange={e => setShowAllCompanies(e.target.checked)} className="mt-0.5" />
+              <span>Show users from every company (default: only this record's own company).</span>
+            </label>
+          )}
+
+          {fields.map(f => {
+            const picked = sel[f.key] && sel[f.key] !== '__clear__' ? usersById[sel[f.key]] : null;
+            const mismatch = picked && recordCompanyId && picked.company_id !== recordCompanyId;
+            return (
+              <div key={f.key}>
+                <label className="text-xs font-semibold flex items-center justify-between" style={{ color: 'var(--color-text-secondary)' }}>
+                  <span>{f.label}</span>
+                  <span className="text-[11px] font-normal" style={{ color: 'var(--color-text-tertiary)' }}>now: {f.current}</span>
+                </label>
+                <ThemedSelect value={sel[f.key] || ''} onChange={e => setSel(s => ({ ...s, [f.key]: e.target.value }))}
+                  className="input w-full text-sm py-1.5 mt-1">
+                  <option value="">— keep current —</option>
+                  <option value="__clear__">— unassign (clear) —</option>
+                  {userOpts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </ThemedSelect>
+                {/* Live, specific — names the exact company mismatch instead of a
+                    generic disclaimer nobody reads. This is what would have
+                    caught the 000003QI mistake (Wavetech fronter picked for a
+                    Mejor sale) before it saved. */}
+                {mismatch && (
+                  <p className="flex items-start gap-1.5 mt-1 text-[11px] font-semibold" style={{ color: 'var(--color-warning-700, #b45309)' }}>
+                    <AlertTriangle size={12} className="flex-shrink-0 mt-0.5" />
+                    {picked.label.split(' · ')[0]} belongs to {picked.company_name || 'a different company'} — this record is {companies.find(c => c.id === recordCompanyId)?.name || 'a different company'}.
+                  </p>
+                )}
+              </div>
+            );
+          })}
 
           <div>
             <label className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>Company</label>
@@ -112,9 +167,9 @@ export default function ReassignOwnership({ kind, record, onDone }) {
             <span>Also apply the same owners to the linked {kind === 'transfer' ? 'sale' : 'transfer'} (if any).</span>
           </label>
 
-          <div className="flex items-start gap-2 rounded-lg p-2 text-[11px]" style={{ backgroundColor: 'var(--color-warning-50, #fffbeb)', color: 'var(--color-warning-700, #b45309)' }}>
+          <div className="flex items-start gap-2 rounded-lg p-2 text-[11px]" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>
             <AlertTriangle size={13} className="flex-shrink-0 mt-0.5" />
-            <span>Pick owners who belong to the right company, or the record won't appear in their view. The change is audited.</span>
+            <span>The picker only shows this record's own company by default now — toggle above to cross-company reassign. Every change is audited.</span>
           </div>
 
           <button onClick={save} disabled={busy}
