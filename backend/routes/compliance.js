@@ -918,39 +918,29 @@ router.get('/sales', asyncHandler(async (req, res) => {
     return q.or(`customer_name.ilike.%${s}%,customer_phone.ilike.%${s}%,reference_no.ilike.%${s}%`);
   };
 
-  // Determine the company type up front so sales get scoped correctly. Sales
-  // are stored under the CLOSER company; a fronter company owns transfers, not
-  // sales, so we scope those by the LINKED transfer's company.
+  // Company filter — match sales.company_id directly, for every company type.
   //
-  // sales.company_id is not perfectly reliable as "which company this row
-  // belongs to" even so — the superadmin /sales/:id/reassign endpoint can move
-  // a sale's company_id to any company (including a fronter one) without
-  // touching the linked transfer, which is exactly how 2 known rows ended up
-  // with sales.company_id and transfers.company_id pointing at two different
-  // fronter companies. When that happens under a fronter-type filter (matched
-  // via the transfer, below), `filterCompanyMeta` lets the row display the
-  // company that actually matched the filter instead of the sale's own
-  // (possibly reassigned) owner — see the `companies:` override further down.
-  let companyType = null;
-  let filterCompanyMeta = null;
-  if (company_id) {
-    const { data: co } = await supabaseAdmin
-      .from('companies').select('id, name, company_type').eq('id', company_id).maybeSingle();
-    companyType = co?.company_type || null;
-    filterCompanyMeta = co || null;
-  }
-
-  // For a fronter company, filter via a server-side inner join on the linked
-  // transfer (transfers!inner) instead of pulling every transfer id into an
-  // .in() clause. A busy fronter has thousands of transfers, and that id list
-  // overflowed the request URL — the source of the 500 on this endpoint.
-  let query = (companyType === 'fronter')
-    ? supabaseAdmin.from('sales').select('*, transfers!inner(company_id)', { count: 'exact' }).eq('transfers.company_id', company_id)
-    : supabaseAdmin.from('sales').select('*', { count: 'exact' });
+  // This used to branch on company_type and, for a FRONTER company, match via
+  // the LINKED TRANSFER's company_id instead (a transfers!inner join) — on the
+  // assumption "sales are stored under the CLOSER company; a fronter owns
+  // transfers, not sales." That's not what this business's data shows: fronter
+  // companies routinely close their own sales, so sales.company_id is already
+  // a reliable "who owns this sale right now" column. Measured before
+  // changing it: of 7,246 sales with a linked transfer, sales.company_id and
+  // the transfer's company_id disagree on exactly 2 (both deliberate
+  // superadmin /sales/:id/reassign moves), and 0 sales have company_id NULL
+  // while carrying a transfer — so this is a safe simplification, not a guess.
+  //
+  // The transfer-join version had a real bug: after a sale is reassigned to a
+  // different company, it kept matching its OLD company's filter (because the
+  // linked transfer's company_id never changes), so picking "Mejor" surfaced
+  // a sale that had been moved to Onyx. Matching sales.company_id directly
+  // fixes that — a reassigned sale now lives only under its current owner.
+  let query = supabaseAdmin.from('sales').select('*', { count: 'exact' });
 
   query = applySort(query, sort_by, sort_dir, access.sortMap, { col: 'created_at', asc: false });
 
-  if (company_id && companyType !== 'fronter') query = query.eq('company_id', company_id);
+  if (company_id) query = query.eq('company_id', company_id);
 
   // readonly_admin company isolation (server-enforced). null = unrestricted;
   // an array = only those companies. A specific ?company_id outside scope 403s;
@@ -1028,10 +1018,7 @@ router.get('/sales', asyncHandler(async (req, res) => {
     (fp || []).forEach(p => { fronterProfileMap[p.user_id] = p; });
   }
 
-  const enriched = (data || []).map(row => {
-    // Drop the join-only `transfers` embed (present when scoping by a fronter
-    // company) so the response shape matches the non-join path exactly.
-    const { transfers: _join, ...s } = row;
+  const enriched = (data || []).map(s => {
     const frId = resolvedFronterId(s);
     return {
       ...s,
@@ -1040,11 +1027,7 @@ router.get('/sales', asyncHandler(async (req, res) => {
       fronter_id:    s.fronter_id || frId,
       closer_name:   profileName(profileMap, s.closer_id),
       fronter_name:  profileName(fronterProfileMap, frId),
-      // Under a fronter-type filter this row matched via transfers.company_id
-      // (the inner join above), not sales.company_id — display the company
-      // that actually matched so a row never appears to belong to a company
-      // filter it doesn't belong to (see the note on `filterCompanyMeta`).
-      companies:     (companyType === 'fronter' && filterCompanyMeta) ? filterCompanyMeta : (companyMap[s.company_id] || null),
+      companies:     companyMap[s.company_id] || null,
       user_profiles: profileMap[s.closer_id] || null,
     };
   });
@@ -1082,10 +1065,8 @@ router.get('/sales', asyncHandler(async (req, res) => {
     // Fresh HEAD-count query per status (immune to PostgREST's 5000-row cap that
     // truncated the old fetch-and-tally). Same filters as the list, minus status.
     const makeSaleBase = () => {
-      let q = (companyType === 'fronter')
-        ? supabaseAdmin.from('sales').select('*, transfers!inner(company_id)', { count: 'exact', head: true }).eq('transfers.company_id', company_id)
-        : supabaseAdmin.from('sales').select('*', { count: 'exact', head: true });
-      if (company_id && companyType !== 'fronter') q = q.eq('company_id', company_id);
+      let q = supabaseAdmin.from('sales').select('*', { count: 'exact', head: true });
+      if (company_id) q = q.eq('company_id', company_id);
       if (!company_id && Array.isArray(roAllowed)) q = scopeToCompanies(q, roAllowed);
       if (user_ids) { const ids = user_ids.split(',').filter(Boolean); if (ids.length) q = q.in('closer_id', ids); }
       if (disposition) q = q.eq('closer_disposition', disposition);
