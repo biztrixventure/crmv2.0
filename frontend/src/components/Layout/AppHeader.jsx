@@ -25,6 +25,28 @@ const CompanyLogoImg = ({ src, brandInitial = 'C' }) => {
   );
 };
 
+// Wraps the logo+title cluster in a real button when a shell wires a click
+// handler (→ that shell's own dashboard), so it's keyboard-focusable and
+// screen-reader-announced as a control instead of dead text. Falls back to a
+// plain div when no handler is given.
+const BrandTag = ({ onClick, label, children }) => {
+  if (!onClick) {
+    return <div className="flex items-center gap-1.5 sm:gap-3 min-w-0">{children}</div>;
+  }
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={`Go to ${label || 'dashboard'}`}
+      title={`Go to ${label || 'dashboard'}`}
+      className="flex items-center gap-1.5 sm:gap-3 min-w-0 rounded-xl cursor-pointer transition-opacity duration-150 hover:opacity-80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+      style={{ outlineColor: 'var(--color-primary-500)' }}
+    >
+      {children}
+    </button>
+  );
+};
+
 // Shared icon button — matches NotificationBell / ChatLauncher styling so the
 // whole control cluster reads as one set.
 const IconBtn = ({ onClick, title, children }) => (
@@ -56,6 +78,7 @@ const AppHeader = ({
   navItems = [],
   activeNav = 'dashboard',
   onNavChange = () => {},
+  onBrandClick = null,
   notifications = [],
   unreadCount = 0,
   onMarkRead = () => {},
@@ -109,32 +132,38 @@ const AppHeader = ({
                 to. A home-screen app has no browser chrome, so without this the
                 only back is an invisible edge swipe. Null everywhere else. */}
             <BackButton />
-            {/* The back control costs 44px, which at 390 is enough to push the
-                logo into the right-hand control cluster — and a company logo
-                here can be up to 120px wide. In an installed app the logo is
-                the thing worth dropping below `sm`: the user launched this from
-                a home-screen icon and already knows which app they are in,
-                whereas the back control is their only way out of a page. A
-                browser tab renders exactly as before. */}
-            <div className={standalone ? 'hidden sm:contents' : 'contents'}>
-              {companyLogoUrl ? (
-                <CompanyLogoImg brandInitial={brandInitial} src={companyLogoUrl} />
-              ) : logo ?? (
-                <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-                  style={{ background: 'var(--gradient-sidebar)', boxShadow: '0 2px 8px rgba(168,136,92,0.35)' }}>
-                  <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '1.1rem', color: 'white' }}>{brandInitial}</span>
-                </div>
-              )}
-            </div>
-            <div className="hidden sm:flex flex-col min-w-0 leading-none">
-              <span className="font-bold truncate"
-                style={{ fontFamily: 'var(--font-display)', fontSize: '1.05rem', letterSpacing: '-0.01em', color: 'var(--color-primary-700)', lineHeight: 1.15 }}>
-                {headerTitle}
-              </span>
-              <span className="text-xs truncate mt-0.5" style={{ color: 'var(--color-text-tertiary)', letterSpacing: '0.03em' }}>
-                {companyName || 'CRM Platform'}
-              </span>
-            </div>
+            {/* Brand block — clickable when a shell wires onBrandClick, taking
+                the user back to that shell's own dashboard rather than a
+                global redirect. Plain (non-interactive) div when the shell
+                doesn't supply a handler, so nothing else regresses. */}
+            <BrandTag onClick={onBrandClick} label={headerTitle}>
+              {/* The back control costs 44px, which at 390 is enough to push the
+                  logo into the right-hand control cluster — and a company logo
+                  here can be up to 120px wide. In an installed app the logo is
+                  the thing worth dropping below `sm`: the user launched this from
+                  a home-screen icon and already knows which app they are in,
+                  whereas the back control is their only way out of a page. A
+                  browser tab renders exactly as before. */}
+              <div className={standalone ? 'hidden sm:contents' : 'contents'}>
+                {companyLogoUrl ? (
+                  <CompanyLogoImg brandInitial={brandInitial} src={companyLogoUrl} />
+                ) : logo ?? (
+                  <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+                    style={{ background: 'var(--gradient-sidebar)', boxShadow: '0 2px 8px rgba(168,136,92,0.35)' }}>
+                    <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '1.1rem', color: 'white' }}>{brandInitial}</span>
+                  </div>
+                )}
+              </div>
+              <div className="hidden sm:flex flex-col min-w-0 leading-none">
+                <span className="font-bold truncate"
+                  style={{ fontFamily: 'var(--font-display)', fontSize: '1.05rem', letterSpacing: '-0.01em', color: 'var(--color-primary-700)', lineHeight: 1.15 }}>
+                  {headerTitle}
+                </span>
+                <span className="text-xs truncate mt-0.5" style={{ color: 'var(--color-text-tertiary)', letterSpacing: '0.03em' }}>
+                  {companyName || 'CRM Platform'}
+                </span>
+              </div>
+            </BrandTag>
           </div>
 
           {/* Center: Custom Actions */}

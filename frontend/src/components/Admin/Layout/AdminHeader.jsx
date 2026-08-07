@@ -15,6 +15,7 @@ const AdminHeader = ({
   notifications = [], unreadCount = 0,
   onMarkRead, onMarkAllRead, onDeleteNotification, onClearNotifications,
   sidebarOpen = true, onToggleSidebar, onOpenMobileNav,
+  onBrandClick = null,
 }) => {
   const { user, updateUser } = useAuth();
   const { siteName, logoUrl } = useBranding();
@@ -85,25 +86,36 @@ const AdminHeader = ({
               the app, so it takes the primary line and "Admin Panel" becomes the
               context beneath it — previously this was inverted, which buried the
               CRM's name in 11px tertiary text under a generic heading. Both
-              come from Branding & SEO, so renaming the CRM renames this. */}
-          <div className={`w-9 h-9 rounded-xl ${standalone ? 'hidden sm:flex' : 'flex'} items-center justify-center flex-shrink-0 overflow-hidden`}
-            style={{ background: 'var(--gradient-sidebar)', boxShadow: 'var(--shadow-sm)' }}>
-            {logoUrl
-              ? <img src={logoUrl} alt="" className="w-full h-full object-cover" />
-              : <Settings size={18} className="text-white" />}
-          </div>
-          {/* The brand text is the first thing to go when width runs out — the
-              logo chip beside it already identifies the app, and the real page
-              title comes from each tab's SectionHeader. `min-w-0` (not
-              flex-shrink-0) so `truncate` can actually engage. */}
-          <div className="hidden md:block min-w-0">
-            <h1 className="text-base font-bold leading-tight truncate" style={{ color: 'var(--color-text)', fontFamily: 'var(--font-display)' }}>
-              {siteName}
-            </h1>
-            <p className="text-xs leading-tight whitespace-nowrap m-0" style={{ color: 'var(--color-text-tertiary)' }}>
-              Admin Panel
-            </p>
-          </div>
+              come from Branding & SEO, so renaming the CRM renames this.
+              Clickable (→ the Dashboard tab) whenever onBrandClick is wired. */}
+          <button
+            type="button"
+            onClick={onBrandClick || undefined}
+            disabled={!onBrandClick}
+            aria-label={`Go to ${siteName || 'CRM'} dashboard`}
+            title={`Go to ${siteName || 'CRM'} dashboard`}
+            className={`flex items-center gap-1.5 sm:gap-3 min-w-0 rounded-xl transition-opacity duration-150 ${onBrandClick ? 'cursor-pointer hover:opacity-80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2' : 'cursor-default'}`}
+            style={{ outlineColor: 'var(--color-primary-500)' }}
+          >
+            <div className={`w-9 h-9 rounded-xl ${standalone ? 'hidden sm:flex' : 'flex'} items-center justify-center flex-shrink-0 overflow-hidden`}
+              style={{ background: 'var(--gradient-sidebar)', boxShadow: 'var(--shadow-sm)' }}>
+              {logoUrl
+                ? <img src={logoUrl} alt="" className="w-full h-full object-cover" />
+                : <Settings size={18} className="text-white" />}
+            </div>
+            {/* The brand text is the first thing to go when width runs out — the
+                logo chip beside it already identifies the app, and the real page
+                title comes from each tab's SectionHeader. `min-w-0` (not
+                flex-shrink-0) so `truncate` can actually engage. */}
+            <div className="hidden md:block min-w-0 text-left">
+              <h1 className="text-base font-bold leading-tight truncate" style={{ color: 'var(--color-text)', fontFamily: 'var(--font-display)' }}>
+                {siteName}
+              </h1>
+              <p className="text-xs leading-tight whitespace-nowrap m-0" style={{ color: 'var(--color-text-tertiary)' }}>
+                Admin Panel
+              </p>
+            </div>
+          </button>
           <div className="hidden lg:block w-px h-7 mx-2 flex-shrink-0" style={{ backgroundColor: 'var(--color-border)' }} />
           {/* Tint via color-mix, not --color-primary-100: that token is light in
               BOTH themes, so it renders a light chip on the dark UI. */}

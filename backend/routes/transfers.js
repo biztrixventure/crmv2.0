@@ -509,9 +509,10 @@ router.get('/search-by-phone', asyncHandler(async (req, res) => {
   const tIds = data.map(t => t.id);
   let saleByTransferId = {};
   let latestDispoMapPhone = {};
+  let callbackByTransferId = {};
 
   if (tIds.length > 0) {
-    const [salesRes, dispoRes] = await Promise.all([
+    const [salesRes, dispoRes, callbackRes] = await Promise.all([
       supabaseAdmin.from('sales')
         .select('id, transfer_id, status, compliance_note, reference_no, customer_phone, closer_id, created_at, closer_disposition, is_resell')
         .in('transfer_id', tIds),
@@ -519,10 +520,21 @@ router.get('/search-by-phone', asyncHandler(async (req, res) => {
         .select('transfer_id, disposition_name, color, note, created_at, user_id')
         .in('transfer_id', tIds)
         .order('created_at', { ascending: false }),
+      // Callbacks scheduled directly off one of these transfers (source_id) —
+      // 'submit-callback' stamps source_id = transfer_id. Soonest pending/
+      // no_answer one per transfer, so a closer sees "customer expects a call".
+      supabaseAdmin.from('callbacks')
+        .select('id, transfer_id:source_id, callback_at, notes, status')
+        .in('source_id', tIds)
+        .in('status', ['pending', 'no_answer'])
+        .order('callback_at', { ascending: true }),
     ]);
     (salesRes.data || []).forEach(s => { saleByTransferId[s.transfer_id] = s; });
     (dispoRes.data || []).forEach(d => {
       if (!latestDispoMapPhone[d.transfer_id]) latestDispoMapPhone[d.transfer_id] = d;
+    });
+    (callbackRes.data || []).forEach(c => {
+      if (!callbackByTransferId[c.transfer_id]) callbackByTransferId[c.transfer_id] = c;
     });
 
     // Resolve setter names for dispositions + closer names for sales in one batch
@@ -577,6 +589,7 @@ router.get('/search-by-phone', asyncHandler(async (req, res) => {
       cross_company_count: coCount,
       cross_company: coCount > 1,
       latest_disposition: latestDispoMapPhone[t.id] || null,
+      callback: callbackByTransferId[t.id] || null,
     };
   });
 

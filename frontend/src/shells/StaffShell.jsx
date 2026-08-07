@@ -925,6 +925,7 @@ const StaffShell = () => {
         onMarkRead={notifHook.markRead} onMarkAllRead={notifHook.markAllRead}
         onDeleteNotification={notifHook.deleteNotification} onClearNotifications={notifHook.clearAll}
         navItems={crossNavItems} activeNav={activeNav} onNavChange={setActiveNav}
+        onBrandClick={() => setActiveNav('dashboard')}
       />
 
       <EngagementBanners />

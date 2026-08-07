@@ -289,6 +289,7 @@ const AdminPanel = () => {
         sidebarOpen={sidebarOpen}
         onToggleSidebar={() => setSidebarOpen(o => !o)}
         onOpenMobileNav={() => setMobileNavOpen(true)}
+        onBrandClick={() => setActiveTab('dashboard')}
       />
 
       <EngagementBanners />

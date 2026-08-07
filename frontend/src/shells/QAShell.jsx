@@ -4883,7 +4883,11 @@ function QAAgentView({ user, logout }) {
     <div className="min-h-screen flex flex-col relative" style={{ background: 'var(--color-bg)' }}>
       <DotGridBg />
       <header className="flex items-center gap-4 px-5 py-3 border-b relative z-10" style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface)' }}>
-        <div className="flex items-center gap-2 font-extrabold" style={{ color: 'var(--color-text)' }}><ClipboardCheck size={20} style={{ color: 'var(--color-primary-600)' }} /> QA</div>
+        <button type="button" onClick={() => setTab('dashboard')} aria-label="Go to QA dashboard" title="Go to QA dashboard"
+          className="flex items-center gap-2 font-extrabold rounded-lg cursor-pointer transition-opacity duration-150 hover:opacity-80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+          style={{ color: 'var(--color-text)', outlineColor: 'var(--color-primary-500)' }}>
+          <ClipboardCheck size={20} style={{ color: 'var(--color-primary-600)' }} /> QA
+        </button>
         <nav className="flex items-center gap-1">
           {tabs.map(t => (
             <button key={t.key} onClick={() => setTab(t.key)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold"
@@ -4928,11 +4932,10 @@ export default function QAShell() {
   // History-backed (see QAAgentView above for why). `persist: false` keeps the
   // existing "land on the first tab this role can actually load" behaviour as
   // the default instead of restoring a remembered tab that may now 403.
-  const [tab, setTab] = useHistoryTab(
-    null,
-    canQueue ? 'dashboard' : canReports ? 'reports' : canManage ? 'config' : canAssign ? 'day' : 'dashboard',
-    { persist: false },
-  );
+  // Also reused by the brand-click handler below, so "go to dashboard" always
+  // lands on a tab this role can actually load instead of a 403'd Dashboard.
+  const landingTab = canQueue ? 'dashboard' : canReports ? 'reports' : canManage ? 'config' : canAssign ? 'day' : 'dashboard';
+  const [tab, setTab] = useHistoryTab(null, landingTab, { persist: false });
   // A tapped QA notification lands on Completed — a manager's QA notifications
   // are about reviews that have been done, not about work waiting for them.
   // Declared before the QAAgentView early-return below so hook order is stable.
@@ -4967,7 +4970,11 @@ export default function QAShell() {
     <div className="min-h-screen flex flex-col relative" style={{ background: 'var(--color-bg)' }}>
       <DotGridBg />
       <header className="flex items-center gap-4 px-5 py-3 border-b relative z-10" style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface)' }}>
-        <div className="flex items-center gap-2 font-extrabold" style={{ color: 'var(--color-text)' }}><ClipboardCheck size={20} style={{ color: 'var(--color-primary-600)' }} /> QA</div>
+        <button type="button" onClick={() => setTab(landingTab)} aria-label="Go to QA dashboard" title="Go to QA dashboard"
+          className="flex items-center gap-2 font-extrabold rounded-lg cursor-pointer transition-opacity duration-150 hover:opacity-80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+          style={{ color: 'var(--color-text)', outlineColor: 'var(--color-primary-500)' }}>
+          <ClipboardCheck size={20} style={{ color: 'var(--color-primary-600)' }} /> QA
+        </button>
         <nav className="flex items-center gap-1">
           {tabs.map(t => (
             <button key={t.key} onClick={() => setTab(t.key)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold"

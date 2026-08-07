@@ -1,12 +1,38 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Search, Phone, DollarSign, AlertTriangle, CheckCircle, Clock, XCircle, ChevronDown, MessageSquare, Check, CalendarPlus, Globe, MapPin, RefreshCw, UserPlus } from 'lucide-react';
+import { Search, Phone, DollarSign, AlertTriangle, CheckCircle, Clock, XCircle, ChevronDown, MessageSquare, Check, CalendarPlus, CalendarClock, Globe, MapPin, RefreshCw, UserPlus } from 'lucide-react';
 import { Card, Badge } from '../UI';
+import { Field } from '../UI/kit';
 import client from '../../api/client';
 import { formatForInput, convertToUtc, getTzAbbr, formatInTz, ET_ZONE } from '../../utils/timezone';
 import ResellModal from './ResellModal';
 import ManualEntryModal from './ManualEntryModal';
 import CustomerHistoryBanner from './CustomerHistoryBanner';
 import ThemedDate from '../UI/ThemedDate';
+
+// Case-insensitive scan of form_data KEYS (not labels — closer search has no
+// access to this company's form_fields config, only the raw JSONB a fronter's
+// form wrote). Same convention the rest of the app already relies on for
+// vehicle fields (see StaffShell's transferVehicle / CLAUDE.md's documented
+// VIN/Miles/CarMake/CarModel/CarYear keys) — a company's admin-defined field
+// `name` is expected to match one of these regardless of how it's labelled.
+const FIELD_PATTERNS = {
+  carrier:  /carrier/i,
+  vin:      /^vin$/i,
+  miles:    /^(miles|mileage)$/i,
+  carYear:  /^(caryear|car_year|year)$/i,
+  carMake:  /^(carmake|car_make|make)$/i,
+  carModel: /^(carmodel|car_model|model)$/i,
+  state:    /^(state|customer_state)$/i,
+  zip:      /^(zip|zipcode|zip_code|postal_code)$/i,
+  reference:/reference/i,
+};
+
+// A small, dark-text (theme-aware) label/value pair for the vitals grid.
+const Vital = ({ label, value, mono = false }) => value ? (
+  <Field as="div" label={label}>
+    <span className={`text-xs font-semibold ${mono ? 'font-mono' : ''}`} style={{ color: 'var(--color-text)' }}>{value}</span>
+  </Field>
+) : null;
 
 const TRANSFER_BADGE = {
   pending:   'warning',
@@ -47,10 +73,30 @@ const TransferCard = ({ transfer, onCreateSale, onDispositionSubmit, onResell, d
     || 'Unknown';
   const phone = fd.customer_phone || fd.Phone || '—';
 
-  const skipKeys = new Set(['customer_name', 'customer_phone', 'FirstName', 'LastName', 'Phone']);
-  const extraFields = Object.entries(fd)
-    .filter(([k, v]) => v && !skipKeys.has(k))
-    .slice(0, 4);
+  // Pulls the first form_data entry whose KEY matches the pattern, marks that
+  // key "claimed" so it doesn't also show up in the generic "other fields"
+  // list below (no duplicate Carrier: X / carrier: X chips).
+  const claimedKeys = new Set(['customer_name', 'customer_phone', 'FirstName', 'LastName', 'Phone']);
+  const takeField = (re) => {
+    const hit = Object.entries(fd).find(([k, v]) => v !== undefined && v !== null && v !== '' && !claimedKeys.has(k) && re.test(k));
+    if (hit) claimedKeys.add(hit[0]);
+    return hit ? hit[1] : '';
+  };
+  const carrier    = takeField(FIELD_PATTERNS.carrier);
+  const vin        = takeField(FIELD_PATTERNS.vin);
+  const miles      = takeField(FIELD_PATTERNS.miles);
+  const carYear    = takeField(FIELD_PATTERNS.carYear);
+  const carMake    = takeField(FIELD_PATTERNS.carMake);
+  const carModel   = takeField(FIELD_PATTERNS.carModel);
+  const stateVal   = takeField(FIELD_PATTERNS.state);
+  const zipVal     = takeField(FIELD_PATTERNS.zip);
+  const leadRef    = takeField(FIELD_PATTERNS.reference);
+  const vehicle    = [carYear, carMake, carModel].filter(Boolean).join(' ');
+  // No cap — a company's custom form fields (beyond the ones named explicitly
+  // above) all still surface here instead of being silently sliced away.
+  // Scalars only: a handful of internal keys (e.g. "Manual Entry By") carry an
+  // object value, and String(obj) renders as the literal text "[object Object]".
+  const extraFields = Object.entries(fd).filter(([k, v]) => v && !claimedKeys.has(k) && typeof v !== 'object');
 
   const hasSale      = transfer.has_sale;
   const saleStatus   = transfer.sale_status;
@@ -370,40 +416,55 @@ const TransferCard = ({ transfer, onCreateSale, onDispositionSubmit, onResell, d
                 In Progress
               </span>
             )}
+            {transfer.callback && (
+              <span title={transfer.callback.notes || 'Customer expects a callback'}
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] sm:text-[10px] font-bold uppercase tracking-wider"
+                style={{ backgroundColor: 'color-mix(in srgb, #3b82f6 16%, transparent)', color: '#3b82f6', border: '1px solid color-mix(in srgb, #3b82f6 35%, transparent)' }}>
+                <CalendarClock size={9} />
+                {formatInTz(transfer.callback.callback_at, companyTimezone || ET_ZONE, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true })}
+              </span>
+            )}
             <span className="text-xs ml-auto" style={{ color: 'var(--color-text-tertiary)' }}>
               {new Date(transfer.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
             </span>
           </div>
 
-          {/* Name + phone */}
-          <p className="font-semibold text-sm leading-tight" style={{ color: 'var(--color-text)' }}>
+          {/* Name + phone — max-contrast, both are the two things a closer
+              looks for first when the results list is long. */}
+          <p className="font-bold text-sm leading-tight" style={{ color: 'var(--color-text)' }}>
             {customerName}
-            <span className="font-normal ml-2" style={{ color: 'var(--color-text-secondary)' }}>{phone}</span>
+            <span className="font-semibold ml-2" style={{ color: 'var(--color-text)' }}>{phone}</span>
           </p>
 
-          {/* Extra fields */}
+          {/* Vitals — everything a closer needs before making the sale, laid
+              out for a fast scan instead of buried in a slice-of-4 chip row.
+              Values use var(--color-text) (the max-contrast, theme-aware
+              token) rather than -secondary/-tertiary, per the legibility ask;
+              a field simply doesn't render when this company's form didn't
+              capture it (Vital returns null on an empty value). */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-3 gap-y-1.5 mt-2">
+            <Vital label="Fronter"     value={transfer.fronter_name} />
+            <Vital label="Fronter Co." value={transfer.company_name} />
+            <Vital label="Carrier"     value={carrier} />
+            <Vital label="Vehicle"     value={vehicle} />
+            <Vital label="VIN"         value={vin} mono />
+            <Vital label="Miles"       value={miles} />
+            <Vital label="Location"    value={[stateVal, zipVal].filter(Boolean).join(' ')} />
+            <Vital label="Reference #" value={transfer.sale_reference_no || leadRef} mono />
+            {hasSale && transfer.sale_closer_name && <Vital label="Closer" value={transfer.sale_closer_name} />}
+          </div>
+
+          {/* Everything else this company's form captured — no cap, so a
+              custom field never gets silently sliced away. */}
           {extraFields.length > 0 && (
-            <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1">
+            <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-2">
               {extraFields.map(([key, val]) => (
-                <span key={key} className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
+                <span key={key} className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                   <span className="capitalize">{key.replace(/_/g, ' ')}</span>:{' '}
-                  <span style={{ color: 'var(--color-text-secondary)' }}>{String(val)}</span>
+                  <span style={{ color: 'var(--color-text)' }}>{String(val)}</span>
                 </span>
               ))}
             </div>
-          )}
-
-          {transfer.fronter_name && (
-            <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>
-              By: {transfer.fronter_name}
-            </p>
-          )}
-
-          {hasSale && transfer.sale_reference_no && (
-            <p className="text-xs mt-0.5 font-mono" style={{ color: 'var(--color-text-tertiary)' }}>
-              Ref: {transfer.sale_reference_no}
-              {transfer.sale_closer_name && ` · Closer: ${transfer.sale_closer_name}`}
-            </p>
           )}
 
           {needsRevision && transfer.sale_compliance_note && (

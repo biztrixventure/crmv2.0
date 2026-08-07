@@ -222,6 +222,7 @@ const ComplianceShell = () => {
         onMarkAllRead={notifHook.markAllRead}
         onDeleteNotification={notifHook.deleteNotification}
         onClearNotifications={notifHook.clearAll}
+        onBrandClick={() => setActiveTab(complianceDefaultTab(TABS) || TABS[0]?.key || 'companies')}
       />
 
       <EngagementBanners />

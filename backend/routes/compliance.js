@@ -921,11 +921,23 @@ router.get('/sales', asyncHandler(async (req, res) => {
   // Determine the company type up front so sales get scoped correctly. Sales
   // are stored under the CLOSER company; a fronter company owns transfers, not
   // sales, so we scope those by the LINKED transfer's company.
+  //
+  // sales.company_id is not perfectly reliable as "which company this row
+  // belongs to" even so — the superadmin /sales/:id/reassign endpoint can move
+  // a sale's company_id to any company (including a fronter one) without
+  // touching the linked transfer, which is exactly how 2 known rows ended up
+  // with sales.company_id and transfers.company_id pointing at two different
+  // fronter companies. When that happens under a fronter-type filter (matched
+  // via the transfer, below), `filterCompanyMeta` lets the row display the
+  // company that actually matched the filter instead of the sale's own
+  // (possibly reassigned) owner — see the `companies:` override further down.
   let companyType = null;
+  let filterCompanyMeta = null;
   if (company_id) {
     const { data: co } = await supabaseAdmin
-      .from('companies').select('company_type').eq('id', company_id).maybeSingle();
+      .from('companies').select('id, name, company_type').eq('id', company_id).maybeSingle();
     companyType = co?.company_type || null;
+    filterCompanyMeta = co || null;
   }
 
   // For a fronter company, filter via a server-side inner join on the linked
@@ -1028,7 +1040,11 @@ router.get('/sales', asyncHandler(async (req, res) => {
       fronter_id:    s.fronter_id || frId,
       closer_name:   profileName(profileMap, s.closer_id),
       fronter_name:  profileName(fronterProfileMap, frId),
-      companies:     companyMap[s.company_id] || null,
+      // Under a fronter-type filter this row matched via transfers.company_id
+      // (the inner join above), not sales.company_id — display the company
+      // that actually matched so a row never appears to belong to a company
+      // filter it doesn't belong to (see the note on `filterCompanyMeta`).
+      companies:     (companyType === 'fronter' && filterCompanyMeta) ? filterCompanyMeta : (companyMap[s.company_id] || null),
       user_profiles: profileMap[s.closer_id] || null,
     };
   });
