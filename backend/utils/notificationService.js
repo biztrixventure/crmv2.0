@@ -190,6 +190,69 @@ async function notifyFloorManagers(companyId, payload) {
   await notifyUsers(ids, { ...payload, companyId });
 }
 
+// A closer's own "your sale was approved" notification doesn't need to name
+// their own company or fronter — they already know both. Someone who oversees
+// MULTIPLE companies/fronters (compliance, company_admin, superadmin) does
+// not, and every sale notification below used to make them tap into the
+// record just to find out who sold what for whom. resolveSaleContext fetches
+// that once per event so the manager/superadmin-facing messages can say it in
+// the text itself.
+//
+// fronter_id is null on legacy rows — same fallback compliance.js's
+// resolvedFronterId uses: the linked transfer's creator IS the fronter for
+// that lead by definition. fronterCompanyId is looked up unconditionally
+// (not just when fronter_id was missing) because onSaleApproved needs it even
+// when fronter_id was already stamped, to decide whether the fronter's OWN
+// company's managers need a separate cross-company notification.
+async function resolveSaleContext(sale) {
+  const companyId = sale.company_id;
+  let fronterId = sale.fronter_id || null;
+  let fronterCompanyId = null;
+
+  const [companyRes, transferRes] = await Promise.all([
+    companyId
+      ? supabaseAdmin.from('companies').select('name').eq('id', companyId).maybeSingle()
+      : Promise.resolve({ data: null }),
+    sale.transfer_id
+      ? supabaseAdmin.from('transfers').select('created_by, company_id').eq('id', sale.transfer_id).maybeSingle()
+      : Promise.resolve({ data: null }),
+  ]);
+
+  if (transferRes.data) {
+    fronterId = fronterId || transferRes.data.created_by || null;
+    fronterCompanyId = transferRes.data.company_id || null;
+  }
+
+  let fronterName = null;
+  if (fronterId) {
+    const { data: fp } = await supabaseAdmin
+      .from('user_profiles').select('first_name, last_name').eq('user_id', fronterId).maybeSingle();
+    fronterName = fp ? `${fp.first_name || ''} ${fp.last_name || ''}`.trim() || null : null;
+  }
+
+  return { companyName: companyRes.data?.name || null, fronterId, fronterName, fronterCompanyId };
+}
+
+// " · Plan: X · $Y/mo" — appended only to the richer manager/superadmin sale
+// messages, never to the closer's/fronter's own (they already know their own
+// deal numbers).
+function saleDetailSuffix(sale) {
+  const bits = [];
+  if (sale.plan) bits.push(`Plan: ${sale.plan}`);
+  const amt = Number(sale.monthly_payment);
+  if (sale.monthly_payment != null && !isNaN(amt) && amt > 0) bits.push(`$${amt.toFixed(2)}/mo`);
+  return bits.length ? ` · ${bits.join(' · ')}` : '';
+}
+
+// "for {company} (fronter: {fronter})" — the piece every manager/superadmin
+// sale message below was missing. Degrades gracefully: drops the fronter
+// clause if unresolvable, drops the whole thing if the company lookup failed,
+// so a lookup miss can never block the notification itself.
+function saleAttribution(ctx) {
+  if (!ctx.companyName) return '';
+  return ` for ${ctx.companyName}${ctx.fronterName ? ` (fronter: ${ctx.fronterName})` : ''}`;
+}
+
 // ─── business events ──────────────────────────────────────────────────────────
 
 async function onTransferCreated({ transfer, fronterName, closerUserId }) {
@@ -292,6 +355,9 @@ async function onSaleSubmittedForReview({ sale, submitterName }) {
   const customerName = sale.customer_name || 'Customer';
   const refNo        = sale.reference_no  || sale.id.slice(0, 8).toUpperCase();
   const companyId    = sale.company_id;
+  const ctx          = await resolveSaleContext(sale);
+  const attribution  = saleAttribution(ctx);
+  const detail       = saleDetailSuffix(sale);
 
   // company_admin rides along with compliance on the SAME call rather than
   // getting a send of its own. Both groups are being told the identical fact
@@ -310,15 +376,20 @@ async function onSaleSubmittedForReview({ sale, submitterName }) {
   await notifyUsers(reviewerIds, {
     companyId,
     type:      'sale_pending_review',
-    title:     'Sale awaiting compliance review',
-    message:   `${submitterName} submitted ${customerName} (Ref: ${refNo}) for review.`,
+    title:     `Sale awaiting review — ${customerName}`,
+    // e.g. "Junaid Saeed made a sale for The Mejor Communications (fronter:
+    // Onyx). Customer: William Rynarson · Plan: Express · $129.00/mo · Ref: 000003YT"
+    message:   `${submitterName} made a sale${attribution}. Customer: ${customerName}${detail} · Ref: ${refNo}`,
     // `open: 'drawer'` is an INTENT, not a destination. Every other sale
     // notification still resolves to "switch to the sales tab and ring the
     // row"; this one says "put the record itself on screen", because a review
     // request is actionable and the recipient is usually on a phone where the
     // row is a sliver. Opt-in per event so nothing else changes behaviour, and
     // absent on every notification written before today — those keep the ring.
-    data:      { sale_id: sale.id, reference_no: refNo, customer_name: customerName, open: 'drawer' },
+    data: {
+      sale_id: sale.id, reference_no: refNo, customer_name: customerName,
+      company_name: ctx.companyName, fronter_name: ctx.fronterName, open: 'drawer',
+    },
     dedupBase: `sale_pending_${sale.id}`,
   });
 }
@@ -331,6 +402,9 @@ async function onSaleApproved({ sale, reviewerName }) {
   const disposition   = sale.closer_disposition;
   const dispoSuffix   = disposition ? ` · Disposition: ${disposition}` : '';
   const dispoData     = disposition ? { closer_disposition: disposition } : {};
+  const ctx           = await resolveSaleContext(sale);
+  const attribution   = saleAttribution(ctx);
+  const detail        = saleDetailSuffix(sale);
 
   const closerId = sale.closer_id || sale.submitted_by;
   if (closerId) {
@@ -362,24 +436,19 @@ async function onSaleApproved({ sale, reviewerName }) {
     companyId,
     type:      'sale_approved',
     title:     `Sale confirmed — ${customerName}`,
-    message:   `${reviewerName} approved ${customerName} (Ref: ${refNo}). Status: CLOSED WON.${dispoSuffix}`,
-    data:      { sale_id: sale.id, reference_no: refNo, customer_name: customerName, ...dispoData },
+    // e.g. "Fahad Butt approved a sale for Wavetech Infomatics (fronter: Daud
+    // Rehman). Customer: Ozell Davis · Plan: Express · $115.83/mo · Ref:
+    // 0000041P. Status: CLOSED WON."
+    message:   `${reviewerName} approved a sale${attribution}. Customer: ${customerName}${detail} · Ref: ${refNo}. Status: CLOSED WON.${dispoSuffix}`,
+    data: {
+      sale_id: sale.id, reference_no: refNo, customer_name: customerName,
+      company_name: ctx.companyName, fronter_name: ctx.fronterName, ...dispoData,
+    },
     dedupBase: `sale_approved_mgr_${sale.id}`,
   });
 
-  let fronterUserId    = sale.fronter_id || null;
-  let fronterCompanyId = null;
-  if (sale.transfer_id) {
-    const { data: tf } = await supabaseAdmin
-      .from('transfers')
-      .select('created_by, company_id')
-      .eq('id', sale.transfer_id)
-      .single();
-    if (tf) {
-      fronterUserId    = fronterUserId || tf.created_by;
-      fronterCompanyId = tf.company_id;
-    }
-  }
+  const fronterUserId    = ctx.fronterId;
+  const fronterCompanyId = ctx.fronterCompanyId;
 
   if (fronterUserId) {
     await createNotification({
@@ -415,6 +484,8 @@ async function onSaleReturned({ sale, reviewerName, note }) {
   const customerName = sale.customer_name || 'Customer';
   const refNo        = sale.reference_no  || sale.id.slice(0, 8).toUpperCase();
   const companyId    = sale.company_id;
+  const ctx          = await resolveSaleContext(sale);
+  const attribution  = saleAttribution(ctx);
 
   const closerId = sale.closer_id || sale.submitted_by;
   if (closerId) {
@@ -442,20 +513,22 @@ async function onSaleReturned({ sale, reviewerName, note }) {
     companyId,
     type:    'sale_needs_revision',
     title:   `Sale returned for revision — ${customerName}`,
-    message: `${reviewerName} returned ${customerName} (Ref: ${refNo}) to closer. Note: ${note}`,
-    data:    { sale_id: sale.id, reference_no: refNo, note },
+    message: `${reviewerName} returned ${customerName}${attribution} (Ref: ${refNo}) to closer. Note: ${note}`,
+    data:    { sale_id: sale.id, reference_no: refNo, note, company_name: ctx.companyName, fronter_name: ctx.fronterName },
   });
 }
 
 async function onComplianceUpdate({ sale, editorName, reason }) {
   const customerName = sale.customer_name || 'Customer';
   const refNo        = sale.reference_no  || sale.id.slice(0, 8).toUpperCase();
+  const ctx          = await resolveSaleContext(sale);
+  const attribution  = saleAttribution(ctx);
 
   await notifyManagers(sale.company_id, {
     type:    'compliance_updated',
     title:   `Compliance update — ${sale.status?.toUpperCase()}`,
-    message: `${editorName} updated ${customerName} (Ref: ${refNo}) for compliance. Reason: ${reason}`,
-    data:    { sale_id: sale.id, reference_no: refNo, status: sale.status, reason },
+    message: `${editorName} updated ${customerName}${attribution} (Ref: ${refNo}) for compliance. Reason: ${reason}`,
+    data:    { sale_id: sale.id, reference_no: refNo, status: sale.status, reason, company_name: ctx.companyName, fronter_name: ctx.fronterName },
   });
 }
 
