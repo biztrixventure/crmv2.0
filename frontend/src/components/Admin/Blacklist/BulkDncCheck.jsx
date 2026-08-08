@@ -4,6 +4,7 @@ import { Upload, ClipboardList, Play, Zap, Download, X, Loader2, ShieldAlert, Sh
 import { toast } from 'sonner';
 import client from '../../../api/client';
 import { TableScroll } from "../../UI/kit";
+import { buildFilename } from '../../../utils/downloadFilename';
 
 // Bulk DNC / blacklist checker: paste a list OR upload a CSV/XLSX, then check
 // every number. Two modes — "cached + fresh" (reuse the shared cache, only
@@ -114,7 +115,7 @@ export default function BulkDncCheck() {
     const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `dnc-check-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = buildFilename({ dataset: 'dnc-check' });
     a.click(); URL.revokeObjectURL(a.href);
   };
 

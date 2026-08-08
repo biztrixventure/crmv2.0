@@ -10,6 +10,7 @@ import { useTransferStatuses } from '../../../hooks/useTransferStatuses';
 import ThemedSelect from '../../UI/Select';
 import ThemedDate from '../../UI/ThemedDate';
 import { SectionHeader, TableScroll } from '../../UI/kit';
+import { buildFilename } from '../../../utils/downloadFilename';
 
 // Default filter-card order (applies to BOTH sales and transfers — each dataset
 // picks the names it has, the rest are skipped). Dataset-specific synthetic
@@ -807,7 +808,7 @@ const DataAnalyzer = () => {
     try {
       const r = await client.post('data-analyzer/export', { dataset, filters: payload }, { responseType: 'blob' });
       const url = URL.createObjectURL(r.data);
-      const a = Object.assign(document.createElement('a'), { href: url, download: `data-analyzer_${dataset}_${new Date().toISOString().slice(0,10)}.csv` });
+      const a = Object.assign(document.createElement('a'), { href: url, download: buildFilename({ dataset, dateFrom, dateTo }) });
       document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
     } catch (e) { setErr(e.response?.data?.error || 'Export failed'); }
     finally { setExporting(false); }

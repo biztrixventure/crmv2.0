@@ -620,9 +620,13 @@ router.post('/export', asyncHandler(async (req, res) => {
   const rows = enriched.map(r => exportCols.map(c => valFor(r, c)));
   const csv = [headerLabels, ...rows].map(r => r.map(esc).join(',')).join('\n');
 
-  const stamp = new Date().toISOString().slice(0, 10);
+  // Same shape as the frontend's buildFilename() (utils/downloadFilename.js):
+  // dataset + date + HHMMSS(ET) so two exports on the same day never collide.
+  const now = new Date();
+  const dateStamp = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
+  const timeStamp = new Intl.DateTimeFormat('en-GB', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(now).replace(/:/g, '');
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', `attachment; filename="data-analyzer_${dataset}_${stamp}.csv"`);
+  res.setHeader('Content-Disposition', `attachment; filename="data-analyzer_${dataset}_${dateStamp}_${timeStamp}.csv"`);
   // UTF-8 BOM so Excel reads it correctly on Windows.
   res.send('﻿' + csv);
 }));

@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import client from '../../api/client';
 import DncLookupPanel from './DncLookupPanel';
 import { useAuth } from '../../contexts/AuthContext';
+import { buildFilename } from '../../utils/downloadFilename';
 
 // Compliance bulk DNC: single lookup + "scan all sales" (cost-previewed, paced,
 // cached) + a filterable, exportable report of every sale's DNC verdict.
@@ -74,7 +75,7 @@ export default function ComplianceDncReport() {
       ].map(csvCell).join(',')));
       const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
       const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
-      a.download = `dnc_${filter}_sales.csv`; a.click(); URL.revokeObjectURL(a.href);
+      a.download = buildFilename({ dataset: `dnc-${filter}-sales` }); a.click(); URL.revokeObjectURL(a.href);
     } catch (e) { toast.error('Export failed'); }
     finally { setExporting(false); }
   };

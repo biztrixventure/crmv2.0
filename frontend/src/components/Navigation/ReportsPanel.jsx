@@ -12,6 +12,7 @@ import Tooltip from '../UI/Tooltip';
 import TeamPerformance from '../Manager/TeamPerformance';
 import { toast } from '../../utils/toast';
 import { writeExport, logClientExport } from '../../utils/exportSpec';
+import { buildFilename } from '../../utils/downloadFilename';
 import { useExportColumns } from '../../hooks/useExportColumns';
 
 // Plain-English explanation for every metric shown on this page.
@@ -141,7 +142,6 @@ const ReportsPanel = ({ companyId }) => {
   useEffect(() => { load(); }, [load]);
 
   const handleExport = async () => {
-    const today = new Date().toISOString().split('T')[0];
     const isFronters = activeTab === 'fronters';
     const dataset = isFronters ? 'reports_fronters' : 'reports_closers';
     const rows = isFronters ? fronters : closers;
@@ -154,7 +154,10 @@ const ReportsPanel = ({ companyId }) => {
     }
     writeExport({
       dataset, surface: dataset, allowed: allowedFor(dataset), rows,
-      filename: `${isFronters ? 'fronters' : 'closers'}_report_${today}.csv`,
+      filename: buildFilename({
+        dataset: isFronters ? 'fronters-report' : 'closers-report',
+        dateFrom: date_from, dateTo: date_to,
+      }),
     });
   };
 

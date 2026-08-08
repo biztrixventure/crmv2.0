@@ -29,6 +29,7 @@ import ProfileModal from '../components/Profile/ProfileModal';
 import { getClip, putClip, clipKey, cachedKeys, cacheStats, clearCache } from '../utils/audioCache';
 import { useHistoryTab } from '../hooks/useHistoryTab';
 import { useNavFocus } from '../contexts/FocusContext';
+import { buildFilename } from '../utils/downloadFilename';
 
 // ============================================================================
 // QA Shell — isolated shell for qa_manager / qa_agent (mirrors ComplianceShell).
@@ -1742,7 +1743,7 @@ function ColumnReport({ rows, loading, canExportQa, from, to }) {
             const lines = [head, ...sorted.map(r => COLS.map(c => esc(r[c[0]])).join(','))];
             const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
             const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
-            a.download = `qa-column-marking_${from}_${to}.csv`; a.click(); URL.revokeObjectURL(a.href);
+            a.download = buildFilename({ dataset: 'qa-column-marking', dateFrom: from, dateTo: to }); a.click(); URL.revokeObjectURL(a.href);
           }} className="flex items-center gap-1 text-[11px] font-bold px-2.5 py-1.5 rounded-lg"
             style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}>
             <Download size={13} /> CSV
@@ -1861,7 +1862,7 @@ function ReviewSheet({ companyId, workType, subjectRole, reviewerId, agentSel, d
     ].map(esc).join(','));
     const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
-    a.download = `qa-marking-sheet_${(cardName || cardId).replace(/[^a-z0-9]+/gi, '-').toLowerCase()}_${dateFrom || 'all'}_${dateTo || 'all'}.csv`;
+    a.download = buildFilename({ dataset: 'qa-marking-sheet', scope: cardName || cardId, dateFrom, dateTo });
     a.click(); URL.revokeObjectURL(a.href);
   };
 
@@ -2095,7 +2096,7 @@ function ReportsTab({ companyId, companyName = '' }) {
             for (const a of rows) lines.push([a.name, a.reviews, a.passed, a.pass_rate ?? '', a.avg_score].map(v => { const s2 = String(v ?? ''); return /[",\n]/.test(s2) ? '"' + s2.replace(/"/g, '""') + '"' : s2; }).join(','));
             const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
             const a2 = document.createElement('a'); a2.href = URL.createObjectURL(blob);
-            a2.download = `qa-agent-report_${f.date_from}_${f.date_to}.csv`; a2.click(); URL.revokeObjectURL(a2.href);
+            a2.download = buildFilename({ dataset: 'qa-agent-report', scope: companyName, dateFrom: f.date_from, dateTo: f.date_to }); a2.click(); URL.revokeObjectURL(a2.href);
           }}
           className="flex items-center gap-1 text-[11px] font-bold px-2.5 py-1.5 rounded-lg"
           style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}
@@ -3843,7 +3844,7 @@ function AgentQualityFile({ subject, managerView, companyId, onClose }) {
     }
     const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
-    a.download = `qa-file_${(subject.name || 'agent').replace(/[^a-z0-9]+/gi, '_')}_${from}_${today}.csv`;
+    a.download = buildFilename({ dataset: 'qa-file', scope: subject.name, dateFrom: from, dateTo: today });
     a.click(); URL.revokeObjectURL(a.href);
   };
 
@@ -3962,7 +3963,7 @@ function AgentQualityFile({ subject, managerView, companyId, onClose }) {
   );
 }
 
-function CompletedTab({ managerView, companyId, selfId, canOverride }) {
+function CompletedTab({ managerView, companyId, selfId, canOverride, companyName = '' }) {
   const { canExport } = useAuth();
   const today = todayISO();
   const [from, setFrom] = useState(today);
@@ -4054,11 +4055,11 @@ function CompletedTab({ managerView, companyId, selfId, canOverride }) {
   // reviewers leaderboard (manager view)
   const leaders = rollup(r => r.reviewer_id, r => r.reviewer_name).sort((a, b) => b.n - a.n);
 
-  const downloadCsvLines = (lines, name) => {
+  const downloadCsvLines = (lines, { dataset, scope, dateFrom, dateTo }) => {
     const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = name;
+    a.download = buildFilename({ dataset, scope, dateFrom, dateTo });
     a.click(); URL.revokeObjectURL(a.href);
   };
   // The export follows the view: Agents → the per-USER quality report (the
@@ -4069,12 +4070,12 @@ function CompletedTab({ managerView, companyId, selfId, canOverride }) {
     if (view === 'agents') {
       const lines = [['Agent (reviewed user)', 'Reviews', 'Avg score', 'Passed', 'Failed', 'Pass rate %', 'Auto-fails', 'TRA', 'RCM'].join(',')];
       for (const g of agentBoard) lines.push([g.name, g.n, g.avg ?? '', g.passed, g.decided - g.passed, g.passRate ?? '', g.autofails, g.tra, g.rcm].map(csvEsc).join(','));
-      return downloadCsvLines(lines, `qa-agent-report_${from}_${to}.csv`);
+      return downloadCsvLines(lines, { dataset: 'qa-agent-report', scope: companyName, dateFrom: from, dateTo: to });
     }
     if (view === 'reviewers') {
       const lines = [['Reviewer', 'Reviews', 'Avg score given', 'Pass rate %', 'Auto-fails', 'TRA', 'RCM'].join(',')];
       for (const g of leaders) lines.push([g.name, g.n, g.avg ?? '', g.passRate ?? '', g.autofails, g.tra, g.rcm].map(csvEsc).join(','));
-      return downloadCsvLines(lines, `qa-reviewer-report_${from}_${to}.csv`);
+      return downloadCsvLines(lines, { dataset: 'qa-reviewer-report', scope: companyName, dateFrom: from, dateTo: to });
     }
     const head = ['Reviewed at', 'Agent (reviewed user)', 'Dialer agent', 'Method', 'Customer', 'Phone', 'Score', 'Quality %', 'Result', 'Auto-fail', 'Call outcome', 'Reviewer', 'Notes'];
     const lines = [head.join(',')];
@@ -4088,7 +4089,7 @@ function CompletedTab({ managerView, companyId, selfId, canOverride }) {
         r.call_outcome || '', r.reviewer_name || '', r.overall_notes || '',
       ].map(csvEsc).join(','));
     }
-    downloadCsvLines(lines, `qa-completed_${from}_${to}.csv`);
+    downloadCsvLines(lines, { dataset: 'qa-completed', scope: companyName, dateFrom: from, dateTo: to });
   };
 
   const groups = {};
@@ -4911,7 +4912,7 @@ function QAAgentView({ user, logout }) {
             while loading (treated as no gate); the manager view is ungated. */}
         {tab === 'work' && <AgentWork selfId={user?.id} companyId={scoped || user?.company_id} scoped={scoped} allowedWt={methods} />}
         {tab === 'dashboard' && <div className="h-full overflow-auto"><QAAgentDashboard companyId={scoped} /></div>}
-        {tab === 'reviews' && <CompletedTab managerView={false} companyId={scoped} selfId={user?.id} canOverride={false} />}
+        {tab === 'reviews' && <CompletedTab managerView={false} companyId={scoped} selfId={user?.id} canOverride={false} companyName={(companies || []).find(c => c.id === scoped)?.name || ''} />}
       </main>
     </div>
   );
@@ -4999,7 +5000,7 @@ export default function QAShell() {
           <DayRecordingsTab canAssign={isSuper || canAssign} companyId={companyId} scoped={scoped} />
         </>}
         {tab === 'agents' && <AgentsTab companyId={scoped || user?.company_id} canManage={canManage} isSuper={isSuper} />}
-        {tab === 'completed' && <CompletedTab managerView={canReports} companyId={scoped} selfId={user?.id} canOverride={canOverride} />}
+        {tab === 'completed' && <CompletedTab managerView={canReports} companyId={scoped} selfId={user?.id} canOverride={canOverride} companyName={(companies || []).find(c => c.id === scoped)?.name || ''} />}
         {tab === 'config' && canManage && <ConfigTab companyId={scoped || user?.company_id} companyName={(companies || []).find(c => c.id === (scoped || user?.company_id))?.name} />}
         {tab === 'reports' && canReports && <ReportsTab companyId={scoped} companyName={(companies || []).find(c => c.id === scoped)?.name || ''} />}
       </main>

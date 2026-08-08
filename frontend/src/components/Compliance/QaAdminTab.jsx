@@ -5,6 +5,7 @@ import client from '../../api/client';
 import ThemedSelect from '../UI/Select';
 import { useAuth } from '../../contexts/AuthContext';
 import { TableScroll } from "../UI/kit";
+import { buildFilename } from '../../utils/downloadFilename';
 
 // ============================================================================
 // QaAdminTab — Compliance owns the QA department (mig 181 + 186).
@@ -105,7 +106,7 @@ function TeamReport({ team, onPick }) {
     const head = ['Person', 'Roles', 'Companies', 'Open', 'Reviews', 'Per day', 'Active days', 'Avg final', 'Avg quality', 'Pass %', 'Avg turnaround (min)', 'Last active'];
     const lines = [head.join(',')].concat(rows.map(r => [r.name, r.levels.map(lvlLabel).join('+'), r.companies.map(c => c.company_name).join(' | '), r.open_tasks, r.reviews, r.per_day, r.active_days, r.avg_final ?? '', r.avg_quality ?? '', r.pass_rate ?? '', r.avg_turnaround_min ?? '', r.last_at || ''].map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')));
     const blob = new Blob([lines.join('\n')], { type: 'text/csv' }); const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = `qa-team-report.csv`; a.click(); URL.revokeObjectURL(url);
+    const a = document.createElement('a'); a.href = url; a.download = buildFilename({ dataset: 'qa-team-report' }); a.click(); URL.revokeObjectURL(url);
   };
   const Th = ({ k, label }) => <th onClick={() => setS(k)} title={COL_TIP[k] ? `${COL_TIP[k]} · click to sort` : 'click to sort'} className="text-left px-3 py-2 text-[11px] font-bold uppercase cursor-pointer select-none whitespace-nowrap" style={{ color: sort.k === k ? 'var(--color-primary-600)' : 'var(--color-text-tertiary)' }}>{label}{sort.k === k ? (sort.dir < 0 ? ' ↓' : ' ↑') : ''}</th>;
   return (

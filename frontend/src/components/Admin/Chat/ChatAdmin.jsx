@@ -14,6 +14,7 @@ import Composer from '../../Chat/Composer';
 import ClientPortalTab from './ClientPortalTab';
 import { Loading, SectionHeader, PillTabs } from '../../UI/kit';
 import { TableScroll } from "../../UI/kit";
+import { buildFilename } from '../../../utils/downloadFilename';
 
 // ── shared bits ───────────────────────────────────────────────────────────────
 const fmt = (s) => s ? new Date(s).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
@@ -146,7 +147,7 @@ const ConversationViewer = ({ conversationId, onClose, onChanged }) => {
   const exportTranscript = () => {
     const head = `${title} — exported ${new Date().toLocaleString()}\n${'='.repeat(48)}\n\n`;
     const body = messages.map(m => `[${fmt(m.created_at)}] ${m.sender_name}${m.deleted ? ' (deleted)' : ''}: ${m.body || ''}`).join('\n');
-    downloadText(`chat-${conversationId.slice(0, 8)}.txt`, head + body);
+    downloadText(buildFilename({ dataset: 'chat', scope: title && title !== 'Loading…' ? title : conversationId.slice(0, 8), ext: 'txt' }), head + body);
   };
 
   return (

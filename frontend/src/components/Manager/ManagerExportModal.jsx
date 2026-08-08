@@ -8,6 +8,7 @@ import ThemedSelect from '../UI/Select';
 import ThemedDate from '../UI/ThemedDate';
 import { useAuth } from '../../contexts/AuthContext';
 import { fetchAllForExport, writeExport } from '../../utils/exportSpec';
+import { buildFilename } from '../../utils/downloadFilename';
 import { useExportColumns } from '../../hooks/useExportColumns';
 
 const SALE_STATUS = [['','All'],['open','Open'],['pending_review','In Review'],['needs_revision','Needs Revision'],['closed_won','Approved'],['closed_lost','Lost'],['cancelled','Cancelled'],['follow_up','Follow Up']];
@@ -44,7 +45,6 @@ const ManagerExportModal = ({ onClose, agents = [] }) => {
   const [busy, setBusy] = useState(false);
 
   const cfg = TYPES.find(t => t.key === type);
-  const today = new Date().toISOString().slice(0, 10);
 
   const run = async () => {
     setBusy(true);
@@ -68,25 +68,25 @@ const ManagerExportModal = ({ onClose, agents = [] }) => {
           .map(c => ({ key: c.key, label: c.key, get: (s) => saleToValue(s, c) }));
         write = () => writeExport({
           dataset: 'sales', surface: 'manager_sales', allowed: allowedFor('sales'),
-          extraColumns: cols, rows: data, filename: `${type}_export_${today}.csv`,
+          extraColumns: cols, rows: data, filename: buildFilename({ dataset: type, dateFrom, dateTo }),
         });
       } else if (type === 'transfers') {
         data = await drain('transfers', { ...dateParams, ...(status && { status }), ...(agent && { user_id: agent }) }, 'transfers');
         write = () => writeExport({
           dataset: 'transfers', surface: 'manager_transfers', allowed: allowedFor('transfers'),
-          rows: data, filename: `${type}_export_${today}.csv`,
+          rows: data, filename: buildFilename({ dataset: type, dateFrom, dateTo }),
         });
       } else if (type === 'callbacks') {
         data = await drain('callbacks', { ...dateParams }, 'callbacks');
         write = () => writeExport({
           dataset: 'callbacks', surface: 'manager_callbacks', allowed: allowedFor('callbacks'),
-          rows: data, filename: `${type}_export_${today}.csv`,
+          rows: data, filename: buildFilename({ dataset: type, dateFrom, dateTo }),
         });
       } else {
         data = await drain('users', { ...(includeInactive && { include_inactive: true }) }, 'users');
         write = () => writeExport({
           dataset: 'users', surface: 'manager_users', allowed: allowedFor('users'),
-          rows: data, filename: `${type}_export_${today}.csv`,
+          rows: data, filename: buildFilename({ dataset: type, dateFrom, dateTo }),
         });
       }
 

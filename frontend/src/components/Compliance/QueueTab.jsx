@@ -3,6 +3,7 @@ import { Clock, CheckCircle, RotateCcw, Eye, AlertTriangle, User } from 'lucide-
 import { Badge, Alert } from '../UI';
 import { FilterSelect } from '../UI/FilterBar';
 import { writeExport } from '../../utils/exportSpec';
+import { buildFilename } from '../../utils/downloadFilename';
 import { useExportColumns } from '../../hooks/useExportColumns';
 import client from '../../api/client';
 import SaleDetailDrawer from '../Shared/SaleDetailDrawer';
@@ -77,7 +78,7 @@ const QueueTab = ({ companyList }) => {
     writeExport({
       dataset: 'sales', surface: 'compliance_queue', allowed: allowedFor('sales'),
       rows: allSales,
-      filename: `queue_${new Date().toISOString().split('T')[0]}.csv`,
+      filename: buildFilename({ dataset: 'queue', scope: companyList.find(c => c.id === co)?.name, dateFrom, dateTo }),
     });
   };
 

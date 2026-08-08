@@ -18,6 +18,7 @@ import {
   Overlay, ModalBox, ModalHeader, InfoTile, fetchAllForExport,
 } from './shared';
 import { writeExport } from '../../utils/exportSpec';
+import { buildFilename } from '../../utils/downloadFilename';
 import { useExportColumns } from '../../hooks/useExportColumns';
 import ColumnHeader from '../UI/ColumnHeader';
 import { useTableQuery, useAbortable, isCanceled } from '../../hooks/useTableQuery';
@@ -305,7 +306,7 @@ const AuditLogView = ({ companyList }) => {
     writeExport({
       dataset: 'callback_audit', surface: 'compliance_callback_audit',
       allowed: allowedFor('callback_audit'), rows: allEntries,
-      filename: `callback_audit_log_${todayET()}.csv`,
+      filename: buildFilename({ dataset: 'callback-audit-log', scope: companyList.find(c => c.id === company)?.name, dateFrom, dateTo }),
     });
   };
 
@@ -551,7 +552,7 @@ const CallbacksTab = ({ companyList }) => {
     writeExport({
       dataset: 'callbacks', surface: 'compliance_callbacks', allowed: allowedFor('callbacks'),
       rows: allCallbacks,
-      filename: `callbacks_${cbType}_${todayET()}.csv`,
+      filename: buildFilename({ dataset: `callbacks-${cbType}`, scope: companyList.find(c => c.id === co)?.name, dateFrom: df, dateTo: dt }),
     });
   };
 

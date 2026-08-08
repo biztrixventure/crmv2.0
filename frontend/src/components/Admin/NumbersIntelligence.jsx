@@ -14,6 +14,7 @@ import client from '../../api/client';
 import { TableScroll } from '../UI/kit';
 import { useAuth } from '../../contexts/AuthContext';
 import { writeExport, logClientExport } from '../../utils/exportSpec';
+import { buildFilename } from '../../utils/downloadFilename';
 import { useExportColumns } from '../../hooks/useExportColumns';
 
 const STATUS_CFG = {
@@ -345,7 +346,7 @@ const NumbersIntelligence = () => {
     }
     writeExport({
       dataset: 'numbers', surface: 'numbers_intelligence', allowed: allowedFor('numbers'),
-      rows: numbers, filename: `numbers-intelligence-${new Date().toISOString().slice(0, 10)}.csv`,
+      rows: numbers, filename: buildFilename({ dataset: 'numbers-intelligence' }),
     });
   };
 

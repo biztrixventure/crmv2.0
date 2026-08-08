@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import ThemedDate from '../UI/ThemedDate';
 import { useAuth } from '../../contexts/AuthContext';
 import { fetchAllForExport, writeExport } from '../../utils/exportSpec';
+import { buildFilename } from '../../utils/downloadFilename';
 import { useExportColumns } from '../../hooks/useExportColumns';
 
 // ============================================================================
@@ -37,7 +38,6 @@ const StaffExportModal = ({ onClose }) => {
   const [busy, setBusy] = useState(false);
 
   const cfg = TYPES.find(t => t.key === type);
-  const today = new Date().toISOString().slice(0, 10);
 
   const run = async () => {
     setBusy(true);
@@ -51,7 +51,7 @@ const StaffExportModal = ({ onClose }) => {
       if (!rows.length) { toast.warning('No records match these filters.'); return; }
       writeExport({
         dataset: type, surface: cfg.surface, allowed: allowedFor(type),
-        rows, filename: `${type}_export_${today}.csv`,
+        rows, filename: buildFilename({ dataset: type, scope: user?.first_name || user?.email, dateFrom, dateTo }),
       });
       toast.success(`Exported ${rows.length.toLocaleString()} ${type}.`);
       onClose();

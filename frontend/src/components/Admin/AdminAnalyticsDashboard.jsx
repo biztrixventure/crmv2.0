@@ -12,6 +12,8 @@ import { todayET, fmtSaleDate } from '../../utils/timezone';
 import { useComplianceStatuses } from '../../hooks/useComplianceStatuses';
 import ThemedSelect from '../UI/Select';
 import { TableScroll } from '../UI/kit';
+import { downloadCSV } from '../../utils/recordFormat';
+import { buildFilename } from '../../utils/downloadFilename';
 
 // Map our 5 semantic badge tokens to a hex so the pipeline bar gets a
 // solid background even when Tailwind tree-shakes unused classes.
@@ -65,16 +67,6 @@ const CbOverdueDot = ({ cb }) => {
       <AlertCircle size={9} /> OD
     </span>
   );
-};
-
-const downloadCSV = (rows, headers, filename) => {
-  const csv = [headers, ...rows]
-    .map(r => r.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(','))
-    .join('\n');
-  const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' }));
-  const a = Object.assign(document.createElement('a'), { href: url, download: filename });
-  a.click();
-  URL.revokeObjectURL(url);
 };
 
 const Th = ({ col, sort, onSort, children }) => (
@@ -444,7 +436,11 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
   const handleExport = async () => {
     setExportLoading(true);
     try {
-      const today = todayET();
+      // Company name (not just id), when a single company is in scope — used
+      // to make the download filename identify what's inside without opening it.
+      const scopeCompanyName = filters.companyId
+        ? companies.find(c => c.id === filters.companyId)?.name
+        : undefined;
       // Page through the API in 1000-row batches (PostgREST caps each response at
       // 1000 regardless of the requested limit) so the export covers EVERY matching
       // record in the range, not just the first page.
@@ -483,7 +479,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
         ]);
         downloadCSV(rows,
           ['Customer','Phone','Email','Reference','Status','Fronter','Closer','Company','Plan','Monthly','Sale Date','Created'],
-          `sales_export_${today}.csv`);
+          buildFilename({ dataset: 'sales', scope: scopeCompanyName, dateFrom: date_from, dateTo: date_to, ext: 'csv' }));
       } else if (dataTab === 'transfers') {
         const params = {
           ...(filters.companyId && { company_id: filters.companyId }),
@@ -505,7 +501,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
         });
         downloadCSV(rows,
           ['Customer','Phone','Transfer Status','Sale Status','Fronter','Closer','Company','Sale Ref','Created'],
-          `transfers_export_${today}.csv`);
+          buildFilename({ dataset: 'transfers', scope: scopeCompanyName, dateFrom: date_from, dateTo: date_to, ext: 'csv' }));
       } else {
         const params = {
           company_type: filters.companyId ? undefined : cbType,
@@ -530,7 +526,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
         ]);
         downloadCSV(rows,
           ['Customer','Phone','Scheduled At','Status','Priority','Notes','Fronter','Closer','Company','Created'],
-          `callbacks_${cbType}_export_${today}.csv`);
+          buildFilename({ dataset: `callbacks-${cbType}`, scope: scopeCompanyName, dateFrom: date_from, dateTo: date_to, ext: 'csv' }));
       }
     } catch (err) {
       // Egress limit (or other export failure) → tell the user why.

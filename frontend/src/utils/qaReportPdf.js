@@ -8,6 +8,7 @@
 // Section-based (header → KPIs → charts → agent bars → table) so when the Reports
 // layout changes later, only the section builders here change.
 import { jsPDF } from 'jspdf';
+import { buildFilename } from './downloadFilename';
 import { getBrandName } from './branding';
 
 const INK = '#0f172a', SLATE = '#334155', MUTE = '#64748b', FAINT = '#94a3b8';
@@ -213,6 +214,5 @@ export function exportQaReportPdf({ data, filters = {}, companyName = '' } = {})
     doc.text(`Page ${p} of ${pages}`, W - M, H - 8, { align: 'right' });
   }
 
-  const safe = (companyName || 'company').replace(/[^\w-]+/g, '_').slice(0, 24);
-  doc.save(`qa-agent-report_${safe}_${filters.date_from || ''}_${filters.date_to || ''}.pdf`);
+  doc.save(buildFilename({ dataset: 'qa-agent-report', scope: companyName, dateFrom: filters.date_from, dateTo: filters.date_to, ext: 'pdf' }));
 }

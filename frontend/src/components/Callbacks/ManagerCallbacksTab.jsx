@@ -12,6 +12,7 @@ import {
   Overlay, ModalBox, ModalHeader, InfoTile,
 } from '../Compliance/shared';
 import { fetchAllForExport, writeExport } from '../../utils/exportSpec';
+import { buildFilename } from '../../utils/downloadFilename';
 import { useExportColumns } from '../../hooks/useExportColumns';
 
 const PRIORITY_CFG = {
@@ -358,7 +359,7 @@ const ManagerCallbacksTab = ({ user }) => {
     }
     writeExport({
       dataset: 'callbacks', surface: 'manager_team_callbacks', allowed: allowedFor('callbacks'),
-      rows, filename: `callbacks_${todayET()}.csv`,
+      rows, filename: buildFilename({ dataset: 'callbacks', scope: user?.company_name, dateFrom, dateTo }),
     });
   };
 

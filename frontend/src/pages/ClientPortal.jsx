@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import client from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
+import { buildRecordingFilename } from '../utils/downloadFilename';
 
 // ── Isolated client recording portal ─────────────────────────────────────────
 // No CRM chrome. Assigned closers' sales + play the actual sale call with a live
@@ -259,8 +260,8 @@ export default function ClientPortal() {
       const res = await client.get(`portal/sales/${sale.id}/recording`, { params: { clip: i + 1 }, responseType: 'blob' });
       const url = URL.createObjectURL(res.data);
       const a = document.createElement('a');
-      const safe = String(sale.customer_name || 'recording').replace(/\W+/g, '_');
-      a.href = url; a.download = `recording_${safe}_${sale.sale_date || ''}_part${i + 1}.mp3`;
+      a.href = url;
+      a.download = buildRecordingFilename({ customerName: sale.customer_name, closerName: sale.closer_name, saleDate: sale.sale_date, part: i + 1 });
       document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
     } catch { /* surfaced via the player error path when played */ }
     finally { setDownloading(null); }
@@ -276,14 +277,14 @@ export default function ClientPortal() {
     try {
       // split sales → download each part; single → one file
       const count = (!sale.isTest && sale.clips > 1) ? sale.clips : 1;
-      const safe = (sale.customer_name || 'call').replace(/[^\w]+/g, '_').slice(0, 40);
       for (let i = 0; i < count; i++) {
         const res = sale.isTest
           ? await client.get('portal/test-audio', { responseType: 'blob' })
           : await client.get(`portal/sales/${sale.id}/recording`, { params: count > 1 ? { clip: i + 1 } : {}, responseType: 'blob' });
         const url = URL.createObjectURL(res.data);
         const a = document.createElement('a');
-        a.href = url; a.download = `recording_${safe}_${sale.sale_date || ''}${count > 1 ? `_part${i + 1}` : ''}.mp3`;
+        a.href = url;
+        a.download = buildRecordingFilename({ customerName: sale.customer_name, closerName: sale.closer_name, saleDate: sale.sale_date, part: count > 1 ? i + 1 : undefined });
         document.body.appendChild(a); a.click(); a.remove();
         URL.revokeObjectURL(url);
       }

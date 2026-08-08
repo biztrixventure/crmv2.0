@@ -21,6 +21,7 @@ import { useCancellationReasons } from '../../hooks/useCancellationReasons';
 import { useSaleHighlight } from '../../hooks/useSaleHighlight';
 import { salePaidTenure } from '../../utils/saleTenure';
 import { writeExport } from '../../utils/exportSpec';
+import { buildFilename } from '../../utils/downloadFilename';
 import { useExportColumns } from '../../hooks/useExportColumns';
 import ThemedSelect from '../UI/Select';
 import ThemedDate from '../UI/ThemedDate';
@@ -328,7 +329,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
     writeExport({
       dataset: 'sales', surface: 'compliance_sales', allowed: allowedFor('sales'),
       rows: allSales, ctx: { labelOf },
-      filename: `sales_${new Date().toISOString().split('T')[0]}.csv`,
+      filename: buildFilename({ dataset: disposition ? `sales-${disposition}` : 'sales', scope: companyList.find(c => c.id === co)?.name, dateFrom: df, dateTo: dt }),
     });
   };
 

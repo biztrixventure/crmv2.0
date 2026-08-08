@@ -10,6 +10,7 @@ import { TableScroll } from '../UI/kit';
 // DUP_REASON_LABEL moved to utils/exportSpec.js — it only ever fed the export,
 // and the column that uses it now lives there with its accessor.
 import { writeExport } from '../../utils/exportSpec';
+import { buildFilename } from '../../utils/downloadFilename';
 import { useTableQuery, useAbortable, isCanceled } from '../../hooks/useTableQuery';
 import { useFilterOptions } from '../../hooks/useFilterOptions';
 import { useExportColumns } from '../../hooks/useExportColumns';
@@ -197,7 +198,7 @@ const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
       // Keyed by COLUMN, not by position — a configured column list would shift
       // a positional index and drop the totals into the wrong cells.
       footer: () => [{}, { customer_name: `Total transfers: ${all.length}`, is_duplicate: `Duplicates: ${dupCount}` }],
-      filename: `transfers_${todayET()}.csv`,
+      filename: buildFilename({ dataset: 'transfers', scope: companyList.find(c => c.id === co)?.name, dateFrom: df, dateTo: dt }),
     });
   };
 

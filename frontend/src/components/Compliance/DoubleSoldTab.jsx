@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import client from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 import { TableScroll } from "../UI/kit";
+import { buildFilename } from '../../utils/downloadFilename';
 
 // Duplicate-sold report: every customer NUMBER (customer_uuid) with >= 2 real
 // sales. Surfaces the whole picture — the same number sold repeatedly (even in
@@ -110,7 +111,7 @@ export default function DoubleSoldTab() {
     const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `duplicate-sold-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = buildFilename({ dataset: 'duplicate-sold' });
     a.click();
     URL.revokeObjectURL(a.href);
   };

@@ -3,6 +3,7 @@ import { toastError } from '../../../utils/toast';
 import { transferPhone } from '../../../utils/phone';
 import { useAuth } from '../../../contexts/AuthContext';
 import { writeExport, logClientExport } from '../../../utils/exportSpec';
+import { buildFilename } from '../../../utils/downloadFilename';
 import { useExportColumns } from '../../../hooks/useExportColumns';
 import ThemedSelect from '../../UI/Select';
 import {
@@ -79,7 +80,7 @@ const ExTd = ({ value, mono, truncate }) => (
 const dt = (d) => d ? new Date(d).toLocaleString() : null;
 
 // ── RecordsPanel ──────────────────────────────────────────────────────────────
-const RecordsPanel = ({ companyId, type, companyType }) => {
+const RecordsPanel = ({ companyId, type, companyType, companyName }) => {
   // null = unconfigured → each record type keeps its own default column set.
   const { allowedFor } = useExportColumns(['sales', 'transfers', 'callbacks']);
   const { user, hasPermission, canExport } = useAuth();
@@ -138,7 +139,6 @@ const RecordsPanel = ({ companyId, type, companyType }) => {
 
   const handleExport = async () => {
     setExportLoading(true);
-    const today = new Date().toISOString().split('T')[0];
     try {
       const params = { company_id: companyId, status: status || undefined, limit: 5000, page: 1,
         __egress: 'csv_export', __dataset: type };   // server enforces + logs
@@ -157,7 +157,7 @@ const RecordsPanel = ({ companyId, type, companyType }) => {
         dataset: type,
         surface: { sales: 'company_sales', transfers: 'company_transfers', callbacks: 'company_callbacks' }[type],
         allowed: allowedFor(type), rows: data, ctx: { companyType },
-        filename: `${type}_${companyId}_${today}.csv`,
+        filename: buildFilename({ dataset: type, scope: companyName }),
       });
     } catch (err) {
       if (err?.response?.data?.code === 'EGRESS_LIMIT') window.alert(err.response.data.error || 'Export blocked by your limit.');
@@ -551,7 +551,7 @@ const ImpersonateModal = ({ data, onClose }) => {
 };
 
 // ── MembersPanel ──────────────────────────────────────────────────────────────
-const MembersPanel = ({ companyId }) => {
+const MembersPanel = ({ companyId, companyName }) => {
   // null = unconfigured → the members CSV keeps its own default column set.
   const { allowedFor } = useExportColumns(['company_members']);
   const { hasPermission, user: authUser, canExport } = useAuth();
@@ -659,7 +659,6 @@ const MembersPanel = ({ companyId }) => {
   const handleExportMembers = async () => {
     if (!users.length) return;
     setExportLoading(true);
-    const today = new Date().toISOString().split('T')[0];
     try {
       // The member rows are already loaded, so there is no list request left for
       // egressAudit to intercept — this soft log was missing entirely, making
@@ -671,7 +670,7 @@ const MembersPanel = ({ companyId }) => {
       writeExport({
         dataset: 'company_members', surface: 'company_members',
         allowed: allowedFor('company_members'), rows: sorted,
-        filename: `members_${companyId}_${today}.csv`,
+        filename: buildFilename({ dataset: 'members', scope: companyName }),
       });
     } finally { setExportLoading(false); }
   };
@@ -1284,12 +1283,12 @@ const CompanyDetail = ({ company: initialCompany, onBack, onUpdate }) => {
 
       {/* panels */}
       {activeTab === 'overview'   && <OverviewPanel  key={`ov-${refresh}`} companyId={company.id} />}
-      {activeTab === 'members'    && <MembersPanel   key={`mb-${refresh}`} companyId={company.id} />}
+      {activeTab === 'members'    && <MembersPanel   key={`mb-${refresh}`} companyId={company.id} companyName={company.name} />}
       {activeTab === 'roles'      && <RolesPanel     key={`ro-${refresh}`} companyId={company.id} />}
       {activeTab === 'settings'   && <SettingsPanel  key={`st-${refresh}`} company={company} onCompanyUpdated={handleCompanyUpdated} />}
-      {activeTab === 'transfers'  && <RecordsPanel   key={`tr-${refresh}`} companyId={company.id} type="transfers" />}
-      {activeTab === 'sales'      && <RecordsPanel   key={`sa-${refresh}`} companyId={company.id} type="sales" />}
-      {activeTab === 'callbacks'  && <RecordsPanel   key={`cb-${refresh}`} companyId={company.id} type="callbacks" companyType={company.company_type} />}
+      {activeTab === 'transfers'  && <RecordsPanel   key={`tr-${refresh}`} companyId={company.id} type="transfers" companyName={company.name} />}
+      {activeTab === 'sales'      && <RecordsPanel   key={`sa-${refresh}`} companyId={company.id} type="sales" companyName={company.name} />}
+      {activeTab === 'callbacks'  && <RecordsPanel   key={`cb-${refresh}`} companyId={company.id} type="callbacks" companyType={company.company_type} companyName={company.name} />}
       {activeTab === 'numbers'    && <NumbersPanel   key={`nb-${refresh}`} companyId={company.id} />}
     </div>
   );

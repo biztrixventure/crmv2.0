@@ -13,6 +13,7 @@ import CopyableNumber from '../../UI/CopyableNumber';
 import NumberRiskCheck from '../../Shared/NumberRiskCheck';
 import { fmtSaleDate, fmtDateTimeET } from '../../../utils/timezone';
 import { salePaidTenure } from '../../../utils/saleTenure';
+import { buildFilename } from '../../../utils/downloadFilename';
 
 // Small amber "paid N months" chip for a cancelled sale (sale_date → cancel_date).
 const PaidChip = ({ sale }) => {
@@ -100,7 +101,7 @@ const downloadProfileCSV = (p) => {
   const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `customer_${(p.identity?.name || p.customer_uuid || 'profile').replace(/\W+/g, '_')}.csv`;
+  a.download = buildFilename({ dataset: 'customer', scope: p.identity?.name || p.customer_uuid });
   a.click(); URL.revokeObjectURL(a.href);
 };
 const buildSummary = (p) => {

@@ -6,6 +6,7 @@ import ExportModal from './ExportModal';
 import { FilterSelect } from '../UI/FilterBar';
 import { fmtDate, customerName, TabHeader, Spinner, Empty, ActiveFilters, Th, TqTh, fetchAllForExport } from './shared';
 import { writeExport } from '../../utils/exportSpec';
+import { buildFilename } from '../../utils/downloadFilename';
 import { useExportColumns } from '../../hooks/useExportColumns';
 import { useTableQuery } from '../../hooks/useTableQuery';
 import { clientColumns } from '../../utils/clientColumns';
@@ -64,7 +65,7 @@ const ReviewsTab = ({ companyList }) => {
       // Company is resolved client-side from the loaded list, so the Company
       // column needs the lookup handed to it.
       ctx: { companyName: (id) => companyList.find(c => c.id === id)?.name || '' },
-      filename: `reviews_${new Date().toISOString().split('T')[0]}.csv`,
+      filename: buildFilename({ dataset: 'reviews', scope: companyList.find(c => c.id === co)?.name }),
     });
   };
 
