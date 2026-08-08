@@ -897,6 +897,32 @@ router.get('/users', asyncHandler(async (req, res) => {
   res.json({ users, total: users.length });
 }));
 
+// ── GET /compliance/clients ────────────────────────────────────────────────────
+// Distinct client_name values actually present on sales, for the All Sales
+// "Client" filter dropdown. client_name is free text (not FK'd to a catalog —
+// see sale_configs, which is per-company and can miss legacy/renamed values),
+// so the real values on real records are the only accurate vocabulary. Sales
+// is a small table (~7k rows — see recordColumns.js's per-table posture note),
+// so a full-column scan here is cheap and needs no new index.
+router.get('/clients', asyncHandler(async (req, res) => {
+  let query = supabaseAdmin.from('sales').select('client_name').not('client_name', 'is', null);
+  const roAllowed = await readonlyAllowedCompanyIds(req);
+  if (Array.isArray(roAllowed)) query = scopeToCompanies(query, roAllowed);
+  const { data, error } = await query.limit(20000);
+  if (error) return res.status(500).json({ error: error.message });
+
+  const seen = new Set();
+  const clients = [];
+  for (const r of (data || [])) {
+    const v = (r.client_name || '').trim();
+    if (!v || seen.has(v.toLowerCase())) continue;
+    seen.add(v.toLowerCase());
+    clients.push(v);
+  }
+  clients.sort((a, b) => a.localeCompare(b));
+  res.json({ clients });
+}));
+
 // ── GET /compliance/sales ─────────────────────────────────────────────────────
 router.get('/sales', asyncHandler(async (req, res) => {
   const { company_id, user_ids, status, disposition, exclude_post_date, charge_from, charge_to, date_from, date_to, search, page = 1, limit = 50, sort_by, sort_dir, filters } = req.query;

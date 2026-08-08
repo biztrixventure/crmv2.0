@@ -1,7 +1,8 @@
 import { useState, useCallback, useEffect, useRef, Fragment } from 'react';
+import { createPortal } from 'react-dom';
 import { useFocus, useNavFocus } from '../../contexts/FocusContext';
 import { useSaleDeepLink } from '../../hooks/useSaleDeepLink';
-import { Shield, RotateCcw, Trash2, Eye, ChevronDown, ChevronUp, CheckCircle } from 'lucide-react';
+import { Shield, RotateCcw, Trash2, Eye, ChevronDown, ChevronUp, CheckCircle, Pencil, MoreVertical } from 'lucide-react';
 import { Badge } from '../UI';
 import SaleStatusBadge from '../UI/SaleStatusBadge';
 import { toast } from 'sonner';
@@ -62,6 +63,72 @@ const statusUpdatedAt = (s) => {
   return (s?.updated_at && s.updated_at !== s.created_at) ? s.updated_at : null;
 };
 
+const money = (v) => (v == null || v === '' ? '' : `$${Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`);
+
+// Row overflow menu — Delete / View / Edit / Audit trail tucked behind one
+// 3-dot button so the primary compliance workflow buttons (Approve / Return /
+// Update / Charge → Sale) aren't crowded by secondary actions. Portalled to
+// <body>, same as ColumnHeader's filter popover — a plain absolutely-positioned
+// menu would get clipped by TableScroll's horizontal scroll container.
+const RowMenu = ({ items }) => {
+  const visible = items.filter(Boolean);
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState(null);
+  const btnRef = useRef(null);
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const place = () => {
+      const r = btnRef.current?.getBoundingClientRect();
+      if (!r) return;
+      setPos({ top: r.bottom + 4, left: Math.max(8, r.right - 168) });
+    };
+    place();
+    const onDown = (e) => {
+      if (menuRef.current?.contains(e.target) || btnRef.current?.contains(e.target)) return;
+      setOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      window.removeEventListener('resize', place);
+      window.removeEventListener('scroll', place, true);
+    };
+  }, [open]);
+
+  if (!visible.length) return null;
+  return (
+    <span className="relative inline-block" onClick={e => e.stopPropagation()}>
+      <button ref={btnRef} type="button" onClick={() => setOpen(o => !o)}
+        className="p-1 rounded" title="More actions" aria-label="More actions"
+        style={{ color: 'var(--color-text-secondary)' }}>
+        <MoreVertical size={14} />
+      </button>
+      {open && pos && createPortal(
+        <div ref={menuRef}
+          className="rounded-xl overflow-hidden py-1"
+          style={{
+            position: 'fixed', top: pos.top, left: pos.left, zIndex: 1000, minWidth: 168,
+            backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)',
+            boxShadow: '0 10px 30px rgba(0,0,0,0.18)',
+          }}>
+          {visible.map((it, i) => (
+            <button key={i} type="button" onClick={() => { setOpen(false); it.onClick(); }}
+              className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-semibold text-left hover:opacity-80"
+              style={{ color: it.danger ? '#ef4444' : 'var(--color-text)' }}>
+              <it.icon size={13} /> {it.label}
+            </button>
+          ))}
+        </div>,
+        document.body,
+      )}
+    </span>
+  );
+};
+
 const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition = '', isPostDate = false }) => {
   const { user, isReadOnly, roControlAllowed } = useAuth();
   // Config-driven status catalog — SuperAdmin → Business Rules → Compliance
@@ -114,7 +181,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
   // Dropdown vocabularies for the uuid/enum headers. Companies come from the
   // prop the shell already holds; users are one cached fetch per session.
   // Statuses use the compliance label overrides, not the raw enum keys.
-  const { userOptions, companyOptions } = useFilterOptions({ companyList });
+  const { userOptions, companyOptions, clientOptions } = useFilterOptions({ companyList });
   const statusOptions = ALL_SALE_STATUSES.map(s => ({ value: s, label: labelOf(s) }));
 
   const [approving, setApproving]   = useState(null);
@@ -363,6 +430,12 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
               <option value="">All companies</option>
               {companyList.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </FilterSelect>
+            <FilterSelect value={tq.draft?.client_name?.v || ''}
+              onChange={e => { const v = e.target.value; tq.setFilter('client_name', v ? { op: 'eq', v } : null); }}
+              title="Filter by client">
+              <option value="">All clients</option>
+              {clientOptions.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+            </FilterSelect>
             <FilterSelect value={status} onChange={e => { setStatus(e.target.value); setPage(1); }} title="Filter by status">
               <option value="">All statuses</option>
               {ALL_SALE_STATUSES.map(s => <option key={s} value={s}>{labelOf(s)}</option>)}
@@ -388,6 +461,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
         onClearAll={() => {
           setSearch(''); setCompany(''); setStatus('');
           setDateFrom(''); setDateTo(''); setChargeFrom(''); setChargeTo(''); setPage(1);
+          tq.clearFilter('client_name');
         }}
       />
 
@@ -451,6 +525,8 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                 <tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
                   <TqTh tq={tq} col="customer">Customer</TqTh>
                   <TqTh tq={tq} col="status" options={statusOptions}>Status</TqTh>
+                  <TqTh tq={tq} col="client_name" options={clientOptions}>Client</TqTh>
+                  <TqTh tq={tq} col="down_payment" align="right">DP</TqTh>
                   <TqTh tq={tq} col="fronter" options={userOptions}>Fronter</TqTh>
                   <TqTh tq={tq} col="closer"  options={userOptions}>Closer</TqTh>
                   <TqTh tq={tq} col="company" options={companyOptions}>Company</TqTh>
@@ -543,6 +619,8 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                           )}
                         </div>
                       </td>
+                      <td className="px-3 py-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{s.client_name || '—'}</td>
+                      <td className="px-3 py-1.5 text-xs text-right tabular-nums" style={{ color: 'var(--color-text-secondary)' }}>{money(s.down_payment) || '—'}</td>
                       <td className="px-3 py-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{s.fronter_name || '—'}</td>
                       <td className="px-3 py-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{closerName(s)}</td>
                       <td className="px-3 py-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{s.companies?.name || '—'}</td>
@@ -600,37 +678,29 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                               </button>
                             )
                           ))}
-                          {Array.isArray(s.edit_history) && s.edit_history.length > 0 && (
-                            <button onClick={() => setExpanded(expanded === s.id ? null : s.id)}
-                              className="p-1 rounded" style={{ color: 'var(--color-text-secondary)' }}>
-                              {expanded === s.id ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-                            </button>
-                          )}
-                          {/* Compliance field-level edit — opens SaleModal pre-filled.
-                              Lives next to View so it's discoverable without
-                              cluttering the workflow buttons (Approve/Return/Update). */}
-                          {!isReadOnly && roControlAllowed('cc-sales.edit') && (
-                            <button onClick={() => setEditFieldsTarget(s)} className="px-2 py-1 rounded-lg text-xs font-bold"
-                              style={{ color: 'var(--color-primary-700)', backgroundColor: 'var(--color-primary-50, #eef2ff)' }}>
-                              Edit
-                            </button>
-                          )}
-                          <button onClick={() => setDetailSale(s)} className="p-1 rounded"
-                            style={{ color: 'var(--color-primary-600)' }}>
-                            <Eye size={14} />
-                          </button>
-                          {!isReadOnly && roControlAllowed('cc-sales.delete') && (
-                            <button onClick={() => setDeleteTarget(s)} className="p-1 rounded"
-                              style={{ color: '#ef4444' }}>
-                              <Trash2 size={13} />
-                            </button>
-                          )}
+                          {/* Secondary actions — View / Edit / Audit trail / Delete —
+                              tucked behind one 3-dot menu so they don't crowd the
+                              primary workflow buttons (Approve/Return/Update/Charge). */}
+                          <RowMenu items={[
+                            { icon: Eye, label: 'View', onClick: () => setDetailSale(s) },
+                            !isReadOnly && roControlAllowed('cc-sales.edit') && {
+                              icon: Pencil, label: 'Edit', onClick: () => setEditFieldsTarget(s),
+                            },
+                            Array.isArray(s.edit_history) && s.edit_history.length > 0 && {
+                              icon: expanded === s.id ? ChevronUp : ChevronDown,
+                              label: expanded === s.id ? 'Hide audit trail' : 'Audit trail',
+                              onClick: () => setExpanded(expanded === s.id ? null : s.id),
+                            },
+                            !isReadOnly && roControlAllowed('cc-sales.delete') && {
+                              icon: Trash2, label: 'Delete', onClick: () => setDeleteTarget(s), danger: true,
+                            },
+                          ]} />
                         </div>
                       </td>
                     </tr>
                     {expanded === s.id && Array.isArray(s.edit_history) && (
                       <tr key={`${s.id}-hist`} style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
-                        <td colSpan={isPostDate ? 9 : 8} className="px-5 py-3">
+                        <td colSpan={isPostDate ? 11 : 10} className="px-5 py-3">
                           <p className="text-xs font-bold mb-2" style={{ color: 'var(--color-text-secondary)' }}>Audit Trail</p>
                           <div className="space-y-1">
                             {s.edit_history.map((h, i) => (

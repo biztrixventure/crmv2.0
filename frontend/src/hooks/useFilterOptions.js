@@ -33,7 +33,7 @@ function once(key, fetcher) {
 /**
  * @param opts.companyList  the shell already holds this (6 rows) — passed in
  *                          rather than re-fetched.
- * @returns { userOptions, companyOptions } as [{ value, label }]
+ * @returns { userOptions, companyOptions, clientOptions } as [{ value, label }]
  */
 export function useFilterOptions({ companyList } = {}) {
   const [userOptions, setUserOptions] = useState(() => cache.get('users') || []);
@@ -53,8 +53,19 @@ export function useFilterOptions({ companyList } = {}) {
     return () => { alive = false; };
   }, []);
 
+  const [clientOptions, setClientOptions] = useState(() => cache.get('clients') || []);
+
+  useEffect(() => {
+    let alive = true;
+    once('clients', async () => {
+      const r = await client.get('compliance/clients');
+      return (r.data?.clients || []).map((v) => ({ value: v, label: v }));
+    }).then((v) => { if (alive) setClientOptions(v); });
+    return () => { alive = false; };
+  }, []);
+
   const companyOptions = (companyList || []).map((c) => ({ value: c.id, label: c.name }));
-  return { userOptions, companyOptions };
+  return { userOptions, companyOptions, clientOptions };
 }
 
 export default useFilterOptions;
