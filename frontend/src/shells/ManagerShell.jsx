@@ -778,7 +778,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
         onMarkRead={notifHook.markRead} onMarkAllRead={notifHook.markAllRead}
         onDeleteNotification={notifHook.deleteNotification} onClearNotifications={notifHook.clearAll}
         navItems={crossNavItems} activeNav={activeNav} onNavChange={setActiveNav}
-        onBrandClick={() => setActiveNav('dashboard')}
+        onBrandClick={() => user?.role === 'superadmin' ? navigate('/admin') : setActiveNav('dashboard')}
       />
 
       <EngagementBanners />
