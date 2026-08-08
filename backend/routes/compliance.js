@@ -1052,6 +1052,26 @@ router.get('/sales', asyncHandler(async (req, res) => {
     }
   } catch { /* highlight is best-effort — never fail the list over it */ }
 
+  // Same highlight, keyed by VIN instead of customer number (mig 230) — the
+  // Sale Highlight business rule lets the superadmin pick which field drives
+  // the tint, so both counts travel on every row regardless of which is active.
+  try {
+    const dupVins = [...new Set(enriched.map(s => s.car_vin).filter(v => v && String(v).trim()))];
+    const dupBy = {};
+    for (let i = 0; i < dupVins.length; i += 100) {
+      const { data: dv } = await supabaseAdmin.from('v_duplicate_sold_vins')
+        .select('car_vin, sale_count, active_sale_count')
+        .in('car_vin', dupVins.slice(i, i + 100));
+      for (const r of (dv || [])) dupBy[r.car_vin] = r;
+    }
+    for (const s of enriched) {
+      const d = s.car_vin ? dupBy[s.car_vin] : null;
+      const live = s.status === 'closed_won' || s.status === 'pending_review';
+      s.vin_dupe_sale_count   = d ? d.sale_count : (s.car_vin ? 1 : 0);
+      s.vin_dupe_active_count = d ? d.active_sale_count : (s.car_vin && live ? 1 : 0);
+    }
+  } catch { /* highlight is best-effort — never fail the list over it */ }
+
   // True per-status totals for the WHOLE filtered set (so the stats strip is
   // consistent across pages — page-only counts made "Today" look bigger than
   // "This Month"). One light single-column query, only when no status filter is

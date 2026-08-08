@@ -6,19 +6,23 @@ import client from '../api/client';
  *
  * Reads the superadmin-configured sale-record highlight from business_config
  * (`compliance.sale_highlight`). Compliance highlights EVERY sale row — active
- * or cancelled — by how many sales share the same customer number, counting ALL
- * real records (active + cancelled), from sales.dupe_sale_count on the
- * /compliance/sales endpoint (mig 193). The more sales on the number, the deeper
- * the yellow, and both the live and cancelled rows for that number are tinted.
+ * or cancelled — by how many sales share the same duplicate field, counting ALL
+ * real records (active + cancelled), from sales.dupe_sale_count / vin_dupe_sale_count
+ * on the /compliance/sales endpoint (migs 193 + 230). The more sales on the
+ * field, the deeper the yellow, and both the live and cancelled rows sharing it
+ * are tinted.
  *
  * Config shape (all optional — falls back to DEFAULT):
- *   { enabled, tiers: [{ min, color, label }] }
+ *   { enabled, field: 'phone' | 'vin', tiers: [{ min, color, label }] }
+ *   - field: which duplicate count drives the tint — same customer number, or
+ *     same VIN. Defaults to 'phone' (the original behavior).
  *   - tiers: pick the highest tier whose `min` <= the row's total sale count
  *
  * Superadmin edits it in Business Rules → Sale Highlight.
  */
 export const DEFAULT_SALE_HIGHLIGHT = {
   enabled: true,
+  field: 'phone',
   tiers: [
     { min: 2, color: '#fef9c3', label: '2 on this number' },
     { min: 3, color: '#fde68a', label: '3 on this number' },
@@ -40,6 +44,7 @@ const clean = (raw) => {
     : DEFAULT_SALE_HIGHLIGHT.tiers;
   return {
     enabled: raw.enabled !== false,
+    field: raw.field === 'vin' ? 'vin' : 'phone',
     tiers,
     cancelled_color: typeof raw.cancelled_color === 'string' ? raw.cancelled_color : '',
   };
@@ -61,17 +66,23 @@ export function useSaleHighlight() {
     return () => { cancelled = true; };
   }, []);
 
-  // The row background for a sale, or null for no highlight. Counts ALL sales on
-  // the customer's number — active AND cancelled — so every such row is tinted.
+  // Total sales sharing whichever field is configured (phone or VIN) — active
+  // AND cancelled. Same number used for both the tint and the ×N badge.
+  const countFor = (sale) => {
+    if (!sale) return 0;
+    return (cfg.field === 'vin' ? sale.vin_dupe_sale_count : sale.dupe_sale_count) || 0;
+  };
+
+  // The row background for a sale, or null for no highlight.
   const colorFor = (sale) => {
     if (!cfg.enabled || !sale) return null;
-    const count = sale.dupe_sale_count || 0;
+    const count = countFor(sale);
     let hit = null;
     for (const t of cfg.tiers) if (count >= t.min) hit = t;   // tiers sorted asc → highest match wins
     return hit ? hit.color : null;
   };
 
-  return { cfg, colorFor };
+  return { cfg, colorFor, countFor };
 }
 
 export function clearSaleHighlightCache() { _cache = null; _at = 0; }

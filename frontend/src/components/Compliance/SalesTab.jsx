@@ -70,7 +70,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
   // with legacy statuses always render correctly.
   const { allStatuses: cfgAll, editStatuses: cfgEdit, labelOf, badgeOf } = useComplianceStatuses();
   const { activeReasons: cancelReasonChoices } = useCancellationReasons();
-  const { colorFor: highlightFor } = useSaleHighlight();
+  const { cfg: highlightCfg, colorFor: highlightFor, countFor: highlightCountFor } = useSaleHighlight();
   // Superadmin-configured export columns for this user (Data Egress → Fields,
   // or the per-user override in the User Control Center). null = keep this
   // tab's own default column set.
@@ -470,7 +470,9 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                   // what the card behind it already paints, so this is a
                   // no-op visually while keeping the duplicate/focus tints.
                   const baseBg = focused ? 'var(--color-primary-50, #eef2ff)' : (hl || 'var(--color-surface)');
-                  const dupN = s.dupe_sale_count || 0;              // ALL sales on this number (active + cancelled)
+                  const dupN = highlightCountFor(s);                 // ALL sales on the configured field (active + cancelled)
+                  const dupField = highlightCfg.field === 'vin' ? 'VIN' : 'customer number';
+                  const dupActive = highlightCfg.field === 'vin' ? s.vin_dupe_active_count : s.dupe_active_count;
                   return (
                   <Fragment key={s.id}>
                     <tr className="cursor-pointer"
@@ -485,7 +487,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                       <td className="px-3 py-1.5">
                         <p className="font-semibold flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>{s.customer_name || '—'}
                           {dupN >= 2 && (
-                            <span title={`${dupN} sales on this customer number (active + cancelled)${s.dupe_active_count != null ? ` · ${s.dupe_active_count} active` : ''}`}
+                            <span title={`${dupN} sales on this ${dupField} (active + cancelled)${dupActive != null ? ` · ${dupActive} active` : ''}`}
                               className="text-[11px] sm:text-[10px] font-extrabold px-1.5 py-0.5 rounded-full"
                               style={{ background: '#f59e0b22', color: '#b45309', border: '1px solid #f59e0b55' }}>×{dupN}</span>
                           )}

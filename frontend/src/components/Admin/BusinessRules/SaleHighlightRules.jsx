@@ -3,9 +3,9 @@ import { Highlighter, Plus, Trash2, Info } from 'lucide-react';
 import { DEFAULT_SALE_HIGHLIGHT } from '../../../hooks/useSaleHighlight';
 
 // Business Rules → Sale Highlight. Superadmin sets the colors compliance sees on
-// the Sale Records list: rows are tinted by how many LIVE sales share the same
-// customer number (deeper = more repeats). Cancelling a sale drops the live
-// count, so the tint lightens automatically.
+// the Sale Records list: rows are tinted by how many sales share the same
+// customer number OR the same VIN (their choice) — deeper = more repeats.
+// Cancelling a sale drops the live count, so the tint lightens automatically.
 const KEY = 'compliance.sale_highlight';
 
 const SaleHighlightRules = ({ config, onSave }) => {
@@ -15,7 +15,9 @@ const SaleHighlightRules = ({ config, onSave }) => {
 
   const tiers = Array.isArray(val.tiers) ? val.tiers : DEFAULT_SALE_HIGHLIGHT.tiers;
   const push = (next) => { setVal(next); onSave(KEY, next); };
+  const field = val.field === 'vin' ? 'vin' : 'phone';
   const setEnabled = (b) => push({ ...val, enabled: b });
+  const setField = (f) => push({ ...val, field: f });
   const setTier = (i, patch) => push({ ...val, tiers: tiers.map((t, j) => j === i ? { ...t, ...patch } : t) });
   const addTier = () => {
     const maxMin = tiers.reduce((m, t) => Math.max(m, +t.min || 0), 0);
@@ -36,16 +38,32 @@ const SaleHighlightRules = ({ config, onSave }) => {
           <h2 className="text-base font-bold text-text">Sale Record Highlight</h2>
         </div>
         <p className="text-xs text-text-secondary mb-4 max-w-2xl leading-relaxed">
-          On the compliance <b>Sale Records</b> list, tint a row by how many sales share the same customer number —
-          counting <b>all</b> records, active <b>and</b> cancelled — with a deeper color for more repeats. Every row on
-          that number (active or cancelled) is tinted, and a <b>×N</b> badge shows the total count.
+          On the compliance <b>Sale Records</b> list, tint a row by how many sales share the same {field === 'vin' ? 'VIN' : 'customer number'} —
+          counting <b>all</b> records, active <b>and</b> cancelled — with a deeper color for more repeats. Every row sharing
+          that {field === 'vin' ? 'VIN' : 'number'} (active or cancelled) is tinted, and a <b>×N</b> badge shows the total count.
         </p>
 
-        <label className="flex items-center gap-3 mb-4 cursor-pointer">
+        <label className="flex items-center gap-3 mb-3 cursor-pointer">
           <input type="checkbox" checked={val.enabled !== false} onChange={e => setEnabled(e.target.checked)}
             className="w-4 h-4" style={{ accentColor: '#f59e0b' }} />
           <span className="text-sm font-semibold text-text">Highlighting {val.enabled !== false ? 'on' : 'off'}</span>
         </label>
+
+        {/* Which duplicate field drives the tint — same phone number, or same VIN. */}
+        <div className="flex items-center gap-3 mb-4">
+          <span className="text-xs font-bold uppercase tracking-wide text-text-tertiary">Highlight by</span>
+          <div className="inline-flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
+            {[['phone', 'Phone number'], ['vin', 'VIN']].map(([key, label]) => (
+              <button key={key} type="button" onClick={() => setField(key)}
+                className="px-3 py-1.5 text-sm font-semibold transition-colors"
+                style={field === key
+                  ? { background: '#f59e0b', color: '#fff' }
+                  : { background: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
 
         {/* tiers */}
         <div className="space-y-2 mb-3" style={{ opacity: val.enabled !== false ? 1 : 0.5, pointerEvents: val.enabled !== false ? 'auto' : 'none' }}>
@@ -90,7 +108,7 @@ const SaleHighlightRules = ({ config, onSave }) => {
                   Sample customer
                   {n >= 2 && <span className="text-[11px] sm:text-[10px] font-extrabold px-1.5 py-0.5 rounded-full" style={{ background: '#f59e0b22', color: '#b45309', border: '1px solid #f59e0b55' }}>×{n}</span>}
                 </span>
-                <span className="text-xs text-text-tertiary">{n} sale{n === 1 ? '' : 's'} on this number</span>
+                <span className="text-xs text-text-tertiary">{n} sale{n === 1 ? '' : 's'} on this {field === 'vin' ? 'VIN' : 'number'}</span>
               </div>
             ))}
           </div>
