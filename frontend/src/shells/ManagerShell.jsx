@@ -795,7 +795,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
           level="page"
           icon={TrendingUp}
           title={workspaceMode ? 'Custom Access Workspace' : (user?.company_name || 'Dashboard')}
-          subtitle={`${user?.role_name || user?.role}${user?.first_name ? ` · ${user.first_name}` : ''}`}
+          subtitle={`${user?.role_name || user?.role}${user?.first_name ? ` · ${[user.first_name, user.last_name].filter(Boolean).join(' ')}` : ''}`}
           actions={<div className="flex items-center gap-2 flex-wrap flex-shrink-0">
             {/* Export gated ONLY by Data Egress (canExport). We deliberately do
                 NOT also gate on the shell-layout action toggle: that config

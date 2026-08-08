@@ -8,7 +8,7 @@ import { getTransferDisplayStatus } from '../../utils/transferStatus';
 import SaleDetailDrawer from '../Shared/SaleDetailDrawer';
 import TransferDetailDrawer from '../Shared/TransferDetailDrawer';
 import DateRangePicker, { getPresetRange } from '../UI/DateRangePicker';
-import { todayET, fmtSaleDate } from '../../utils/timezone';
+import { todayET, fmtSaleDate, greetingWord } from '../../utils/timezone';
 import { useComplianceStatuses } from '../../hooks/useComplianceStatuses';
 import ThemedSelect from '../UI/Select';
 import { TableScroll } from '../UI/kit';
@@ -590,7 +590,7 @@ export default function AdminAnalyticsDashboard({ isReadOnly, user }) {
       {/* ── Header ─────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-base font-bold text-text">Good day, {user?.first_name || 'Admin'}</h2>
+          <h2 className="text-base font-bold text-text">{greetingWord()}, {[user?.first_name, user?.last_name].filter(Boolean).join(' ') || 'Admin'}</h2>
           <p className="text-text-secondary text-xs mt-0.5">System overview across all companies</p>
         </div>
         <button onClick={() => { fetchStats(); fetchRows(1); }}

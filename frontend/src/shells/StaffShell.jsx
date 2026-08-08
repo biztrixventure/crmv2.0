@@ -18,6 +18,7 @@ import VehicleSelect from "../components/Form/VehicleSelect";
 import CopyableNumber from "../components/UI/CopyableNumber";
 import ThemedSelect from '../components/UI/Select';
 import { transferPhone } from "../utils/phone";
+import { greetingWord } from "../utils/timezone";
 import ThemedDate from '../components/UI/ThemedDate';
 import {
   DollarSign, Send, Phone, Hash, Search, Target, Clock,
@@ -950,7 +951,7 @@ const StaffShell = () => {
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8 animate-fade-in">
           <div className="min-w-0">
             <h2 className="text-3xl font-bold mb-1 text-text">
-              Welcome back, {user?.first_name || user?.email}!
+              {greetingWord()}, {[user?.first_name, user?.last_name].filter(Boolean).join(' ') || user?.email}!
             </h2>
             <p className="text-text-secondary m-0">
               <strong>{user?.role_name || user?.role}</strong> at <strong>{user?.company_name}</strong>

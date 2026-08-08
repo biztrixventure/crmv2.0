@@ -12,6 +12,13 @@ export function todayET() {
   }).format(new Date());
 }
 
+// "Good morning/afternoon/evening" — the VIEWER's own clock (not ET), so a
+// dashboard greeting matches the person actually looking at it.
+export function greetingWord() {
+  const h = new Date().getHours();
+  return h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
+}
+
 // Format a UTC ISO string as a short date in Eastern Time ("Jan 15, 2024")
 export function fmtDateET(utcIso) {
   if (!utcIso) return '—';
