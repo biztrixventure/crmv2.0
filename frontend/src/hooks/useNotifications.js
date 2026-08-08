@@ -27,6 +27,8 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import client from '../api/client';
 import { supabase, setRealtimeAuth } from '../api/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { loadCelebrationConfig } from './useCelebrationConfig';
+import { fireCelebration } from '../utils/celebration';
 
 // Tiny notification chime via the Web Audio API.
 //
@@ -54,6 +56,20 @@ if (typeof window !== 'undefined') {
   window.addEventListener('pointerdown', unlock, { passive: true });
   window.addEventListener('keydown', unlock);
   window.addEventListener('touchstart', unlock, { passive: true });
+}
+
+// Celebration trigger — generic eventKey → template map (utils/celebration.js
+// + useCelebrationConfig.js). notification.type is matched directly against
+// the configured `events` map, so a new morale-moment (e.g. a future
+// notification type) needs zero changes here, only a new entry in the config.
+// Fire-and-forget: confetti is decorative and must never affect notification
+// delivery, so failures are swallowed inside fireCelebration/loadCelebrationConfig.
+async function maybeCelebrate(type) {
+  const cfg = await loadCelebrationConfig();
+  if (!cfg.enabled) return;
+  const ev = cfg.events[type];
+  if (!ev || ev.enabled === false) return;
+  fireCelebration(ev.template);
 }
 
 export function playNotificationSound() {
@@ -187,6 +203,7 @@ export const useNotifications = () => {
             setNotifications(prev => [payload.new, ...prev].slice(0, 40));
             setUnreadCount(prev => prev + 1);
             playNotificationSound();
+            maybeCelebrate(payload.new.type);
           }
         )
         .subscribe((status) => {
