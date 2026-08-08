@@ -30,6 +30,7 @@ import CallbackNumberDetailDrawer    from '../../Shared/CallbackNumberDetailDraw
 import CallbackPhoneHistoryDrawer    from '../../Shared/CallbackPhoneHistoryDrawer';
 import { Loading } from '../../UI/kit';
 import { TableScroll } from "../../UI/kit";
+import { PillTabs } from '../../UI/kit';
 
 // ── constants ─────────────────────────────────────────────────────────────────
 const SALE_BADGE     = { open:'info', sold:'success', cancelled:'error', follow_up:'warning', closed_won:'success', closed_lost:'error', compliance_cancelled:'error', dispute:'warning', chargeback:'error' };
@@ -568,6 +569,9 @@ const MembersPanel = ({ companyId, companyName }) => {
   const [impersonateData,    setImpersonateData]    = useState(null);
   const [impersonateLoading, setImpersonateLoading] = useState(null);
   const [sort, setSort] = useState({ col: 'name', dir: 'asc' });
+  // Active/Inactive/All — the roster is loaded once with include_inactive:true
+  // (below), so this is a pure client-side split, not a re-fetch.
+  const [statusFilter, setStatusFilter] = useState('active');
 
   // Click a header to sort; click again to flip direction. Client-side — the
   // whole member list is already loaded, no pagination.
@@ -591,6 +595,17 @@ const MembersPanel = ({ companyId, companyName }) => {
     });
     return arr;
   }, [users, sort]);
+
+  const activeCount = users.filter(u => u.is_active).length;
+  const inactiveCount = users.length - activeCount;
+  const filtered = statusFilter === 'active' ? sorted.filter(u => u.is_active)
+    : statusFilter === 'inactive' ? sorted.filter(u => !u.is_active)
+    : sorted;
+  const statusTabs = [
+    { key: 'active',   label: 'Active',   count: activeCount },
+    { key: 'inactive', label: 'Inactive', count: inactiveCount },
+    { key: 'all',      label: 'All',      count: users.length },
+  ];
 
   const handleImpersonate = async (u) => {
     setImpersonateLoading(u.user_id);
@@ -657,30 +672,31 @@ const MembersPanel = ({ companyId, companyName }) => {
   };
 
   const handleExportMembers = async () => {
-    if (!users.length) return;
+    if (!filtered.length) return;
     setExportLoading(true);
     try {
       // The member rows are already loaded, so there is no list request left for
       // egressAudit to intercept — this soft log was missing entirely, making
-      // the members CSV the last unlogged export in the admin shell.
-      if (!await logClientExport('company_members', sorted.length, { company_id: companyId })) {
+      // the members CSV the last unlogged export in the admin shell. Exports
+      // whatever the Active/Inactive/All tab currently shows, not the full roster.
+      if (!await logClientExport('company_members', filtered.length, { company_id: companyId })) {
         window.alert('Export blocked by your daily limit.');
         return;
       }
       writeExport({
         dataset: 'company_members', surface: 'company_members',
-        allowed: allowedFor('company_members'), rows: sorted,
-        filename: buildFilename({ dataset: 'members', scope: companyName }),
+        allowed: allowedFor('company_members'), rows: filtered,
+        filename: buildFilename({ dataset: `members-${statusFilter}`, scope: companyName }),
       });
     } finally { setExportLoading(false); }
   };
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-text-secondary">{users.length} member{users.length !== 1 ? 's' : ''}</p>
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <PillTabs items={statusTabs} value={statusFilter} onChange={setStatusFilter} />
         <div className="flex items-center gap-2">
-          {users.length > 0 && canExport('company_data') && (
+          {filtered.length > 0 && canExport('company_data') && (
             <button onClick={handleExportMembers} disabled={exportLoading}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-white disabled:opacity-60"
               style={{ background: 'linear-gradient(135deg,#16a34a,#15803d)' }}>
@@ -716,6 +732,11 @@ const MembersPanel = ({ companyId, companyName }) => {
           <Users size={40} className="mx-auto mb-3 text-text-tertiary" />
           <p className="text-text-secondary text-sm">No members yet. Add the first one.</p>
         </Card>
+      ) : filtered.length === 0 ? (
+        <Card className="p-10 text-center">
+          <Users size={40} className="mx-auto mb-3 text-text-tertiary" />
+          <p className="text-text-secondary text-sm">No {statusFilter === 'all' ? '' : `${statusFilter} `}members{statusFilter !== 'all' ? '.' : ' yet.'}</p>
+        </Card>
       ) : (
         <Card className="overflow-hidden">
           <TableScroll stickyFirst label="Company records">
@@ -731,7 +752,7 @@ const MembersPanel = ({ companyId, companyName }) => {
                 </tr>
               </thead>
               <tbody>
-                {sorted.map(u => (
+                {filtered.map(u => (
                   <tr key={u.id} onClick={() => setViewUser(u)}
                     className="hover:bg-bg-secondary cursor-pointer transition-colors"
                     style={{ borderBottom: '1px solid var(--color-border)' }}>
