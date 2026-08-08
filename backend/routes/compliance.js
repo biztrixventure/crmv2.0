@@ -11,6 +11,7 @@ const { applyColumnFilters, resolveColumnAccess } = require('../utils/columnFilt
 const { COMPLIANCE_SALE_COLUMNS, TRANSFER_COLUMNS, CALLBACK_COLUMNS } = require('../config/recordColumns');
 const { onSalesActivityChanged: spiffOnSalesChanged } = require('../utils/spiffMetrics');
 const { readonlyAllowedCompanyIds, scopeToCompanies, companyInScope, maskForReadonly, canViewRecordings } = require('../utils/readonlyGovernance');
+const { isPostDateDispo } = require('../utils/postDate');
 
 const { getConfig } = require('../utils/businessConfig');
 
@@ -555,13 +556,13 @@ router.get('/companies', asyncHandler(async (req, res) => {
     };
     const [usersData, salesData, transfersData] = await Promise.all([
       fetchAll(() => supabaseAdmin.from('user_company_roles').select('company_id').eq('is_active', true).in('company_id', ids)),
-      fetchAll(() => bySaleDate(supabaseAdmin.from('sales').select('company_id, status, down_payment').in('company_id', ids))),
+      fetchAll(() => bySaleDate(supabaseAdmin.from('sales').select('company_id, status, down_payment, closer_disposition').in('company_id', ids))),
       fetchAll(() => byCreatedAt(supabaseAdmin.from('transfers').select('company_id').neq('vicidial_pending', true).in('company_id', ids))),
     ]);
     usersData.forEach(u => { userCount[u.company_id] = (userCount[u.company_id] || 0) + 1; });
     salesData.forEach(s => {
       const c = s.company_id;
-      saleCount[c] = (saleCount[c] || 0) + 1;
+      if (!isPostDateDispo(s.closer_disposition)) saleCount[c] = (saleCount[c] || 0) + 1;
       if (s.status === 'pending_review')                          pendingCount[c]   = (pendingCount[c]   || 0) + 1;
       if (s.status === 'closed_won' || s.status === 'sold')       completedCount[c] = (completedCount[c] || 0) + 1;
       if (s.status === 'cancelled' || s.status === 'compliance_cancelled') cancelledCount[c] = (cancelledCount[c] || 0) + 1;
@@ -601,8 +602,8 @@ router.get('/companies/:id/report', asyncHandler(async (req, res) => {
 
   // Sales for this company.
   let sq = isFronter
-    ? supabaseAdmin.from('sales').select('id, status, down_payment, monthly_payment, client_name, closer_id, fronter_id, is_resell, cancellation_date, transfers!inner(company_id)').eq('transfers.company_id', id)
-    : supabaseAdmin.from('sales').select('id, status, down_payment, monthly_payment, client_name, closer_id, fronter_id, is_resell, cancellation_date').eq('company_id', id);
+    ? supabaseAdmin.from('sales').select('id, status, client_name, closer_id, fronter_id, is_resell, cancellation_date, transfers!inner(company_id)').eq('transfers.company_id', id)
+    : supabaseAdmin.from('sales').select('id, status, client_name, closer_id, fronter_id, is_resell, cancellation_date').eq('company_id', id);
   const { data: salesData } = await bySaleDate(sq).limit(20000);
   const S = salesData || [];
 
@@ -630,8 +631,6 @@ router.get('/companies/:id/report', asyncHandler(async (req, res) => {
     pending: S.filter(s => s.status === 'pending_review').length,
     cancelled: S.filter(isCancelled).length,
     resells: S.filter(s => s.is_resell).length,
-    gross_down_payment: approved.reduce((a, s) => a + (Number(s.down_payment) || 0), 0),
-    monthly_recurring:  approved.reduce((a, s) => a + (Number(s.monthly_payment) || 0), 0),
   };
 
   // Agent leaderboard — closer co groups by closer, fronter co by fronter.

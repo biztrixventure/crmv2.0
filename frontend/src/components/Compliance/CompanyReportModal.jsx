@@ -1,9 +1,7 @@
 import { useState, useEffect } from 'react';
-import { X, Building2, DollarSign, RefreshCw, TrendingUp, Users, Briefcase, CheckCircle2, Clock, XCircle, ArrowRight, Trophy } from 'lucide-react';
+import { X, Building2, DollarSign, TrendingUp, Users, Briefcase, CheckCircle2, Clock, XCircle, ArrowRight, Trophy } from 'lucide-react';
 import client from '../../api/client';
 import DateRangePicker, { getPresetRange } from '../UI/DateRangePicker';
-
-const money = (n) => (n == null || isNaN(Number(n))) ? '$0' : `$${Number(n).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 
 // Deep-dive report for one company — funnel + agent leaderboard + per-client
 // breakdown, all scoped to a date range chosen at the top. Fronter companies are
@@ -107,8 +105,6 @@ export default function CompanyReportModal({ company, onClose, onNavigate }) {
                 <Kpi icon={XCircle} label="Cancelled" value={s.cancelled} color="#dc2626" onClick={() => nav('sales', { company: company.id, status: 'cancelled' })} />
                 <Kpi icon={ArrowRight} label={isFronter ? 'Transfers generated' : 'Transfers worked'} value={data.transfers_total} onClick={() => nav('transfers', { company: company.id })} />
                 <Kpi icon={TrendingUp} label="Conversion" value={data.conversion_rate != null ? `${data.conversion_rate}%` : '—'} sub="approved / transfers" />
-                <Kpi icon={DollarSign} label="Gross down pmts" value={money(s.gross_down_payment)} color="#16a34a" sub="approved sales" />
-                <Kpi icon={RefreshCw} label="Monthly recurring" value={`${money(s.monthly_recurring)}/mo`} sub={`${s.resells} resells`} />
               </div>
 
               {/* leaderboards */}
