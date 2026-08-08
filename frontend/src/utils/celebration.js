@@ -14,10 +14,20 @@ import confetti from 'canvas-confetti';
  * one place, for every burst, with no way for a new template to forget it.
  * canvas-confetti draws to its own transparent, full-viewport, pointer-events:
  * none canvas — nothing here needs to manage z-index or click-blocking.
+ *
+ * IMPORTANT: never call the bare `confetti(...)` default export. It lazily
+ * creates ONE memoized cannon on its first call with useWorker hardcoded to
+ * true (see confettiCannon/getDefaultFire in the library) — a per-call option
+ * can't turn that back off afterward. That worker is a `blob:` Worker, which
+ * a real CSP without an explicit worker-src/blob: allowance blocks outright,
+ * and the library swallows the failure silently: no error, no confetti. Our
+ * own instance below opts out of the worker at creation time instead, so
+ * every burst renders on the main thread and CSP never enters the picture.
  */
+const myConfetti = confetti.create(null, { resize: true, useWorker: false });
 
 function fire(opts) {
-  confetti({ disableForReducedMotion: true, ...opts });
+  myConfetti({ disableForReducedMotion: true, ...opts });
 }
 
 // Live theme colors (default palette or a superadmin-configured per-company
