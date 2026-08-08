@@ -13,8 +13,16 @@ const router = express.Router();
 router.get('/', asyncHandler(async (req, res) => {
   const { type } = req.query;
   // A foreign ?company_id= no longer surfaces another company's plan / client
-  // option list; non-members fall back to their own.
-  const companyId = await resolveScopedCompanyId(req);
+  // option list; non-members fall back to their own. compliance_manager is the
+  // one exception: they manage sales cross-company (CLAUDE.md), so when SaleForm
+  // asks for the SALE's own company (editing another company's sale) they must
+  // get THAT company's catalog — resolveScopedCompanyId isn't membership-aware
+  // of compliance's role-based cross-company access, so without this the sale's
+  // real client/plan value silently falls outside the returned list and the
+  // edit form renders it as if unselected.
+  const companyId = (req.user?.role === 'compliance_manager' && req.query?.company_id)
+    ? req.query.company_id
+    : await resolveScopedCompanyId(req);
 
   let query = supabaseAdmin
     .from('sale_configs')

@@ -65,17 +65,6 @@ const Field = ({ label, required, error, hint, children, className = '' }) => (
 );
 
 
-// Guarantees a <ThemedSelect> always shows its stored value as a selected option,
-// even when the option source (per-company plans / clients / fronters) doesn't
-// contain it — e.g. a compliance manager editing another company's sale, where
-// that company's configs aren't in the editing user's lists. Without this the
-// field renders blank and looks like it "lost" the saved value. Renders nothing
-// when the value is empty or already present in the list.
-const StaleOption = ({ value, present, label }) =>
-  (value && !present)
-    ? <option value={value}>{label || value}</option>
-    : null;
-
 // Maps known form field names to sales table columns for search indexing
 function mapToSaleColumns(formData) {
   const firstName = (formData.FirstName || formData.first_name || '').trim();
@@ -124,8 +113,9 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
   const { plans, clients, fetchConfigs } = useSaleConfigs(configCompanyId);
   // Per-user client access: if the signed-in user is restricted, only show their
   // allowed clients (null/absent = unrestricted → the full list, unchanged). The
-  // current value is always preserved via StaleOption, so editing an old sale
-  // whose client is now outside the list never loses data.
+  // current value is always preserved by injecting it as an extra <option> below
+  // when the fetched list doesn't contain it, so editing an old/cross-company
+  // sale never loses or hides the stored value.
   const { user: authUser } = useAuth();
   const allowedClientNames = (Array.isArray(authUser?.client_access) && authUser.client_access.length) ? authUser.client_access : null;
   const visibleClients = allowedClientNames ? clients.filter(c => allowedClientNames.includes(c.value)) : clients;
@@ -147,8 +137,9 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
 
   // Fetch fronters for the sale's company (configCompanyId) rather than the
   // editing user's — so a compliance manager editing another company's sale
-  // still gets that company's fronters in the dropdown. StaleOption below keeps
-  // the stored fronter selectable even if the list still doesn't include them.
+  // still gets that company's fronters in the dropdown. The injected-option
+  // fallback below keeps the stored fronter selectable even if the list still
+  // doesn't include them.
   useEffect(() => {
     client.get('users', { params: { company_id: configCompanyId } })
       .then(res => {
@@ -511,7 +502,7 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
         <ThemedSelect value={val} onChange={onChange} required={field.is_required}
           className={`input ${errClass}`}>
           <option value="">Select client…</option>
-          <StaleOption value={val} present={visibleClients.some(c => c.value === val)} />
+          {val && !visibleClients.some(c => c.value === val) && <option value={val}>{val}</option>}
           {visibleClients.map(c => <option key={c.id} value={c.value}>{c.value}</option>)}
         </ThemedSelect>
       );
@@ -528,7 +519,7 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
         <ThemedSelect value={val} onChange={onChange} required={field.is_required}
           className={`input ${errClass}`}>
           <option value="">Select plan…</option>
-          <StaleOption value={val} present={planOptions.some(p => p.value === val)} />
+          {val && !planOptions.some(p => p.value === val) && <option value={val}>{val}</option>}
           {planOptions.map(p => <option key={p.id} value={p.value}>{p.value}</option>)}
         </ThemedSelect>
       );
@@ -573,8 +564,9 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
           <ThemedSelect value={val} onChange={onChange} className={`input pl-9 ${errClass}`}
             style={{ color: colorFor(val, 'var(--color-text)'), fontWeight: colorFor(val) ? 600 : undefined }}>
             <option value="" style={{ color: 'var(--color-text)', fontWeight: 400 }}>Select fronter…</option>
-            <StaleOption value={val} present={fronters.some(f => f.user_id === val)}
-              label={existingSale?.fronter_name || transfer?.fronter_name || 'Current fronter'} />
+            {val && !fronters.some(f => f.user_id === val) && (
+              <option value={val}>{existingSale?.fronter_name || transfer?.fronter_name || 'Current fronter'}</option>
+            )}
             {fronters.map(f => (
               <option key={f.user_id} value={f.user_id}
                 style={{ color: colorFor(f.user_id, 'var(--color-text)'), fontWeight: colorFor(f.user_id) ? 600 : 400 }}>
@@ -613,7 +605,7 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
         <ThemedSelect value={val} onChange={onChange} required={field.is_required}
           className={`input ${errClass}`}>
           <option value="">Select disposition…</option>
-          <StaleOption value={val} present={opts.includes(val)} label={String(val).replace(/_/g, ' ')} />
+          {val && !opts.includes(val) && <option value={val}>{String(val).replace(/_/g, ' ')}</option>}
           {opts.map(o => <option key={o} value={o}>{o.replace(/_/g, ' ')}</option>)}
         </ThemedSelect>
       );
