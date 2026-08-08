@@ -33,7 +33,9 @@ function once(key, fetcher) {
 /**
  * @param opts.companyList  the shell already holds this (6 rows) — passed in
  *                          rather than re-fetched.
- * @returns { userOptions, companyOptions, clientOptions } as [{ value, label }]
+ * @returns { userOptions, companyOptions, clientOptions } — userOptions carry
+ *          a `role` (the user's custom_roles level, e.g. 'closer'/'fronter'),
+ *          all as [{ value, label }]
  */
 export function useFilterOptions({ companyList } = {}) {
   const [userOptions, setUserOptions] = useState(() => cache.get('users') || []);
@@ -47,7 +49,7 @@ export function useFilterOptions({ companyList } = {}) {
       const seen = new Set();
       return (r.data?.users || [])
         .filter((u) => { if (seen.has(u.user_id)) return false; seen.add(u.user_id); return true; })
-        .map((u) => ({ value: u.user_id, label: u.full_name || 'Unknown' }))
+        .map((u) => ({ value: u.user_id, label: u.full_name || 'Unknown', role: u.role_level || null }))
         .sort((a, b) => a.label.localeCompare(b.label));
     }).then((v) => { if (alive) setUserOptions(v); });
     return () => { alive = false; };

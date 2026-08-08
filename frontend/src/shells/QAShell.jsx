@@ -30,6 +30,7 @@ import { getClip, putClip, clipKey, cachedKeys, cacheStats, clearCache } from '.
 import { useHistoryTab } from '../hooks/useHistoryTab';
 import { useNavFocus } from '../contexts/FocusContext';
 import { buildFilename } from '../utils/downloadFilename';
+import * as XLSX from 'xlsx';
 
 // ============================================================================
 // QA Shell — isolated shell for qa_manager / qa_agent (mirrors ComplianceShell).
@@ -1843,15 +1844,15 @@ function ReviewSheet({ companyId, workType, subjectRole, reviewerId, agentSel, d
   const groups = {};
   for (const r of rows) (groups[r.scorecard_id || 'none'] ||= []).push(r);
 
-  const csv = (cardId, cols, list, cardName) => {
-    // every column exports its MARK and, right after it, the comment the reviewer
-    // left on that mark — the export is the record, so it carries the reasons too
+  // Shared row-builder for both export formats — every column's MARK and,
+  // right after it, the comment the reviewer left on that mark (the export is
+  // the record, so it carries the reasons too). Returns raw values; each
+  // downloader below handles its own escaping/typing.
+  const buildRows = (cols, list) => {
     const head = ['Date', 'Method', 'Reviewed', 'Side', 'QA agent', 'Customer',
       ...cols.flatMap(c => [c.label, `${c.label} — comment`]),
       ...COMPUTED.map(c => c.label), 'Result', 'Notes'];
-    const esc = v => { const s = String(v ?? ''); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
-    const lines = [head.map(esc).join(',')];
-    for (const r of list) lines.push([
+    const rows = list.map(r => [
       r.call_date ? new Date(r.call_date).toLocaleDateString() : '',
       SLOT_LABEL[r.work_type] || r.work_type || r.method || '',
       r.agent || r.subject_name || '', r.subject_role || '', r.reviewer_name || '', r.customer_name || '',
@@ -1859,11 +1860,32 @@ function ReviewSheet({ companyId, workType, subjectRole, reviewerId, agentSel, d
       ...COMPUTED.map(c => r[c.key] ?? ''),
       r.passed === true ? 'Pass' : r.passed === false ? 'Fail' : (r.autofail_result || ''),
       r.overall_notes || '',
-    ].map(esc).join(','));
+    ]);
+    return { head, rows };
+  };
+
+  const downloadCsv = (cardId, cols, list, cardName) => {
+    const { head, rows } = buildRows(cols, list);
+    const esc = v => { const s = String(v ?? ''); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+    const lines = [head, ...rows].map(row => row.map(esc).join(','));
     const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
     a.download = buildFilename({ dataset: 'qa-marking-sheet', scope: cardName || cardId, dateFrom, dateTo });
     a.click(); URL.revokeObjectURL(a.href);
+  };
+
+  // A real workbook (typed cells, sized columns) instead of a CSV Excel merely
+  // happens to open — dates/numbers stay numbers instead of Excel's autodetect
+  // mangling them on open.
+  const downloadXlsx = (cardId, cols, list, cardName) => {
+    const { head, rows } = buildRows(cols, list);
+    const ws = XLSX.utils.aoa_to_sheet([head, ...rows]);
+    ws['!cols'] = head.map((h, i) => ({
+      wch: Math.min(40, Math.max(10, String(h).length, ...rows.map(r => String(r[i] ?? '').length)) + 2),
+    }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, (cardName || 'Marking Sheet').slice(0, 31));
+    XLSX.writeFile(wb, buildFilename({ dataset: 'qa-marking-sheet', scope: cardName || cardId, dateFrom, dateTo, ext: 'xlsx' }));
   };
 
   const th = { padding: '6px 8px', fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '.02em', color: 'var(--color-text-tertiary)', whiteSpace: 'nowrap', textAlign: 'left', borderBottom: '1px solid var(--color-border)' };
@@ -1900,12 +1922,20 @@ function ReviewSheet({ companyId, workType, subjectRole, reviewerId, agentSel, d
                 <span className="text-[11px] font-normal" style={{ color: 'var(--color-text-tertiary)' }}>{list.length} scored{card?.method ? ` · ${String(card.method).toUpperCase()}` : ''}</span>
               </div>
               {canExportQa && (
-                <button onClick={() => csv(cardId, cols, list, card?.name)}
-                  className="flex items-center gap-1 text-[11px] font-bold px-2.5 py-1.5 rounded-lg"
-                  style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}
-                  title="Download this sheet exactly as shown, one row per scored review">
-                  <Download size={13} /> CSV
-                </button>
+                <span className="flex items-center gap-1.5">
+                  <button onClick={() => downloadXlsx(cardId, cols, list, card?.name)}
+                    className="flex items-center gap-1 text-[11px] font-bold px-2.5 py-1.5 rounded-lg"
+                    style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}
+                    title="Download this sheet exactly as shown, one row per scored review — real Excel workbook">
+                    <Download size={13} /> Excel
+                  </button>
+                  <button onClick={() => downloadCsv(cardId, cols, list, card?.name)}
+                    className="flex items-center gap-1 text-[11px] font-bold px-2.5 py-1.5 rounded-lg"
+                    style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}
+                    title="Download this sheet exactly as shown, one row per scored review — CSV">
+                    <Download size={13} /> CSV
+                  </button>
+                </span>
               )}
             </div>
             <div className="rounded-xl" style={{ border: '1px solid var(--color-border)', overflowX: 'auto', maxHeight: 520, overflowY: 'auto' }}>

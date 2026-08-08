@@ -4,6 +4,8 @@ import { toast } from 'sonner';
 import { computeSheetReview, truncPct1, resolveSheetFields } from '../../utils/qaSheetFormula';
 import ThemedSelect from '../UI/Select';
 import ThemedDate from '../UI/ThemedDate';
+import ComboInput from '../UI/ComboInput';
+import { useFilterOptions } from '../../hooks/useFilterOptions';
 
 // ============================================================================
 // SheetScoreRow — horizontal, spreadsheet-style scoring strip for sheet_v2
@@ -173,6 +175,18 @@ export default function SheetScoreRow({ config, draftKey = null, initialValues =
     ? (out.passed == null ? '—' : (out.passed ? 'Pass' : 'FAIL'))
     : (out.quality_score != null ? `${out.quality_score}%` : '—');
 
+  // Closer/fronter roster for the "agent name" meta columns — a searchable
+  // pick list instead of free text, so the same person doesn't end up scored
+  // under three spellings of their own name. Shared cached fetch (one request
+  // per session across every open sheet — see useFilterOptions), filtered to
+  // the two roles that actually work calls; managers/admins never handled the
+  // call being reviewed, so they don't belong in this list.
+  const { userOptions } = useFilterOptions();
+  const agentOptions = useMemo(() => {
+    const names = userOptions.filter(u => u.role === 'closer' || u.role === 'fronter').map(u => u.label);
+    return [...new Set(names)].sort((a, b) => a.localeCompare(b));
+  }, [userOptions]);
+
   // ── build the flat, ordered column list (matches the sheet's left→right order)
   //
   // ONE source of order and type: resolveSheetFields. A field carries its own
@@ -204,8 +218,14 @@ export default function SheetScoreRow({ config, draftKey = null, initialValues =
     // "Additional Comments" means typing through a slot, so those get a real
     // resizable box — and a wider column to sit in.
     const long = kind === 'text' && /comment|note|reason|feedback|remark|detail/i.test(`${f.key} ${f.label || ''}`);
+    // "Closer_Agent_Name" / "Fronter_Agent_Name" / "Agents" — every column
+    // whose source maps to the CRM's own agent_name (see qaSheetPresets.js)
+    // gets the searchable closer/fronter picker instead of a plain text box,
+    // regardless of which sheet layout renamed the column.
+    const isAgent = kind === 'text' && f.source === 'agent_name';
     const w = long ? 300 : (kind === 'text' || kind === 'date' ? 130 : (group === 'quality' ? 116 : 108));
     if (long) columns.push({ key: f.key, label, group, kind: 'longtext', w });
+    else if (isAgent) columns.push({ key: f.key, label, group, kind: 'agent', w: Math.max(w, 170) });
     else if (kind === 'scale') columns.push({ key: f.key, label, group, kind: 'rating', scale: f.input.max, min: f.input.min, w });
     else if (kind === 'choice') columns.push({ key: f.key, label, group, kind: 'choice', options: f.input.options || [], w: Math.max(w, 116) });
     else columns.push({ key: f.key, label, group, kind, w });
@@ -230,6 +250,13 @@ export default function SheetScoreRow({ config, draftKey = null, initialValues =
   const renderCell = (c) => {
     switch (c.kind) {
       case 'text': return <input value={values[c.key] ?? ''} onChange={e => set(c.key, e.target.value)} disabled={readOnly} style={selStyle} placeholder="—" />;
+      // Closer/fronter name — searchable pick list (type to filter, or free
+      // text if the person isn't in the roster yet) instead of an open input,
+      // so the same agent doesn't get scored under three spellings of their name.
+      case 'agent': return (
+        <ComboInput value={values[c.key] ?? ''} onChange={v => set(c.key, v)} options={agentOptions}
+          disabled={readOnly} style={selStyle} placeholder="Search agent…" />
+      );
       // resizable in both directions — drag the corner to give a long comment room
       case 'longtext': return (
         <textarea value={values[c.key] ?? ''} onChange={e => set(c.key, e.target.value)} disabled={readOnly}
