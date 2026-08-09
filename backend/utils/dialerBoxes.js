@@ -1260,8 +1260,10 @@ module.exports = {
   refreshBoxes,
   // Exported for QA v2's recording poller (build brief 7.2) — pure reuse of
   // the same cached lookup every other caller here already shares, no change
-  // to its behavior.
-  recordingLookup,
+  // to its behavior. phoneTail/onlyDigits let the poller apply the SAME
+  // phone-confirmation findSaleRecording already uses before trusting a
+  // cross-box match (a lead_id is only unique per cluster).
+  recordingLookup, phoneTail, onlyDigits,
   lookupCallsByPhone, lookupCallsByPhoneDiag, latestDisposition, leadStatusByCode, leadAgentByCode, findSaleRecording,
   resolveLeadIdByAgentDate,
   listCandidatesForSale, listCandidatesByPhone, listCandidatesByLeadId, listCandidatesByPhoneLeads, locationForRecording,

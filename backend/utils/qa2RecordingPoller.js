@@ -8,9 +8,16 @@
 // reimplemented). This replaces v1's hourly materialisation lag and is what
 // makes same-day scoring possible.
 //
-// Fans out across EVERY box for the vendor code's prefix — two production
-// boxes share the WTI prefix (see dialerBoxes.js), so trusting "one box per
-// prefix" would silently miss half the recordings on that prefix.
+// TWO-TIER SEARCH, same shape as findSaleRecording's own fallback:
+//   1. The vendor code's prefix names an exact box (or boxes, when a prefix
+//      is shared across boxes) — search only those, no phone check needed,
+//      since a lead_id is unique WITHIN that cluster.
+//   2. Nothing found there (or the prefix didn't resolve to a box at all) —
+//      widen to EVERY box, but only trust a hit whose recording path
+//      contains this call's own phone number. Searching everywhere without
+//      that check risked returning a different customer's call: a lead_id
+//      is only unique PER CLUSTER (parseVendorCode's own rule), not across
+//      the whole dialer estate.
 //
 // A row with no dialer_lead_id (phone-only match, no usable code from the
 // dialer) can never succeed via a lead_id-based lookup — marked 'missing'
@@ -19,7 +26,7 @@
 
 const { supabaseAdmin } = require('../config/database');
 const logger = require('../utils/logger');
-const { recordingLookup, parseVendorCode, getBoxes } = require('./dialerBoxes');
+const { recordingLookup, parseVendorCode, getBoxes, phoneTail, onlyDigits } = require('./dialerBoxes');
 
 const MAX_ATTEMPTS = 10;
 const BATCH_SIZE = 25; // capped per tick
@@ -31,9 +38,19 @@ async function pollOne(row) {
   }
 
   const parsed = parseVendorCode(row.vendor_code || row.dialer_lead_id);
-  const boxes = parsed && parsed.boxes && parsed.boxes.length ? parsed.boxes : getBoxes();
-  const results = (await Promise.all(boxes.map(b => recordingLookup(b, { lead_id: row.dialer_lead_id })))).flat();
-  const hit = results.find(r => r && r.recording_id && r.location);
+  const exactBoxes = parsed && parsed.boxes && parsed.boxes.length ? parsed.boxes : [];
+  const exactResults = exactBoxes.length
+    ? (await Promise.all(exactBoxes.map(b => recordingLookup(b, { lead_id: row.dialer_lead_id })))).flat()
+    : [];
+  let hit = exactResults.find(r => r && r.recording_id && r.location);
+
+  if (!hit) {
+    const tail = phoneTail(row.normalized_phone || row.customer_phone || '');
+    if (tail) {
+      const wideResults = (await Promise.all(getBoxes().map(b => recordingLookup(b, { lead_id: row.dialer_lead_id })))).flat();
+      hit = wideResults.find(r => r && r.recording_id && r.location && onlyDigits(r.location).includes(tail));
+    }
+  }
   const attempts = (row.recording_attempts || 0) + 1;
 
   if (hit) {
@@ -56,7 +73,7 @@ async function pollOne(row) {
 async function pollPendingRecordings() {
   const { data: rows, error } = await supabaseAdmin
     .from('qa2_call')
-    .select('id, vendor_code, dialer_lead_id, recording_attempts')
+    .select('id, vendor_code, dialer_lead_id, recording_attempts, normalized_phone, customer_phone')
     .eq('recording_state', 'pending')
     .lt('recording_attempts', MAX_ATTEMPTS)
     .order('created_at', { ascending: true })
