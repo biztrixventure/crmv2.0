@@ -29,6 +29,9 @@ const { companyInScope, methodInScope } = require('../utils/qa2Scope');
 const { issueTicket } = require('../utils/mediaTicket');
 const { annotateHangups } = require('../utils/dialerBoxes');
 const { resolveCustomerContext } = require('../utils/qa2CustomerContext');
+const { resolveColumnAccess } = require('../utils/columnFilter');
+const { applyQa2Sort, applyQa2Filters } = require('../utils/qa2ColumnFilter');
+const { QA2_CALL_COLUMNS } = require('../config/recordColumns');
 const logger = require('../utils/logger');
 
 async function requireScope(req, res) {
@@ -59,18 +62,23 @@ function callInScope(scope, call) {
 router.get('/queue', asyncHandler(async (req, res) => {
   const scope = await requireScope(req, res);
   if (!scope) return;
-  const { status } = req.query;
+  const { status, sort_by, sort_dir, filters } = req.query;
+  const access = await resolveColumnAccess(req, QA2_CALL_COLUMNS);
 
+  // !inner changes nothing about the result set (call_id is NOT NULL, every
+  // assignment has a matching call) — it's required syntax for the embedded
+  // filter/sort calls below.
   let query = supabaseAdmin
     .from('qa2_assignment')
     .select(`id, call_id, assigned_to, assigned_at, opened_at, status, origin, calibration_group_id,
              priority, due_at, period, created_at,
-             qa2_call(id, company_id, leg, agent_user, agent_user_id, customer_phone, dispo_raw, call_at,
+             qa2_call!inner(id, company_id, leg, agent_user, agent_user_id, customer_phone, dispo_raw, call_at,
                        recording_state, method_id, qa2_method(label), companies(name))`)
-    .eq('assigned_to', req.user.id)
-    .order('created_at', { ascending: false })
-    .limit(200);
+    .eq('assigned_to', req.user.id);
   query = status ? query.eq('status', status) : query.in('status', ['pending', 'in_review']);
+  query = applyQa2Filters(query, filters, QA2_CALL_COLUMNS, access.blocked, 'qa2_call');
+  query = applyQa2Sort(query, sort_by, sort_dir, access.sortMap, 'qa2_call', 'created_at', false);
+  query = query.limit(200);
 
   const { data, error } = await query;
   if (error) return res.status(500).json({ error: error.message });
@@ -78,7 +86,7 @@ router.get('/queue', asyncHandler(async (req, res) => {
   const assignments = (data || []).map(a => (a.qa2_call
     ? { ...a, qa2_call: { ...a.qa2_call, agent_name: names.get(a.qa2_call.agent_user_id) || a.qa2_call.agent_user || null } }
     : a));
-  res.json({ assignments });
+  res.json({ assignments, columns: access.catalog });
 }));
 
 // ── /qa2/pool — self-claimable within my grants ────────────────────────────
@@ -86,33 +94,38 @@ router.get('/queue', asyncHandler(async (req, res) => {
 router.get('/pool', asyncHandler(async (req, res) => {
   const scope = await requireScope(req, res);
   if (!scope) return;
-  if (scope.operationalCompanyIds !== 'all' && !scope.operationalCompanyIds.length) return res.json({ assignments: [] });
-  if (scope.operationalMethodIds !== 'all' && !scope.operationalMethodIds.length) return res.json({ assignments: [] });
+  if (scope.operationalCompanyIds !== 'all' && !scope.operationalCompanyIds.length) return res.json({ assignments: [], columns: {} });
+  if (scope.operationalMethodIds !== 'all' && !scope.operationalMethodIds.length) return res.json({ assignments: [], columns: {} });
 
-  let callQuery = supabaseAdmin.from('qa2_call').select('id').eq('qa_relevant', true).not('method_id', 'is', null);
-  if (scope.operationalCompanyIds !== 'all') callQuery = callQuery.in('company_id', scope.operationalCompanyIds);
-  if (scope.operationalMethodIds !== 'all') callQuery = callQuery.in('method_id', scope.operationalMethodIds);
-  const { data: calls } = await callQuery.limit(500);
-  const callIds = (calls || []).map(c => c.id);
-  if (!callIds.length) return res.json({ assignments: [] });
+  const { sort_by, sort_dir, filters } = req.query;
+  const access = await resolveColumnAccess(req, QA2_CALL_COLUMNS);
 
-  const { data, error } = await supabaseAdmin
+  // Company/method scope now applies directly on the embedded qa2_call table
+  // via !inner — one query instead of the previous fetch-500-ids-then-filter
+  // two-step, and without that step's 500-row id cap.
+  let query = supabaseAdmin
     .from('qa2_assignment')
     .select(`id, call_id, status, created_at,
-             qa2_call(id, company_id, leg, agent_user, agent_user_id, customer_phone, dispo_raw, call_at,
+             qa2_call!inner(id, company_id, leg, agent_user, agent_user_id, customer_phone, dispo_raw, call_at,
                        recording_state, method_id, qa2_method(label), companies(name))`)
-    .in('call_id', callIds)
     .is('assigned_to', null)
     .eq('status', 'pending')
     .is('calibration_group_id', null)
-    .order('created_at', { ascending: true })
-    .limit(200);
+    .eq('qa2_call.qa_relevant', true)
+    .not('qa2_call.method_id', 'is', null);
+  if (scope.operationalCompanyIds !== 'all') query = query.in('qa2_call.company_id', scope.operationalCompanyIds);
+  if (scope.operationalMethodIds !== 'all') query = query.in('qa2_call.method_id', scope.operationalMethodIds);
+  query = applyQa2Filters(query, filters, QA2_CALL_COLUMNS, access.blocked, 'qa2_call');
+  query = applyQa2Sort(query, sort_by, sort_dir, access.sortMap, 'qa2_call', 'created_at', true);
+  query = query.limit(200);
+
+  const { data, error } = await query;
   if (error) return res.status(500).json({ error: error.message });
   const names = await nameMap((data || []).map(a => a.qa2_call?.agent_user_id));
   const assignments = (data || []).map(a => (a.qa2_call
     ? { ...a, qa2_call: { ...a.qa2_call, agent_name: names.get(a.qa2_call.agent_user_id) || a.qa2_call.agent_user || null } }
     : a));
-  res.json({ assignments });
+  res.json({ assignments, columns: access.catalog });
 }));
 
 // ── claim / manual push / unassign / skip / calibrate ──────────────────────

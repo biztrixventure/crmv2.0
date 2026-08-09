@@ -157,7 +157,23 @@ function blockedForHide(catalog, hide) {
   return out;
 }
 
+// ── QA v2 — qa2_call (Pool/Queue) ───────────────────────────────────────────
+// No `mask` entries here — QA v2's security boundary is scope (company/method
+// grants via companyInScope/operationalCompanyIds), not readonly_admin PII
+// masking, which is a different admin tier entirely. Text search intentionally
+// left out (no contains/starts/ends columns) — Pool/Queue run at ~80
+// calls/day/company, nowhere near the row counts that motivated this system
+// for transfers/sales, so the useful set is company/method/leg/recording
+// state/date, not a general search box.
+const QA2_CALL_COLUMNS = {
+  company:         { col: 'company_id',      type: 'uuid', sort: true, enumSource: 'companies' },
+  method:          { col: 'method_id',       type: 'uuid', sort: true, enumSource: 'qa2_methods' },
+  leg:             { col: 'leg',             type: 'enum', sort: true, values: ['fronter', 'closer'] },
+  recording_state: { col: 'recording_state', type: 'enum', sort: true, values: ['pending', 'found', 'missing', 'error'] },
+  call_at:         { col: 'call_at',         type: 'date', sort: true },
+};
+
 module.exports = {
-  SALE_COLUMNS, COMPLIANCE_SALE_COLUMNS, TRANSFER_COLUMNS, CALLBACK_COLUMNS,
+  SALE_COLUMNS, COMPLIANCE_SALE_COLUMNS, TRANSFER_COLUMNS, CALLBACK_COLUMNS, QA2_CALL_COLUMNS,
   blockedForHide,
 };
