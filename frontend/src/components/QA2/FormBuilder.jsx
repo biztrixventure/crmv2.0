@@ -8,12 +8,12 @@
 // clones it into a fresh draft (POST .../versions) rather than mutating it.
 // ============================================================================
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
-import { ArrowLeft, Plus, Trash2, Save, Rocket, Copy, Eye } from 'lucide-react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { ArrowLeft, Plus, Trash2, Save, Rocket, Copy, Eye, GripVertical, ChevronUp, ChevronDown } from 'lucide-react';
 import { toast } from 'sonner';
 import client from '../../api/client';
 import ThemedSelect from '../UI/Select';
-import { Panel, SectionHeader, Field, Loading } from '../UI/kit';
+import { Panel, SectionHeader, Field, Loading, IconButton } from '../UI/kit';
 import { Toggle } from '../UI/kit';
 
 const INPUT_TYPES = ['yes_no', 'scale', 'choice', 'number', 'text'];
@@ -217,6 +217,24 @@ export default function FormBuilder({ form, initialVersionId, onBack }) {
   const addParam = (sectionId) => setParameters(prev => [...prev, newParam(sectionId)]);
   const addSection = () => setSections(prev => [...prev, { _tempId: `new-${Math.random().toString(36).slice(2)}`, name: 'New section', sort: prev.length }]);
 
+  // Reorders within ONE section — walks the flat `parameters` array in its
+  // existing order and, for entries belonging to this section only, swaps in
+  // the next item from the freshly-reordered subset. Position-matching works
+  // because bySection was built by iterating `parameters` in that same order.
+  const moveParam = (sectionId, from, to) => {
+    const list = [...(bySection.get(sectionId) || [])];
+    if (to < 0 || to >= list.length || from === to) return;
+    list.splice(to, 0, list.splice(from, 1)[0]);
+    let i = 0;
+    setParameters(prev => prev.map(p => (p.section_id === sectionId ? list[i++] : p)));
+  };
+  const moveSection = (from, to) => {
+    if (to < 0 || to >= sections.length || from === to) return;
+    setSections(prev => { const next = [...prev]; next.splice(to, 0, next.splice(from, 1)[0]); return next; });
+  };
+  const dragParam = useRef(null);   // { sectionId, index }
+  const dragSection = useRef(null); // index
+
   const updateVersionField = (k, v) => setVersion(prev => ({ ...prev, [k]: v }));
 
   const save = async () => {
@@ -232,13 +250,17 @@ export default function FormBuilder({ form, initialVersionId, onBack }) {
         autofail_mode: version.autofail_mode,
         autofail_table: version.autofail_table,
         sections: [
-          ...sections.map(s => ({
-            name: s.name, sort: s.sort,
-            parameters: (bySection.get(s.id) || []).map(({ _tempId, id, form_version_id, created_at, options, ...rest }) => ({ ...rest, options })),
+          // sort is taken from the array's LIVE position, not each item's own
+          // stale `sort` field (every freshly-added parameter defaults to 0,
+          // which is exactly what made drag-to-reorder need this fix) — the
+          // on-screen order IS the order that gets persisted.
+          ...sections.map((s, si) => ({
+            name: s.name, sort: si,
+            parameters: (bySection.get(s.id) || []).map(({ _tempId, id, form_version_id, created_at, options, sort, ...rest }, pi) => ({ ...rest, options, sort: pi })),
           })),
           {
             name: null, sort: sections.length, // ungrouped bucket
-            parameters: (bySection.get(null) || []).map(({ _tempId, id, form_version_id, created_at, options, ...rest }) => ({ ...rest, options })),
+            parameters: (bySection.get(null) || []).map(({ _tempId, id, form_version_id, created_at, options, sort, ...rest }, pi) => ({ ...rest, options, sort: pi })),
           },
         ],
       };
@@ -351,16 +373,54 @@ export default function FormBuilder({ form, initialVersionId, onBack }) {
         )}
       </Panel>
 
-      {[...sections, { id: null, name: 'Ungrouped', sort: 999 }].map(s => (
-        <Panel key={s.id || 'ungrouped'} className="space-y-3">
+      {[...sections.map((s, si) => ({ ...s, _idx: si, _real: true })), { id: null, name: 'Ungrouped', sort: 999, _real: false }].map(s => (
+        <Panel key={s.id || 'ungrouped'} className="space-y-3"
+          draggable={isDraft && s._real}
+          onDragStart={() => { if (s._real) dragSection.current = s._idx; }}
+          onDragOver={e => { if (s._real) e.preventDefault(); }}
+          onDrop={e => {
+            if (!s._real) return;
+            e.preventDefault();
+            if (dragSection.current != null) moveSection(dragSection.current, s._idx);
+            dragSection.current = null;
+          }}>
           <SectionHeader level="section" title={s.name || 'Ungrouped'} actions={isDraft && (
-            <button className="text-xs font-semibold flex items-center gap-1" style={{ color: 'var(--color-primary-600)' }} onClick={() => addParam(s.id)}>
-              <Plus size={13} />Add parameter
-            </button>
+            <div className="flex items-center gap-1">
+              {s._real && (
+                <>
+                  <GripVertical size={14} style={{ color: 'var(--color-text-tertiary)', cursor: 'grab' }} />
+                  <IconButton label="Move section up" variant="ghost" onClick={() => moveSection(s._idx, s._idx - 1)} disabled={s._idx === 0}><ChevronUp size={13} /></IconButton>
+                  <IconButton label="Move section down" variant="ghost" onClick={() => moveSection(s._idx, s._idx + 1)} disabled={s._idx === sections.length - 1}><ChevronDown size={13} /></IconButton>
+                </>
+              )}
+              <button className="text-xs font-semibold flex items-center gap-1" style={{ color: 'var(--color-primary-600)' }} onClick={() => addParam(s.id)}>
+                <Plus size={13} />Add parameter
+              </button>
+            </div>
           )} />
           <div className="space-y-2">
-            {(bySection.get(s.id) || []).map(p => (
-              <ParameterRow key={p.id || p._tempId} p={p} onChange={updateParam} onRemove={() => removeParam(p)} />
+            {(bySection.get(s.id) || []).map((p, pi, arr) => (
+              <div key={p.id || p._tempId} className="flex items-start gap-1.5"
+                draggable={isDraft}
+                onDragStart={() => { dragParam.current = { sectionId: s.id, index: pi }; }}
+                onDragOver={e => e.preventDefault()}
+                onDrop={e => {
+                  e.preventDefault();
+                  const d = dragParam.current;
+                  if (d && d.sectionId === s.id) moveParam(s.id, d.index, pi);
+                  dragParam.current = null;
+                }}>
+                {isDraft && (
+                  <div className="flex flex-col items-center gap-0.5 pt-2 flex-shrink-0" style={{ cursor: 'grab' }}>
+                    <GripVertical size={14} style={{ color: 'var(--color-text-tertiary)' }} />
+                    <IconButton label="Move up" variant="ghost" onClick={() => moveParam(s.id, pi, pi - 1)} disabled={pi === 0}><ChevronUp size={13} /></IconButton>
+                    <IconButton label="Move down" variant="ghost" onClick={() => moveParam(s.id, pi, pi + 1)} disabled={pi === arr.length - 1}><ChevronDown size={13} /></IconButton>
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <ParameterRow p={p} onChange={updateParam} onRemove={() => removeParam(p)} />
+                </div>
+              </div>
             ))}
             {(bySection.get(s.id) || []).length === 0 && (
               <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>No parameters here yet.</p>
