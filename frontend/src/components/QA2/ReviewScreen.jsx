@@ -12,7 +12,7 @@
 // ============================================================================
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { ArrowLeft, Play, Pause, Phone, Building2, User, Clock, Send, SkipForward } from 'lucide-react';
+import { ArrowLeft, Play, Pause, Phone, Building2, User, Clock, Send, SkipForward, Car, Hash } from 'lucide-react';
 import { toast } from 'sonner';
 import client from '../../api/client';
 import ThemedSelect from '../UI/Select';
@@ -156,6 +156,7 @@ export function ParameterInput({ param, answer, onChange }) {
 export default function ReviewScreen({ assignment, onDone }) {
   const [call, setCall] = useState(null);
   const [linked, setLinked] = useState(null);
+  const [customerContext, setCustomerContext] = useState(null);
   const [evaluation, setEvaluation] = useState(null);
   const [def, setDef] = useState(null); // { version, sections, parameters, computed_max }
   const [answers, setAnswers] = useState({}); // parameter_id -> {value_num, value_text, value_bool, is_na, comment}
@@ -172,6 +173,7 @@ export default function ReviewScreen({ assignment, onDone }) {
         if (dead) return;
         setCall(callRes.data.call);
         setLinked(callRes.data.linked);
+        setCustomerContext(callRes.data.customer_context || null);
 
         const evalRes = await client.post('qa2/evaluations', { assignment_id: assignment.id });
         if (dead) return;
@@ -271,6 +273,26 @@ export default function ReviewScreen({ assignment, onDone }) {
               {call.dispo_raw && <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>Dispo: {call.dispo_raw}</div>}
             </div>
           </Panel>
+
+          {customerContext && (
+            <Panel tone="inset">
+              <SectionHeader level="section" title="Customer & vehicle" subtitle="Auto-fetched from the CRM — not entered by the reviewer." />
+              <div className="space-y-1.5 text-sm">
+                {customerContext.customer_name && (
+                  <div className="flex items-center gap-2"><User size={13} style={{ color: 'var(--color-text-tertiary)' }} />{customerContext.customer_name}{customerContext.zip ? ` · ${customerContext.zip}` : ''}</div>
+                )}
+                {(customerContext.vehicle_year || customerContext.vehicle_make || customerContext.vehicle_model) && (
+                  <div className="flex items-center gap-2">
+                    <Car size={13} style={{ color: 'var(--color-text-tertiary)' }} />
+                    {[customerContext.vehicle_year, customerContext.vehicle_make, customerContext.vehicle_model].filter(Boolean).join(' ')}
+                  </div>
+                )}
+                {customerContext.vin && (
+                  <div className="flex items-center gap-2"><Hash size={13} style={{ color: 'var(--color-text-tertiary)' }} />VIN {customerContext.vin}</div>
+                )}
+              </div>
+            </Panel>
+          )}
 
           <AudioPlayer call={call} />
 

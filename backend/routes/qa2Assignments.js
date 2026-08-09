@@ -27,6 +27,8 @@ const { supabaseAdmin } = require('../config/database');
 const { resolveQa2Scope } = require('../utils/qa2ScopeResolver');
 const { companyInScope, methodInScope } = require('../utils/qa2Scope');
 const { issueTicket } = require('../utils/mediaTicket');
+const { resolveCustomerContext } = require('../utils/qa2CustomerContext');
+const logger = require('../utils/logger');
 
 async function requireScope(req, res) {
   const scope = await resolveQa2Scope(req);
@@ -231,7 +233,14 @@ router.get('/calls/:id', asyncHandler(async (req, res) => {
     const { data } = await supabaseAdmin.from('qa2_call').select('*').eq('id', call.linked_call_id).maybeSingle();
     linked = data || null;
   }
-  res.json({ call, linked });
+
+  // Best-effort — a lookup failure or "nothing found" must never break the
+  // Review screen itself, it just means the Customer/Vehicle panel is empty.
+  let customerContext = null;
+  try { customerContext = await resolveCustomerContext(call); }
+  catch (e) { logger.warn('QA2_CALLS', `customer context lookup failed for ${call.id}: ${e.message}`); }
+
+  res.json({ call, linked, customer_context: customerContext });
 }));
 
 router.post('/calls/:id/recording-ticket', asyncHandler(async (req, res) => {
