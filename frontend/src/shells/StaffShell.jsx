@@ -24,7 +24,7 @@ import {
   DollarSign, Send, Phone, Hash, Search, Target, Clock,
   CheckCircle, XCircle, Plus, User, Car, Star, MessageSquare,
   Users, Shield, FileText, BarChart3, AlertTriangle, RefreshCw, CalendarPlus, Pencil, Trash2, Download,
-  ChevronLeft, ChevronRight, HelpCircle, CalendarDays, Copy, UserCircle, Database, CreditCard,
+  ChevronLeft, ChevronRight, HelpCircle, CalendarDays, Copy, UserCircle, Database, CreditCard, Award,
 } from "lucide-react";
 
 const PAGE_SIZE = 25;
@@ -217,6 +217,10 @@ const StaffShell = () => {
       ? [{ key: 'forms',   label: 'Forms',   icon: FileText }] : []),
     ...(hasPermission('view_call_reviews') || hasPermission('view_all_call_reviews')
       ? [{ key: 'reviews', label: 'Reviews', icon: Star     }] : []),
+    // QA v2 read-only self-view — final score + pass/fail only (mig 238's
+    // qa2.view_own_scores, seeded only for fronter/closer).
+    ...(hasPermission('qa2.view_own_scores')
+      ? [{ key: 'qa2_scores', label: 'QA Scores', icon: Award }] : []),
     ...(hasPermission('view_fronter_stats') || hasPermission('view_closer_stats') || hasPermission('view_company_reports') || hasPermission('view_reports')
       ? [{ key: 'reports', label: 'Reports', icon: BarChart3}] : []),
     // Monthly-payment reminders — closers (and anyone who can see sales) get

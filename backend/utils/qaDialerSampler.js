@@ -69,32 +69,24 @@ async function insertRows(rows) {
   return n;
 }
 
-// Sample the PREVIOUS complete day's raw dialer calls for one company.
-// Returns the number of RCM tasks created. `date` overrides the day (else
-// yesterday); `force` re-samples even if a sample already exists for that day
-// (clears the day's UNASSIGNED samples first — used by the manual "Pull now").
-// `detail:true` makes it return a diagnostic object instead of a bare count.
-async function sampleRcmFromDialer(companyId, { covers, sample, force = false, date, detail = false } = {}) {
+// The shared pool-building step — resolve dialer-mapped users, sweep the raw
+// recordings for the day (listDayRecordings' box x agent concurrency +
+// caching, untouched), exclude anything already in the CRM (TRA's job), and
+// group redials into one candidate per (agent, phone). Extracted so QA v2's
+// sweep adapter (utils/qa2Sweep.js, build brief 7.3) can reuse this EXACT
+// concurrency/caching/dedupe/exclusion logic without also inheriting the
+// quota-sampling below — v2 records every swept call, not a sampled subset.
+// sampleRcmFromDialer is now a thin wrapper: build the same pool, THEN
+// quota-sample it and write qa_assignments. Zero behavior change versus the
+// previous inlined version — same order of operations, same every result.
+async function buildRawCallPool(companyId, { covers, date } = {}) {
   const day = (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) ? date : new Date(Date.now() - 86400000).toISOString().slice(0, 10);
-  const ret = (created, reason) => detail ? { created, day, reason } : created;
-
-  // one sample per day — if any dialer-random rows exist for this day, done
-  // (unless forced, in which case we drop the day's UNASSIGNED samples & redo).
-  const { count: already } = await supabaseAdmin.from('qa_assignments')
-    .select('*', { count: 'exact', head: true })
-    .eq('company_id', companyId).eq('source', 'dialer_random').eq('period', day);
-  if (already > 0) {
-    if (!force) return ret(0, 'already_sampled');
-    await supabaseAdmin.from('qa_assignments').delete()
-      .eq('company_id', companyId).eq('source', 'dialer_random').eq('period', day)
-      .eq('status', 'pending').is('assigned_to', null);
-  }
 
   const { ids, roleByAgent, nameByAgent } = await companyDialerAgents(companyId, covers);
-  if (!ids.length) { logger.info('QA_RCM', `${companyId}: no dialer-mapped users to sample`); return ret(0, 'no_mapped_users'); }
+  if (!ids.length) return { day, ids, roleByAgent, nameByAgent, pool: [], reason: 'no_mapped_users' };
 
   const recs = await listDayRecordings({ date: day, agentIds: ids });
-  if (!recs.length) return ret(0, 'no_recordings_that_day');
+  if (!recs.length) return { day, ids, roleByAgent, nameByAgent, pool: [], reason: 'no_recordings_that_day' };
 
   // numbers that live in the CRM around that day are TRA territory — exclude,
   // so RCM stays purely the raw, non-CRM calls (sections separated).
@@ -116,7 +108,36 @@ async function sampleRcmFromDialer(companyId, { covers, sample, force = false, d
     groups.set(key, g);
   }
   const pool = [...groups.values()];
-  if (!pool.length) return ret(0, 'all_calls_are_in_crm');
+  return { day, ids, roleByAgent, nameByAgent, pool, reason: pool.length ? null : 'all_calls_are_in_crm' };
+}
+
+// Sample the PREVIOUS complete day's raw dialer calls for one company.
+// Returns the number of RCM tasks created. `date` overrides the day (else
+// yesterday); `force` re-samples even if a sample already exists for that day
+// (clears the day's UNASSIGNED samples first — used by the manual "Pull now").
+// `detail:true` makes it return a diagnostic object instead of a bare count.
+async function sampleRcmFromDialer(companyId, { covers, sample, force = false, date, detail = false } = {}) {
+  const day = (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) ? date : new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+  const ret = (created, reason) => detail ? { created, day, reason } : created;
+
+  // one sample per day — if any dialer-random rows exist for this day, done
+  // (unless forced, in which case we drop the day's UNASSIGNED samples & redo).
+  // Checked BEFORE the (expensive, live-dialer) pool build below — the common
+  // case on every hourly re-tick is "already sampled," and that must stay a
+  // cheap DB-only check, never a full re-sweep.
+  const { count: already } = await supabaseAdmin.from('qa_assignments')
+    .select('*', { count: 'exact', head: true })
+    .eq('company_id', companyId).eq('source', 'dialer_random').eq('period', day);
+  if (already > 0) {
+    if (!force) return ret(0, 'already_sampled');
+    await supabaseAdmin.from('qa_assignments').delete()
+      .eq('company_id', companyId).eq('source', 'dialer_random').eq('period', day)
+      .eq('status', 'pending').is('assigned_to', null);
+  }
+
+  const { roleByAgent, nameByAgent, pool, reason } = await buildRawCallPool(companyId, { covers, date: day });
+  if (reason === 'no_mapped_users') { logger.info('QA_RCM', `${companyId}: no dialer-mapped users to sample`); return ret(0, reason); }
+  if (reason) return ret(0, reason);
 
   // quota per the company's sample config; weekly quotas spread across 7 days
   const mode = sample?.mode === 'fixed' ? 'fixed' : 'percentage';
@@ -171,4 +192,4 @@ async function sampleRcmFromDialer(companyId, { covers, sample, force = false, d
   return detail ? { created: n, day, reason: n ? 'ok' : 'nothing_new', pool: pool.length, targeted: targetAgents.size } : n;
 }
 
-module.exports = { sampleRcmFromDialer };
+module.exports = { sampleRcmFromDialer, buildRawCallPool };

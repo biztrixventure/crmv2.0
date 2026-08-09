@@ -1585,4 +1585,6 @@ api.get('/number-activity', asyncHandler(async (req, res) => {
 // disposition that queued before the transfer existed (the fronter-xfer path
 // already reconciles; the manual/webform paths did not, leaving the dispo stuck
 // in the queue and the transfer showing no closer/disposition).
-module.exports = { ingest, api, reconcileQueuedDispoForTransfer, fetchAndApplyDispo };
+// resolveAgent additionally exported for QA v2's ingest hook (Phase 5) — pure
+// reuse, no change to its behavior or any existing caller here.
+module.exports = { ingest, api, reconcileQueuedDispoForTransfer, fetchAndApplyDispo, resolveAgent };

@@ -15,6 +15,8 @@ const logger = require('./logger');
 const { runPaymentReminderScan } = require('./paymentReminders');
 const { runQaMaterialization } = require('./qaMaterializer');
 const { sweepMilestones } = require('./quotaMilestoneWatcher');
+const { pollPendingRecordings } = require('./qa2RecordingPoller');
+const { runQa2AutoAssign, purgeStaleQa2Assignments } = require('./qa2AutoAssign');
 
 const REFRESH_SEGMENTS_MS = 10 * 60 * 1000;     // every 10 min
 const CACHE_SWEEP_MS      = 5  * 60 * 1000;      // every 5 min
@@ -29,6 +31,19 @@ const MILESTONE_SWEEP_INIT = 2 * 60 * 1000;     // first sweep ~2 min after boot
 // daily if hourly proves too eager. First run ~2 min after boot.
 const QA_MATERIALIZE_MS   = 60 * 60 * 1000;
 const QA_MATERIALIZE_INIT = 2 * 60 * 1000;
+// QA v2 recording attachment poller (build brief 7.2). 60s — recordings land
+// on the dialer ~60-90s after hangup, and this is what makes same-day
+// scoring possible (v1's equivalent only ran hourly).
+const QA2_REC_POLL_MS   = 60 * 1000;
+const QA2_REC_POLL_INIT = 30 * 1000;
+// QA v2 sampling-rule pool fill (build brief Phase 8). 5 min — frequent
+// enough that a newly-classified call reaches the pool same-shift, cheap
+// enough not to matter at ~80 calls/day scale.
+const QA2_AUTOASSIGN_MS   = 5 * 60 * 1000;
+const QA2_AUTOASSIGN_INIT = 90 * 1000;
+// QA v2 retention purge — matches v1's mig 177 cadence (hourly) exactly.
+const QA2_RETENTION_MS   = 60 * 60 * 1000;
+const QA2_RETENTION_INIT = 3 * 60 * 1000;
 
 let _timers = [];
 
@@ -83,7 +98,24 @@ function startBackgroundJobs() {
   _timers.push(setTimeout(ms, MILESTONE_SWEEP_INIT));
   _timers.push(setInterval(ms, MILESTONE_SWEEP_MS));
 
-  logger.info('JOBS', `background jobs started — segments refresh ${REFRESH_SEGMENTS_MS / 60000}m, cache sweep ${CACHE_SWEEP_MS / 60000}m, payment scan ${PAYMENT_SCAN_MS / 3600000}h, qa materialize ${QA_MATERIALIZE_MS / 60000}m, milestone sweep ${MILESTONE_SWEEP_MS / 60000}m`);
+  // QA v2 recording poller — attaches a found clip to any qa2_call still
+  // waiting on one (recording_state='pending'), or gives up after 10 tries.
+  const rec2 = () => pollPendingRecordings().catch(e => logger.warn('JOBS', `qa2 recording poll error: ${e.message}`));
+  _timers.push(setTimeout(rec2, QA2_REC_POLL_INIT));
+  _timers.push(setInterval(rec2, QA2_REC_POLL_MS));
+
+  // QA v2 sampling-driven pool fill + ageing purge (Phase 8). No-op unless a
+  // company has active qa2_sampling_rule rows — same "off by default until
+  // configured" posture as everything else in this scheduler.
+  const auto2 = () => runQa2AutoAssign().catch(e => logger.warn('JOBS', `qa2 auto-assign error: ${e.message}`));
+  _timers.push(setTimeout(auto2, QA2_AUTOASSIGN_INIT));
+  _timers.push(setInterval(auto2, QA2_AUTOASSIGN_MS));
+
+  const ret2 = () => purgeStaleQa2Assignments().catch(e => logger.warn('JOBS', `qa2 retention purge error: ${e.message}`));
+  _timers.push(setTimeout(ret2, QA2_RETENTION_INIT));
+  _timers.push(setInterval(ret2, QA2_RETENTION_MS));
+
+  logger.info('JOBS', `background jobs started — segments refresh ${REFRESH_SEGMENTS_MS / 60000}m, cache sweep ${CACHE_SWEEP_MS / 60000}m, payment scan ${PAYMENT_SCAN_MS / 3600000}h, qa materialize ${QA_MATERIALIZE_MS / 60000}m, milestone sweep ${MILESTONE_SWEEP_MS / 60000}m, qa2 recording poll ${QA2_REC_POLL_MS / 1000}s, qa2 auto-assign ${QA2_AUTOASSIGN_MS / 60000}m, qa2 retention ${QA2_RETENTION_MS / 3600000}h`);
 }
 
 function stopBackgroundJobs() {

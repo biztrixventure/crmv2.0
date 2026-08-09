@@ -69,6 +69,9 @@ const customerProfileRoutes     = require('./routes/customerProfile');
 const egressRoutes              = require('./routes/egress');
 const qaRoutes                  = require('./routes/qa');
 const qaMediaRoutes             = require('./routes/qaMedia');
+const qa2Routes                 = require('./routes/qa2');
+const { qa2IngestHook }         = require('./middleware/qa2VicidialIngestHook');
+const qa1ReadonlyGate           = require('./middleware/qa1ReadonlyGate');
 const kanbanRoutes              = require('./routes/kanban');
 const { egressAudit }           = require('./middleware/egressAudit');
 const { requireFeature }        = require('./utils/featureGate');
@@ -363,6 +366,13 @@ app.get('/health', (req, res) => {
 app.use(geoGate);
 
 app.use('/api/auth', authRoutes);
+// QA v2's ingest hook (build brief 7.1) — observes fronter-xfer/closer-dispo
+// traffic without touching vicidial.js. Mounted BEFORE the real ingest
+// router so it sees every request, but it only wraps res.json and always
+// calls next() synchronously — the real handler still runs immediately
+// after, completely unaffected. See middleware/qa2VicidialIngestHook.js.
+app.use('/api/vicidial/fronter-xfer', qa2IngestHook('ingest_fronter'));
+app.use('/api/vicidial/closer-dispo', qa2IngestHook('ingest_closer'));
 // VICIdial ingest — fired by the VICIdial SERVER (no CRM session); guarded by a
 // shared token in the URL. Mounted before the authed groups so it isn't gated.
 app.use('/api/vicidial', vicidialIngest);
@@ -438,7 +448,11 @@ app.use('/api/egress',            authMiddleware, readonlyGuard, egressRoutes);
 // The ticket is signed by the authenticated /api/qa/recordings/ticket, which
 // is where the permission checks and the egress audit happen.
 app.use('/api/qa-media',          qaMediaRoutes);
-app.use('/api/qa',                authMiddleware, readonlyGuard, egressAudit, qaRoutes);
+// qa1ReadonlyGate: off until a superadmin sets a cutover date (qa2/org/v1-freeze) —
+// see the middleware's own header for why the clock can't start on deploy.
+app.use('/api/qa',                authMiddleware, readonlyGuard, egressAudit, qa1ReadonlyGate, qaRoutes);
+// QA v2 — new, parallel to v1 above.
+app.use('/api/qa2',               authMiddleware, readonlyGuard, egressAudit, qa2Routes);
 app.use('/api/audit',             authMiddleware, readonlyGuard, auditRoutes);
 app.use('/api/user-preferences',  authMiddleware, userPreferencesRoutes);
 app.use('/api/activity-logs',       authMiddleware, readonlyGuard, activityLogsRoutes);

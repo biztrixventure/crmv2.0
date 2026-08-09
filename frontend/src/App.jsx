@@ -27,6 +27,7 @@ const StaffShell      = lazy(() => import("./shells/StaffShell"));
 const ManagerShell    = lazy(() => import("./shells/ManagerShell"));
 const ComplianceShell = lazy(() => import("./shells/ComplianceShell"));
 const QAShell         = lazy(() => import("./shells/QAShell"));
+const QA2Shell        = lazy(() => import("./shells/QA2Shell"));
 const ClientPortal    = lazy(() => import("./pages/ClientPortal"));
 const NotFound        = lazy(() => import("./pages/NotFound"));
 const KanbanBoard     = lazy(() => import("./pages/KanbanBoard"));
@@ -109,6 +110,13 @@ const AppContent = () => {
           {/* QA Department — isolated shell for qa_manager + qa_agent */}
           <Route path="/qa/*" element={
             <ProtectedRoute requiredRole="qa_agent"><QAShell /></ProtectedRoute>
+          } />
+
+          {/* QA v2 — new, parallel to v1 above during the build-out. Same
+              access rule as /qa (hasRoleAccess already treats qa_agent,
+              qa_manager, and compliance_manager identically for this pair). */}
+          <Route path="/qa2/*" element={
+            <ProtectedRoute requiredRole="qa_agent"><QA2Shell /></ProtectedRoute>
           } />
 
           {/* Staff Shell — closer / fronter */}

@@ -1258,6 +1258,10 @@ module.exports = {
   fetchAgentRoster,
   boxPrefixes,
   refreshBoxes,
+  // Exported for QA v2's recording poller (build brief 7.2) — pure reuse of
+  // the same cached lookup every other caller here already shares, no change
+  // to its behavior.
+  recordingLookup,
   lookupCallsByPhone, lookupCallsByPhoneDiag, latestDisposition, leadStatusByCode, leadAgentByCode, findSaleRecording,
   resolveLeadIdByAgentDate,
   listCandidatesForSale, listCandidatesByPhone, listCandidatesByLeadId, listCandidatesByPhoneLeads, locationForRecording,

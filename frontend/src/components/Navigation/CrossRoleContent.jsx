@@ -14,6 +14,7 @@ const ChatAdmin       = lazy(() => import('../Admin/Chat/ChatAdmin'));
 const PaymentRemindersPanel = lazy(() => import('../Payments/PaymentRemindersPanel'));
 const DncLookupPanel        = lazy(() => import('../Shared/DncLookupPanel'));
 const CardValidator         = lazy(() => import('../Shared/CardValidator'));
+const MyScoresPanel         = lazy(() => import('../QA2/MyScoresPanel'));
 
 const ToolFallback = () => (
   <div className="flex justify-center py-16"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" /></div>
@@ -38,6 +39,7 @@ const CrossRoleContent = ({ section, user }) => {
   if (section === 'payments')               return <Suspense fallback={<ToolFallback />}><PaymentRemindersPanel /></Suspense>;
   if (section === 'dnc')                     return <Suspense fallback={<ToolFallback />}><DncLookupPanel /></Suspense>;
   if (section === 'card_validator')          return <Suspense fallback={<ToolFallback />}><CardValidator /></Suspense>;
+  if (section === 'qa2_scores')              return <Suspense fallback={<ToolFallback />}><MyScoresPanel /></Suspense>;
 
   return null;
 };
