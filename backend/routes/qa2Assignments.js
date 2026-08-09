@@ -27,6 +27,7 @@ const { supabaseAdmin } = require('../config/database');
 const { resolveQa2Scope } = require('../utils/qa2ScopeResolver');
 const { companyInScope, methodInScope } = require('../utils/qa2Scope');
 const { issueTicket } = require('../utils/mediaTicket');
+const { annotateHangups } = require('../utils/dialerBoxes');
 const { resolveCustomerContext } = require('../utils/qa2CustomerContext');
 const logger = require('../utils/logger');
 
@@ -37,6 +38,16 @@ async function requireScope(req, res) {
     return null;
   }
   return scope;
+}
+
+// Batch-resolve display names for CRM user ids — same shape qa2Reports.js's
+// own nameMap() already uses. agent_user (the raw dialer login string) stays
+// on every response as a fallback for whoever has no user_profiles row yet.
+async function nameMap(userIds) {
+  const ids = [...new Set((userIds || []).filter(Boolean))];
+  if (!ids.length) return new Map();
+  const { data } = await supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').in('user_id', ids);
+  return new Map((data || []).map(p => [p.user_id, `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'Unknown']));
 }
 
 function callInScope(scope, call) {
@@ -54,7 +65,7 @@ router.get('/queue', asyncHandler(async (req, res) => {
     .from('qa2_assignment')
     .select(`id, call_id, assigned_to, assigned_at, opened_at, status, origin, calibration_group_id,
              priority, due_at, period, created_at,
-             qa2_call(id, company_id, leg, agent_user, customer_phone, dispo_raw, call_at,
+             qa2_call(id, company_id, leg, agent_user, agent_user_id, customer_phone, dispo_raw, call_at,
                        recording_state, method_id, qa2_method(label), companies(name))`)
     .eq('assigned_to', req.user.id)
     .order('created_at', { ascending: false })
@@ -63,7 +74,11 @@ router.get('/queue', asyncHandler(async (req, res) => {
 
   const { data, error } = await query;
   if (error) return res.status(500).json({ error: error.message });
-  res.json({ assignments: data || [] });
+  const names = await nameMap((data || []).map(a => a.qa2_call?.agent_user_id));
+  const assignments = (data || []).map(a => (a.qa2_call
+    ? { ...a, qa2_call: { ...a.qa2_call, agent_name: names.get(a.qa2_call.agent_user_id) || a.qa2_call.agent_user || null } }
+    : a));
+  res.json({ assignments });
 }));
 
 // ── /qa2/pool — self-claimable within my grants ────────────────────────────
@@ -84,7 +99,7 @@ router.get('/pool', asyncHandler(async (req, res) => {
   const { data, error } = await supabaseAdmin
     .from('qa2_assignment')
     .select(`id, call_id, status, created_at,
-             qa2_call(id, company_id, leg, agent_user, customer_phone, dispo_raw, call_at,
+             qa2_call(id, company_id, leg, agent_user, agent_user_id, customer_phone, dispo_raw, call_at,
                        recording_state, method_id, qa2_method(label), companies(name))`)
     .in('call_id', callIds)
     .is('assigned_to', null)
@@ -93,7 +108,11 @@ router.get('/pool', asyncHandler(async (req, res) => {
     .order('created_at', { ascending: true })
     .limit(200);
   if (error) return res.status(500).json({ error: error.message });
-  res.json({ assignments: data || [] });
+  const names = await nameMap((data || []).map(a => a.qa2_call?.agent_user_id));
+  const assignments = (data || []).map(a => (a.qa2_call
+    ? { ...a, qa2_call: { ...a.qa2_call, agent_name: names.get(a.qa2_call.agent_user_id) || a.qa2_call.agent_user || null } }
+    : a));
+  res.json({ assignments });
 }));
 
 // ── claim / manual push / unassign / skip / calibrate ──────────────────────
@@ -223,15 +242,23 @@ router.get('/calls/:id', asyncHandler(async (req, res) => {
   const scope = await requireScope(req, res);
   if (!scope) return;
   const { id } = req.params;
-  const { data: call, error } = await supabaseAdmin.from('qa2_call').select('*').eq('id', id).maybeSingle();
+  const { data: call, error } = await supabaseAdmin.from('qa2_call').select('*, companies(name)').eq('id', id).maybeSingle();
   if (error) return res.status(500).json({ error: error.message });
   if (!call) return res.status(404).json({ error: 'Call not found' });
   if (!(await canSeeCall(scope, req.user.id, call))) return res.status(403).json({ error: 'Forbidden' });
 
   let linked = null;
   if (call.linked_call_id) {
-    const { data } = await supabaseAdmin.from('qa2_call').select('*').eq('id', call.linked_call_id).maybeSingle();
+    const { data } = await supabaseAdmin.from('qa2_call').select('*, companies(name)').eq('id', call.linked_call_id).maybeSingle();
     linked = data || null;
+  }
+
+  const names = await nameMap([call.agent_user_id, linked?.agent_user_id]);
+  call.agent_name = names.get(call.agent_user_id) || call.agent_user || null;
+  call.company_name = call.companies?.name || null;
+  if (linked) {
+    linked.agent_name = names.get(linked.agent_user_id) || linked.agent_user || null;
+    linked.company_name = linked.companies?.name || null;
   }
 
   // Best-effort — a lookup failure or "nothing found" must never break the
@@ -240,7 +267,21 @@ router.get('/calls/:id', asyncHandler(async (req, res) => {
   try { customerContext = await resolveCustomerContext(call); }
   catch (e) { logger.warn('QA2_CALLS', `customer context lookup failed for ${call.id}: ${e.message}`); }
 
-  res.json({ call, linked, customer_context: customerContext });
+  // Who hung up — reuses dialerBoxes.js's own hangup annotator (v1's exact
+  // mechanism: VICIdial's phone_number_log, matched by agent+time window),
+  // never reimplemented. Best-effort for the same reason as customer_context.
+  let hangup = null;
+  try {
+    const [row] = await annotateHangups([{ start_time: call.call_at, agent_user: call.agent_user }], call.customer_phone);
+    if (row) {
+      hangup = {
+        label: row.hangup_label || null, reason: row.hangup_reason || null,
+        call_status: row.call_status || null, unavailable: !!row.hangup_unavailable,
+      };
+    }
+  } catch (e) { logger.warn('QA2_CALLS', `hangup lookup failed for ${call.id}: ${e.message}`); }
+
+  res.json({ call, linked, customer_context: customerContext, hangup });
 }));
 
 router.post('/calls/:id/recording-ticket', asyncHandler(async (req, res) => {

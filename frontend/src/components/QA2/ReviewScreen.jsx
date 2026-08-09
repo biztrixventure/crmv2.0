@@ -157,6 +157,7 @@ export default function ReviewScreen({ assignment, onDone }) {
   const [call, setCall] = useState(null);
   const [linked, setLinked] = useState(null);
   const [customerContext, setCustomerContext] = useState(null);
+  const [hangup, setHangup] = useState(null);
   const [evaluation, setEvaluation] = useState(null);
   const [def, setDef] = useState(null); // { version, sections, parameters, computed_max }
   const [answers, setAnswers] = useState({}); // parameter_id -> {value_num, value_text, value_bool, is_na, comment}
@@ -174,6 +175,7 @@ export default function ReviewScreen({ assignment, onDone }) {
         setCall(callRes.data.call);
         setLinked(callRes.data.linked);
         setCustomerContext(callRes.data.customer_context || null);
+        setHangup(callRes.data.hangup || null);
 
         const evalRes = await client.post('qa2/evaluations', { assignment_id: assignment.id });
         if (dead) return;
@@ -264,10 +266,24 @@ export default function ReviewScreen({ assignment, onDone }) {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="space-y-3">
           <Panel>
-            <SectionHeader level="section" title="Call context" />
+            <SectionHeader level="section" title="Call context" actions={hangup?.label ? (
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded whitespace-nowrap"
+                title={`Dialer hangup reason: ${hangup.reason}${hangup.call_status ? ` · status ${hangup.call_status}` : ''}`}
+                style={/^AGENT/i.test(hangup.reason || '')
+                  ? { background: 'rgba(220,38,38,0.14)', color: 'var(--color-error-600)' }
+                  : { background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}>
+                {hangup.label}
+              </span>
+            ) : hangup?.unavailable ? (
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded whitespace-nowrap"
+                title="The dialer's call log no longer holds this call, so who hung up cannot be read for it."
+                style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-tertiary)' }}>
+                hangup n/a
+              </span>
+            ) : null} />
             <div className="space-y-1.5 text-sm">
-              <div className="flex items-center gap-2"><Building2 size={13} style={{ color: 'var(--color-text-tertiary)' }} />{call.company_id || '—'}</div>
-              <div className="flex items-center gap-2"><User size={13} style={{ color: 'var(--color-text-tertiary)' }} />{call.agent_user || '—'} ({call.leg})</div>
+              <div className="flex items-center gap-2"><Building2 size={13} style={{ color: 'var(--color-text-tertiary)' }} />{call.company_name || '—'}</div>
+              <div className="flex items-center gap-2"><User size={13} style={{ color: 'var(--color-text-tertiary)' }} />{call.agent_name || '—'} ({call.leg})</div>
               <div className="flex items-center gap-2"><Phone size={13} style={{ color: 'var(--color-text-tertiary)' }} />{call.customer_phone || '—'}</div>
               <div className="flex items-center gap-2"><Clock size={13} style={{ color: 'var(--color-text-tertiary)' }} />{call.call_at ? new Date(call.call_at).toLocaleString() : '—'}</div>
               {call.dispo_raw && <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>Dispo: {call.dispo_raw}</div>}

@@ -68,7 +68,7 @@ export default function QueueTab() {
                     <td className="px-3 py-2">{a.qa2_call?.companies?.name || '—'}</td>
                     <td className="px-3 py-2">{a.qa2_call?.qa2_method?.label || '—'}</td>
                     <td className="px-3 py-2">{a.qa2_call?.leg || '—'}</td>
-                    <td className="px-3 py-2">{a.qa2_call?.agent_user || '—'}</td>
+                    <td className="px-3 py-2">{a.qa2_call?.agent_name || a.qa2_call?.agent_user || '—'}</td>
                     <td className="px-3 py-2">{a.qa2_call?.recording_state || '—'}</td>
                     <td className="px-3 py-2 text-right">
                       <button className="btn btn-primary text-xs" onClick={() => setOpen(a)}>Open</button>
