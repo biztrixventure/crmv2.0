@@ -68,12 +68,15 @@ function AgentSection({ params }) {
   const c = useThemeColors();
   const [data, setData] = useState(null);
   useEffect(() => { setData(null); client.get('qa2/reports/agent', { params }).then(r => setData(r.data)).catch(() => setData({ agents: [], daily: [] })); }, [params]);
-  if (!data) return <Loading variant="cards" />;
 
+  // Hooks must run unconditionally every render, so these precede the
+  // `!data` early return below (data is loading on that first render) —
+  // matches PerfCharts.jsx's established pattern for this codebase.
+  const daily = data?.daily || [];
   const chartData = useMemo(() => ({
-    labels: data.daily.map(d => d.date.slice(5)),
-    datasets: [{ label: 'Avg score', data: data.daily.map(d => d.avg_score), backgroundColor: c.primary, borderRadius: 3, maxBarThickness: 26 }],
-  }), [data.daily, c]);
+    labels: daily.map(d => d.date.slice(5)),
+    datasets: [{ label: 'Avg score', data: daily.map(d => d.avg_score), backgroundColor: c.primary, borderRadius: 3, maxBarThickness: 26 }],
+  }), [daily, c]);
   const chartOptions = useMemo(() => ({
     responsive: true, maintainAspectRatio: false,
     plugins: { legend: { display: false } },
@@ -82,6 +85,8 @@ function AgentSection({ params }) {
       y: { beginAtZero: true, max: 100, grid: { color: c.grid }, ticks: { color: c.muted, font: { size: 10 } } },
     },
   }), [c]);
+
+  if (!data) return <Loading variant="cards" />;
 
   return (
     <div className="space-y-3">
@@ -124,9 +129,10 @@ function ParametersSection({ params }) {
   const c = useThemeColors();
   const [data, setData] = useState(null);
   useEffect(() => { setData(null); client.get('qa2/reports/parameters', { params }).then(r => setData(r.data)).catch(() => setData({ parameters: [] })); }, [params]);
-  if (!data) return <Loading variant="cards" />;
-  const top = data.parameters.slice(0, 12);
 
+  // Same hook-ordering rule as AgentSection above — computed before the
+  // `!data` early return so useMemo always runs, every render.
+  const top = (data?.parameters || []).slice(0, 12);
   const chartData = useMemo(() => ({
     labels: top.map(p => p.label.length > 28 ? p.label.slice(0, 27) + '…' : p.label),
     datasets: [{ label: 'Flag rate %', data: top.map(p => p.flag_rate), backgroundColor: c.warn, borderRadius: 3 }],
@@ -139,6 +145,8 @@ function ParametersSection({ params }) {
       y: { grid: { display: false }, ticks: { color: c.muted, font: { size: 10 } } },
     },
   }), [top, c]);
+
+  if (!data) return <Loading variant="cards" />;
 
   return (
     <div className="space-y-3">
