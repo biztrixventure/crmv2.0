@@ -21,6 +21,7 @@
 // ============================================================================
 
 const express = require('express');
+const crypto = require('crypto');
 const router = express.Router();
 const { asyncHandler } = require('../middleware/errorHandler');
 const { supabaseAdmin } = require('../config/database');
@@ -293,7 +294,7 @@ router.put('/versions/:vid', asyncHandler(async (req, res) => {
           .insert({
             form_version_id: vid,
             section_id: sectionId,
-            lineage_id: p.lineage_id || undefined, // DB default gen_random_uuid() if omitted -- new question
+            lineage_id: p.lineage_id || crypto.randomUUID(), // qa2_parameter.lineage_id has NO db default (mig 235) -- new question gets a fresh identity
             key: p.key,
             label: p.label,
             input_type: p.input_type,
