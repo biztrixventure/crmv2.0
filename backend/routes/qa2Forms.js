@@ -61,6 +61,16 @@ async function requireViewer(req, res) {
   if (!scope.isCompliance && !scope.managerAccess) { res.status(403).json({ error: 'Forbidden' }); return null; }
   return scope;
 }
+// Wider than requireViewer on purpose — the standalone GET /versions/:vid
+// below is what the Review screen calls for ANY assignee scoring their own
+// call (build brief Phase 7), not just managers/compliance browsing the
+// Forms catalog. Same tier qa2Assignments.js's requireScope already grants
+// a qa_agent for queue/pool/evaluations.
+async function requireScoreViewer(req, res) {
+  const scope = await resolveQa2Scope(req);
+  if (!scope.isCompliance && !scope.managerAccess && scope.role !== 'qa_agent') { res.status(403).json({ error: 'Forbidden' }); return null; }
+  return scope;
+}
 
 // ── /qa2/forms ───────────────────────────────────────────────────────────
 
@@ -233,7 +243,7 @@ router.get('/forms/:id/versions/:vid', asyncHandler(async (req, res) => {
 // Standalone — no form_id required. The Review screen (Phase 7) only ever
 // has form_version_id from the evaluation row.
 router.get('/versions/:vid', asyncHandler(async (req, res) => {
-  if (!(await requireViewer(req, res))) return;
+  if (!(await requireScoreViewer(req, res))) return;
   const { vid } = req.params;
   const result = await loadVersionDefinition(vid, null);
   if (!result) return res.status(404).json({ error: 'Version not found' });
