@@ -91,7 +91,7 @@ router.post('/evaluations', asyncHandler(async (req, res) => {
   if (assignment.assigned_to !== req.user.id && !scope.managerAccess) return res.status(403).json({ error: 'Forbidden' });
 
   const { data: existing } = await supabaseAdmin
-    .from('qa2_evaluation').select('id').eq('assignment_id', assignment_id).eq('reviewer_id', req.user.id).eq('status', 'draft').maybeSingle();
+    .from('qa2_evaluation').select('*').eq('assignment_id', assignment_id).eq('reviewer_id', req.user.id).eq('status', 'draft').maybeSingle();
   if (existing) return res.json({ evaluation: existing, resumed: true });
 
   const { data: call } = await supabaseAdmin
