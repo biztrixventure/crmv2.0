@@ -17,6 +17,7 @@ const { runQaMaterialization } = require('./qaMaterializer');
 const { sweepMilestones } = require('./quotaMilestoneWatcher');
 const { pollPendingRecordings } = require('./qa2RecordingPoller');
 const { runQa2AutoAssign, purgeStaleQa2Assignments } = require('./qa2AutoAssign');
+const { runCrmDayForAllCompanies } = require('./qa2CrmDay');
 
 const REFRESH_SEGMENTS_MS = 10 * 60 * 1000;     // every 10 min
 const CACHE_SWEEP_MS      = 5  * 60 * 1000;      // every 5 min
@@ -44,6 +45,13 @@ const QA2_AUTOASSIGN_INIT = 90 * 1000;
 // QA v2 retention purge — matches v1's mig 177 cadence (hourly) exactly.
 const QA2_RETENTION_MS   = 60 * 60 * 1000;
 const QA2_RETENTION_INIT = 3 * 60 * 1000;
+// QA v2 day-1 CRM population (qa2CrmDay.js). No wall-clock cron in this
+// scheduler — everything runs on a fixed interval since boot — so this ticks
+// every 2h; populateCrmDay's own dedup makes a repeat call for the same day a
+// fast no-op, which is what gives "runs once a day" behavior without needing
+// real cron. First run 4 min after boot.
+const QA2_CRMDAY_MS   = 2 * 60 * 60 * 1000;
+const QA2_CRMDAY_INIT = 4 * 60 * 1000;
 
 let _timers = [];
 
@@ -115,7 +123,14 @@ function startBackgroundJobs() {
   _timers.push(setTimeout(ret2, QA2_RETENTION_INIT));
   _timers.push(setInterval(ret2, QA2_RETENTION_MS));
 
-  logger.info('JOBS', `background jobs started — segments refresh ${REFRESH_SEGMENTS_MS / 60000}m, cache sweep ${CACHE_SWEEP_MS / 60000}m, payment scan ${PAYMENT_SCAN_MS / 3600000}h, qa materialize ${QA_MATERIALIZE_MS / 60000}m, milestone sweep ${MILESTONE_SWEEP_MS / 60000}m, qa2 recording poll ${QA2_REC_POLL_MS / 1000}s, qa2 auto-assign ${QA2_AUTOASSIGN_MS / 60000}m, qa2 retention ${QA2_RETENTION_MS / 3600000}h`);
+  // QA v2 day-1 CRM population — pulls yesterday's transfers/sales (per
+  // company with a QA v2 manager assigned) straight from the CRM, same as
+  // ingest/sweep but reading real records instead of the dialer.
+  const crmDay2 = () => runCrmDayForAllCompanies().catch(e => logger.warn('JOBS', `qa2 crm-day error: ${e.message}`));
+  _timers.push(setTimeout(crmDay2, QA2_CRMDAY_INIT));
+  _timers.push(setInterval(crmDay2, QA2_CRMDAY_MS));
+
+  logger.info('JOBS', `background jobs started — segments refresh ${REFRESH_SEGMENTS_MS / 60000}m, cache sweep ${CACHE_SWEEP_MS / 60000}m, payment scan ${PAYMENT_SCAN_MS / 3600000}h, qa materialize ${QA_MATERIALIZE_MS / 60000}m, milestone sweep ${MILESTONE_SWEEP_MS / 60000}m, qa2 recording poll ${QA2_REC_POLL_MS / 1000}s, qa2 auto-assign ${QA2_AUTOASSIGN_MS / 60000}m, qa2 retention ${QA2_RETENTION_MS / 3600000}h, qa2 crm-day ${QA2_CRMDAY_MS / 3600000}h`);
 }
 
 function stopBackgroundJobs() {
