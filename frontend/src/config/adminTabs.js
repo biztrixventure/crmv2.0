@@ -75,6 +75,7 @@ export const ADMIN_TAB_CATALOG = [
   { id: 'vicidial',         label: 'VICIdial',             group: 'superadmin',    roEligible: false, defaultForRo: false, gate: null },
   { id: 'task-boards',      label: 'Task Boards',          group: 'superadmin',    roEligible: false, defaultForRo: false, gate: null },
   { id: 'blacklist',        label: 'Blacklist / DNC',      group: 'superadmin',    roEligible: false, defaultForRo: false, gate: null },
+  { id: 'payouts',          label: 'Payouts',              group: 'superadmin',    roEligible: false, defaultForRo: false, gate: null },
   { id: 'egress',           label: 'Data Egress',          group: 'superadmin',    roEligible: false, defaultForRo: false, gate: null },
   { id: 'branding',         label: 'Branding & SEO',       group: 'superadmin',    roEligible: false, defaultForRo: false, gate: null },
   { id: 'appearance',       label: 'Appearance',           group: 'superadmin',    roEligible: false, defaultForRo: false, gate: null },

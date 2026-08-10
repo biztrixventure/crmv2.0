@@ -36,6 +36,7 @@ import VehicleManager from "../components/Admin/Vehicles/VehicleManager";
 import ClientsPlansHub from "../components/Admin/ClientsPlans/ClientsPlansHub";
 import BusinessRulesHub from "../components/Admin/BusinessRules/BusinessRulesHub";
 import BlacklistSettings from "../components/Admin/Blacklist/BlacklistSettings";
+import PayoutTab from "../components/Admin/Payout/PayoutTab";
 import ReadonlyAdminManager from "../components/Admin/ReadonlyAdmins/ReadonlyAdminManager";
 import UserControlCenter from "../components/Admin/UserControlCenter";
 import EgressGovernance from "../components/Admin/EgressGovernance/EgressGovernance";
@@ -192,6 +193,7 @@ const AdminPanel = () => {
     ...(isSAorRO                                       ? [{ id: "business-rules", label: "Business Rules"       }] : []),
     ...(isSAorRO                                       ? [{ id: "clients-plans",  label: "Clients & Plans"      }] : []),
     ...(user?.role === 'superadmin'                    ? [{ id: "blacklist",      label: "Blacklist / DNC"      }] : []),
+    ...(user?.role === 'superadmin'                    ? [{ id: "payouts",        label: "Payouts"              }] : []),
     ...(user?.role === 'superadmin'                    ? [{ id: "egress",         label: "Data Egress"          }] : []),
     ...(user?.role === 'superadmin'                    ? [{ id: "branding",       label: "Branding & SEO"       }] : []),
     ...(user?.role === 'superadmin'                    ? [{ id: "appearance",     label: "Appearance"           }] : []),
@@ -260,6 +262,7 @@ const AdminPanel = () => {
       case 'features':          return <FeatureFlagsManager />;
       case 'business-rules':    return <BusinessRulesHub />;
       case 'blacklist':         return <BlacklistSettings />;
+      case 'payouts':           return <PayoutTab />;
       case 'egress':            return <EgressGovernance />;
       case 'branding':          return <BrandingManager />;
       case 'appearance':        return <AppearanceManager />;

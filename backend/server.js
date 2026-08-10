@@ -23,6 +23,7 @@ const rolesRoutes = require('./routes/roles');
 const formsRoutes = require('./routes/forms');
 const transfersRoutes = require('./routes/transfers');
 const salesRoutes = require('./routes/sales');
+const payoutsRoutes = require('./routes/payouts');
 const statsRoutes = require('./routes/stats');
 const notificationsRoutes = require('./routes/notifications');
 const saleConfigsRoutes   = require('./routes/sale-configs');
@@ -413,6 +414,9 @@ app.use('/api/transfers', authMiddleware, readonlyGuard, egressAudit, readonlyDa
 // VICIdial fronter app routes (pending-from-dialer list + confirm) — authed.
 app.use('/api/vicidial', authMiddleware, vicidialApi);
 app.use('/api/sales', authMiddleware, readonlyGuard, egressAudit, readonlyDataGuard, salesRoutes);
+// Payouts — superadmin only (enforced inside the router); readonlyGuard still
+// blocks the PATCH for a readonly_admin, matching every other admin surface.
+app.use('/api/payouts', authMiddleware, readonlyGuard, payoutsRoutes);
 app.use('/api/sale-configs', authMiddleware, readonlyGuard, saleConfigsRoutes);
 app.use('/api/callbacks',   authMiddleware, readonlyGuard, egressAudit, readonlyDataGuard, callbacksRoutes);
 app.use('/api/payment-reminders', authMiddleware, readonlyGuard, paymentRemindersRoutes);

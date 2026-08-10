@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BarChart3, Users, Shield, Building2, FileText, ChevronRight, Zap, Network, HelpCircle, MessageSquareText, UploadCloud, Megaphone, Radio, Trophy, MessagesSquare, CalendarDays, DollarSign, ArrowRight, PhoneCall, Database, Car, Tag, Settings2, Eye, Eraser, UserCircle, Download, ClipboardCheck, Palette, Paintbrush, Hash, Send, LayoutGrid, BookOpen, Lock, Target, X } from 'lucide-react';
+import { BarChart3, Users, Shield, Building2, FileText, ChevronRight, Zap, Network, HelpCircle, MessageSquareText, UploadCloud, Megaphone, Radio, Trophy, MessagesSquare, CalendarDays, DollarSign, ArrowRight, PhoneCall, Database, Car, Tag, Settings2, Eye, Eraser, UserCircle, Download, ClipboardCheck, Palette, Paintbrush, Hash, Send, LayoutGrid, BookOpen, Lock, Target, X, Wallet } from 'lucide-react';
 import { useBranding } from '../../../contexts/BrandingContext';
 
 // Items with an `href` navigate to another shell instead of switching an
@@ -67,6 +67,7 @@ const NAV_SECTIONS = [
       { id: 'features',       label: 'Feature Flags',       icon: Zap       },
       { id: 'business-rules', label: 'Business Rules',      icon: Settings2 },
       { id: 'blacklist',      label: 'Blacklist / DNC',     icon: Shield    },
+      { id: 'payouts',        label: 'Payouts',             icon: Wallet    },
       { id: 'hub-governance', label: 'Access & Governance', icon: Lock      },
       { id: 'hub-look',       label: 'Look & Feel',         icon: Paintbrush },
     ],
