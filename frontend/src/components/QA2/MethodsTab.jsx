@@ -4,7 +4,7 @@
 // ============================================================================
 
 import { useState, useEffect, useCallback, Fragment } from 'react';
-import { Plus, Archive, Pencil, Trash2, ListChecks } from 'lucide-react';
+import { Plus, Archive, ArchiveRestore, Pencil, Trash2, ListChecks } from 'lucide-react';
 import { toast } from 'sonner';
 import client from '../../api/client';
 import ThemedSelect from '../UI/Select';
@@ -192,6 +192,14 @@ export default function MethodsTab({ scope }) {
     } catch (e) { toast.error(e.response?.data?.error || 'Could not archive method'); }
   };
 
+  const unarchiveMethod = async (id) => {
+    try {
+      await client.put(`qa2/methods/${id}`, { is_active: true });
+      toast.success('Method unarchived');
+      load();
+    } catch (e) { toast.error(e.response?.data?.error || 'Could not unarchive method'); }
+  };
+
   return (
     <div className="max-w-5xl mx-auto space-y-4">
       <SectionHeader level="page" icon={ListChecks} title="Methods"
@@ -231,6 +239,7 @@ export default function MethodsTab({ scope }) {
                           <IconButton label="Rules" variant="ghost" onClick={() => setRulesFor(rulesFor?.id === m.id ? null : m)}><ListChecks size={15} /></IconButton>
                           {canManage && <IconButton label="Edit" variant="ghost" onClick={() => setEditingId(editingId === m.id ? null : m.id)}><Pencil size={15} /></IconButton>}
                           {canManage && m.is_active && <IconButton label="Archive" variant="ghost" tone="danger" onClick={() => archiveMethod(m.id)}><Archive size={15} /></IconButton>}
+                          {canManage && !m.is_active && <IconButton label="Unarchive" variant="ghost" onClick={() => unarchiveMethod(m.id)}><ArchiveRestore size={15} /></IconButton>}
                         </div>
                       </td>
                     </tr>

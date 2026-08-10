@@ -96,7 +96,10 @@ router.put('/methods/:id', asyncHandler(async (req, res) => {
   }
   if (requires_transfer !== undefined) updates.requires_transfer = requires_transfer;
   if (sort !== undefined) updates.sort = Number.isFinite(+sort) ? +sort : 0;
-  if (is_active !== undefined) updates.is_active = !!is_active;
+  if (is_active !== undefined) {
+    updates.is_active = !!is_active;
+    if (is_active) updates.archived_at = null;
+  }
   if (!Object.keys(updates).length) return res.status(400).json({ error: 'Nothing to update' });
 
   const { data: row, error } = await supabaseAdmin.from('qa2_method').update(updates).eq('id', id).select().maybeSingle();
