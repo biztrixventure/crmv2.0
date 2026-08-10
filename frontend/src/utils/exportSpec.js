@@ -54,6 +54,10 @@ export const DUP_REASON_LABEL = {
 const statusLabel = (v, ctx) =>
   (ctx?.labelOf ? ctx.labelOf(v) : null) || STATUS_LABEL[v] || v || '';
 
+// Payout Status (mig 243) — a separate lifecycle from `status` above, so it
+// gets its own small label map rather than sharing statusLabel/STATUS_LABEL.
+const PAYOUT_STATUS_LABEL = { pending: 'Pending', paid: 'Paid', reverted: 'Reverted' };
+
 // ── datasets ─────────────────────────────────────────────────────────────────
 export const DATASETS = {
   sales: {
@@ -82,6 +86,9 @@ export const DATASETS = {
       { key: 'down_payment',    label: 'Down Payment', get: s => (s.down_payment ? `$${s.down_payment}` : '') },
       { key: 'compliance_note', label: 'Compliance Note', get: s => s.compliance_note || '' },
       { key: 'customer_uuid',   label: 'Customer UUID',   get: s => s.customer_uuid || '' },
+      // Payout lifecycle (mig 243) — pending/paid/reverted, tracked
+      // independently of the sale's own compliance `status` above.
+      { key: 'payout_status',   label: 'Payout Status',   get: s => PAYOUT_STATUS_LABEL[s.payout_status] || s.payout_status || '' },
     ],
     surfaces: {
       // The reference export — every other sales surface converges on this list
@@ -90,6 +97,9 @@ export const DATASETS = {
       compliance_queue: { columns: ['customer_name', 'customer_phone', 'reference_no', 'closer_name', 'company_name', 'created_at'] },
       company_sales:    { columns: ['customer_name', 'customer_phone', 'reference_no', 'fronter_name', 'closer_name', 'status', 'plan', 'monthly_payment', 'created_at'] },
       staff_sales:      { columns: ['customer_name', 'customer_phone', 'reference_no', 'status', 'sale_date', 'plan', 'monthly_payment', 'down_payment'] },
+      // SuperAdmin Payout tab — exact column order requested: sale date, phone,
+      // customer, client, down payment, plan, compliance status, payout status.
+      payout_sales:     { columns: ['sale_date', 'customer_phone', 'customer_name', 'client_name', 'down_payment', 'plan', 'status', 'payout_status'] },
       // manager_sales is DYNAMIC: its default columns come from form_fields at
       // runtime (saleExportColumns), which is why `columns` is empty — an empty
       // surface list means "use the caller's extraColumns". Its headers are

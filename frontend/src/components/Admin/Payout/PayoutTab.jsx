@@ -8,8 +8,8 @@
 // paid-tenure chip). Payout Status is a separate, editable lifecycle
 // (pending → paid / reverted) tracked only here.
 // ============================================================================
-import { useState, useEffect, useCallback } from 'react';
-import { Layers, Clock, CheckCircle2, Undo2 } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { Layers, Clock, CheckCircle2, Undo2, FileDown } from 'lucide-react';
 import { toast } from 'sonner';
 import client from '../../../api/client';
 import SaleStatusBadge from '../../UI/SaleStatusBadge';
@@ -17,15 +17,20 @@ import SaleDetailDrawer from '../../Shared/SaleDetailDrawer';
 import ThemedSelect from '../../UI/Select';
 import FilterBar, { FilterSelect } from '../../UI/FilterBar';
 import { TableScroll, KpiTile } from '../../UI/kit';
-import { TabHeader, Spinner, Empty, Pagination, Th } from '../../Compliance/shared';
+import { TabHeader, Spinner, Empty, Pagination, TqTh, ActiveFilters } from '../../Compliance/shared';
 import { fmtSaleDate } from '../../../utils/timezone';
 import { salePaidTenure } from '../../../utils/saleTenure';
 import { useFilterOptions } from '../../../hooks/useFilterOptions';
-import { useAbortable, isCanceled } from '../../../hooks/useTableQuery';
+import useTableQuery, { useAbortable, isCanceled } from '../../../hooks/useTableQuery';
+import { useComplianceStatuses } from '../../../hooks/useComplianceStatuses';
+import { writeExport, fetchAllForExport } from '../../../utils/exportSpec';
+import { buildFilename } from '../../../utils/downloadFilename';
+import { useFeatureFlags } from '../../../contexts/FeatureFlagsContext';
 
 const LIMIT = 30;
 const PAYOUT_STATUSES = ['pending', 'paid', 'reverted'];
 const PAYOUT_LABEL = { pending: 'Pending', paid: 'Paid', reverted: 'Reverted' };
+const PAYOUT_STATUS_OPTIONS = PAYOUT_STATUSES.map(s => ({ value: s, label: PAYOUT_LABEL[s] }));
 
 const money = (v) => (v == null || v === '' ? '$0' : `$${Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`);
 
@@ -33,6 +38,8 @@ export default function PayoutTab() {
   const [companies, setCompanies] = useState([]);
   useEffect(() => { client.get('companies').then(r => setCompanies(r.data.companies || [])).catch(() => {}); }, []);
   const { clientOptions } = useFilterOptions({ companyList: companies });
+  const { allStatuses, labelOf } = useComplianceStatuses();
+  const { isEnabled } = useFeatureFlags();
 
   const [sales, setSales] = useState([]);
   const [total, setTotal] = useState(0);
@@ -51,6 +58,17 @@ export default function PayoutTab() {
   const [detailSale, setDetailSale] = useState(null);
   const [savingId, setSavingId] = useState(null);
 
+  // Click-a-column-header sort + filter — same primitive every other list in
+  // the app uses. `columns` starts empty and is filled in from the server's
+  // response, so a header offers exactly what the backend will honour.
+  const [columns, setColumns] = useState({});
+  const tq = useTableQuery({
+    scope: 'admin:payouts',
+    columns,
+    defaultSort: { by: 'sale_date', dir: 'desc' },
+  });
+  const statusOptions = allStatuses.map(s => ({ value: s, label: labelOf(s) }));
+
   const abortable = useAbortable();
 
   const load = useCallback(async () => {
@@ -64,6 +82,8 @@ export default function PayoutTab() {
           payout_status: payoutStatus || undefined,
           date_from: dateFrom || undefined,
           date_to: dateTo || undefined,
+          // sort_by / sort_dir / filters — all resolved by useTableQuery.
+          ...tq.params,
           page, limit: LIMIT,
         },
         signal: abortable(),
@@ -72,14 +92,23 @@ export default function PayoutTab() {
       setSales(res.data.sales || []);
       setTotal(res.data.total || 0);
       setKpis(res.data.kpis || null);
+      if (res.data.columns) setColumns(res.data.columns);
     } catch (e) {
       if (isCanceled(e)) return;
       const httpStatus = e.response?.status;
       setLoadError(e.response?.data?.error || (httpStatus ? `the server returned ${httpStatus}` : (e.message || 'the request failed')));
     } finally { setLoading(false); }
-  }, [search, company, clientName, payoutStatus, dateFrom, dateTo, page, abortable]);
+  }, [search, company, clientName, payoutStatus, dateFrom, dateTo, page, tq.version, tq.params, abortable]);
 
   useEffect(() => { load(); }, [load]);
+
+  // A new column sort or filter re-windows the whole dataset — page 2 of the
+  // old result is meaningless, so jump back to page 1.
+  const firstQuery = useRef(true);
+  useEffect(() => {
+    if (firstQuery.current) { firstQuery.current = false; return; }
+    setPage(1);
+  }, [tq.version]);
 
   const patchPayout = async (sale, next) => {
     const prev = sale.payout_status;
@@ -92,6 +121,50 @@ export default function PayoutTab() {
       setSales(list => list.map(x => x.id === sale.id ? { ...x, payout_status: prev } : x));
       toast.error(err.response?.data?.error || 'Failed to update payout status');
     } finally { setSavingId(null); }
+  };
+
+  // Both exports honor the same top filters shown on screen (search / company /
+  // client / payout status / date range) — not the per-column header filters,
+  // matching how every other tab's CSV export works (e.g. SalesTab.jsx).
+  const exportParams = () => ({
+    search: search || undefined,
+    company_id: company || undefined,
+    client_name: clientName || undefined,
+    payout_status: payoutStatus || undefined,
+    date_from: dateFrom || undefined,
+    date_to: dateTo || undefined,
+  });
+  const companyScopeName = () => companies.find(c => c.id === company)?.name || '';
+
+  const [exporting, setExporting] = useState('');
+  const handleExportCsv = async () => {
+    if (exporting) return;
+    setExporting('csv');
+    try {
+      const rows = await fetchAllForExport('payouts', exportParams(), 'sales', undefined, 'sales');
+      writeExport({
+        dataset: 'sales', surface: 'payout_sales', allowed: null,
+        rows, ctx: { labelOf },
+        filename: buildFilename({ dataset: 'payouts', scope: companyScopeName(), dateFrom, dateTo }),
+      });
+    } catch (err) {
+      toast.error(err.egressBlocked ? err.message : 'Failed to export CSV');
+    } finally { setExporting(''); }
+  };
+  const handleExportPdf = async () => {
+    if (exporting) return;
+    setExporting('pdf');
+    try {
+      const rows = await fetchAllForExport('payouts', exportParams(), 'sales', undefined, 'sales');
+      const { exportPayoutReportPdf } = await import('../../../utils/payoutReportPdf');
+      exportPayoutReportPdf({
+        rows, kpis, labelOf,
+        filters: { date_from: dateFrom, date_to: dateTo, payout_status: payoutStatus },
+        companyName: companyScopeName(),
+      });
+    } catch (err) {
+      toast.error(err.egressBlocked ? err.message : 'Could not build the PDF');
+    } finally { setExporting(''); }
   };
 
   const kpiTiles = [
@@ -107,6 +180,16 @@ export default function PayoutTab() {
         title="Payouts"
         subtitle="Every compliance-approved sale, with its payout status — pending, paid, or reverted."
         onRefresh={() => { setPage(1); load(); }}
+        onExport={handleExportCsv}
+        extra={
+          isEnabled('exports') && (
+            <button onClick={handleExportPdf} disabled={!!exporting}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-bold border transition-colors disabled:opacity-60"
+              style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)', backgroundColor: 'var(--color-surface)' }}>
+              <FileDown size={13} /> {exporting === 'pdf' ? 'Building…' : 'Export PDF (A4)'}
+            </button>
+          )
+        }
       />
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
@@ -149,8 +232,11 @@ export default function PayoutTab() {
         onClearAll={() => {
           setSearch(''); setCompany(''); setClientName(''); setPayoutStatus('');
           setDateFrom(''); setDateTo(''); setPage(1);
+          tq.clearAll();
         }}
       />
+
+      <ActiveFilters tq={tq} />
 
       {loadError && (
         <div className="flex items-center gap-2 flex-wrap mb-3 px-3 py-2 rounded-xl text-xs font-semibold"
@@ -176,14 +262,14 @@ export default function PayoutTab() {
             <table className="w-full text-sm">
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
-                  <Th>Sale Date</Th>
-                  <Th>Phone Number</Th>
-                  <Th>Customer Name</Th>
-                  <Th>Client Name</Th>
-                  <Th className="text-right">Down Payment</Th>
-                  <Th>Plan Name</Th>
-                  <Th>Status</Th>
-                  <Th>Payout Status</Th>
+                  <TqTh tq={tq} col="sale_date">Sale Date</TqTh>
+                  <TqTh tq={tq} col="customer_phone">Phone Number</TqTh>
+                  <TqTh tq={tq} col="customer">Customer Name</TqTh>
+                  <TqTh tq={tq} col="client_name" options={clientOptions}>Client Name</TqTh>
+                  <TqTh tq={tq} col="down_payment" align="right">Down Payment</TqTh>
+                  <TqTh tq={tq} col="plan">Plan Name</TqTh>
+                  <TqTh tq={tq} col="status" options={statusOptions}>Status</TqTh>
+                  <TqTh tq={tq} col="payout_status" options={PAYOUT_STATUS_OPTIONS}>Payout Status</TqTh>
                 </tr>
               </thead>
               <tbody>

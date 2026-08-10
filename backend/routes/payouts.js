@@ -14,6 +14,9 @@ const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { isSuperAdmin } = require('../models/helpers');
 const { escapeOrValue } = require('../utils/searchSanitize');
+const { applySort } = require('../utils/sortHelper');
+const { applyColumnFilters, resolveColumnAccess } = require('../utils/columnFilter');
+const { PAYOUT_COLUMNS } = require('../config/recordColumns');
 
 const router = express.Router();
 
@@ -48,6 +51,7 @@ function applyFilters(q, { company_id, client_name, date_from, date_to, search }
 router.get('/', asyncHandler(async (req, res) => {
   const {
     company_id, client_name, payout_status, date_from, date_to, search,
+    sort_by, sort_dir, filters: columnFilters,
     page = 1, limit = LIMIT,
   } = req.query;
 
@@ -55,11 +59,19 @@ router.get('/', asyncHandler(async (req, res) => {
     return res.status(400).json({ error: 'Invalid payout_status filter' });
   }
 
+  // Superadmin-only router (guarded above), so this is always the
+  // unrestricted branch — no readonly_admin masking applies here. Resolved
+  // anyway so the catalog shape stays consistent with every other list.
+  const access = await resolveColumnAccess(req, PAYOUT_COLUMNS);
+
   const filters = { company_id, client_name, date_from, date_to, search };
 
-  let listQuery = applyFilters(supabaseAdmin.from('sales').select('*', { count: 'exact' }), filters)
-    .order('sale_date', { ascending: false, nullsFirst: false });
+  let listQuery = applyFilters(supabaseAdmin.from('sales').select('*', { count: 'exact' }), filters);
+  listQuery = applySort(listQuery, sort_by, sort_dir, access.sortMap, { col: 'sale_date', asc: false });
   if (payout_status) listQuery = listQuery.eq('payout_status', payout_status);
+  // Column-header filters (click a header → filter popover), on top of the
+  // dedicated payout_status/company/client/date/search filters above.
+  listQuery = applyColumnFilters(listQuery, columnFilters, PAYOUT_COLUMNS, access.blocked);
 
   const offset = (parseInt(page) - 1) * parseInt(limit);
   listQuery = listQuery.range(offset, offset + parseInt(limit) - 1);
@@ -83,7 +95,7 @@ router.get('/', asyncHandler(async (req, res) => {
     }
   }
 
-  res.json({ sales: data || [], total: count || 0, kpis });
+  res.json({ sales: data || [], total: count || 0, kpis, columns: access.catalog });
 }));
 
 // PATCH /payouts/:id — set payout_status. The only write this surface makes.

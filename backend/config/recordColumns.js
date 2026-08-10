@@ -90,6 +90,16 @@ const COMPLIANCE_SALE_COLUMNS = {
   updated_at:     { col: 'updated_at', type: 'date', sort: true },
 };
 
+// The SuperAdmin Payout tab (mig 243) — same sales columns, plus the payout
+// lifecycle field. payout_status is a CHECK-constrained text column, not a
+// real Postgres ENUM, so — same posture as CALLBACK_COLUMNS.status — it
+// carries enumSource but no `values`: an unrecognized filter value just
+// matches zero rows instead of erroring.
+const PAYOUT_COLUMNS = {
+  ...SALE_COLUMNS,
+  payout_status: { col: 'payout_status', type: 'enum', sort: true, enumSource: 'payout_status' },
+};
+
 // ── transfers ───────────────────────────────────────────────────────────────
 const TRANSFER_COLUMNS = {
   // ⚠ CORRECTION. This was `form_data->>customer_name` in both transfers.js and
@@ -174,6 +184,6 @@ const QA2_CALL_COLUMNS = {
 };
 
 module.exports = {
-  SALE_COLUMNS, COMPLIANCE_SALE_COLUMNS, TRANSFER_COLUMNS, CALLBACK_COLUMNS, QA2_CALL_COLUMNS,
+  SALE_COLUMNS, COMPLIANCE_SALE_COLUMNS, PAYOUT_COLUMNS, TRANSFER_COLUMNS, CALLBACK_COLUMNS, QA2_CALL_COLUMNS,
   blockedForHide,
 };
