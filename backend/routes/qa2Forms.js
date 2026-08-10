@@ -185,7 +185,7 @@ router.post('/forms/:id/versions', asyncHandler(async (req, res) => {
     const { data: opts } = await supabaseAdmin.from('qa2_parameter_option').select('*').eq('parameter_id', p.id);
     if (opts && opts.length) {
       await supabaseAdmin.from('qa2_parameter_option').insert(
-        opts.map(o => ({ parameter_id: np.id, value: o.value, label: o.label, points: o.points, sort: o.sort }))
+        opts.map(o => ({ parameter_id: np.id, value: o.value, label: o.label, points: o.points, is_pass: o.is_pass, sort: o.sort }))
       );
     }
   }
@@ -326,7 +326,7 @@ router.put('/versions/:vid', asyncHandler(async (req, res) => {
 
         if (Array.isArray(p.options) && p.options.length) {
           const { error: oErr } = await supabaseAdmin.from('qa2_parameter_option').insert(
-            p.options.map((o, oi) => ({ parameter_id: np.id, value: String(o.value), label: o.label, points: o.points, sort: o.sort ?? oi }))
+            p.options.map((o, oi) => ({ parameter_id: np.id, value: String(o.value), label: o.label, points: o.points, is_pass: !!o.is_pass, sort: o.sort ?? oi }))
           );
           if (oErr) return res.status(400).json({ error: `options for "${p.key}": ${oErr.message}` });
         }

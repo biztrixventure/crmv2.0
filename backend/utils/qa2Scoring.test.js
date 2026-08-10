@@ -149,10 +149,10 @@ describe('pass_comparator — v2 fixes v1s hardcoded strict ">"', () => {
 // autofail gate (fields: [] in the source JSON), base divides by 100 even
 // though the bands only total 95 (mig 226's own comment: "the divisor is
 // 100"). Pass/fail in v1 comes from a human-entered "Final Status" field
-// (manual_status) which v2's schema has no equivalent for yet — see
-// qa2Scoring.js's header. This fixture asserts the SCORE MATH matches v1
-// exactly and explicitly documents that `result` stays null here, rather
-// than silently asserting something v2 doesn't actually compute.
+// (manual_status), which mig 242 ports as a 'verdict'-role parameter whose
+// options carry is_pass. This fixture asserts the SCORE MATH matches v1
+// exactly, AND that a verdict answer overrides `result` independently of
+// that score — same as v1's real card.
 // ---------------------------------------------------------------------------
 const weightedTraParams = [
   { id: 'w1', key: 'greeting_cro_energy',     role: 'score', input_type: 'choice', included_in_base: true },
@@ -162,6 +162,8 @@ const weightedTraParams = [
   { id: 'w5', key: 'misguide',                role: 'score', input_type: 'choice', included_in_base: true },
   { id: 'w6', key: 'use_of_rebuttals',        role: 'score', input_type: 'choice', included_in_base: true },
 ];
+const weightedTraVerdictParam =
+  { id: 'w7', key: 'final_status', role: 'verdict', input_type: 'choice' };
 const weightedTraOptions = [
   ...['0', '5', '10'].map(v => ({ parameter_id: 'w1', value: v, points: Number(v) })),
   ...['0', '5', '10', '15', '20'].map(v => ({ parameter_id: 'w2', value: v, points: Number(v) })),
@@ -169,6 +171,10 @@ const weightedTraOptions = [
   ...['0', '5', '10', '15', '20'].map(v => ({ parameter_id: 'w4', value: v, points: Number(v) })),
   ...['0', '5', '10'].map(v => ({ parameter_id: 'w5', value: v, points: Number(v) })),
   ...['0', '5', '10', '15'].map(v => ({ parameter_id: 'w6', value: v, points: Number(v) })),
+];
+const weightedTraVerdictOptions = [
+  { parameter_id: 'w7', value: 'Pass', points: 0, is_pass: true },
+  { parameter_id: 'w7', value: 'Fail', points: 0, is_pass: false },
 ];
 const weightedTraAnswers = [
   { parameter_id: 'w1', value_text: '10' },
@@ -183,14 +189,14 @@ const weightedTraFormVersion = {
   base_denominator: 100,           // bands total 95; the sheet still divides by 100 (mig 226)
   final_score_formula: 'base_pct_plus_penalty',
   rounding_mode: 'truncate_1',
-  pass_threshold: null,            // no threshold in the source JSON — manual_status decides in v1
+  pass_threshold: null,            // no threshold in the source JSON — the verdict decides
   pass_comparator: 'gte',
   autofail_mode: 'none',           // source JSON's autofail.fields is [] — no gate
   autofail_table: {},
 };
 
-describe('mig-226 weighted TRA — score math matches v1; documents the manual_status gap', () => {
-  test('10+15+20+15+10+15=85 over /100 -> base_pct 85.0, no autofail gate, final_score 85.0', () => {
+describe('mig-226 weighted TRA — score math matches v1; no verdict configured', () => {
+  test('10+15+20+15+10+15=85 over /100 -> base_pct 85.0, no autofail gate, final_score 85.0, result null', () => {
     const result = computeEvaluation({
       formVersion: weightedTraFormVersion,
       parameters: weightedTraParams,
@@ -202,10 +208,33 @@ describe('mig-226 weighted TRA — score math matches v1; documents the manual_s
     expect(result.autofail_result).toBeNull();   // fields: [] in v1 -> no gate, same here
     expect(result.penalty_total).toBeNull();      // no penalty-role parameters on this card
     expect(result.final_score).toBe(85.0);
-    // KNOWN GAP: v1's real card has manual_status ("Final Status") override
-    // this to passed=true. v2 has no verdict-role equivalent yet, so this is
-    // correctly null, not a mismatch — see qa2Scoring.js header.
+    // No threshold and no verdict parameter on this card at all -> informational.
     expect(result.result).toBeNull();
+  });
+});
+
+describe('mig 242 — verdict role overrides result independently of the score (manual_status parity)', () => {
+  const params = [...weightedTraParams, weightedTraVerdictParam];
+  const options = [...weightedTraOptions, ...weightedTraVerdictOptions];
+
+  test('verdict unanswered -> result null even though the score is a healthy 85%', () => {
+    const result = computeEvaluation({ formVersion: weightedTraFormVersion, parameters: params, options, answers: weightedTraAnswers });
+    expect(result.final_score).toBe(85.0);
+    expect(result.result).toBeNull();
+  });
+
+  test('verdict = Pass -> result "pass"', () => {
+    const answers = [...weightedTraAnswers, { parameter_id: 'w7', value_text: 'Pass' }];
+    const result = computeEvaluation({ formVersion: weightedTraFormVersion, parameters: params, options, answers });
+    expect(result.final_score).toBe(85.0);
+    expect(result.result).toBe('pass');
+  });
+
+  test('verdict = Fail overrides a good score -> result "fail" (reviewer judgment is authoritative, same as v1)', () => {
+    const answers = [...weightedTraAnswers, { parameter_id: 'w7', value_text: 'Fail' }];
+    const result = computeEvaluation({ formVersion: weightedTraFormVersion, parameters: params, options, answers });
+    expect(result.final_score).toBe(85.0);
+    expect(result.result).toBe('fail');
   });
 });
 

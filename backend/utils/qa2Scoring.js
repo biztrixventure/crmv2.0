@@ -16,20 +16,14 @@
 //                 value_num, value_text, value_bool, is_na }.
 //   -> { base_sum, base_pct, penalty_total, final_score, autofail_result, result }
 //
-// KNOWN GAP (flagged, not silently patched): v1's sheet_v2 engine
-// (qaSheetFormula.js) has two features this module does NOT reproduce,
-// because v2's schema (mig 235) has no equivalent role/column for them yet:
-//   - manual_status — a human-entered verdict field that OVERRIDES any
-//     computed pass/fail (e.g. the mig-226 weighted TRA sheet has no
-//     pass_threshold at all; "Final Status" IS the pass/fail).
-//   - quality_score — a closer-side %-of-Yes checklist independent of
-//     base/final score (v1's RCM sheet).
-// Until qa2_parameter grows a role for this (a 'verdict' role writing
-// straight to qa2_evaluation.result, bypassing the threshold comparison),
-// a form shaped like that sheet will compute base_sum/base_pct/final_score
-// identically to v1 but `result` stays null instead of reflecting a manual
-// override — see qa2Scoring.test.js's mig-226 fixture, which asserts exactly
-// that boundary.
+// manual_status parity (mig 242): a 'verdict'-role parameter's is_pass-tagged
+// options OVERRIDE the computed `result`, same authority v1's manual_status
+// had (e.g. the mig-226 weighted TRA sheet has no pass_threshold at all;
+// "Final Status" IS the pass/fail). See the verdict block below.
+//
+// REMAINING KNOWN GAP: quality_score — a closer-side %-of-Yes checklist
+// independent of base/final score (v1's RCM sheet) — still has no v2
+// equivalent role/column.
 // ============================================================================
 
 const YES_TEXT = new Set(['Y', 'YES', 'TRUE', '1']);
@@ -71,7 +65,7 @@ function optionsByParam(options) {
   const map = new Map();
   for (const o of (options || [])) {
     if (!map.has(o.parameter_id)) map.set(o.parameter_id, new Map());
-    map.get(o.parameter_id).set(String(o.value), Number(o.points) || 0);
+    map.get(o.parameter_id).set(String(o.value), { points: Number(o.points) || 0, is_pass: !!o.is_pass });
   }
   return map;
 }
@@ -99,8 +93,8 @@ function fieldPoints(param, answer, optMap) {
     }
     case 'choice': {
       const key = answer.value_text != null ? String(answer.value_text) : '';
-      const pts = optMap.get(param.id);
-      return pts && pts.has(key) ? pts.get(key) : 0;
+      const opts = optMap.get(param.id);
+      return opts && opts.has(key) ? opts.get(key).points : 0;
     }
     case 'number': {
       const n = Number(answer.value_num);
@@ -122,9 +116,9 @@ function maxPoints(param, optMap) {
     case 'scale':
       return Number(param.scale_max ?? 0);
     case 'choice': {
-      const pts = optMap.get(param.id);
-      if (!pts || !pts.size) return 0;
-      return Math.max(...pts.values());
+      const opts = optMap.get(param.id);
+      if (!opts || !opts.size) return 0;
+      return Math.max(...[...opts.values()].map(o => o.points));
     }
     default:
       return 0;
@@ -223,6 +217,26 @@ function computeEvaluation({ formVersion, parameters, options, answers }) {
   }
   // No threshold configured and no auto-fail -> result stays null
   // (informational card, e.g. a closer/RCM sheet with no pass/fail line).
+
+  // ── Verdict — a human-entered pick that OVERRIDES the computed result,
+  // same authority v1's manual_status had (mig-226 weighted TRA: "Final
+  // Status" IS the pass/fail, independent of the numeric score). A verdict
+  // parameter's mere presence hands `result` entirely to the reviewer:
+  // unanswered -> null (undecided), answered -> whichever option's is_pass
+  // says. final_score above is untouched — an auto-fail still zeroes the
+  // NUMBER, a verdict can still mark it Pass over that zero, exactly like
+  // the sheet it replaces.
+  const verdictParam = params.find(p => p.role === 'verdict');
+  if (verdictParam) {
+    const a = ansMap.get(verdictParam.id);
+    const key = a && !a.is_na && a.value_text != null ? String(a.value_text).trim() : '';
+    if (!key) {
+      result = null;
+    } else {
+      const opt = optMap.get(verdictParam.id)?.get(key);
+      result = opt?.is_pass ? 'pass' : 'fail';
+    }
+  }
 
   return { base_sum: baseSum, base_pct, penalty_total, final_score, autofail_result, result };
 }

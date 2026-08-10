@@ -17,7 +17,7 @@ import { Panel, SectionHeader, Field, Loading, IconButton } from '../UI/kit';
 import { Toggle } from '../UI/kit';
 
 const INPUT_TYPES = ['yes_no', 'scale', 'choice', 'number', 'text'];
-const ROLES = ['score', 'autofail', 'penalty', 'outcome', 'info'];
+const ROLES = ['score', 'autofail', 'penalty', 'outcome', 'info', 'verdict'];
 const COMMENT_RULES = ['never', 'on_fail', 'always'];
 const ROUNDING_MODES = ['truncate_1', 'round_1', 'round_2'];
 const AUTOFAIL_MODES = ['none', 'all_yes', 'explicit_table'];
@@ -38,7 +38,7 @@ function ParameterRow({ p, onChange, onRemove }) {
   const setOption = (i, k, v) => {
     const opts = [...p.options]; opts[i] = { ...opts[i], [k]: v }; onChange({ ...p, options: opts });
   };
-  const addOption = () => onChange({ ...p, options: [...p.options, { value: '', label: '', points: 0, sort: p.options.length }] });
+  const addOption = () => onChange({ ...p, options: [...p.options, { value: '', label: '', points: 0, is_pass: false, sort: p.options.length }] });
   const removeOption = (i) => onChange({ ...p, options: p.options.filter((_, idx) => idx !== i) });
 
   return (
@@ -78,12 +78,20 @@ function ParameterRow({ p, onChange, onRemove }) {
       )}
       {p.input_type === 'choice' && (
         <div className="space-y-1.5">
-          <span className="text-[11px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>Options — each carries its own weight</span>
+          <span className="text-[11px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
+            {p.role === 'verdict' ? 'Options — mark which one means Pass' : 'Options — each carries its own weight'}
+          </span>
           {p.options.map((o, i) => (
             <div key={i} className="flex items-center gap-2">
               <input className="input" placeholder="value" style={{ maxWidth: 100 }} value={o.value} onChange={e => setOption(i, 'value', e.target.value)} />
               <input className="input" placeholder="label" value={o.label} onChange={e => setOption(i, 'label', e.target.value)} />
-              <input type="number" className="input" placeholder="points" style={{ maxWidth: 90 }} value={o.points} onChange={e => setOption(i, 'points', Number(e.target.value))} />
+              {p.role === 'verdict' ? (
+                <label className="flex items-center gap-1.5 text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>
+                  <input type="checkbox" checked={!!o.is_pass} onChange={e => setOption(i, 'is_pass', e.target.checked)} /> Pass
+                </label>
+              ) : (
+                <input type="number" className="input" placeholder="points" style={{ maxWidth: 90 }} value={o.points} onChange={e => setOption(i, 'points', Number(e.target.value))} />
+              )}
               <button onClick={() => removeOption(i)} aria-label="Remove option"><Trash2 size={14} style={{ color: 'var(--color-error-600)' }} /></button>
             </div>
           ))}
