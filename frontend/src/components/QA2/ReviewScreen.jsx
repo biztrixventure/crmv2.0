@@ -161,6 +161,7 @@ export default function ReviewScreen({ assignment, onDone }) {
   const [evaluation, setEvaluation] = useState(null);
   const [def, setDef] = useState(null); // { version, sections, parameters, computed_max }
   const [answers, setAnswers] = useState({}); // parameter_id -> {value_num, value_text, value_bool, is_na, comment}
+  const [notes, setNotes] = useState('');
   const [score, setScore] = useState(null);
   const [loadError, setLoadError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
@@ -180,6 +181,7 @@ export default function ReviewScreen({ assignment, onDone }) {
         const evalRes = await client.post('qa2/evaluations', { assignment_id: assignment.id });
         if (dead) return;
         setEvaluation(evalRes.data.evaluation);
+        setNotes(evalRes.data.evaluation.overall_notes || '');
 
         const defRes = await client.get(`qa2/versions/${evalRes.data.evaluation.form_version_id}`);
         if (dead) return;
@@ -193,16 +195,22 @@ export default function ReviewScreen({ assignment, onDone }) {
     setAnswers(prev => {
       const next = { ...prev, [parameterId]: { ...prev[parameterId], ...patch } };
       if (saveTimer.current) clearTimeout(saveTimer.current);
-      saveTimer.current = setTimeout(() => save(next), 1000);
+      saveTimer.current = setTimeout(() => save(next, notes), 1000);
       return next;
     });
   };
 
-  const save = async (currentAnswers) => {
+  const setNotesDebounced = (value) => {
+    setNotes(value);
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => save(answers, value), 1000);
+  };
+
+  const save = async (currentAnswers, currentNotes) => {
     if (!evaluation) return;
     const payload = Object.entries(currentAnswers).map(([parameter_id, v]) => ({ parameter_id, ...v }));
     try {
-      const r = await client.put(`qa2/evaluations/${evaluation.id}`, { answers: payload });
+      const r = await client.put(`qa2/evaluations/${evaluation.id}`, { answers: payload, overall_notes: currentNotes });
       setScore(r.data.evaluation);
     } catch { /* autosave failure is silent — next edit retries */ }
   };
@@ -210,7 +218,7 @@ export default function ReviewScreen({ assignment, onDone }) {
   const submit = async () => {
     setSubmitting(true);
     try {
-      await client.put(`qa2/evaluations/${evaluation.id}`, { answers: Object.entries(answers).map(([parameter_id, v]) => ({ parameter_id, ...v })) });
+      await client.put(`qa2/evaluations/${evaluation.id}`, { answers: Object.entries(answers).map(([parameter_id, v]) => ({ parameter_id, ...v })), overall_notes: notes });
       await client.post(`qa2/evaluations/${evaluation.id}/submit`);
       toast.success('Submitted');
       onDone();
@@ -331,6 +339,12 @@ export default function ReviewScreen({ assignment, onDone }) {
               </div>
             </Panel>
           )}
+
+          <Panel>
+            <SectionHeader level="section" title="Comments" subtitle="Overall notes on this call — separate from each question's own comment box below." />
+            <textarea className="input w-full" rows={4} placeholder="Additional comments…"
+              value={notes} onChange={e => setNotesDebounced(e.target.value)} />
+          </Panel>
         </div>
 
         <div className="space-y-3">

@@ -15,6 +15,11 @@ const { asyncHandler } = require('../middleware/errorHandler');
 const { supabaseAdmin } = require('../config/database');
 const { resolveQa2Scope } = require('../utils/qa2ScopeResolver');
 const { companyInScope, methodInScope } = require('../utils/qa2Scope');
+const { populateCrmDay } = require('../utils/qa2CrmDay');
+const { etDateToUtcStart, etDateToUtcEnd } = require('../utils/etUtils');
+const { applySort } = require('../utils/sortHelper');
+const { applyColumnFilters, resolveColumnAccess } = require('../utils/columnFilter');
+const { QA2_CALL_COLUMNS } = require('../config/recordColumns');
 
 async function requireManager(req, res) {
   const scope = await resolveQa2Scope(req);
@@ -34,6 +39,13 @@ async function agentBelongsToManager(agentId, managerId) {
   const { data } = await supabaseAdmin
     .from('qa2_team_member').select('agent_id').eq('agent_id', agentId).eq('manager_id', managerId).maybeSingle();
   return !!data;
+}
+
+async function nameMap(userIds) {
+  const ids = [...new Set((userIds || []).filter(Boolean))];
+  if (!ids.length) return new Map();
+  const { data } = await supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').in('user_id', ids);
+  return new Map((data || []).map(p => [p.user_id, `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'Unknown']));
 }
 
 // My own agent roster — GET /agent-companies and /agent-methods only ever
@@ -298,6 +310,120 @@ router.delete('/targets/:id', asyncHandler(async (req, res) => {
   const { error } = await supabaseAdmin.from('qa2_agent_target').delete().eq('id', id);
   if (error) return res.status(500).json({ error: error.message });
   res.json({ ok: true });
+}));
+
+// ── /qa2/team/load-day, /day-calls, /bulk-assign — manual day-1 workflow ───
+// The scheduler (qa2AutoAssign.js) only ever pulls "yesterday", automatically,
+// for every qa2-managed company. This is the manual counterpart: a manager
+// picks ANY past date, loads it on demand (reuses populateCrmDay — same
+// function the scheduler calls, so a manual load and the automatic one are
+// identical in every way except which date/company triggered them), browses
+// what landed, and hand-assigns specific calls to specific agents.
+
+router.post('/load-day', asyncHandler(async (req, res) => {
+  const scope = await requireManager(req, res);
+  if (!scope) return;
+  const { company_id, date } = req.body || {};
+  if (!company_id || !date) return res.status(400).json({ error: 'company_id and date required' });
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'date must be YYYY-MM-DD' });
+  if (!companyInScope(scope, company_id)) return res.status(403).json({ error: 'You are not assigned to this company' });
+
+  const result = await populateCrmDay(company_id, date);
+  res.json({ ok: true, created: result.created || 0, date });
+}));
+
+router.get('/day-calls', asyncHandler(async (req, res) => {
+  const scope = await requireManager(req, res);
+  if (!scope) return;
+  const { company_id, date, sort_by, sort_dir, filters } = req.query;
+  if (!company_id || !date) return res.status(400).json({ error: 'company_id and date required' });
+  if (!companyInScope(scope, company_id)) return res.status(403).json({ error: 'You are not assigned to this company' });
+  const start = etDateToUtcStart(date);
+  const end = etDateToUtcEnd(date);
+  if (!start || !end) return res.status(400).json({ error: 'Invalid date' });
+
+  const access = await resolveColumnAccess(req, QA2_CALL_COLUMNS);
+  // Unclassified calls (method_id NULL) have no scorecard to score against —
+  // same exclusion Pool already applies — so they don't belong in an assign
+  // browser; a manager classifies those from the Unclassified tab first.
+  let query = supabaseAdmin
+    .from('qa2_call')
+    .select('id, company_id, method_id, leg, agent_user, agent_user_id, customer_phone, dispo_raw, call_at, recording_state, source, qa2_method(label), companies(name)')
+    .eq('company_id', company_id).gte('call_at', start).lte('call_at', end)
+    .eq('qa_relevant', true).not('method_id', 'is', null);
+  if (scope.operationalMethodIds !== 'all') query = query.in('method_id', scope.operationalMethodIds);
+  query = applySort(query, sort_by, sort_dir, access.sortMap, { col: 'call_at', asc: false });
+  query = applyColumnFilters(query, filters, QA2_CALL_COLUMNS, access.blocked);
+  query = query.limit(500);
+
+  const { data: calls, error } = await query;
+  if (error) return res.status(500).json({ error: error.message });
+
+  const callIds = (calls || []).map(c => c.id);
+  const { data: assignments } = callIds.length
+    ? await supabaseAdmin.from('qa2_assignment').select('call_id, assigned_to, status').in('call_id', callIds).is('calibration_group_id', null)
+    : { data: [] };
+  const assignByCall = new Map((assignments || []).map(a => [a.call_id, a]));
+
+  const names = await nameMap([
+    ...(calls || []).map(c => c.agent_user_id),
+    ...(assignments || []).map(a => a.assigned_to),
+  ]);
+
+  const rows = (calls || []).map(c => {
+    const a = assignByCall.get(c.id);
+    return {
+      ...c,
+      agent_name: names.get(c.agent_user_id) || c.agent_user || null,
+      assignment_status: a ? a.status : 'unassigned',
+      assigned_to: a?.assigned_to || null,
+      assigned_to_name: a?.assigned_to ? (names.get(a.assigned_to) || 'Unknown') : null,
+    };
+  });
+
+  res.json({ calls: rows, columns: access.catalog });
+}));
+
+router.post('/bulk-assign', asyncHandler(async (req, res) => {
+  const scope = await requireManager(req, res);
+  if (!scope) return;
+  const { call_ids, agent_ids } = req.body || {};
+  if (!Array.isArray(call_ids) || !call_ids.length) return res.status(400).json({ error: 'call_ids required' });
+  if (!Array.isArray(agent_ids) || !agent_ids.length) return res.status(400).json({ error: 'agent_ids required' });
+
+  for (const agentId of agent_ids) {
+    if (!(await agentBelongsToManager(agentId, req.user.id))) {
+      return res.status(403).json({ error: 'One or more selected agents are not on your team' });
+    }
+  }
+
+  const { data: calls } = await supabaseAdmin.from('qa2_call').select('id, company_id, method_id').in('id', call_ids);
+  const validCalls = (calls || []).filter(c => companyInScope(scope, c.company_id) && (!c.method_id || methodInScope(scope, c.method_id)));
+  if (!validCalls.length) return res.status(403).json({ error: 'None of the selected calls are within your scope' });
+
+  // Round-robin across the chosen agents — distributes the selected calls,
+  // does NOT send every call to every agent (that's calibration, a separate
+  // opt-in feature with its own explicit action). Already-assigned calls are
+  // skipped, never silently reassigned out from under whoever has them.
+  const now = new Date().toISOString();
+  let assigned = 0, skipped = 0;
+  for (let i = 0; i < validCalls.length; i++) {
+    const call = validCalls[i];
+    const agentId = agent_ids[i % agent_ids.length];
+    const { data: existing } = await supabaseAdmin
+      .from('qa2_assignment').select('id, assigned_to').eq('call_id', call.id).is('calibration_group_id', null).maybeSingle();
+    if (existing?.assigned_to) { skipped++; continue; }
+    if (existing) {
+      await supabaseAdmin.from('qa2_assignment')
+        .update({ assigned_to: agentId, assigned_by: req.user.id, assigned_at: now, origin: 'manual', status: 'pending' })
+        .eq('id', existing.id);
+    } else {
+      await supabaseAdmin.from('qa2_assignment')
+        .insert({ call_id: call.id, assigned_to: agentId, assigned_by: req.user.id, assigned_at: now, origin: 'manual', status: 'pending' });
+    }
+    assigned++;
+  }
+  res.json({ assigned, skipped, total: validCalls.length });
 }));
 
 module.exports = router;
