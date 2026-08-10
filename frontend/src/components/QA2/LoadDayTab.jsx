@@ -8,7 +8,7 @@
 // ============================================================================
 
 import { useState, useEffect, useCallback } from 'react';
-import { CalendarClock, Download, Users2 } from 'lucide-react';
+import { CalendarClock, Download, Users2, Wrench } from 'lucide-react';
 import { toast } from 'sonner';
 import client from '../../api/client';
 import ThemedSelect from '../UI/Select';
@@ -29,6 +29,7 @@ export default function LoadDayTab({ scope }) {
   const [companyId, setCompanyId] = useState('');
   const [date, setDate] = useState('');
   const [loading, setLoading] = useState(false);
+  const [repairing, setRepairing] = useState(false);
   const [calls, setCalls] = useState(null);
   const [loadError, setLoadError] = useState(null);
   const [columns, setColumns] = useState({});
@@ -71,6 +72,17 @@ export default function LoadDayTab({ scope }) {
     finally { setLoading(false); }
   };
 
+  const repairDay = async () => {
+    if (!companyId || !date) return toast.error('Pick a company and a date');
+    setRepairing(true);
+    try {
+      const r = await client.post('qa2/team/repair-day', { company_id: companyId, date });
+      toast.success(r.data.repaired ? `Fixed ${r.data.repaired} call(s) — the recording poller will pick them up within a minute` : 'Nothing to repair for this day');
+      fetchCalls();
+    } catch (e) { toast.error(e.response?.data?.error || 'Could not repair this day'); }
+    finally { setRepairing(false); }
+  };
+
   const toggleOne = (id) => setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const toggleAll = () => setSelected(prev => (prev.size === (calls || []).length ? new Set() : new Set((calls || []).map(c => c.id))));
 
@@ -104,6 +116,10 @@ export default function LoadDayTab({ scope }) {
         <button className="btn text-sm" style={{ border: '1px solid var(--color-border)' }} disabled={!companyId || !date} onClick={fetchCalls}>Browse</button>
         <button className="btn btn-primary text-sm flex items-center gap-1.5" disabled={loading || !companyId || !date} onClick={loadDay}>
           <Download size={14} />{loading ? 'Pulling…' : 'Pull this day from the CRM'}
+        </button>
+        <button className="btn text-sm flex items-center gap-1.5" style={{ border: '1px solid var(--color-border)' }}
+          disabled={repairing || !companyId || !date} onClick={repairDay} title="Fixes closer-leg calls that never got a recording lookup because they were missing a dialer code">
+          <Wrench size={14} />{repairing ? 'Repairing…' : 'Repair missing recordings'}
         </button>
       </Panel>
 

@@ -36,6 +36,22 @@ const { findSaleRecording } = require('./dialerBoxes');
 const { classifyCall } = require('./qa2ClassifyResolver');
 const { checkUnclassifiedThreshold } = require('./qa2UnclassifiedAlert');
 
+// Fixed-size worker pool — runs `limit` items at once instead of the whole
+// array simultaneously (which would fire 100+ dialer HTTP calls in one burst)
+// or one at a time (which is what made a full day take minutes).
+async function mapWithConcurrency(items, limit, fn) {
+  const results = new Array(items.length);
+  let next = 0;
+  async function worker() {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i]);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
 // A sale can exist without ever closing (a "Callback"/other non-sale dispo
 // still creates a sales row) — no status filter here on purpose, so the
 // closer leg always prefers the sale's own dispo/id when one exists at all.
@@ -137,16 +153,15 @@ async function populateCrmDay(companyId, date) {
     .eq('company_id', companyId).is('transfer_id', null).eq('sale_date', date);
 
   const existing = await existingKeys(companyId);
-  let created = 0, sawUnclassified = false;
+  const tasks = [];
 
   for (const t of (transfers || [])) {
     if (existing.has(`t:${t.id}:fronter`)) continue;
-    const r = await insertCrmDayCall({
+    tasks.push({
       companyId, leg: 'fronter', transferId: t.id, saleId: null,
       vendorCode: t.vicidial_vendor_code, phone: t.normalized_phone, callAt: t.created_at,
       agentUserId: t.created_by, dispoRaw: t.latest_disposition,
     });
-    if (r) { created++; if (r === 'unclassified') sawUnclassified = true; }
   }
 
   for (const t of (transfers || [])) {
@@ -154,29 +169,84 @@ async function populateCrmDay(companyId, date) {
     if (!sale && !t.assigned_closer_id) continue; // nothing on the closer side to review yet
     const key = sale ? `s:${sale.id}:closer` : `t:${t.id}:closer`;
     if (existing.has(key)) continue;
-    const r = await insertCrmDayCall({
+    tasks.push({
       companyId, leg: 'closer', transferId: t.id, saleId: sale?.id || null,
-      vendorCode: sale?.vicidial_vendor_code || null,
+      // The sale's own code first (most precise), falling back to the
+      // TRANSFER's code — the same lead_id almost always carries both legs,
+      // and findSaleRecording is specifically built to pick the closer's own
+      // leg off a shared lead_id via agentIds. Without this fallback every
+      // closer row with no sale (or a sale that never got its own code)
+      // never even attempts a lookup — confirmed live: 100% of closer-leg
+      // crm_day rows had vendor_code NULL before this fix.
+      vendorCode: sale?.vicidial_vendor_code || t.vicidial_vendor_code || null,
       phone: sale?.normalized_phone || sale?.customer_phone || t.normalized_phone,
       callAt: sale?.created_at || t.created_at, dialerAt: t.created_at,
       agentUserId: sale?.closer_id || t.assigned_closer_id,
       dispoRaw: sale?.closer_disposition || t.latest_disposition,
     });
-    if (r) { created++; if (r === 'unclassified') sawUnclassified = true; }
   }
 
   for (const s of (standaloneSales || [])) {
     if (existing.has(`s:${s.id}:closer`)) continue;
-    const r = await insertCrmDayCall({
+    tasks.push({
       companyId, leg: 'closer', transferId: null, saleId: s.id,
       vendorCode: s.vicidial_vendor_code, phone: s.normalized_phone || s.customer_phone,
       callAt: s.created_at || s.sale_date, agentUserId: s.closer_id, dispoRaw: s.closer_disposition,
     });
-    if (r) { created++; if (r === 'unclassified') sawUnclassified = true; }
   }
+
+  // Bounded concurrency, not sequential — each task does an agent lookup PLUS
+  // a dialer recording search (itself potentially several HTTP round-trips),
+  // and a full day can be 100+ calls. Sequential awaits made "load a day"
+  // take minutes; a small worker pool keeps it from hammering the dialer
+  // boxes (which are also serving live calls) while still running in parallel.
+  const CONCURRENCY = 6;
+  const results = await mapWithConcurrency(tasks, CONCURRENCY, insertCrmDayCall);
+  const created = results.filter(Boolean).length;
+  const sawUnclassified = results.includes('unclassified');
 
   if (sawUnclassified) checkUnclassifiedThreshold(companyId).catch(() => {});
   return { created };
+}
+
+// One-off repair for calls populated BEFORE the closer-leg vendor_code
+// fallback existed — populateCrmDay's own dedup means simply re-loading a
+// day never retries an already-created row, so those need fixing in place.
+// Only touches rows still recording_state='pending'/'missing' with a NULL
+// vendor_code and a transfer link — never overwrites a code or state that's
+// already resolved. Doesn't re-run the recording search itself; resets the
+// row to 'pending' with a real lead_id so the existing 60s poller
+// (qa2RecordingPoller.js) picks it up on its own next tick.
+async function repairMissingVendorCodes(companyId, date) {
+  const start = etDateToUtcStart(date);
+  const end = etDateToUtcEnd(date);
+  if (!start || !end) return { repaired: 0, error: 'invalid date' };
+
+  const { data: rows } = await supabaseAdmin
+    .from('qa2_call')
+    .select('id, transfer_id')
+    .eq('company_id', companyId).gte('call_at', start).lte('call_at', end)
+    .eq('source', 'crm_day').eq('leg', 'closer')
+    .is('vendor_code', null).not('transfer_id', 'is', null)
+    .in('recording_state', ['pending', 'missing']);
+  if (!rows || !rows.length) return { repaired: 0 };
+
+  const transferIds = [...new Set(rows.map(r => r.transfer_id))];
+  const { data: transfers } = await supabaseAdmin
+    .from('transfers').select('id, vicidial_vendor_code').in('id', transferIds).not('vicidial_vendor_code', 'is', null);
+  const codeByTransfer = new Map((transfers || []).map(t => [t.id, t.vicidial_vendor_code]));
+
+  let repaired = 0;
+  for (const row of rows) {
+    const code = codeByTransfer.get(row.transfer_id);
+    if (!code) continue; // the transfer itself has no code either — nothing to fix here
+    const leadId = (String(code).match(/(\d+)$/) || [])[1] || null;
+    const { error } = await supabaseAdmin.from('qa2_call')
+      .update({ vendor_code: code, dialer_lead_id: leadId, recording_state: 'pending', recording_attempts: 0 })
+      .eq('id', row.id);
+    if (!error) repaired++;
+  }
+  return { repaired, checked: rows.length };
 }
 
 // ET "yesterday" — noon-UTC arithmetic sidesteps DST-boundary edge cases from
@@ -208,4 +278,4 @@ async function runCrmDayForAllCompanies() {
   return { companies: companyIds.length, created, date };
 }
 
-module.exports = { populateCrmDay, runCrmDayForAllCompanies, yesterdayEt };
+module.exports = { populateCrmDay, runCrmDayForAllCompanies, yesterdayEt, repairMissingVendorCodes };

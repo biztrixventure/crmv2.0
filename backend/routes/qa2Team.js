@@ -15,7 +15,7 @@ const { asyncHandler } = require('../middleware/errorHandler');
 const { supabaseAdmin } = require('../config/database');
 const { resolveQa2Scope } = require('../utils/qa2ScopeResolver');
 const { companyInScope, methodInScope } = require('../utils/qa2Scope');
-const { populateCrmDay } = require('../utils/qa2CrmDay');
+const { populateCrmDay, repairMissingVendorCodes } = require('../utils/qa2CrmDay');
 const { etDateToUtcStart, etDateToUtcEnd } = require('../utils/etUtils');
 const { applySort } = require('../utils/sortHelper');
 const { applyColumnFilters, resolveColumnAccess } = require('../utils/columnFilter');
@@ -330,6 +330,17 @@ router.post('/load-day', asyncHandler(async (req, res) => {
 
   const result = await populateCrmDay(company_id, date);
   res.json({ ok: true, created: result.created || 0, date });
+}));
+
+router.post('/repair-day', asyncHandler(async (req, res) => {
+  const scope = await requireManager(req, res);
+  if (!scope) return;
+  const { company_id, date } = req.body || {};
+  if (!company_id || !date) return res.status(400).json({ error: 'company_id and date required' });
+  if (!companyInScope(scope, company_id)) return res.status(403).json({ error: 'You are not assigned to this company' });
+
+  const result = await repairMissingVendorCodes(company_id, date);
+  res.json({ ok: true, ...result });
 }));
 
 router.get('/day-calls', asyncHandler(async (req, res) => {
