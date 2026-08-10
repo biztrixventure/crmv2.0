@@ -925,7 +925,11 @@ router.get('/clients', asyncHandler(async (req, res) => {
 
 // ── GET /compliance/sales ─────────────────────────────────────────────────────
 router.get('/sales', asyncHandler(async (req, res) => {
-  const { company_id, user_ids, status, disposition, exclude_post_date, charge_from, charge_to, date_from, date_to, search, page = 1, limit = 50, sort_by, sort_dir, filters } = req.query;
+  const { company_id, user_ids, status, disposition, exclude_post_date, charge_from, charge_to, date_from, date_to, search, page = 1, limit = 50, sort_by, sort_dir, filters,
+    // Payout section (mig 243/244) — merged into this list from the former
+    // standalone Payout tab. payout_status = DP Status (pending/paid/reverted);
+    // payout_confirmed = Payout Status, a manual 'yes'/'no'.
+    payout_status, payout_confirmed } = req.query;
 
   // Which columns THIS caller may sort/filter on (narrowed for a masked RO).
   const access = await resolveColumnAccess(req, COMPLIANCE_SALE_COLUMNS);
@@ -1003,6 +1007,12 @@ router.get('/sales', asyncHandler(async (req, res) => {
   // because its created_at is the upload day, not the file's date.
   if (date_from) query = query.gte('sale_date', date_from);
   if (date_to)   query = query.lte('sale_date', date_to);
+  // Payout section filters — DP Status (pending/paid/reverted) and the manual
+  // Payout Status yes/no. Harmless for any caller; only the superadmin UI
+  // exposes controls that send these.
+  if (payout_status) query = query.eq('payout_status', payout_status);
+  if (payout_confirmed === 'yes') query = query.eq('payout_confirmed', true);
+  else if (payout_confirmed === 'no') query = query.eq('payout_confirmed', false);
   query = applySaleSearch(query);
 
   // Per-column header filters LAST, so they narrow inside the company scope and
@@ -1131,7 +1141,27 @@ router.get('/sales', asyncHandler(async (req, res) => {
 
   // Mask PII / financial for a readonly_admin whose superadmin turned those off.
   const sales = await maskForReadonly(enriched, 'sales', req);
-  res.json({ sales, total: count || 0, page: parseInt(page), limit: parseInt(limit), status_counts, columns: access.catalog });
+
+  // Payout KPI sums (DP Status: pending/paid/reverted → $ + count each) —
+  // superadmin only, matching the merged section's original superadmin-only
+  // scope. Reuses the payout_kpis() RPC from mig 243, scoped by the same
+  // company/date/search filters as the list above (not the column filters or
+  // status, so all three buckets stay comparable while the table narrows).
+  let payout_kpis = null;
+  if (req.user.role === 'superadmin') {
+    payout_kpis = { pending: { count: 0, gross: 0 }, paid: { count: 0, gross: 0 }, reverted: { count: 0, gross: 0 } };
+    try {
+      const { data: kpiRows } = await supabaseAdmin.rpc('payout_kpis', {
+        p_company_id: company_id || null, p_client_name: null,
+        p_date_from: date_from || null, p_date_to: date_to || null, p_search: search || null,
+      });
+      for (const row of (kpiRows || [])) {
+        if (payout_kpis[row.payout_status]) payout_kpis[row.payout_status] = { count: Number(row.cnt) || 0, gross: Number(row.gross) || 0 };
+      }
+    } catch { /* mig 243's RPC not applied yet — KPI tiles just read zero */ }
+  }
+
+  res.json({ sales, total: count || 0, page: parseInt(page), limit: parseInt(limit), status_counts, columns: access.catalog, payout_kpis });
 }));
 
 // ── GET /compliance/transfers ─────────────────────────────────────────────────

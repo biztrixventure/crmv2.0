@@ -58,7 +58,7 @@ export function exportPayoutReportPdf({ rows = [], kpis = null, filters = {}, co
   font('bold', 17); ink('#ffffff');
   doc.text('Payout Report', M, 13);
   font('normal', 9); ink('#cbd5e1');
-  const sub = [companyName || 'All companies', filters.payout_status ? `Payout: ${PAYOUT_LABEL[filters.payout_status] || filters.payout_status}` : 'Every payout status'].filter(Boolean).join('    ·    ');
+  const sub = [companyName || 'All companies', filters.payout_status ? `DP Status: ${PAYOUT_LABEL[filters.payout_status] || filters.payout_status}` : 'Every DP Status'].filter(Boolean).join('    ·    ');
   doc.text(sub, M, 20);
   if (filters.date_from || filters.date_to) doc.text(`${filters.date_from || '…'}  →  ${filters.date_to || '…'}`, M, 25.5);
   font('normal', 8); ink('#94a3b8');
@@ -122,14 +122,15 @@ export function exportPayoutReportPdf({ rows = [], kpis = null, filters = {}, co
 
   // ── row table ──────────────────────────────────────────────────────────────
   const cols = [
-    { k: 'sale_date',      label: 'Sale Date',     w: 20, align: 'left' },
-    { k: 'customer_name',  label: 'Customer',      w: 34, align: 'left' },
-    { k: 'customer_phone', label: 'Phone',         w: 26, align: 'left' },
-    { k: 'client_name',    label: 'Client',        w: 26, align: 'left' },
-    { k: 'down_payment',   label: 'Down Payment',  w: 20, align: 'right' },
-    { k: 'plan',           label: 'Plan',          w: 24, align: 'left' },
-    { k: 'status',         label: 'Status',        w: 16, align: 'left' },
-    { k: 'payout_status',  label: 'Payout',        w: 16, align: 'left' },
+    { k: 'sale_date',         label: 'Sale Date',      w: 18, align: 'left' },
+    { k: 'customer_name',     label: 'Customer',       w: 30, align: 'left' },
+    { k: 'customer_phone',    label: 'Phone',          w: 22, align: 'left' },
+    { k: 'client_name',       label: 'Client',         w: 22, align: 'left' },
+    { k: 'down_payment',      label: 'Down Payment',   w: 18, align: 'right' },
+    { k: 'plan',              label: 'Plan',           w: 18, align: 'left' },
+    { k: 'status',            label: 'Status',         w: 14, align: 'left' },
+    { k: 'payout_status',     label: 'DP Status',      w: 14, align: 'left' },
+    { k: 'payout_confirmed',  label: 'Payout Status',  w: 14, align: 'left' },
   ];
   const rowH = 6.6;
   const tableHead = () => {
@@ -158,6 +159,7 @@ export function exportPayoutReportPdf({ rows = [], kpis = null, filters = {}, co
         else if (col.k === 'down_payment') { text = s.down_payment ? money(s.down_payment) : '—'; style = 'bold'; }
         else if (col.k === 'status') { text = statusCell; }
         else if (col.k === 'payout_status') { text = PAYOUT_LABEL[s.payout_status] || s.payout_status || 'Pending'; tint = payoutTint; style = 'bold'; }
+        else if (col.k === 'payout_confirmed') { text = s.payout_confirmed ? 'Yes' : 'No'; tint = s.payout_confirmed ? GREEN : MUTE; style = 'bold'; }
         else text = s[col.k] || '—';
         font(style, 7); ink(tint);
         doc.text(clip(text, col.w - 2, 7, style), col.align === 'right' ? cx + col.w - 2 : cx, y + 4.4, { align: col.align });

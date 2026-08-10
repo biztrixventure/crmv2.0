@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect, useRef, Fragment } from 'react';
 import { createPortal } from 'react-dom';
 import { useFocus, useNavFocus } from '../../contexts/FocusContext';
 import { useSaleDeepLink } from '../../hooks/useSaleDeepLink';
-import { Shield, RotateCcw, Trash2, Eye, ChevronDown, ChevronUp, CheckCircle, Pencil, MoreVertical } from 'lucide-react';
+import { Shield, RotateCcw, Trash2, Eye, ChevronDown, ChevronUp, CheckCircle, Pencil, MoreVertical, Clock, CheckCircle2, Undo2, Layers, Download, FileDown } from 'lucide-react';
 import { Badge } from '../UI';
 import SaleStatusBadge from '../UI/SaleStatusBadge';
 import { toast } from 'sonner';
@@ -10,7 +10,7 @@ import client from '../../api/client';
 import SaleDetailDrawer from '../Shared/SaleDetailDrawer';
 import SaleModal from '../Closer/SaleModal';
 import ExportModal from './ExportModal';
-import { TableScroll } from '../UI/kit';
+import { TableScroll, KpiTile } from '../UI/kit';
 import FilterBar, { FilterSelect } from '../UI/FilterBar';
 import DateRangePicker from '../UI/DateRangePicker';
 import TabStatsStrip from './TabStatsStrip';
@@ -64,6 +64,19 @@ const statusUpdatedAt = (s) => {
 };
 
 const money = (v) => (v == null || v === '' ? '' : `$${Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`);
+const moneyKpi = (v) => `$${Number(v || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+
+// Payout section (mig 243/244), merged in from the former standalone Payout
+// tab. Two independent fields on the sale, superadmin-only:
+//   DP Status (payout_status)        — pending (default) / paid / reverted
+//   Payout Status (payout_confirmed) — manual boolean, Yes / No
+const PAYOUT_STATUSES = ['pending', 'paid', 'reverted'];
+const PAYOUT_LABEL = { pending: 'Pending', paid: 'Paid', reverted: 'Reverted' };
+const DP_TINT = {
+  pending:  { bg: '#fef3c7', fg: '#b45309' },
+  paid:     { bg: '#d1fae5', fg: '#047857' },
+  reverted: { bg: '#fee2e2', fg: '#b91c1c' },
+};
 
 // Row overflow menu — Delete / View / Edit / Audit trail tucked behind one
 // 3-dot button so the primary compliance workflow buttons (Approve / Return /
@@ -164,6 +177,14 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo]     = useState('');
   const [expanded, setExpanded] = useState(null);
+  // Payout section — superadmin only (merged in from the former standalone
+  // Payout tab). DP Status filter/KPIs = payout_status; Payout Status
+  // filter = the manual payout_confirmed yes/no.
+  const isSuperadmin = user?.role === 'superadmin';
+  const [payoutStatus, setPayoutStatus]       = useState('');
+  const [payoutConfirmed, setPayoutConfirmed] = useState('');
+  const [payoutKpis, setPayoutKpis]           = useState(null);
+  const [payoutExporting, setPayoutExporting] = useState('');
   // Sort + per-column filters. Default is unchanged: newest SALE first (by the
   // Sale Date column the list shows), so the latest sales lead. sale_date nulls
   // sort last; created_at is the tiebreaker.
@@ -221,6 +242,8 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
   const [editReasonKey, setEditReasonKey] = useState('');
   const [editCancelDate, setEditCancelDate] = useState('');
   const [editChargebackAmt, setEditChargebackAmt] = useState('');
+  const [editPayoutStatus, setEditPayoutStatus]       = useState('pending');
+  const [editPayoutConfirmed, setEditPayoutConfirmed] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
   const [editMsg, setEditMsg]       = useState('');
   // Cancel-like statuses gate the cancellation_date field. Keeps the rule
@@ -249,6 +272,9 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
           exclude_post_date: disposition ? undefined : 1,
           charge_from: chargeFrom || undefined, charge_to: chargeTo || undefined,
           date_from: dateFrom || undefined, date_to: dateTo || undefined,
+          // Payout section (superadmin only — plain undefined for everyone else).
+          payout_status: payoutStatus || undefined,
+          payout_confirmed: payoutConfirmed || undefined,
           // sort_by / sort_dir / filters — all resolved by useTableQuery.
           ...tq.params,
           page, limit: LIMIT,
@@ -261,6 +287,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
       setSales(res.data.sales || []);
       setTotal(res.data.total || 0);
       if (res.data.columns) setColumns(res.data.columns);
+      setPayoutKpis(res.data.payout_kpis || null);
       // Keep page-1 totals across pages; clear when a status filter is active
       // (then the page-derived breakdown — the one filtered status — is correct).
       setStatusCounts(prev => status ? null : (res.data.status_counts ?? prev));
@@ -273,7 +300,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
       const httpStatus = e.response?.status;   // not the `status` filter above
       setLoadError(e.response?.data?.error || (httpStatus ? `the server returned ${httpStatus}` : (e.message || 'the request failed')));
     } finally { setLoading(false); }
-  }, [search, status, company, disposition, chargeFrom, chargeTo, dateFrom, dateTo, page, tq.version, tq.params, abortable]);
+  }, [search, status, company, disposition, chargeFrom, chargeTo, dateFrom, dateTo, payoutStatus, payoutConfirmed, page, tq.version, tq.params, abortable]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -327,6 +354,8 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
     setEditReasonKey(s.cancellation_reason_key || '');
     setEditCancelDate(s.cancellation_date || '');
     setEditChargebackAmt(s.chargeback_amount || '');
+    setEditPayoutStatus(s.payout_status || 'pending');
+    setEditPayoutConfirmed(!!s.payout_confirmed);
     setEditMsg('');
   };
 
@@ -369,6 +398,22 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
         chargeback_amount: editStatus === 'chargeback' ? (editChargebackAmt || null) : undefined,
         chargeback_date:   editStatus === 'chargeback' ? (editCancelDate || null) : undefined,
       });
+      // Payout section (superadmin only, only for a sale compliance has ever
+      // approved) — a second, independent write so a rejected payout PATCH
+      // never blocks the compliance status update that already succeeded.
+      if (isSuperadmin && editTarget?.compliance_reviewed_at) {
+        const prevStatus    = editTarget.payout_status || 'pending';
+        const prevConfirmed = !!editTarget.payout_confirmed;
+        if (editPayoutStatus !== prevStatus || editPayoutConfirmed !== prevConfirmed) {
+          try {
+            await client.patch(`payouts/${editTarget.id}`, {
+              payout_status: editPayoutStatus, payout_confirmed: editPayoutConfirmed,
+            });
+          } catch (payoutErr) {
+            toast.error(payoutErr.response?.data?.error || 'Saved the compliance update, but the payout fields failed to save');
+          }
+        }
+      }
       setEditTarget(null); load();
     } catch (err) { setEditMsg(err.response?.data?.error || 'Failed'); }
     finally { setEditSaving(false); }
@@ -398,6 +443,42 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
       rows: allSales, ctx: { labelOf },
       filename: buildFilename({ dataset: disposition ? `sales-${disposition}` : 'sales', scope: companyList.find(c => c.id === co)?.name, dateFrom: df, dateTo: dt }),
     });
+  };
+
+  // Payout report export (CSV + A4 PDF) — superadmin only. Pulls the same
+  // rows the table is currently showing (current filters, not just the page).
+  const payoutExportParams = () => ({
+    disposition: disposition || undefined, exclude_post_date: disposition ? undefined : 1,
+    search: search || undefined, status: status || undefined, company_id: company || undefined,
+    date_from: dateFrom || undefined, date_to: dateTo || undefined,
+    payout_status: payoutStatus || undefined, payout_confirmed: payoutConfirmed || undefined,
+  });
+  const handlePayoutCsv = async () => {
+    if (payoutExporting) return;
+    setPayoutExporting('csv');
+    try {
+      const rows = await fetchAllForExport('compliance/sales', payoutExportParams(), 'sales');
+      writeExport({
+        dataset: 'sales', surface: 'payout_sales', allowed: null,
+        rows, ctx: { labelOf },
+        filename: buildFilename({ dataset: 'payouts', scope: companyList.find(c => c.id === company)?.name, dateFrom, dateTo }),
+      });
+    } catch (err) { toast.error(err.egressBlocked ? err.message : 'Failed to export CSV'); }
+    finally { setPayoutExporting(''); }
+  };
+  const handlePayoutPdf = async () => {
+    if (payoutExporting) return;
+    setPayoutExporting('pdf');
+    try {
+      const rows = await fetchAllForExport('compliance/sales', payoutExportParams(), 'sales');
+      const { exportPayoutReportPdf } = await import('../../utils/payoutReportPdf');
+      exportPayoutReportPdf({
+        rows, kpis: payoutKpis, labelOf,
+        filters: { date_from: dateFrom, date_to: dateTo, payout_status: payoutStatus },
+        companyName: companyList.find(c => c.id === company)?.name || '',
+      });
+    } catch (err) { toast.error(err.egressBlocked ? err.message : 'Could not build the PDF'); }
+    finally { setPayoutExporting(''); }
   };
 
   return (
@@ -456,37 +537,90 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                 />
               </span>
             )}
+            {/* Payout section — superadmin only, pushed to the very right of
+                the filter bar (ml-auto) so compliance's own filters stay left. */}
+            {isSuperadmin && (
+              <span className="inline-flex items-center gap-2 ml-auto">
+                <FilterSelect value={payoutStatus} onChange={e => { setPayoutStatus(e.target.value); setPage(1); }} title="Filter by DP Status">
+                  <option value="">All DP Status</option>
+                  {PAYOUT_STATUSES.map(s => <option key={s} value={s}>{PAYOUT_LABEL[s]}</option>)}
+                </FilterSelect>
+                <FilterSelect value={payoutConfirmed} onChange={e => { setPayoutConfirmed(e.target.value); setPage(1); }} title="Filter by Payout Status">
+                  <option value="">All Payout Status</option>
+                  <option value="yes">Yes</option>
+                  <option value="no">No</option>
+                </FilterSelect>
+              </span>
+            )}
           </>
         }
         onClearAll={() => {
           setSearch(''); setCompany(''); setStatus('');
           setDateFrom(''); setDateTo(''); setChargeFrom(''); setChargeTo(''); setPage(1);
+          setPayoutStatus(''); setPayoutConfirmed('');
           tq.clearFilter('client_name');
         }}
       />
 
-      {/* Stats strip — total matches + per-status breakdown of the page.
-          Catalog-driven labels + badges via the compliance hook. */}
-      <TabStatsStrip
-        total={total}
-        records={sales}
-        statusTotals={statusCounts}
-        activeStatus={status}
-        onSelectStatus={(s) => { setStatus(s); setPage(1); }}
-        labelOf={labelOf}
-        badgeOf={(key) => {
-          // Map the catalog badge variant to bg/color the strip expects.
-          const variant = badgeOf(key);
-          const VAR = {
-            success:   { bg: '#d1fae5', color: '#047857' },
-            error:     { bg: '#fee2e2', color: '#b91c1c' },
-            warning:   { bg: '#fef3c7', color: '#b45309' },
-            info:      { bg: '#dbeafe', color: '#1d4ed8' },
-            secondary: { bg: '#f3f4f6', color: '#6b7280' },
-          };
-          return { ...(VAR[variant] || VAR.secondary), label: labelOf(key) };
-        }}
-      />
+      {/* Stats strip — compliance's own totals stay on the LEFT; the payout
+          KPI block (superadmin only) sits on the RIGHT. */}
+      <div className="flex items-start gap-3 flex-wrap">
+        <div className="flex-1 min-w-[280px]">
+          <TabStatsStrip
+            total={total}
+            records={sales}
+            statusTotals={statusCounts}
+            activeStatus={status}
+            onSelectStatus={(s) => { setStatus(s); setPage(1); }}
+            labelOf={labelOf}
+            badgeOf={(key) => {
+              // Map the catalog badge variant to bg/color the strip expects.
+              const variant = badgeOf(key);
+              const VAR = {
+                success:   { bg: '#d1fae5', color: '#047857' },
+                error:     { bg: '#fee2e2', color: '#b91c1c' },
+                warning:   { bg: '#fef3c7', color: '#b45309' },
+                info:      { bg: '#dbeafe', color: '#1d4ed8' },
+                secondary: { bg: '#f3f4f6', color: '#6b7280' },
+              };
+              return { ...(VAR[variant] || VAR.secondary), label: labelOf(key) };
+            }}
+          />
+        </div>
+
+        {isSuperadmin && (
+          <div className="flex-shrink-0 mb-4" style={{ width: 264 }}>
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[11px] font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-tertiary)' }}>
+                DP Status
+              </span>
+              <div className="flex items-center gap-1">
+                <button onClick={handlePayoutCsv} disabled={!!payoutExporting} title="Export payout report — CSV"
+                  className="p-1.5 rounded-full border disabled:opacity-50 transition-colors"
+                  style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)', backgroundColor: 'var(--color-surface)' }}>
+                  <Download size={12} />
+                </button>
+                <button onClick={handlePayoutPdf} disabled={!!payoutExporting} title="Export payout report — A4 PDF"
+                  className="p-1.5 rounded-full border disabled:opacity-50 transition-colors"
+                  style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)', backgroundColor: 'var(--color-surface)' }}>
+                  <FileDown size={12} />
+                </button>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <KpiTile icon={Layers} label="All approved" value={moneyKpi((payoutKpis?.pending?.gross || 0) + (payoutKpis?.paid?.gross || 0) + (payoutKpis?.reverted?.gross || 0))}
+                sub={`${((payoutKpis?.pending?.count || 0) + (payoutKpis?.paid?.count || 0) + (payoutKpis?.reverted?.count || 0)).toLocaleString()} sales`}
+                tone="primary" active={!payoutStatus} onClick={() => { setPayoutStatus(''); setPage(1); }} />
+              <KpiTile icon={Clock} label="Pending" value={moneyKpi(payoutKpis?.pending?.gross)} sub={`${(payoutKpis?.pending?.count || 0).toLocaleString()} sales`}
+                tone="warn" active={payoutStatus === 'pending'} onClick={() => { setPayoutStatus(payoutStatus === 'pending' ? '' : 'pending'); setPage(1); }} />
+              <KpiTile icon={CheckCircle2} label="Paid" value={moneyKpi(payoutKpis?.paid?.gross)} sub={`${(payoutKpis?.paid?.count || 0).toLocaleString()} sales`}
+                tone="success" active={payoutStatus === 'paid'} onClick={() => { setPayoutStatus(payoutStatus === 'paid' ? '' : 'paid'); setPage(1); }} />
+              <KpiTile icon={Undo2} label="Reverted" value={moneyKpi(payoutKpis?.reverted?.gross)} sub={`${(payoutKpis?.reverted?.count || 0).toLocaleString()} sales`}
+                tone="danger" active={payoutStatus === 'reverted'} onClick={() => { setPayoutStatus(payoutStatus === 'reverted' ? '' : 'reverted'); setPage(1); }} />
+            </div>
+          </div>
+        )}
+      </div>
 
       <ActiveFilters tq={tq} />
 
@@ -533,6 +667,8 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                   <TqTh tq={tq} col="sale_date">Sale Date</TqTh>
                   <TqTh tq={tq} col="status_updated">Status Updated</TqTh>
                   {isPostDate && <Th>Charge Date</Th>}
+                  {isSuperadmin && <Th>DP Status</Th>}
+                  {isSuperadmin && <Th>Payout Status</Th>}
                   <Th>Actions</Th>
                 </tr>
               </thead>
@@ -637,6 +773,28 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                           {s.charge_at ? new Date(s.charge_at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—'}
                         </td>
                       )}
+                      {/* Payout section (superadmin only) — read-only here; set
+                          from the Update popup, not inline. */}
+                      {isSuperadmin && (
+                        <td className="px-3 py-1.5 text-xs">
+                          {s.compliance_reviewed_at ? (
+                            <span className="inline-flex items-center text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded whitespace-nowrap"
+                              style={{ backgroundColor: DP_TINT[s.payout_status || 'pending'].bg, color: DP_TINT[s.payout_status || 'pending'].fg }}>
+                              {PAYOUT_LABEL[s.payout_status || 'pending']}
+                            </span>
+                          ) : <span style={{ color: 'var(--color-text-tertiary)' }}>—</span>}
+                        </td>
+                      )}
+                      {isSuperadmin && (
+                        <td className="px-3 py-1.5 text-xs">
+                          {s.compliance_reviewed_at ? (
+                            <span className="inline-flex items-center text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded whitespace-nowrap"
+                              style={{ backgroundColor: s.payout_confirmed ? '#d1fae5' : '#f3f4f6', color: s.payout_confirmed ? '#047857' : '#6b7280' }}>
+                              {s.payout_confirmed ? 'Yes' : 'No'}
+                            </span>
+                          ) : <span style={{ color: 'var(--color-text-tertiary)' }}>—</span>}
+                        </td>
+                      )}
                       <td className="px-3 py-1.5" onClick={e => e.stopPropagation()}>
                         <div className="flex items-center gap-1 flex-wrap justify-end">
                           {isPostDate && !isReadOnly && roControlAllowed('cc-sales.charge') && (
@@ -700,7 +858,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                     </tr>
                     {expanded === s.id && Array.isArray(s.edit_history) && (
                       <tr key={`${s.id}-hist`} style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
-                        <td colSpan={isPostDate ? 11 : 10} className="px-5 py-3">
+                        <td colSpan={(isPostDate ? 11 : 10) + (isSuperadmin ? 2 : 0)} className="px-5 py-3">
                           <p className="text-xs font-bold mb-2" style={{ color: 'var(--color-text-secondary)' }}>Audit Trail</p>
                           <div className="space-y-1">
                             {s.edit_history.map((h, i) => (
@@ -828,6 +986,25 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                     </div>
                   )}
                 </>
+              )}
+              {/* Payout section — superadmin only, only for a sale compliance
+                  has ever approved (nothing to track otherwise). */}
+              {isSuperadmin && editTarget?.compliance_reviewed_at && (
+                <div className="grid grid-cols-2 gap-3 p-3 rounded-xl" style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+                  <div>
+                    <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--color-text)' }}>DP Status</label>
+                    <ThemedSelect value={editPayoutStatus} onChange={e => setEditPayoutStatus(e.target.value)} className="input text-sm w-full">
+                      {PAYOUT_STATUSES.map(s => <option key={s} value={s}>{PAYOUT_LABEL[s]}</option>)}
+                    </ThemedSelect>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--color-text)' }}>Payout Status</label>
+                    <ThemedSelect value={editPayoutConfirmed ? 'yes' : 'no'} onChange={e => setEditPayoutConfirmed(e.target.value === 'yes')} className="input text-sm w-full">
+                      <option value="no">No</option>
+                      <option value="yes">Yes</option>
+                    </ThemedSelect>
+                  </div>
+                </div>
               )}
               <div>
                 <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--color-text)' }}>
