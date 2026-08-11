@@ -415,7 +415,6 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
     } finally { setEditFieldsSaving(false); }
   };
   const doEdit = async () => {
-    if (!editReason.trim()) { setEditMsg('Reason required.'); return; }
     if (isCancelLikeStatus && !editCancelDate) {
       setEditMsg('Cancellation date is required for this status.'); return;
     }
@@ -1089,10 +1088,10 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
               )}
               <div>
                 <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--color-text)' }}>
-                  Reason <span className="text-red-500">*</span>
+                  Reason
                 </label>
                 <textarea value={editReason} onChange={e => setEditReason(e.target.value)}
-                  placeholder="Explain the reason for this update…"
+                  placeholder="Explain the reason for this update… (optional)"
                   rows={3} className="input text-sm w-full" />
               </div>
               {editMsg && <p className="text-xs text-red-500">{editMsg}</p>}

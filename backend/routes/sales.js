@@ -2005,7 +2005,7 @@ router.post('/:id/compliance-return', [
 // ============================================================================
 router.post('/:id/compliance', [
   body('status').optional().isString(),
-  body('reason').isString().notEmpty().withMessage('Reason is required for compliance updates'),
+  body('reason').optional({ checkFalsy: true }).isString(),
 ], asyncHandler(async (req, res) => {
   const errs = validationResult(req);
   if (!errs.isEmpty()) return res.status(400).json({ errors: errs.array() });
