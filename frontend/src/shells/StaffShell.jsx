@@ -119,6 +119,19 @@ const fmtCardDate = (iso) => {
   const d = new Date(iso);
   return isNaN(d) ? '' : d.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
 };
+// Incentive pill on a closer's own sale card — reads the two compliance-set
+// payout fields (payout_confirmed tri-state + paid_to_closer, mig 244/246)
+// and turns them into the label/color a closer actually needs to see: not
+// whether the DP itself has posted, just where their own incentive stands.
+const incentivePill = (s) => {
+  const confirmed = s.payout_confirmed || 'pending';
+  if (confirmed === 'no') return { label: 'Not Eligible', bg: '#f3f4f6', fg: '#6b7280' };
+  if (confirmed === 'pending') return { label: 'Pending', bg: '#fef3c7', fg: '#b45309' };
+  // confirmed === 'yes'
+  return s.paid_to_closer
+    ? { label: 'Paid', bg: '#d1fae5', fg: '#047857' }
+    : { label: 'Eligible', bg: '#dbeafe', fg: '#1d4ed8' };
+};
 // Pull a "Year Make Model" string out of a transfer's form_data, if present.
 const transferVehicle = (fd) => {
   if (!fd) return '';
@@ -1433,6 +1446,15 @@ const StaffShell = () => {
                               <span className="flex items-center gap-1"><CalendarDays size={11} /> Sale {fmtCardDate(s.sale_date || s.created_at)}</span>
                               {s.plan && <span className="truncate">{s.plan}</span>}
                             </div>
+                            {s.status === 'approved' && (
+                              <div className="flex items-center gap-1.5 mt-1 text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>
+                                Incentive:
+                                <span className="inline-flex items-center font-bold px-1.5 py-0.5 rounded"
+                                  style={{ backgroundColor: incentivePill(s).bg, color: incentivePill(s).fg }}>
+                                  {incentivePill(s).label}
+                                </span>
+                              </div>
+                            )}
                           </div>
                           <div className="flex flex-col items-end gap-1 ml-2">
                             <SaleStatusBadge sale={s} size="sm" />

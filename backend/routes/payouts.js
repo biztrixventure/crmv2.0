@@ -10,6 +10,10 @@
 //   DP Status (payout_status)        — pending (default) → paid / reverted
 //   Payout Status (payout_confirmed) — manual tri-state, pending (default)
 //                                       → yes / no, no derived meaning
+//   Paid to closer (paid_to_closer)  — mig 246, independent boolean: has the
+//                                       eligible payout actually gone out.
+//                                       Surfaced to the closer as the
+//                                       "Incentive" pill on their Sale card.
 // ============================================================================
 const express = require('express');
 const { supabaseAdmin } = require('../config/database');
@@ -32,7 +36,7 @@ router.use(asyncHandler(async (req, res, next) => {
 // field may be sent alone; at least one is required.
 router.patch('/:id', asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { payout_status, payout_confirmed } = req.body;
+  const { payout_status, payout_confirmed, paid_to_closer } = req.body;
 
   const updates = {};
   if (payout_status !== undefined) {
@@ -47,8 +51,9 @@ router.patch('/:id', asyncHandler(async (req, res) => {
     }
     updates.payout_confirmed = payout_confirmed;
   }
+  if (paid_to_closer !== undefined) updates.paid_to_closer = !!paid_to_closer;
   if (!Object.keys(updates).length) {
-    return res.status(400).json({ error: 'Send payout_status and/or payout_confirmed' });
+    return res.status(400).json({ error: 'Send payout_status, payout_confirmed, and/or paid_to_closer' });
   }
   updates.payout_updated_at = new Date().toISOString();
   updates.payout_updated_by = req.user.id;
@@ -58,7 +63,7 @@ router.patch('/:id', asyncHandler(async (req, res) => {
     .update(updates)
     .eq('id', id)
     .not('compliance_reviewed_at', 'is', null)
-    .select('id, payout_status, payout_confirmed, payout_updated_at')
+    .select('id, payout_status, payout_confirmed, paid_to_closer, payout_updated_at')
     .maybeSingle();
   if (error) return res.status(500).json({ error: error.message });
   if (!data) return res.status(404).json({ error: 'Sale not found, or it has never been compliance-approved' });

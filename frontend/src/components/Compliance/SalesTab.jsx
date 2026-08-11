@@ -279,6 +279,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
   const [editChargebackAmt, setEditChargebackAmt] = useState('');
   const [editPayoutStatus, setEditPayoutStatus]       = useState('pending');
   const [editPayoutConfirmed, setEditPayoutConfirmed] = useState('pending');
+  const [editPaidToCloser, setEditPaidToCloser]       = useState(false);
   const [editSaving, setEditSaving] = useState(false);
   const [editMsg, setEditMsg]       = useState('');
   // Cancel-like statuses gate the cancellation_date field. Keeps the rule
@@ -392,6 +393,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
     setEditChargebackAmt(s.chargeback_amount || '');
     setEditPayoutStatus(s.payout_status || 'pending');
     setEditPayoutConfirmed(s.payout_confirmed || 'pending');
+    setEditPaidToCloser(!!s.paid_to_closer);
     setEditMsg('');
   };
 
@@ -440,10 +442,11 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
       if (isSuperadmin && editTarget?.compliance_reviewed_at) {
         const prevStatus    = editTarget.payout_status || 'pending';
         const prevConfirmed = editTarget.payout_confirmed || 'pending';
-        if (editPayoutStatus !== prevStatus || editPayoutConfirmed !== prevConfirmed) {
+        const prevPaid      = !!editTarget.paid_to_closer;
+        if (editPayoutStatus !== prevStatus || editPayoutConfirmed !== prevConfirmed || editPaidToCloser !== prevPaid) {
           try {
             await client.patch(`payouts/${editTarget.id}`, {
-              payout_status: editPayoutStatus, payout_confirmed: editPayoutConfirmed,
+              payout_status: editPayoutStatus, payout_confirmed: editPayoutConfirmed, paid_to_closer: editPaidToCloser,
             });
           } catch (payoutErr) {
             toast.error(payoutErr.response?.data?.error || 'Saved the compliance update, but the payout fields failed to save');
@@ -850,9 +853,17 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                       {isSuperadmin && (
                         <td className="px-3 py-1.5 text-xs">
                           {s.compliance_reviewed_at ? (
-                            <span className="inline-flex items-center text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded whitespace-nowrap"
-                              style={{ backgroundColor: PAYOUT_CONFIRMED_TINT[s.payout_confirmed || 'pending'].bg, color: PAYOUT_CONFIRMED_TINT[s.payout_confirmed || 'pending'].fg }}>
-                              {PAYOUT_CONFIRMED_LABEL[s.payout_confirmed || 'pending']}
+                            <span className="inline-flex items-center gap-1 flex-wrap">
+                              <span className="inline-flex items-center text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded whitespace-nowrap"
+                                style={{ backgroundColor: PAYOUT_CONFIRMED_TINT[s.payout_confirmed || 'pending'].bg, color: PAYOUT_CONFIRMED_TINT[s.payout_confirmed || 'pending'].fg }}>
+                                {PAYOUT_CONFIRMED_LABEL[s.payout_confirmed || 'pending']}
+                              </span>
+                              {s.payout_confirmed === 'yes' && s.paid_to_closer && (
+                                <span className="inline-flex items-center text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded whitespace-nowrap"
+                                  style={{ backgroundColor: 'var(--color-success-100)', color: 'var(--color-success-700)' }}>
+                                  Paid
+                                </span>
+                              )}
                             </span>
                           ) : <span style={{ color: 'var(--color-text-tertiary)' }}>—</span>}
                         </td>
@@ -1064,6 +1075,15 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                     <ThemedSelect value={editPayoutConfirmed} onChange={e => setEditPayoutConfirmed(e.target.value)} className="input text-sm w-full">
                       {PAYOUT_CONFIRMED_STATUSES.map(s => <option key={s} value={s}>{PAYOUT_CONFIRMED_LABEL[s]}</option>)}
                     </ThemedSelect>
+                  </div>
+                  <div className="col-span-2">
+                    <label className="flex items-center gap-2 text-sm font-semibold cursor-pointer" style={{ color: 'var(--color-text)' }}>
+                      <input type="checkbox" checked={editPaidToCloser} onChange={e => setEditPaidToCloser(e.target.checked)} />
+                      Paid to closer
+                    </label>
+                    <p className="text-[11px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
+                      Shows as "Paid" on the closer's own Incentive pill instead of "Eligible".
+                    </p>
                   </div>
                 </div>
               )}
