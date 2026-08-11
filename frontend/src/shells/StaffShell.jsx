@@ -1446,7 +1446,7 @@ const StaffShell = () => {
                               <span className="flex items-center gap-1"><CalendarDays size={11} /> Sale {fmtCardDate(s.sale_date || s.created_at)}</span>
                               {s.plan && <span className="truncate">{s.plan}</span>}
                             </div>
-                            {s.status === 'approved' && (
+                            {s.status === 'closed_won' && (
                               <div className="flex items-center gap-1.5 mt-1 text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>
                                 Incentive:
                                 <span className="inline-flex items-center font-bold px-1.5 py-0.5 rounded"
