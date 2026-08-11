@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Settings2, RefreshCw, Search, BarChart3, ShieldCheck, Bell, Building2, Copy, LayoutTemplate, Workflow, LayoutDashboard, Car, Gauge, Boxes, Highlighter, CalendarClock, PartyPopper } from 'lucide-react';
+import { Settings2, RefreshCw, Search, BarChart3, ShieldCheck, Bell, Building2, Copy, LayoutTemplate, Workflow, LayoutDashboard, Car, Gauge, Boxes, Highlighter, CalendarClock, PartyPopper, CircleDollarSign } from 'lucide-react';
 import client from '../../../api/client';
 import ResellRules from './ResellRules';
 import DedupRules from './DedupRules';
@@ -13,6 +13,7 @@ import DrawerLayoutRules from './DrawerLayoutRules';
 import SystemRules from './SystemRules';
 import BatchRules from './BatchRules';
 import SaleHighlightRules from './SaleHighlightRules';
+import DpStatusClientsRules from './DpStatusClientsRules';
 import PostDateRules from './PostDateRules';
 import CelebrationRules from './CelebrationRules';
 import ThemedSelect from '../../UI/Select';
@@ -29,6 +30,7 @@ const PAGES = [
   { id: 'kpi',          label: 'Stats & KPIs',           icon: BarChart3,   Component: KpiRules },
   { id: 'compliance',   label: 'Compliance Workflow',    icon: ShieldCheck, Component: ComplianceRules },
   { id: 'sale_highlight', label: 'Sale Highlight',       icon: Highlighter, Component: SaleHighlightRules },
+  { id: 'dp_status_clients', label: 'DP Status Clients', icon: CircleDollarSign, Component: DpStatusClientsRules },
   { id: 'post_dates',   label: 'Post Dates',             icon: CalendarClock, Component: PostDateRules },
   { id: 'celebrations', label: 'Celebrations',           icon: PartyPopper, Component: CelebrationRules },
   { id: 'transfer',     label: 'Transfer Lifecycle',     icon: Workflow,    Component: TransferStatusRules },

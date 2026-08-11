@@ -1186,7 +1186,37 @@ router.get('/sales', asyncHandler(async (req, res) => {
     } catch { /* mig 244's RPC not applied yet — tiles just read zero */ }
   }
 
-  res.json({ sales, total: count || 0, page: parseInt(page), limit: parseInt(limit), status_counts, columns: access.catalog, payout_kpis, payout_confirmed_kpis });
+  // Per-client DP Status breakdown (mig 247) — one card per client the
+  // superadmin ticked in Business Rules → DP Status Clients
+  // (business_config 'compliance.dp_status_clients'). Deliberately does NOT
+  // use kpiClientName (the sales-list Client column filter) — the whole
+  // point is to show every configured client side by side regardless of
+  // which single client is currently filtered on screen. Company/date/search
+  // still narrow it, same as payout_kpis above. Empty/unconfigured → [].
+  let payout_kpis_by_client = [];
+  if (req.user.role === 'superadmin') {
+    try {
+      const dpStatusClients = await getConfig(null, 'compliance.dp_status_clients', []);
+      if (Array.isArray(dpStatusClients) && dpStatusClients.length) {
+        const { data: pcbRows } = await supabaseAdmin.rpc('payout_kpis_by_client', {
+          p_company_id: company_id || null, p_client_names: dpStatusClients,
+          p_date_from: date_from || null, p_date_to: date_to || null, p_search: search || null,
+        });
+        const byClient = {};
+        for (const row of (pcbRows || [])) {
+          const c = byClient[row.client_name] || (byClient[row.client_name] = { pending: { count: 0, gross: 0 }, paid: { count: 0, gross: 0 }, reverted: { count: 0, gross: 0 } });
+          if (c[row.payout_status]) c[row.payout_status] = { count: Number(row.cnt) || 0, gross: Number(row.gross) || 0 };
+        }
+        // Keep the order the superadmin configured, not whatever GROUP BY returned.
+        payout_kpis_by_client = dpStatusClients.map(client => ({
+          client,
+          ...(byClient[client] || { pending: { count: 0, gross: 0 }, paid: { count: 0, gross: 0 }, reverted: { count: 0, gross: 0 } }),
+        }));
+      }
+    } catch { /* mig 247's RPC not applied yet — no per-client cards render */ }
+  }
+
+  res.json({ sales, total: count || 0, page: parseInt(page), limit: parseInt(limit), status_counts, columns: access.catalog, payout_kpis, payout_confirmed_kpis, payout_kpis_by_client });
 }));
 
 // ── GET /compliance/transfers ─────────────────────────────────────────────────

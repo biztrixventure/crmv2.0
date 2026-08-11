@@ -155,9 +155,9 @@ const RowMenu = ({ items }) => {
 // with the dollar sign." Payout Status (the separate manual tri-state) stays
 // three individual KpiTiles with plain counts, no $ — a different field with
 // no $ meaning of its own.
-const DpStatusCard = ({ rows, width = 168 }) => (
+const DpStatusCard = ({ rows, width = 168, title = 'DP Status' }) => (
   <div className="rounded-xl p-3 flex-shrink-0" style={{ width, backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-    <p className="text-[11px] font-bold uppercase tracking-widest mb-2 m-0" style={{ color: 'var(--color-text-tertiary)' }}>DP Status</p>
+    <p className="text-[11px] font-bold uppercase tracking-widest mb-2 m-0 truncate" style={{ color: 'var(--color-text-tertiary)' }} title={title}>{title}</p>
     <div className="space-y-1">
       {rows.map((r) => {
         const a = accent(r.tone);
@@ -219,7 +219,13 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
   const [payoutConfirmed, setPayoutConfirmed] = useState('');
   const [payoutKpis, setPayoutKpis]           = useState(null);
   const [payoutConfirmedKpis, setPayoutConfirmedKpis] = useState(null);
+  // Per-client DP Status cards (Business Rules → DP Status Clients, mig 247)
+  // — array of { client, pending, paid, reverted }, independent of the
+  // Client column filter below.
+  const [payoutKpisByClient, setPayoutKpisByClient] = useState([]);
   const [payoutExporting, setPayoutExporting] = useState('');
+  // Closer filter — dedicated dropdown, all closer agents.
+  const [closerId, setCloserId] = useState('');
   // Sort + per-column filters. Default is unchanged: newest SALE first (by the
   // Sale Date column the list shows), so the latest sales lead. sale_date nulls
   // sort last; created_at is the tiebreaker.
@@ -239,6 +245,9 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
   // Statuses use the compliance label overrides, not the raw enum keys.
   const { userOptions, companyOptions, clientOptions } = useFilterOptions({ companyList });
   const statusOptions = ALL_SALE_STATUSES.map(s => ({ value: s, label: labelOf(s) }));
+  // Closer filter dropdown — userOptions carries each user's role level;
+  // narrow to closers only so fronters/managers don't clutter the list.
+  const closerOptions = userOptions.filter(u => u.role === 'closer');
 
   const [approving, setApproving]   = useState(null);
   const [detailSale, setDetailSale] = useState(null);
@@ -302,6 +311,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
         params: {
           search: search || undefined, status: status || undefined,
           company_id: company || undefined,
+          user_ids: closerId || undefined,
           disposition: disposition || undefined,
           // All Sales (no disposition) hides un-charged post-date sales — they
           // belong only to the Post Date tab until "Charge → Sale" is clicked.
@@ -325,6 +335,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
       if (res.data.columns) setColumns(res.data.columns);
       setPayoutKpis(res.data.payout_kpis || null);
       setPayoutConfirmedKpis(res.data.payout_confirmed_kpis || null);
+      setPayoutKpisByClient(res.data.payout_kpis_by_client || []);
       // Keep page-1 totals across pages; clear when a status filter is active
       // (then the page-derived breakdown — the one filtered status — is correct).
       setStatusCounts(prev => status ? null : (res.data.status_counts ?? prev));
@@ -337,7 +348,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
       const httpStatus = e.response?.status;   // not the `status` filter above
       setLoadError(e.response?.data?.error || (httpStatus ? `the server returned ${httpStatus}` : (e.message || 'the request failed')));
     } finally { setLoading(false); }
-  }, [search, status, company, disposition, chargeFrom, chargeTo, dateFrom, dateTo, payoutStatus, payoutConfirmed, page, tq.version, tq.params, abortable]);
+  }, [search, status, company, closerId, disposition, chargeFrom, chargeTo, dateFrom, dateTo, payoutStatus, payoutConfirmed, page, tq.version, tq.params, abortable]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -559,6 +570,10 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
               <option value="">All statuses</option>
               {ALL_SALE_STATUSES.map(s => <option key={s} value={s}>{labelOf(s)}</option>)}
             </FilterSelect>
+            <FilterSelect value={closerId} onChange={e => { setCloserId(e.target.value); setPage(1); }} title="Filter by closer">
+              <option value="">All closers</option>
+              {closerOptions.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+            </FilterSelect>
             {isPostDate && (
               <span className="inline-flex items-center gap-1.5">
                 <span className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>Charge:</span>
@@ -592,7 +607,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
           </>
         }
         onClearAll={() => {
-          setSearch(''); setCompany(''); setStatus('');
+          setSearch(''); setCompany(''); setStatus(''); setCloserId('');
           // Back to the default range (this month), not all-time — matches
           // defaultPreset above and what FilterBar's own "Clear all" already
           // reset the picker to, so the two don't fight over the result.
@@ -667,6 +682,33 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                 { key: 'reverted', label: 'Reverted', tone: 'danger', value: moneyKpi(payoutKpis?.reverted?.gross),
                   active: payoutStatus === 'reverted', onClick: () => { setPayoutStatus(payoutStatus === 'reverted' ? '' : 'reverted'); setPage(1); } },
               ]} />
+              {/* Per-client DP Status cards (Business Rules → DP Status
+                  Clients, mig 247) — always show every configured client,
+                  regardless of the Client column filter above. Clicking a
+                  row still SETS that filter (+ payoutStatus) as an action;
+                  it just never collapses the card list. */}
+              {payoutKpisByClient.map((c) => {
+                const clientFilterActive = (tq.draft?.client_name?.v || '') === c.client;
+                const drill = (statusKey) => {
+                  tq.setFilter('client_name', { op: 'eq', v: c.client });
+                  setPayoutStatus(clientFilterActive && payoutStatus === statusKey ? '' : statusKey);
+                  setPage(1);
+                };
+                const totalGross = (c.pending?.gross || 0) + (c.paid?.gross || 0) + (c.reverted?.gross || 0);
+                return (
+                  <DpStatusCard key={c.client} title={c.client} rows={[
+                    { key: '', label: 'All', tone: 'primary', value: moneyKpi(totalGross),
+                      active: clientFilterActive && !payoutStatus,
+                      onClick: () => { tq.setFilter('client_name', clientFilterActive ? null : { op: 'eq', v: c.client }); setPayoutStatus(''); setPage(1); } },
+                    { key: 'pending', label: 'Pending', tone: 'warn', value: moneyKpi(c.pending?.gross),
+                      active: clientFilterActive && payoutStatus === 'pending', onClick: () => drill('pending') },
+                    { key: 'paid', label: 'Paid', tone: 'success', value: moneyKpi(c.paid?.gross),
+                      active: clientFilterActive && payoutStatus === 'paid', onClick: () => drill('paid') },
+                    { key: 'reverted', label: 'Reverted', tone: 'danger', value: moneyKpi(c.reverted?.gross),
+                      active: clientFilterActive && payoutStatus === 'reverted', onClick: () => drill('reverted') },
+                  ]} />
+                );
+              })}
               {/* Payout Status (manual tri-state, mig 244) — three separate
                   tiles, pending first, plain counts — no $ sign. */}
               <KpiTile icon={Clock} label="Payout Pending" value={(payoutConfirmedKpis?.pending?.count ?? 0).toLocaleString()}
