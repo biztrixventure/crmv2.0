@@ -132,6 +132,22 @@ const incentivePill = (s) => {
     ? { label: 'Paid', bg: '#d1fae5', fg: '#047857' }
     : { label: 'Eligible', bg: '#dbeafe', fg: '#1d4ed8' };
 };
+// Whole-card tint for a closer's own sale, keyed off the same payout fields
+// the Incentive pill reads (mig 244/246) — so a closer sees at a glance which
+// cards need action without reading every pill. Low-opacity via color-mix
+// (not a hardcoded pastel hex) so it stays correct in dark mode too. Only
+// meaningful once compliance has approved the sale, same gate as the pill.
+const incentiveHighlight = (s) => {
+  if (s.status !== 'closed_won') return null;
+  const confirmed = s.payout_confirmed || 'pending';
+  if (confirmed === 'no') return 'color-mix(in srgb, var(--color-error-600) 10%, transparent)';
+  if (confirmed === 'yes') {
+    return s.paid_to_closer
+      ? 'color-mix(in srgb, var(--color-success-600) 10%, transparent)'
+      : 'color-mix(in srgb, var(--color-warning-600) 12%, transparent)';
+  }
+  return null;   // pending — no tint
+};
 // Pull a "Year Make Model" string out of a transfer's form_data, if present.
 const transferVehicle = (fd) => {
   if (!fd) return '';
@@ -1406,11 +1422,12 @@ const StaffShell = () => {
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                     {sales.map(s => {
                       const _f = isFocused('sale', s.id);
+                      const incentiveBg = incentiveHighlight(s);
                       return (
                       <div key={s.id} onClick={() => setDetailSale(s)}
                         ref={_f ? focusCardRef : null}
                         className="p-4 rounded-xl border transition-all hover:shadow-md cursor-pointer"
-                        style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg)', ...focusRing(_f) }}>
+                        style={{ borderColor: 'var(--color-border)', backgroundColor: incentiveBg || 'var(--color-bg)', ...focusRing(_f) }}>
 
                         {/* Compliance note banner for needs_revision */}
                         {s.status === 'needs_revision' && s.compliance_note && (
@@ -1569,11 +1586,12 @@ const StaffShell = () => {
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                     {sales.map(s => {
                       const _f = isFocused('sale', s.id);
+                      const incentiveBg = incentiveHighlight(s);
                       return (
                       <div key={s.id} onClick={() => setDetailSale(s)}
                         ref={_f ? focusCardRef : null}
                         className="p-4 rounded-xl border transition-all hover:shadow-md cursor-pointer"
-                        style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg)', ...focusRing(_f) }}>
+                        style={{ borderColor: 'var(--color-border)', backgroundColor: incentiveBg || 'var(--color-bg)', ...focusRing(_f) }}>
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0">
                             <p className="font-semibold text-text truncate">{s.customer_name || 'Sale'}</p>
