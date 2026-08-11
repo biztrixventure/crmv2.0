@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect, useRef, Fragment } from 'react';
 import { createPortal } from 'react-dom';
 import { useFocus, useNavFocus } from '../../contexts/FocusContext';
 import { useSaleDeepLink } from '../../hooks/useSaleDeepLink';
-import { Shield, RotateCcw, Trash2, Eye, ChevronDown, ChevronUp, CheckCircle, Pencil, MoreVertical, Clock, CheckCircle2, Undo2, Layers, Download, FileDown } from 'lucide-react';
+import { Shield, RotateCcw, Trash2, Eye, ChevronDown, ChevronUp, CheckCircle, Pencil, MoreVertical, Clock, CheckCircle2, XCircle, Download, FileDown } from 'lucide-react';
 import { Badge } from '../UI';
 import SaleStatusBadge from '../UI/SaleStatusBadge';
 import { toast } from 'sonner';
@@ -10,9 +10,9 @@ import client from '../../api/client';
 import SaleDetailDrawer from '../Shared/SaleDetailDrawer';
 import SaleModal from '../Closer/SaleModal';
 import ExportModal from './ExportModal';
-import { TableScroll, KpiTile } from '../UI/kit';
+import { TableScroll, KpiTile, accent } from '../UI/kit';
 import FilterBar, { FilterSelect } from '../UI/FilterBar';
-import DateRangePicker from '../UI/DateRangePicker';
+import DateRangePicker, { getPresetRange } from '../UI/DateRangePicker';
 import TabStatsStrip from './TabStatsStrip';
 import { prettyDispo } from '../../utils/dispositions';
 import { fmtSaleDate } from '../../utils/timezone';
@@ -69,13 +69,20 @@ const moneyKpi = (v) => `$${Number(v || 0).toLocaleString(undefined, { maximumFr
 // Payout section (mig 243/244), merged in from the former standalone Payout
 // tab. Two independent fields on the sale, superadmin-only:
 //   DP Status (payout_status)        — pending (default) / paid / reverted
-//   Payout Status (payout_confirmed) — manual boolean, Yes / No
+//   Payout Status (payout_confirmed) — manual tri-state, pending (default) / yes / no
 const PAYOUT_STATUSES = ['pending', 'paid', 'reverted'];
 const PAYOUT_LABEL = { pending: 'Pending', paid: 'Paid', reverted: 'Reverted' };
 const DP_TINT = {
   pending:  { bg: '#fef3c7', fg: '#b45309' },
   paid:     { bg: '#d1fae5', fg: '#047857' },
   reverted: { bg: '#fee2e2', fg: '#b91c1c' },
+};
+const PAYOUT_CONFIRMED_STATUSES = ['pending', 'yes', 'no'];
+const PAYOUT_CONFIRMED_LABEL = { pending: 'Pending', yes: 'Yes', no: 'No' };
+const PAYOUT_CONFIRMED_TINT = {
+  pending: { bg: '#fef3c7', fg: '#b45309' },
+  yes:     { bg: '#d1fae5', fg: '#047857' },
+  no:      { bg: '#f3f4f6', fg: '#6b7280' },
 };
 
 // Row overflow menu — Delete / View / Edit / Audit trail tucked behind one
@@ -142,6 +149,31 @@ const RowMenu = ({ items }) => {
   );
 };
 
+// Compact, single-card DP Status breakdown — one card, clickable rows (All /
+// Pending / Paid / Reverted), each showing its own $ total. Replaced four
+// separate KpiTiles per an explicit ask: "combine these into a single kpi
+// with the dollar sign." Payout Status (the separate manual tri-state) stays
+// three individual KpiTiles with plain counts, no $ — a different field with
+// no $ meaning of its own.
+const DpStatusCard = ({ rows, width = 168 }) => (
+  <div className="rounded-xl p-3 flex-shrink-0" style={{ width, backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+    <p className="text-[11px] font-bold uppercase tracking-widest mb-2 m-0" style={{ color: 'var(--color-text-tertiary)' }}>DP Status</p>
+    <div className="space-y-1">
+      {rows.map((r) => {
+        const a = accent(r.tone);
+        return (
+          <button key={r.key} type="button" onClick={r.onClick}
+            className="w-full flex items-center justify-between px-2 py-1 rounded-lg text-left transition-colors"
+            style={{ backgroundColor: r.active ? a.soft : 'transparent' }}>
+            <span className="text-xs font-semibold truncate" style={{ color: r.active ? a.fg : 'var(--color-text-secondary)' }}>{r.label}</span>
+            <span className="text-xs font-bold tabular-nums flex-shrink-0 ml-2" style={{ color: a.fg }}>{r.value}</span>
+          </button>
+        );
+      })}
+    </div>
+  </div>
+);
+
 const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition = '', isPostDate = false }) => {
   const { user, isReadOnly, roControlAllowed } = useAuth();
   // Config-driven status catalog — SuperAdmin → Business Rules → Compliance
@@ -174,16 +206,19 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
   const [search, setSearch]     = useState('');
   const [status, setStatus]     = useState(initStatus);
   const [company, setCompany]   = useState(initCompany);
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo]     = useState('');
+  // Defaults to "This month" (not all-time) — matches the DateRangePicker's
+  // defaultPreset below, so the label and the actual filter agree from load.
+  const [dateFrom, setDateFrom] = useState(() => getPresetRange('month').date_from || '');
+  const [dateTo, setDateTo]     = useState(() => getPresetRange('month').date_to || '');
   const [expanded, setExpanded] = useState(null);
   // Payout section — superadmin only (merged in from the former standalone
   // Payout tab). DP Status filter/KPIs = payout_status; Payout Status
-  // filter = the manual payout_confirmed yes/no.
+  // filter = the manual payout_confirmed tri-state (pending/yes/no).
   const isSuperadmin = user?.role === 'superadmin';
   const [payoutStatus, setPayoutStatus]       = useState('');
   const [payoutConfirmed, setPayoutConfirmed] = useState('');
   const [payoutKpis, setPayoutKpis]           = useState(null);
+  const [payoutConfirmedKpis, setPayoutConfirmedKpis] = useState(null);
   const [payoutExporting, setPayoutExporting] = useState('');
   // Sort + per-column filters. Default is unchanged: newest SALE first (by the
   // Sale Date column the list shows), so the latest sales lead. sale_date nulls
@@ -243,7 +278,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
   const [editCancelDate, setEditCancelDate] = useState('');
   const [editChargebackAmt, setEditChargebackAmt] = useState('');
   const [editPayoutStatus, setEditPayoutStatus]       = useState('pending');
-  const [editPayoutConfirmed, setEditPayoutConfirmed] = useState(false);
+  const [editPayoutConfirmed, setEditPayoutConfirmed] = useState('pending');
   const [editSaving, setEditSaving] = useState(false);
   const [editMsg, setEditMsg]       = useState('');
   // Cancel-like statuses gate the cancellation_date field. Keeps the rule
@@ -288,6 +323,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
       setTotal(res.data.total || 0);
       if (res.data.columns) setColumns(res.data.columns);
       setPayoutKpis(res.data.payout_kpis || null);
+      setPayoutConfirmedKpis(res.data.payout_confirmed_kpis || null);
       // Keep page-1 totals across pages; clear when a status filter is active
       // (then the page-derived breakdown — the one filtered status — is correct).
       setStatusCounts(prev => status ? null : (res.data.status_counts ?? prev));
@@ -355,7 +391,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
     setEditCancelDate(s.cancellation_date || '');
     setEditChargebackAmt(s.chargeback_amount || '');
     setEditPayoutStatus(s.payout_status || 'pending');
-    setEditPayoutConfirmed(!!s.payout_confirmed);
+    setEditPayoutConfirmed(s.payout_confirmed || 'pending');
     setEditMsg('');
   };
 
@@ -403,7 +439,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
       // never blocks the compliance status update that already succeeded.
       if (isSuperadmin && editTarget?.compliance_reviewed_at) {
         const prevStatus    = editTarget.payout_status || 'pending';
-        const prevConfirmed = !!editTarget.payout_confirmed;
+        const prevConfirmed = editTarget.payout_confirmed || 'pending';
         if (editPayoutStatus !== prevStatus || editPayoutConfirmed !== prevConfirmed) {
           try {
             await client.patch(`payouts/${editTarget.id}`, {
@@ -503,7 +539,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
         dateRange={{
           value: { date_from: dateFrom, date_to: dateTo },
           onChange: (r) => { setDateFrom(r.date_from || ''); setDateTo(r.date_to || ''); setPage(1); },
-          defaultPreset: 'all',
+          defaultPreset: 'month',
         }}
         extras={
           <>
@@ -547,8 +583,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                 </FilterSelect>
                 <FilterSelect value={payoutConfirmed} onChange={e => { setPayoutConfirmed(e.target.value); setPage(1); }} title="Filter by Payout Status">
                   <option value="">All Payout Status</option>
-                  <option value="yes">Yes</option>
-                  <option value="no">No</option>
+                  {PAYOUT_CONFIRMED_STATUSES.map(s => <option key={s} value={s}>{PAYOUT_CONFIRMED_LABEL[s]}</option>)}
                 </FilterSelect>
               </span>
             )}
@@ -556,14 +591,24 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
         }
         onClearAll={() => {
           setSearch(''); setCompany(''); setStatus('');
-          setDateFrom(''); setDateTo(''); setChargeFrom(''); setChargeTo(''); setPage(1);
+          // Back to the default range (this month), not all-time — matches
+          // defaultPreset above and what FilterBar's own "Clear all" already
+          // reset the picker to, so the two don't fight over the result.
+          const monthRange = getPresetRange('month');
+          setDateFrom(monthRange.date_from || ''); setDateTo(monthRange.date_to || '');
+          setChargeFrom(''); setChargeTo(''); setPage(1);
           setPayoutStatus(''); setPayoutConfirmed('');
           tq.clearFilter('client_name');
         }}
       />
 
-      {/* Stats strip — compliance's own totals stay on the LEFT; the payout
-          KPI block (superadmin only) sits on the RIGHT. */}
+      {/* Stats strip (compliance's own totals) on the left; the payout KPI
+          block (superadmin only) sits beside it on the SAME line, pinned
+          right. TabStatsStrip is flex-1 (grows/shrinks, 280px floor); the
+          payout block is flex-shrink-0 with its own flex-nowrap + horizontal
+          scroll so a width squeeze scrolls the tiles instead of wrapping them
+          into a ragged second row. Every tile carries both a value AND a sub
+          line (never one without the other) so all 7 stay the same height. */}
       <div className="flex items-start gap-3 flex-wrap">
         <div className="flex-1 min-w-[280px]">
           <TabStatsStrip
@@ -589,10 +634,10 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
         </div>
 
         {isSuperadmin && (
-          <div className="flex-shrink-0 mb-4" style={{ width: 264 }}>
-            <div className="flex items-center justify-between mb-1.5">
+          <div className="flex-shrink-0 mb-4" style={{ maxWidth: '100%' }}>
+            <div className="flex items-center justify-between mb-1.5 gap-2">
               <span className="text-[11px] font-bold uppercase tracking-widest" style={{ color: 'var(--color-text-tertiary)' }}>
-                DP Status
+                Payout
               </span>
               <div className="flex items-center gap-1">
                 <button onClick={handlePayoutCsv} disabled={!!payoutExporting} title="Export payout report — CSV"
@@ -607,16 +652,33 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                 </button>
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              <KpiTile icon={Layers} label="All approved" value={moneyKpi((payoutKpis?.pending?.gross || 0) + (payoutKpis?.paid?.gross || 0) + (payoutKpis?.reverted?.gross || 0))}
-                sub={`${((payoutKpis?.pending?.count || 0) + (payoutKpis?.paid?.count || 0) + (payoutKpis?.reverted?.count || 0)).toLocaleString()} sales`}
-                tone="primary" active={!payoutStatus} onClick={() => { setPayoutStatus(''); setPage(1); }} />
-              <KpiTile icon={Clock} label="Pending" value={moneyKpi(payoutKpis?.pending?.gross)} sub={`${(payoutKpis?.pending?.count || 0).toLocaleString()} sales`}
-                tone="warn" active={payoutStatus === 'pending'} onClick={() => { setPayoutStatus(payoutStatus === 'pending' ? '' : 'pending'); setPage(1); }} />
-              <KpiTile icon={CheckCircle2} label="Paid" value={moneyKpi(payoutKpis?.paid?.gross)} sub={`${(payoutKpis?.paid?.count || 0).toLocaleString()} sales`}
-                tone="success" active={payoutStatus === 'paid'} onClick={() => { setPayoutStatus(payoutStatus === 'paid' ? '' : 'paid'); setPage(1); }} />
-              <KpiTile icon={Undo2} label="Reverted" value={moneyKpi(payoutKpis?.reverted?.gross)} sub={`${(payoutKpis?.reverted?.count || 0).toLocaleString()} sales`}
-                tone="danger" active={payoutStatus === 'reverted'} onClick={() => { setPayoutStatus(payoutStatus === 'reverted' ? '' : 'reverted'); setPage(1); }} />
+            <div className="flex flex-nowrap items-start gap-2 overflow-x-auto pb-1">
+              {/* DP Status — one combined card, four $ rows. */}
+              <DpStatusCard rows={[
+                { key: '', label: 'All', tone: 'primary',
+                  value: moneyKpi((payoutKpis?.pending?.gross || 0) + (payoutKpis?.paid?.gross || 0) + (payoutKpis?.reverted?.gross || 0)),
+                  active: !payoutStatus, onClick: () => { setPayoutStatus(''); setPage(1); } },
+                { key: 'pending', label: 'Pending', tone: 'warn', value: moneyKpi(payoutKpis?.pending?.gross),
+                  active: payoutStatus === 'pending', onClick: () => { setPayoutStatus(payoutStatus === 'pending' ? '' : 'pending'); setPage(1); } },
+                { key: 'paid', label: 'Paid', tone: 'success', value: moneyKpi(payoutKpis?.paid?.gross),
+                  active: payoutStatus === 'paid', onClick: () => { setPayoutStatus(payoutStatus === 'paid' ? '' : 'paid'); setPage(1); } },
+                { key: 'reverted', label: 'Reverted', tone: 'danger', value: moneyKpi(payoutKpis?.reverted?.gross),
+                  active: payoutStatus === 'reverted', onClick: () => { setPayoutStatus(payoutStatus === 'reverted' ? '' : 'reverted'); setPage(1); } },
+              ]} />
+              {/* Payout Status (manual tri-state, mig 244) — three separate
+                  tiles, pending first, plain counts — no $ sign. */}
+              <KpiTile icon={Clock} label="Payout Pending" value={(payoutConfirmedKpis?.pending?.count ?? 0).toLocaleString()}
+                tone="warn" active={payoutConfirmed === 'pending'}
+                onClick={() => { setPayoutConfirmed(payoutConfirmed === 'pending' ? '' : 'pending'); setPage(1); }}
+                className="flex-shrink-0" style={{ width: 116 }} />
+              <KpiTile icon={CheckCircle2} label="Payout Yes" value={(payoutConfirmedKpis?.yes?.count ?? 0).toLocaleString()}
+                tone="success" active={payoutConfirmed === 'yes'}
+                onClick={() => { setPayoutConfirmed(payoutConfirmed === 'yes' ? '' : 'yes'); setPage(1); }}
+                className="flex-shrink-0" style={{ width: 116 }} />
+              <KpiTile icon={XCircle} label="Payout No" value={(payoutConfirmedKpis?.no?.count ?? 0).toLocaleString()}
+                tone="muted" active={payoutConfirmed === 'no'}
+                onClick={() => { setPayoutConfirmed(payoutConfirmed === 'no' ? '' : 'no'); setPage(1); }}
+                className="flex-shrink-0" style={{ width: 116 }} />
             </div>
           </div>
         )}
@@ -789,8 +851,8 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                         <td className="px-3 py-1.5 text-xs">
                           {s.compliance_reviewed_at ? (
                             <span className="inline-flex items-center text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded whitespace-nowrap"
-                              style={{ backgroundColor: s.payout_confirmed ? '#d1fae5' : '#f3f4f6', color: s.payout_confirmed ? '#047857' : '#6b7280' }}>
-                              {s.payout_confirmed ? 'Yes' : 'No'}
+                              style={{ backgroundColor: PAYOUT_CONFIRMED_TINT[s.payout_confirmed || 'pending'].bg, color: PAYOUT_CONFIRMED_TINT[s.payout_confirmed || 'pending'].fg }}>
+                              {PAYOUT_CONFIRMED_LABEL[s.payout_confirmed || 'pending']}
                             </span>
                           ) : <span style={{ color: 'var(--color-text-tertiary)' }}>—</span>}
                         </td>
@@ -999,9 +1061,8 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                   </div>
                   <div>
                     <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--color-text)' }}>Payout Status</label>
-                    <ThemedSelect value={editPayoutConfirmed ? 'yes' : 'no'} onChange={e => setEditPayoutConfirmed(e.target.value === 'yes')} className="input text-sm w-full">
-                      <option value="no">No</option>
-                      <option value="yes">Yes</option>
+                    <ThemedSelect value={editPayoutConfirmed} onChange={e => setEditPayoutConfirmed(e.target.value)} className="input text-sm w-full">
+                      {PAYOUT_CONFIRMED_STATUSES.map(s => <option key={s} value={s}>{PAYOUT_CONFIRMED_LABEL[s]}</option>)}
                     </ThemedSelect>
                   </div>
                 </div>

@@ -7,8 +7,9 @@
 // popup calls when a superadmin sets DP Status / Payout Status on an
 // already-approved sale. Superadmin-only.
 //
-//   DP Status (payout_status)      — pending (default) → paid / reverted
-//   Payout Status (payout_confirmed) — manual boolean, no derived meaning
+//   DP Status (payout_status)        — pending (default) → paid / reverted
+//   Payout Status (payout_confirmed) — manual tri-state, pending (default)
+//                                       → yes / no, no derived meaning
 // ============================================================================
 const express = require('express');
 const { supabaseAdmin } = require('../config/database');
@@ -18,6 +19,7 @@ const { isSuperAdmin } = require('../models/helpers');
 const router = express.Router();
 
 const PAYOUT_STATUSES = ['pending', 'paid', 'reverted'];
+const PAYOUT_CONFIRMED_STATUSES = ['pending', 'yes', 'no'];
 
 router.use(asyncHandler(async (req, res, next) => {
   if (!(await isSuperAdmin(req.user.id))) {
@@ -40,7 +42,10 @@ router.patch('/:id', asyncHandler(async (req, res) => {
     updates.payout_status = payout_status;
   }
   if (payout_confirmed !== undefined) {
-    updates.payout_confirmed = !!payout_confirmed;
+    if (!PAYOUT_CONFIRMED_STATUSES.includes(payout_confirmed)) {
+      return res.status(400).json({ error: 'payout_confirmed must be one of: ' + PAYOUT_CONFIRMED_STATUSES.join(', ') });
+    }
+    updates.payout_confirmed = payout_confirmed;
   }
   if (!Object.keys(updates).length) {
     return res.status(400).json({ error: 'Send payout_status and/or payout_confirmed' });

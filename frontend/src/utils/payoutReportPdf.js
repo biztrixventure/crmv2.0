@@ -16,6 +16,8 @@ const money = (v) => `$${Math.round(Number(v) || 0).toLocaleString()}`;
 
 const PAYOUT_LABEL = { pending: 'Pending', paid: 'Paid', reverted: 'Reverted' };
 const PAYOUT_TINT = { pending: AMBER, paid: GREEN, reverted: RED };
+const PAYOUT_CONFIRMED_LABEL = { pending: 'Pending', yes: 'Yes', no: 'No' };
+const PAYOUT_CONFIRMED_TINT = { pending: AMBER, yes: GREEN, no: MUTE };
 const CANCEL_LIKE = new Set(['cancelled', 'compliance_cancelled', 'closed_lost', 'chargeback', 'dispute']);
 
 export function exportPayoutReportPdf({ rows = [], kpis = null, filters = {}, companyName = '', labelOf } = {}) {
@@ -159,7 +161,7 @@ export function exportPayoutReportPdf({ rows = [], kpis = null, filters = {}, co
         else if (col.k === 'down_payment') { text = s.down_payment ? money(s.down_payment) : '—'; style = 'bold'; }
         else if (col.k === 'status') { text = statusCell; }
         else if (col.k === 'payout_status') { text = PAYOUT_LABEL[s.payout_status] || s.payout_status || 'Pending'; tint = payoutTint; style = 'bold'; }
-        else if (col.k === 'payout_confirmed') { text = s.payout_confirmed ? 'Yes' : 'No'; tint = s.payout_confirmed ? GREEN : MUTE; style = 'bold'; }
+        else if (col.k === 'payout_confirmed') { text = PAYOUT_CONFIRMED_LABEL[s.payout_confirmed] || 'Pending'; tint = PAYOUT_CONFIRMED_TINT[s.payout_confirmed] || AMBER; style = 'bold'; }
         else text = s[col.k] || '—';
         font(style, 7); ink(tint);
         doc.text(clip(text, col.w - 2, 7, style), col.align === 'right' ? cx + col.w - 2 : cx, y + 4.4, { align: col.align });

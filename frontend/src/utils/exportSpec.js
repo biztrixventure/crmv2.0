@@ -57,8 +57,9 @@ const statusLabel = (v, ctx) =>
 // DP Status (mig 243, column payout_status) — a separate lifecycle from
 // `status` above, so it gets its own small label map rather than sharing
 // statusLabel/STATUS_LABEL. Payout Status (mig 244, column payout_confirmed)
-// is a second, independent field — a plain manual yes/no.
+// is a second, independent field — a manual tri-state (pending/yes/no).
 const PAYOUT_STATUS_LABEL = { pending: 'Pending', paid: 'Paid', reverted: 'Reverted' };
+const PAYOUT_CONFIRMED_LABEL = { pending: 'Pending', yes: 'Yes', no: 'No' };
 
 // ── datasets ─────────────────────────────────────────────────────────────────
 export const DATASETS = {
@@ -91,8 +92,8 @@ export const DATASETS = {
       // DP Status (mig 243, payout_status) — pending/paid/reverted, tracked
       // independently of the sale's own compliance `status` above.
       { key: 'payout_status',   label: 'DP Status',       get: s => PAYOUT_STATUS_LABEL[s.payout_status] || s.payout_status || '' },
-      // Payout Status (mig 244, payout_confirmed) — manual yes/no.
-      { key: 'payout_confirmed', label: 'Payout Status',  get: s => (s.payout_confirmed ? 'Yes' : 'No') },
+      // Payout Status (mig 244, payout_confirmed) — manual tri-state.
+      { key: 'payout_confirmed', label: 'Payout Status',  get: s => PAYOUT_CONFIRMED_LABEL[s.payout_confirmed] || s.payout_confirmed || 'Pending' },
     ],
     surfaces: {
       // The reference export — every other sales surface converges on this list

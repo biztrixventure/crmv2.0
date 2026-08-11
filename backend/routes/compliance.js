@@ -7,7 +7,7 @@ const { listCandidatesForSale, listCandidatesByPhone, listCandidatesByLeadId, lo
 const { etDateToUtcStart, etDateToUtcEnd } = require('../utils/etUtils');
 const { escapeOrValue } = require('../utils/searchSanitize');
 const { applySort } = require('../utils/sortHelper');
-const { applyColumnFilters, resolveColumnAccess } = require('../utils/columnFilter');
+const { applyColumnFilters, resolveColumnAccess, parseFilters } = require('../utils/columnFilter');
 const { COMPLIANCE_SALE_COLUMNS, TRANSFER_COLUMNS, CALLBACK_COLUMNS } = require('../config/recordColumns');
 const { onSalesActivityChanged: spiffOnSalesChanged } = require('../utils/spiffMetrics');
 const { readonlyAllowedCompanyIds, scopeToCompanies, companyInScope, maskForReadonly, canViewRecordings } = require('../utils/readonlyGovernance');
@@ -928,7 +928,7 @@ router.get('/sales', asyncHandler(async (req, res) => {
   const { company_id, user_ids, status, disposition, exclude_post_date, charge_from, charge_to, date_from, date_to, search, page = 1, limit = 50, sort_by, sort_dir, filters,
     // Payout section (mig 243/244) — merged into this list from the former
     // standalone Payout tab. payout_status = DP Status (pending/paid/reverted);
-    // payout_confirmed = Payout Status, a manual 'yes'/'no'.
+    // payout_confirmed = Payout Status, a manual tri-state (pending/yes/no).
     payout_status, payout_confirmed } = req.query;
 
   // Which columns THIS caller may sort/filter on (narrowed for a masked RO).
@@ -1010,9 +1010,8 @@ router.get('/sales', asyncHandler(async (req, res) => {
   // Payout section filters — DP Status (pending/paid/reverted) and the manual
   // Payout Status yes/no. Harmless for any caller; only the superadmin UI
   // exposes controls that send these.
-  if (payout_status) query = query.eq('payout_status', payout_status);
-  if (payout_confirmed === 'yes') query = query.eq('payout_confirmed', true);
-  else if (payout_confirmed === 'no') query = query.eq('payout_confirmed', false);
+  if (payout_status)    query = query.eq('payout_status', payout_status);
+  if (payout_confirmed) query = query.eq('payout_confirmed', payout_confirmed);
   query = applySaleSearch(query);
 
   // Per-column header filters LAST, so they narrow inside the company scope and
@@ -1142,17 +1141,26 @@ router.get('/sales', asyncHandler(async (req, res) => {
   // Mask PII / financial for a readonly_admin whose superadmin turned those off.
   const sales = await maskForReadonly(enriched, 'sales', req);
 
+  // The Client column filter (TqTh header popover on "Client") arrives as
+  // {"client_name":{"op":"eq","v":"..."}} inside the same `filters` JSON the
+  // list query already applies via applyColumnFilters — the KPI RPCs below
+  // used to hardcode p_client_name: null, so picking a client narrowed the
+  // table but left every KPI tile showing the totals for ALL clients.
+  const parsedFiltersForKpis = parseFilters(filters);
+  const kpiClientName = parsedFiltersForKpis?.client_name?.v || null;
+
   // Payout KPI sums (DP Status: pending/paid/reverted → $ + count each) —
   // superadmin only, matching the merged section's original superadmin-only
   // scope. Reuses the payout_kpis() RPC from mig 243, scoped by the same
-  // company/date/search filters as the list above (not the column filters or
-  // status, so all three buckets stay comparable while the table narrows).
+  // company/client/date/search filters as the list above (not the DP/Payout
+  // status filters themselves, so all buckets stay comparable while the
+  // table narrows to one).
   let payout_kpis = null;
   if (req.user.role === 'superadmin') {
     payout_kpis = { pending: { count: 0, gross: 0 }, paid: { count: 0, gross: 0 }, reverted: { count: 0, gross: 0 } };
     try {
       const { data: kpiRows } = await supabaseAdmin.rpc('payout_kpis', {
-        p_company_id: company_id || null, p_client_name: null,
+        p_company_id: company_id || null, p_client_name: kpiClientName,
         p_date_from: date_from || null, p_date_to: date_to || null, p_search: search || null,
       });
       for (const row of (kpiRows || [])) {
@@ -1161,7 +1169,24 @@ router.get('/sales', asyncHandler(async (req, res) => {
     } catch { /* mig 243's RPC not applied yet — KPI tiles just read zero */ }
   }
 
-  res.json({ sales, total: count || 0, page: parseInt(page), limit: parseInt(limit), status_counts, columns: access.catalog, payout_kpis });
+  // Payout Status KPIs (the manual tri-state, mig 244) — pending/yes/no →
+  // $ + count each, same company/client/date/search scope as payout_kpis
+  // above. Reuses payout_confirmed_kpis() from mig 244, same pattern.
+  let payout_confirmed_kpis = null;
+  if (req.user.role === 'superadmin') {
+    payout_confirmed_kpis = { pending: { count: 0, gross: 0 }, yes: { count: 0, gross: 0 }, no: { count: 0, gross: 0 } };
+    try {
+      const { data: pcRows } = await supabaseAdmin.rpc('payout_confirmed_kpis', {
+        p_company_id: company_id || null, p_client_name: kpiClientName,
+        p_date_from: date_from || null, p_date_to: date_to || null, p_search: search || null,
+      });
+      for (const row of (pcRows || [])) {
+        if (payout_confirmed_kpis[row.payout_confirmed]) payout_confirmed_kpis[row.payout_confirmed] = { count: Number(row.cnt) || 0, gross: Number(row.gross) || 0 };
+      }
+    } catch { /* mig 244's RPC not applied yet — tiles just read zero */ }
+  }
+
+  res.json({ sales, total: count || 0, page: parseInt(page), limit: parseInt(limit), status_counts, columns: access.catalog, payout_kpis, payout_confirmed_kpis });
 }));
 
 // ── GET /compliance/transfers ─────────────────────────────────────────────────
