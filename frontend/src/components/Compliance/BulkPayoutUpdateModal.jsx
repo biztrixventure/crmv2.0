@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { ListChecks } from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
+import { ListChecks, Search, ArrowUp, ArrowDown } from 'lucide-react';
 import { toast } from 'sonner';
 import client from '../../api/client';
 import ThemedSelect from '../UI/Select';
@@ -30,6 +30,37 @@ const PAID_OPTIONS = [
 
 const money = (v) => (v == null || v === '' ? '—' : `$${Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`);
 
+// Every sortable column + how to read its sort value off a row, plus which
+// ones default to descending on first click (dates/money — newest/highest
+// first reads better than ascending) vs ascending (text).
+const SORT_COLS = {
+  customer_name:    { get: r => (r.customer_name || '').toLowerCase(), dir: 'asc' },
+  customer_phone:   { get: r => r.customer_phone || '', dir: 'asc' },
+  client_name:      { get: r => (r.client_name || '').toLowerCase(), dir: 'asc' },
+  sale_date:        { get: r => r.sale_date || '', dir: 'desc' },
+  down_payment:     { get: r => Number(r.down_payment) || 0, dir: 'desc' },
+  payout_status:    { get: r => r.payout_status || 'pending', dir: 'asc' },
+  payout_confirmed: { get: r => r.payout_confirmed || 'pending', dir: 'asc' },
+};
+
+// Clickable column header — local (in-memory) sort only, since the modal
+// already holds every row matching the tab's filters. Distinct from the
+// server-driven TqTh/ColumnHeader the main Sales table uses.
+const SortTh = ({ col, sortBy, sortDir, onSort, align = 'left', children }) => {
+  const active = sortBy === col;
+  const Icon = sortDir === 'asc' ? ArrowUp : ArrowDown;
+  return (
+    <th className={`px-3 py-2 text-${align} text-xs font-bold select-none cursor-pointer`}
+      style={{ color: active ? 'var(--color-text)' : 'var(--color-text-tertiary)' }}
+      onClick={() => onSort(col)}>
+      <span className={`inline-flex items-center gap-1 ${align === 'right' ? 'flex-row-reverse' : ''}`}>
+        {children}
+        {active && <Icon size={11} />}
+      </span>
+    </th>
+  );
+};
+
 // Compliance Sales tab → "Bulk Update". Loads every sale matching the tab's
 // current filters (same params the CSV/PDF export already uses, so the row
 // count here matches what's on screen) and lets a superadmin apply DP
@@ -43,6 +74,12 @@ const BulkPayoutUpdateModal = ({ fetchParams, onClose, onDone }) => {
   const [payoutConfirmed, setPayoutConfirmed] = useState('');
   const [paidToCloser, setPaidToCloser] = useState('');
   const [saving, setSaving] = useState(false);
+  // Local search/sort — this modal already holds every row matching the
+  // tab's filters, so narrowing further is a client-side operation, not a
+  // new server round-trip.
+  const [q, setQ] = useState('');
+  const [sortBy, setSortBy] = useState('sale_date');
+  const [sortDir, setSortDir] = useState('desc');
 
   useEffect(() => {
     let cancelled = false;
@@ -61,8 +98,42 @@ const BulkPayoutUpdateModal = ({ fetchParams, onClose, onDone }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const allSelected = rows.length > 0 && selected.size === rows.length;
-  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(rows.map(r => r.id)));
+  const displayRows = useMemo(() => {
+    let out = rows;
+    const term = q.trim().toLowerCase();
+    if (term) {
+      out = out.filter(r =>
+        (r.customer_name || '').toLowerCase().includes(term) ||
+        (r.customer_phone || '').toLowerCase().includes(term) ||
+        (r.client_name || '').toLowerCase().includes(term) ||
+        (r.reference_no || '').toLowerCase().includes(term));
+    }
+    const col = SORT_COLS[sortBy];
+    if (col) {
+      out = [...out].sort((a, b) => {
+        const av = col.get(a), bv = col.get(b);
+        if (av < bv) return sortDir === 'asc' ? -1 : 1;
+        if (av > bv) return sortDir === 'asc' ? 1 : -1;
+        return 0;
+      });
+    }
+    return out;
+  }, [rows, q, sortBy, sortDir]);
+
+  const onSort = (col) => {
+    if (sortBy === col) { setSortDir(d => (d === 'asc' ? 'desc' : 'asc')); return; }
+    setSortBy(col);
+    setSortDir(SORT_COLS[col].dir);
+  };
+
+  // Select-all only ever acts on what's currently visible (search-filtered)
+  // — rows hidden by the search box keep whatever selection they already had.
+  const allVisibleSelected = displayRows.length > 0 && displayRows.every(r => selected.has(r.id));
+  const toggleAll = () => setSelected(prev => {
+    const next = new Set(prev);
+    displayRows.forEach(r => (allVisibleSelected ? next.delete(r.id) : next.add(r.id)));
+    return next;
+  });
   const toggleOne = (id) => setSelected(prev => {
     const next = new Set(prev);
     next.has(id) ? next.delete(id) : next.add(id);
@@ -107,29 +178,37 @@ const BulkPayoutUpdateModal = ({ fetchParams, onClose, onDone }) => {
             <p className="text-sm py-6 text-center" style={{ color: 'var(--color-text-tertiary)' }}>No sales match the current filters.</p>
           ) : (
             <>
+              <div className="relative max-w-xs">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
+                <input value={q} onChange={e => setQ(e.target.value)}
+                  placeholder="Search name, phone, client…"
+                  className="input text-sm w-full" style={{ paddingLeft: 30 }} />
+              </div>
               <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
                 <TableScroll label="Bulk update candidates">
                   <table className="w-full text-sm">
                     <thead>
                       <tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
                         <th className="px-3 py-2 text-left">
-                          <input type="checkbox" checked={allSelected} onChange={toggleAll} aria-label="Select all" />
+                          <input type="checkbox" checked={allVisibleSelected} onChange={toggleAll} aria-label="Select all" />
                         </th>
-                        <th className="px-3 py-2 text-left text-xs font-bold" style={{ color: 'var(--color-text-tertiary)' }}>Customer</th>
-                        <th className="px-3 py-2 text-left text-xs font-bold" style={{ color: 'var(--color-text-tertiary)' }}>Client</th>
-                        <th className="px-3 py-2 text-left text-xs font-bold" style={{ color: 'var(--color-text-tertiary)' }}>Sale Date</th>
-                        <th className="px-3 py-2 text-right text-xs font-bold" style={{ color: 'var(--color-text-tertiary)' }}>DP</th>
-                        <th className="px-3 py-2 text-left text-xs font-bold" style={{ color: 'var(--color-text-tertiary)' }}>DP Status</th>
-                        <th className="px-3 py-2 text-left text-xs font-bold" style={{ color: 'var(--color-text-tertiary)' }}>Payout Status</th>
+                        <SortTh col="customer_name" sortBy={sortBy} sortDir={sortDir} onSort={onSort}>Customer</SortTh>
+                        <SortTh col="customer_phone" sortBy={sortBy} sortDir={sortDir} onSort={onSort}>Phone</SortTh>
+                        <SortTh col="client_name" sortBy={sortBy} sortDir={sortDir} onSort={onSort}>Client</SortTh>
+                        <SortTh col="sale_date" sortBy={sortBy} sortDir={sortDir} onSort={onSort}>Sale Date</SortTh>
+                        <SortTh col="down_payment" sortBy={sortBy} sortDir={sortDir} onSort={onSort} align="right">DP</SortTh>
+                        <SortTh col="payout_status" sortBy={sortBy} sortDir={sortDir} onSort={onSort}>DP Status</SortTh>
+                        <SortTh col="payout_confirmed" sortBy={sortBy} sortDir={sortDir} onSort={onSort}>Payout Status</SortTh>
                       </tr>
                     </thead>
                     <tbody>
-                      {rows.map(r => (
+                      {displayRows.map(r => (
                         <tr key={r.id} style={{ borderBottom: '1px solid var(--color-border)' }}>
                           <td className="px-3 py-1.5">
                             <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggleOne(r.id)} aria-label={`Select ${r.customer_name || r.id}`} />
                           </td>
                           <td className="px-3 py-1.5 text-xs font-semibold" style={{ color: 'var(--color-text)' }}>{r.customer_name || '—'}</td>
+                          <td className="px-3 py-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{r.customer_phone || '—'}</td>
                           <td className="px-3 py-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{r.client_name || '—'}</td>
                           <td className="px-3 py-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{r.sale_date ? fmtSaleDate(r.sale_date) : '—'}</td>
                           <td className="px-3 py-1.5 text-xs text-right tabular-nums" style={{ color: 'var(--color-text-secondary)' }}>{money(r.down_payment)}</td>
@@ -142,7 +221,8 @@ const BulkPayoutUpdateModal = ({ fetchParams, onClose, onDone }) => {
                 </TableScroll>
               </div>
               <p className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
-                {selected.size.toLocaleString()} of {rows.length.toLocaleString()} selected
+                {selected.size.toLocaleString()} selected
+                {q.trim() ? ` · ${displayRows.length.toLocaleString()} shown of ${rows.length.toLocaleString()}` : ` of ${rows.length.toLocaleString()}`}
               </p>
             </>
           )}

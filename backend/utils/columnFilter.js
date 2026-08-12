@@ -46,7 +46,7 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 // a typo to be coerced — it is a client that disagrees with the catalog, and
 // range operators are precisely how a masked value gets binary-searched.
 const OPS_BY_TYPE = {
-  text:   ['contains', 'eq', 'starts', 'ends', 'empty', 'notempty'],
+  text:   ['contains', 'eq', 'in', 'starts', 'ends', 'empty', 'notempty'],
   enum:   ['in', 'eq', 'empty', 'notempty'],
   number: ['eq', 'gte', 'lte', 'between'],
   date:   ['on', 'gte', 'lte', 'between', 'empty', 'notempty'],
@@ -119,6 +119,10 @@ function applyOne(query, entry, spec) {
       if (op === 'contains') return query.ilike(col, `%${escLike(v)}%`);
       if (op === 'starts')   return query.ilike(col, `${escLike(v)}%`);
       if (op === 'ends')     return query.ilike(col, `%${escLike(v)}`);
+      if (op === 'in') {
+        const list = asArray(v).map(x => String(x).slice(0, MAX_TEXT)).slice(0, MAX_IN);
+        return list.length ? query.in(col, list) : query;
+      }
       return query.eq(col, String(v).slice(0, MAX_TEXT));
 
     case 'enum': {

@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef } from 'react';
-import { Search, X, Filter as FilterIcon } from 'lucide-react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { createPortal } from 'react-dom';
+import { Search, X, Filter as FilterIcon, ChevronDown, Check } from 'lucide-react';
 import DateRangePicker, { getPresetRange } from './DateRangePicker';
 import ThemedSelect from './Select';
 
@@ -174,5 +175,143 @@ export function FilterSelect({ value, onChange, children, title, className = '',
     >
       {children}
     </ThemedSelect>
+  );
+}
+
+// Same pill footprint as FilterSelect, but a portalled checkbox popover
+// instead of a native <select> so more than one option can be active at
+// once. Value is always an array (never a bare string) — [] means "all".
+//   <MultiFilterSelect value={ids} onChange={setIds} options={opts}
+//                       placeholder="All companies" />
+export function MultiFilterSelect({
+  value = [], onChange, options = [], placeholder = 'All', title, searchable, className = '', style,
+}) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const [rect, setRect] = useState(null);
+  const triggerRef = useRef(null);
+  const menuRef = useRef(null);
+
+  const sel = useMemo(() => new Set(value), [value]);
+  const showSearch = searchable ?? options.length > 8;
+
+  const filtered = useMemo(() => {
+    if (!q.trim()) return options;
+    const s = q.trim().toLowerCase();
+    return options.filter(o => String(o.label).toLowerCase().includes(s));
+  }, [options, q]);
+
+  const place = useCallback(() => {
+    const el = triggerRef.current;
+    if (el) setRect(el.getBoundingClientRect());
+  }, []);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    place();
+    const onDown = (e) => {
+      if (triggerRef.current?.contains(e.target) || menuRef.current?.contains(e.target)) return;
+      setOpen(false);
+    };
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+      window.removeEventListener('resize', place);
+      window.removeEventListener('scroll', place, true);
+    };
+  }, [open, place]);
+
+  const toggle = (v) => onChange(sel.has(v) ? value.filter(x => x !== v) : [...value, v]);
+
+  const triggerLabel = value.length === 0 ? placeholder
+    : value.length === 1 ? (options.find(o => String(o.value) === String(value[0]))?.label ?? placeholder)
+    : `${value.length} selected`;
+
+  const menuStyle = useMemo(() => {
+    if (!rect) return { display: 'none' };
+    const gap = 4;
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const above = spaceBelow < 260 && rect.top > spaceBelow;
+    return {
+      position: 'fixed', left: rect.left, minWidth: Math.max(rect.width, 200), maxWidth: 280,
+      [above ? 'bottom' : 'top']: above ? window.innerHeight - rect.top + gap : rect.bottom + gap,
+      maxHeight: Math.min(280, (above ? rect.top : spaceBelow) - 12),
+    };
+  }, [rect]);
+
+  return (
+    <>
+      <button type="button" ref={triggerRef} title={title} className={className}
+        aria-haspopup="listbox" aria-expanded={open}
+        onClick={() => (open ? setOpen(false) : (place(), setOpen(true)))}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 8, width: 'auto', maxWidth: 220,
+          padding: '8px 12px', borderRadius: 999, cursor: 'pointer', textAlign: 'left', outline: 'none',
+          backgroundColor: value.length ? 'color-mix(in srgb, var(--color-primary) 12%, var(--color-bg-secondary))' : 'var(--color-bg-secondary)',
+          border: `1px solid ${value.length ? 'var(--color-primary)' : 'var(--color-border)'}`,
+          fontSize: 14, fontWeight: 500, color: 'var(--color-text)',
+          ...style,
+        }}>
+        <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: value.length ? 'var(--color-text)' : 'var(--color-placeholder)' }}>
+          {triggerLabel}
+        </span>
+        <ChevronDown size={16} style={{ color: 'var(--color-text-tertiary)', flexShrink: 0, transition: 'transform .15s', transform: open ? 'rotate(180deg)' : 'none' }} />
+      </button>
+
+      {open && createPortal(
+        <div ref={menuRef} role="listbox" style={{
+          ...menuStyle, zIndex: 10000, background: 'var(--color-surface)', border: '1px solid var(--color-border)',
+          borderRadius: 12, boxShadow: 'var(--shadow-lg)', overflowY: 'auto', padding: 4,
+        }}>
+          {value.length > 0 && (
+            <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '2px 6px 6px' }}>
+              <button type="button" onClick={() => onChange([])}
+                style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--color-text-secondary)', background: 'none', border: 'none', cursor: 'pointer' }}>
+                Clear
+              </button>
+            </div>
+          )}
+          {showSearch && (
+            <div style={{ position: 'sticky', top: -4, background: 'var(--color-surface)', padding: '2px 2px 6px', margin: '-4px -4px 2px', borderBottom: '1px solid var(--color-border)' }}>
+              <div style={{ position: 'relative' }}>
+                <Search size={13} style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-tertiary)', pointerEvents: 'none' }} />
+                <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="Search…"
+                  style={{ width: '100%', padding: '7px 10px 7px 28px', fontSize: 13, borderRadius: 8, outline: 'none',
+                    background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }} />
+              </div>
+            </div>
+          )}
+          {filtered.length === 0 && (
+            <div style={{ padding: '10px 12px', fontSize: 13, color: 'var(--color-text-tertiary)' }}>No matches</div>
+          )}
+          {filtered.map((o) => {
+            const on = sel.has(o.value);
+            return (
+              <div key={o.value} role="option" aria-selected={on}
+                onMouseDown={(e) => { e.preventDefault(); toggle(o.value); }}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 8, fontSize: 14, cursor: 'pointer',
+                  color: 'var(--color-text)', fontWeight: on ? 600 : 400,
+                  background: on ? 'color-mix(in srgb, var(--color-primary) 9%, transparent)' : 'transparent',
+                }}>
+                <span style={{
+                  width: 16, height: 16, borderRadius: 4, flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  border: `1px solid ${on ? 'var(--color-primary)' : 'var(--color-border)'}`, background: on ? 'var(--color-primary)' : 'transparent',
+                }}>
+                  {on && <Check size={11} style={{ color: 'var(--color-surface)' }} />}
+                </span>
+                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{o.label}</span>
+              </div>
+            );
+          })}
+        </div>,
+        document.body,
+      )}
+    </>
   );
 }

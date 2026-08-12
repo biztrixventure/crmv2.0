@@ -931,6 +931,15 @@ router.get('/sales', asyncHandler(async (req, res) => {
     // payout_confirmed = Payout Status, a manual tri-state (pending/yes/no).
     payout_status, payout_confirmed } = req.query;
 
+  // Company / Status / DP Status / Payout Status all became multi-select in
+  // the Sales tab filter bar — comma-separated on the wire, same convention
+  // user_ids already used (closer filter). Empty string/absent → [] → the
+  // .eq()/.in() calls below just skip that filter, unchanged from before.
+  const companyIds          = company_id       ? company_id.split(',').filter(Boolean)       : [];
+  const statusList          = status           ? status.split(',').filter(Boolean)           : [];
+  const payoutStatusList    = payout_status    ? payout_status.split(',').filter(Boolean)    : [];
+  const payoutConfirmedList = payout_confirmed ? payout_confirmed.split(',').filter(Boolean) : [];
+
   // Which columns THIS caller may sort/filter on (narrowed for a masked RO).
   const access = await resolveColumnAccess(req, COMPLIANCE_SALE_COLUMNS);
 
@@ -969,22 +978,25 @@ router.get('/sales', asyncHandler(async (req, res) => {
 
   query = applySort(query, sort_by, sort_dir, access.sortMap, { col: 'created_at', asc: false });
 
-  if (company_id) query = query.eq('company_id', company_id);
+  if (companyIds.length) query = query.in('company_id', companyIds);
 
   // readonly_admin company isolation (server-enforced). null = unrestricted;
-  // an array = only those companies. A specific ?company_id outside scope 403s;
-  // the global (no company_id) view is clamped to the allowed closer companies.
+  // an array = only those companies. Any selected company outside scope 403s
+  // the whole request; the global (no company selected) view is clamped to
+  // the allowed closer companies.
   const roAllowed = await readonlyAllowedCompanyIds(req);
   if (Array.isArray(roAllowed)) {
-    if (company_id && !companyInScope(roAllowed, company_id)) return res.status(403).json({ error: 'That company is outside your allowed scope.' });
-    if (!company_id) query = scopeToCompanies(query, roAllowed);
+    if (companyIds.length && companyIds.some(id => !companyInScope(roAllowed, id))) {
+      return res.status(403).json({ error: 'That company is outside your allowed scope.' });
+    }
+    if (!companyIds.length) query = scopeToCompanies(query, roAllowed);
   }
 
   if (user_ids) {
     const ids = user_ids.split(',').filter(Boolean);
     if (ids.length) query = query.in('closer_id', ids);
   }
-  if (status)    query = query.eq('status', status);
+  if (statusList.length) query = query.in('status', statusList);
   // Disposition tab filter (closer_disposition) — drives the dynamic per-
   // disposition tabs (e.g. "Post Date") in compliance.
   if (disposition) {
@@ -1010,8 +1022,8 @@ router.get('/sales', asyncHandler(async (req, res) => {
   // Payout section filters — DP Status (pending/paid/reverted) and the manual
   // Payout Status yes/no. Harmless for any caller; only the superadmin UI
   // exposes controls that send these.
-  if (payout_status)    query = query.eq('payout_status', payout_status);
-  if (payout_confirmed) query = query.eq('payout_confirmed', payout_confirmed);
+  if (payoutStatusList.length)    query = query.in('payout_status', payoutStatusList);
+  if (payoutConfirmedList.length) query = query.in('payout_confirmed', payoutConfirmedList);
   query = applySaleSearch(query);
 
   // Per-column header filters LAST, so they narrow inside the company scope and
@@ -1120,8 +1132,8 @@ router.get('/sales', asyncHandler(async (req, res) => {
     // truncated the old fetch-and-tally). Same filters as the list, minus status.
     const makeSaleBase = () => {
       let q = supabaseAdmin.from('sales').select('*', { count: 'exact', head: true });
-      if (company_id) q = q.eq('company_id', company_id);
-      if (!company_id && Array.isArray(roAllowed)) q = scopeToCompanies(q, roAllowed);
+      if (companyIds.length) q = q.in('company_id', companyIds);
+      if (!companyIds.length && Array.isArray(roAllowed)) q = scopeToCompanies(q, roAllowed);
       if (user_ids) { const ids = user_ids.split(',').filter(Boolean); if (ids.length) q = q.in('closer_id', ids); }
       if (disposition) q = q.eq('closer_disposition', disposition);
       else if (exclude_post_date) q = q.or('closer_disposition.is.null,closer_disposition.not.ilike.%post%date%');
@@ -1147,7 +1159,12 @@ router.get('/sales', asyncHandler(async (req, res) => {
   // used to hardcode p_client_name: null, so picking a client narrowed the
   // table but left every KPI tile showing the totals for ALL clients.
   const parsedFiltersForKpis = parseFilters(filters);
-  const kpiClientName = parsedFiltersForKpis?.client_name?.v || null;
+  // client_name filter arrives as {op:'eq', v:'x'} (legacy single) or
+  // {op:'in', v:['x','y']} (multi-select) — normalize both to an array or
+  // null, matching mig 248's p_client_names text[] (NULL = no filter).
+  const kpiClientNameRaw = parsedFiltersForKpis?.client_name?.v;
+  const kpiClientNames = kpiClientNameRaw ? (Array.isArray(kpiClientNameRaw) ? kpiClientNameRaw : [kpiClientNameRaw]) : null;
+  const kpiCompanyIds = companyIds.length ? companyIds : null;
 
   // Payout KPI sums (DP Status: pending/paid/reverted → $ + count each) —
   // superadmin only, matching the merged section's original superadmin-only
@@ -1160,7 +1177,7 @@ router.get('/sales', asyncHandler(async (req, res) => {
     payout_kpis = { pending: { count: 0, gross: 0 }, paid: { count: 0, gross: 0 }, reverted: { count: 0, gross: 0 } };
     try {
       const { data: kpiRows } = await supabaseAdmin.rpc('payout_kpis', {
-        p_company_id: company_id || null, p_client_name: kpiClientName,
+        p_company_ids: kpiCompanyIds, p_client_names: kpiClientNames,
         p_date_from: date_from || null, p_date_to: date_to || null, p_search: search || null,
       });
       for (const row of (kpiRows || [])) {
@@ -1177,7 +1194,7 @@ router.get('/sales', asyncHandler(async (req, res) => {
     payout_confirmed_kpis = { pending: { count: 0, gross: 0 }, yes: { count: 0, gross: 0 }, no: { count: 0, gross: 0 } };
     try {
       const { data: pcRows } = await supabaseAdmin.rpc('payout_confirmed_kpis', {
-        p_company_id: company_id || null, p_client_name: kpiClientName,
+        p_company_ids: kpiCompanyIds, p_client_names: kpiClientNames,
         p_date_from: date_from || null, p_date_to: date_to || null, p_search: search || null,
       });
       for (const row of (pcRows || [])) {
@@ -1199,7 +1216,7 @@ router.get('/sales', asyncHandler(async (req, res) => {
       const dpStatusClients = await getConfig(null, 'compliance.dp_status_clients', []);
       if (Array.isArray(dpStatusClients) && dpStatusClients.length) {
         const { data: pcbRows } = await supabaseAdmin.rpc('payout_kpis_by_client', {
-          p_company_id: company_id || null, p_client_names: dpStatusClients,
+          p_company_ids: kpiCompanyIds, p_client_names: dpStatusClients,
           p_date_from: date_from || null, p_date_to: date_to || null, p_search: search || null,
         });
         const byClient = {};

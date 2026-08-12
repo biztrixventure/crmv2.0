@@ -12,7 +12,7 @@ import SaleModal from '../Closer/SaleModal';
 import ExportModal from './ExportModal';
 import BulkPayoutUpdateModal from './BulkPayoutUpdateModal';
 import { TableScroll, KpiTile, accent } from '../UI/kit';
-import FilterBar, { FilterSelect } from '../UI/FilterBar';
+import FilterBar, { FilterSelect, MultiFilterSelect } from '../UI/FilterBar';
 import DateRangePicker, { getPresetRange } from '../UI/DateRangePicker';
 import TabStatsStrip from './TabStatsStrip';
 import { prettyDispo } from '../../utils/dispositions';
@@ -205,8 +205,10 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
   const [loadError, setLoadError] = useState('');
   const [page, setPage]         = useState(1);
   const [search, setSearch]     = useState('');
-  const [status, setStatus]     = useState(initStatus);
-  const [company, setCompany]   = useState(initCompany);
+  // Company / Status / Closer / DP Status / Payout Status are all multi-select
+  // — every one is an array now, [] meaning "no filter" (was '' before).
+  const [statuses, setStatuses]     = useState(initStatus ? [initStatus] : []);
+  const [companyIds, setCompanyIds] = useState(initCompany ? [initCompany] : []);
   // Defaults to "This month" (not all-time) — matches the DateRangePicker's
   // defaultPreset below, so the label and the actual filter agree from load.
   const [dateFrom, setDateFrom] = useState(() => getPresetRange('month').date_from || '');
@@ -216,8 +218,8 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
   // Payout tab). DP Status filter/KPIs = payout_status; Payout Status
   // filter = the manual payout_confirmed tri-state (pending/yes/no).
   const isSuperadmin = user?.role === 'superadmin';
-  const [payoutStatus, setPayoutStatus]       = useState('');
-  const [payoutConfirmed, setPayoutConfirmed] = useState('');
+  const [payoutStatuses, setPayoutStatuses]       = useState([]);
+  const [payoutConfirmeds, setPayoutConfirmeds]   = useState([]);
   const [payoutKpis, setPayoutKpis]           = useState(null);
   const [payoutConfirmedKpis, setPayoutConfirmedKpis] = useState(null);
   // Per-client DP Status cards (Business Rules → DP Status Clients, mig 247)
@@ -227,7 +229,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
   const [payoutExporting, setPayoutExporting] = useState('');
   const [bulkModalOpen, setBulkModalOpen] = useState(false);
   // Closer filter — dedicated dropdown, all closer agents.
-  const [closerId, setCloserId] = useState('');
+  const [closerIds, setCloserIds] = useState([]);
   // Sort + per-column filters. Default is unchanged: newest SALE first (by the
   // Sale Date column the list shows), so the latest sales lead. sale_date nulls
   // sort last; created_at is the tiebreaker.
@@ -250,6 +252,16 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
   // Closer filter dropdown — userOptions carries each user's role level;
   // narrow to closers only so fronters/managers don't clutter the list.
   const closerOptions = userOptions.filter(u => u.role === 'closer');
+  // Company dropdown vocabulary for the multi-select — companyList is the
+  // shell's already-loaded {id,name} list, same source the old single-select
+  // <option> loop used.
+  const companyMultiOptions = companyList.map(c => ({ value: c.id, label: c.name }));
+  // A KPI-card row click still means "narrow to just this one" (its old
+  // single-select behavior) — clicking it again clears back to "all". The
+  // filter-bar dropdown above is the new way to pick several at once; this
+  // click-a-tile shortcut stays a single-value toggle for muscle memory.
+  const isSoleFilter = (arr, v) => arr.length === 1 && arr[0] === v;
+  const toggleSoleFilter = (setter, arr, v) => setter(isSoleFilter(arr, v) ? [] : [v]);
 
   const [approving, setApproving]   = useState(null);
   const [detailSale, setDetailSale] = useState(null);
@@ -311,9 +323,9 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
     try {
       const res = await client.get('compliance/sales', {
         params: {
-          search: search || undefined, status: status || undefined,
-          company_id: company || undefined,
-          user_ids: closerId || undefined,
+          search: search || undefined, status: statuses.join(',') || undefined,
+          company_id: companyIds.join(',') || undefined,
+          user_ids: closerIds.join(',') || undefined,
           disposition: disposition || undefined,
           // All Sales (no disposition) hides un-charged post-date sales — they
           // belong only to the Post Date tab until "Charge → Sale" is clicked.
@@ -321,8 +333,8 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
           charge_from: chargeFrom || undefined, charge_to: chargeTo || undefined,
           date_from: dateFrom || undefined, date_to: dateTo || undefined,
           // Payout section (superadmin only — plain undefined for everyone else).
-          payout_status: payoutStatus || undefined,
-          payout_confirmed: payoutConfirmed || undefined,
+          payout_status: payoutStatuses.join(',') || undefined,
+          payout_confirmed: payoutConfirmeds.join(',') || undefined,
           // sort_by / sort_dir / filters — all resolved by useTableQuery.
           ...tq.params,
           page, limit: LIMIT,
@@ -340,7 +352,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
       setPayoutKpisByClient(res.data.payout_kpis_by_client || []);
       // Keep page-1 totals across pages; clear when a status filter is active
       // (then the page-derived breakdown — the one filtered status — is correct).
-      setStatusCounts(prev => status ? null : (res.data.status_counts ?? prev));
+      setStatusCounts(prev => statuses.length ? null : (res.data.status_counts ?? prev));
     } catch (e) {
       // A cancelled request is a superseded one, not a failure — leaving
       // `loading` on would freeze the table on every keystroke.
@@ -350,7 +362,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
       const httpStatus = e.response?.status;   // not the `status` filter above
       setLoadError(e.response?.data?.error || (httpStatus ? `the server returned ${httpStatus}` : (e.message || 'the request failed')));
     } finally { setLoading(false); }
-  }, [search, status, company, closerId, disposition, chargeFrom, chargeTo, dateFrom, dateTo, payoutStatus, payoutConfirmed, page, tq.version, tq.params, abortable]);
+  }, [search, statuses, companyIds, closerIds, disposition, chargeFrom, chargeTo, dateFrom, dateTo, payoutStatuses, payoutConfirmeds, page, tq.version, tq.params, abortable]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -500,15 +512,19 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
   // rows the table is currently showing (current filters, not just the page).
   const payoutExportParams = () => ({
     disposition: disposition || undefined, exclude_post_date: disposition ? undefined : 1,
-    search: search || undefined, status: status || undefined, company_id: company || undefined,
-    user_ids: closerId || undefined,
+    search: search || undefined, status: statuses.join(',') || undefined, company_id: companyIds.join(',') || undefined,
+    user_ids: closerIds.join(',') || undefined,
     date_from: dateFrom || undefined, date_to: dateTo || undefined,
-    payout_status: payoutStatus || undefined, payout_confirmed: payoutConfirmed || undefined,
+    payout_status: payoutStatuses.join(',') || undefined, payout_confirmed: payoutConfirmeds.join(',') || undefined,
     // Column filters (Client, etc.) + sort — same params the on-screen table's
     // own load() sends. Without this, CSV/PDF/bulk-update silently ignored
     // whatever the Client column filter was narrowed to.
     ...tq.params,
   });
+  // A single company name for the export filename — only meaningful when
+  // exactly one company is selected; a multi-company export doesn't have one
+  // scope name to show.
+  const soleCompanyName = companyIds.length === 1 ? companyList.find(c => c.id === companyIds[0])?.name : undefined;
   const handlePayoutCsv = async () => {
     if (payoutExporting) return;
     setPayoutExporting('csv');
@@ -517,7 +533,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
       writeExport({
         dataset: 'sales', surface: 'payout_sales', allowed: null,
         rows, ctx: { labelOf },
-        filename: buildFilename({ dataset: 'payouts', scope: companyList.find(c => c.id === company)?.name, dateFrom, dateTo }),
+        filename: buildFilename({ dataset: 'payouts', scope: soleCompanyName, dateFrom, dateTo }),
       });
     } catch (err) { toast.error(err.egressBlocked ? err.message : 'Failed to export CSV'); }
     finally { setPayoutExporting(''); }
@@ -530,8 +546,8 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
       const { exportPayoutReportPdf } = await import('../../utils/payoutReportPdf');
       exportPayoutReportPdf({
         rows, kpis: payoutKpis, labelOf,
-        filters: { date_from: dateFrom, date_to: dateTo, payout_status: payoutStatus },
-        companyName: companyList.find(c => c.id === company)?.name || '',
+        filters: { date_from: dateFrom, date_to: dateTo, payout_status: payoutStatuses.join(', ') },
+        companyName: soleCompanyName || '',
       });
     } catch (err) { toast.error(err.egressBlocked ? err.message : 'Could not build the PDF'); }
     finally { setPayoutExporting(''); }
@@ -563,24 +579,16 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
         }}
         extras={
           <>
-            <FilterSelect value={company} onChange={e => { setCompany(e.target.value); setPage(1); }} title="Filter by company">
-              <option value="">All companies</option>
-              {companyList.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </FilterSelect>
-            <FilterSelect value={tq.draft?.client_name?.v || ''}
-              onChange={e => { const v = e.target.value; tq.setFilter('client_name', v ? { op: 'eq', v } : null); }}
-              title="Filter by client">
-              <option value="">All clients</option>
-              {clientOptions.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
-            </FilterSelect>
-            <FilterSelect value={status} onChange={e => { setStatus(e.target.value); setPage(1); }} title="Filter by status">
-              <option value="">All statuses</option>
-              {ALL_SALE_STATUSES.map(s => <option key={s} value={s}>{labelOf(s)}</option>)}
-            </FilterSelect>
-            <FilterSelect value={closerId} onChange={e => { setCloserId(e.target.value); setPage(1); }} title="Filter by closer">
-              <option value="">All closers</option>
-              {closerOptions.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
-            </FilterSelect>
+            <MultiFilterSelect value={companyIds} onChange={v => { setCompanyIds(v); setPage(1); }}
+              options={companyMultiOptions} placeholder="All companies" title="Filter by company" />
+            <MultiFilterSelect
+              value={Array.isArray(tq.draft?.client_name?.v) ? tq.draft.client_name.v : (tq.draft?.client_name?.v ? [tq.draft.client_name.v] : [])}
+              onChange={v => tq.setFilter('client_name', v.length ? { op: 'in', v } : null)}
+              options={clientOptions} placeholder="All clients" title="Filter by client" />
+            <MultiFilterSelect value={statuses} onChange={v => { setStatuses(v); setPage(1); }}
+              options={statusOptions} placeholder="All statuses" title="Filter by status" />
+            <MultiFilterSelect value={closerIds} onChange={v => { setCloserIds(v); setPage(1); }}
+              options={closerOptions} placeholder="All closers" title="Filter by closer" />
             {isPostDate && (
               <span className="inline-flex items-center gap-1.5">
                 <span className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>Charge:</span>
@@ -601,27 +609,25 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                 the filter bar (ml-auto) so compliance's own filters stay left. */}
             {isSuperadmin && (
               <span className="inline-flex items-center gap-2 ml-auto">
-                <FilterSelect value={payoutStatus} onChange={e => { setPayoutStatus(e.target.value); setPage(1); }} title="Filter by DP Status">
-                  <option value="">All DP Status</option>
-                  {PAYOUT_STATUSES.map(s => <option key={s} value={s}>{PAYOUT_LABEL[s]}</option>)}
-                </FilterSelect>
-                <FilterSelect value={payoutConfirmed} onChange={e => { setPayoutConfirmed(e.target.value); setPage(1); }} title="Filter by Payout Status">
-                  <option value="">All Payout Status</option>
-                  {PAYOUT_CONFIRMED_STATUSES.map(s => <option key={s} value={s}>{PAYOUT_CONFIRMED_LABEL[s]}</option>)}
-                </FilterSelect>
+                <MultiFilterSelect value={payoutStatuses} onChange={v => { setPayoutStatuses(v); setPage(1); }}
+                  options={PAYOUT_STATUSES.map(s => ({ value: s, label: PAYOUT_LABEL[s] }))}
+                  placeholder="All DP Status" title="Filter by DP Status" />
+                <MultiFilterSelect value={payoutConfirmeds} onChange={v => { setPayoutConfirmeds(v); setPage(1); }}
+                  options={PAYOUT_CONFIRMED_STATUSES.map(s => ({ value: s, label: PAYOUT_CONFIRMED_LABEL[s] }))}
+                  placeholder="All Payout Status" title="Filter by Payout Status" />
               </span>
             )}
           </>
         }
         onClearAll={() => {
-          setSearch(''); setCompany(''); setStatus(''); setCloserId('');
+          setSearch(''); setCompanyIds([]); setStatuses([]); setCloserIds([]);
           // Back to the default range (this month), not all-time — matches
           // defaultPreset above and what FilterBar's own "Clear all" already
           // reset the picker to, so the two don't fight over the result.
           const monthRange = getPresetRange('month');
           setDateFrom(monthRange.date_from || ''); setDateTo(monthRange.date_to || '');
           setChargeFrom(''); setChargeTo(''); setPage(1);
-          setPayoutStatus(''); setPayoutConfirmed('');
+          setPayoutStatuses([]); setPayoutConfirmeds([]);
           tq.clearFilter('client_name');
         }}
       />
@@ -639,8 +645,8 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
             total={total}
             records={sales}
             statusTotals={statusCounts}
-            activeStatus={status}
-            onSelectStatus={(s) => { setStatus(s); setPage(1); }}
+            activeStatus={statuses.length === 1 ? statuses[0] : ''}
+            onSelectStatus={(s) => { setStatuses(s ? [s] : []); setPage(1); }}
             labelOf={labelOf}
             badgeOf={(key) => {
               // Map the catalog badge variant to bg/color the strip expects.
@@ -686,13 +692,13 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
               <DpStatusCard rows={[
                 { key: '', label: 'All', tone: 'primary',
                   value: moneyKpi((payoutKpis?.pending?.gross || 0) + (payoutKpis?.paid?.gross || 0) + (payoutKpis?.reverted?.gross || 0)),
-                  active: !payoutStatus, onClick: () => { setPayoutStatus(''); setPage(1); } },
+                  active: !payoutStatuses.length, onClick: () => { setPayoutStatuses([]); setPage(1); } },
                 { key: 'pending', label: 'Pending', tone: 'warn', value: moneyKpi(payoutKpis?.pending?.gross),
-                  active: payoutStatus === 'pending', onClick: () => { setPayoutStatus(payoutStatus === 'pending' ? '' : 'pending'); setPage(1); } },
+                  active: isSoleFilter(payoutStatuses, 'pending'), onClick: () => { toggleSoleFilter(setPayoutStatuses, payoutStatuses, 'pending'); setPage(1); } },
                 { key: 'paid', label: 'Paid', tone: 'success', value: moneyKpi(payoutKpis?.paid?.gross),
-                  active: payoutStatus === 'paid', onClick: () => { setPayoutStatus(payoutStatus === 'paid' ? '' : 'paid'); setPage(1); } },
+                  active: isSoleFilter(payoutStatuses, 'paid'), onClick: () => { toggleSoleFilter(setPayoutStatuses, payoutStatuses, 'paid'); setPage(1); } },
                 { key: 'reverted', label: 'Reverted', tone: 'danger', value: moneyKpi(payoutKpis?.reverted?.gross),
-                  active: payoutStatus === 'reverted', onClick: () => { setPayoutStatus(payoutStatus === 'reverted' ? '' : 'reverted'); setPage(1); } },
+                  active: isSoleFilter(payoutStatuses, 'reverted'), onClick: () => { toggleSoleFilter(setPayoutStatuses, payoutStatuses, 'reverted'); setPage(1); } },
               ]} />
               {/* Per-client DP Status cards (Business Rules → DP Status
                   Clients, mig 247) — always show every configured client,
@@ -700,40 +706,41 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                   row still SETS that filter (+ payoutStatus) as an action;
                   it just never collapses the card list. */}
               {payoutKpisByClient.map((c) => {
-                const clientFilterActive = (tq.draft?.client_name?.v || '') === c.client;
+                const clientFilterValues = Array.isArray(tq.draft?.client_name?.v) ? tq.draft.client_name.v : (tq.draft?.client_name?.v ? [tq.draft.client_name.v] : []);
+                const clientFilterActive = isSoleFilter(clientFilterValues, c.client);
                 const drill = (statusKey) => {
-                  tq.setFilter('client_name', { op: 'eq', v: c.client });
-                  setPayoutStatus(clientFilterActive && payoutStatus === statusKey ? '' : statusKey);
+                  tq.setFilter('client_name', { op: 'in', v: [c.client] });
+                  setPayoutStatuses(clientFilterActive && isSoleFilter(payoutStatuses, statusKey) ? [] : [statusKey]);
                   setPage(1);
                 };
                 const totalGross = (c.pending?.gross || 0) + (c.paid?.gross || 0) + (c.reverted?.gross || 0);
                 return (
                   <DpStatusCard key={c.client} title={c.client} rows={[
                     { key: '', label: 'All', tone: 'primary', value: moneyKpi(totalGross),
-                      active: clientFilterActive && !payoutStatus,
-                      onClick: () => { tq.setFilter('client_name', clientFilterActive ? null : { op: 'eq', v: c.client }); setPayoutStatus(''); setPage(1); } },
+                      active: clientFilterActive && !payoutStatuses.length,
+                      onClick: () => { tq.setFilter('client_name', clientFilterActive ? null : { op: 'in', v: [c.client] }); setPayoutStatuses([]); setPage(1); } },
                     { key: 'pending', label: 'Pending', tone: 'warn', value: moneyKpi(c.pending?.gross),
-                      active: clientFilterActive && payoutStatus === 'pending', onClick: () => drill('pending') },
+                      active: clientFilterActive && isSoleFilter(payoutStatuses, 'pending'), onClick: () => drill('pending') },
                     { key: 'paid', label: 'Paid', tone: 'success', value: moneyKpi(c.paid?.gross),
-                      active: clientFilterActive && payoutStatus === 'paid', onClick: () => drill('paid') },
+                      active: clientFilterActive && isSoleFilter(payoutStatuses, 'paid'), onClick: () => drill('paid') },
                     { key: 'reverted', label: 'Reverted', tone: 'danger', value: moneyKpi(c.reverted?.gross),
-                      active: clientFilterActive && payoutStatus === 'reverted', onClick: () => drill('reverted') },
+                      active: clientFilterActive && isSoleFilter(payoutStatuses, 'reverted'), onClick: () => drill('reverted') },
                   ]} />
                 );
               })}
               {/* Payout Status (manual tri-state, mig 244) — three separate
                   tiles, pending first, plain counts — no $ sign. */}
               <KpiTile icon={Clock} label="Payout Pending" value={(payoutConfirmedKpis?.pending?.count ?? 0).toLocaleString()}
-                tone="warn" active={payoutConfirmed === 'pending'}
-                onClick={() => { setPayoutConfirmed(payoutConfirmed === 'pending' ? '' : 'pending'); setPage(1); }}
+                tone="warn" active={isSoleFilter(payoutConfirmeds, 'pending')}
+                onClick={() => { toggleSoleFilter(setPayoutConfirmeds, payoutConfirmeds, 'pending'); setPage(1); }}
                 className="flex-shrink-0" style={{ width: 116 }} />
               <KpiTile icon={CheckCircle2} label="Payout Yes" value={(payoutConfirmedKpis?.yes?.count ?? 0).toLocaleString()}
-                tone="success" active={payoutConfirmed === 'yes'}
-                onClick={() => { setPayoutConfirmed(payoutConfirmed === 'yes' ? '' : 'yes'); setPage(1); }}
+                tone="success" active={isSoleFilter(payoutConfirmeds, 'yes')}
+                onClick={() => { toggleSoleFilter(setPayoutConfirmeds, payoutConfirmeds, 'yes'); setPage(1); }}
                 className="flex-shrink-0" style={{ width: 116 }} />
               <KpiTile icon={XCircle} label="Payout No" value={(payoutConfirmedKpis?.no?.count ?? 0).toLocaleString()}
-                tone="muted" active={payoutConfirmed === 'no'}
-                onClick={() => { setPayoutConfirmed(payoutConfirmed === 'no' ? '' : 'no'); setPage(1); }}
+                tone="muted" active={isSoleFilter(payoutConfirmeds, 'no')}
+                onClick={() => { toggleSoleFilter(setPayoutConfirmeds, payoutConfirmeds, 'no'); setPage(1); }}
                 className="flex-shrink-0" style={{ width: 116 }} />
             </div>
           </div>
@@ -761,7 +768,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
             msg={loadError ? 'The list could not be loaded.' : 'No sales match the current filters.'}
             hint={loadError ? 'This is a load failure, not an empty result — the records are still there.'
               : tq.activeCount ? 'A column filter is narrowing this list. Clear it to see every sale again.'
-              : (search || status || company || dateFrom || dateTo)
+              : (search || statuses.length || companyIds.length || dateFrom || dateTo)
                 ? 'Search, status, company or date filters are active above.'
                 : null}
             onAction={!loadError && tq.activeCount ? tq.clearAll : null}
