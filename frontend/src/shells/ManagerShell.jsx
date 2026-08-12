@@ -1115,6 +1115,10 @@ const ManagerShell = ({ workspaceMode = false }) => {
                           <SortTh col="monthly_payment" sort={salesSort} onSort={toggleSalesSort}>Monthly</SortTh>
                         )}
                         <SortTh col="sale_date" sort={salesSort} onSort={toggleSalesSort}>Sale Date</SortTh>
+                        {/* Superadmin-set flag (Compliance Sales tab Update popup) — the
+                            company's own payout status, separate from the individual
+                            closer's "Paid to closer" incentive. company_admin only. */}
+                        {isCoAdmin && <Th>Paid to Partner</Th>}
                         {hasPermission('delete_sale') && <Th>Action</Th>}
                       </tr>
                     </thead>
@@ -1146,6 +1150,17 @@ const ManagerShell = ({ workspaceMode = false }) => {
                               prints it as the calendar day stored, never shifting one
                               day backward in US timezones the way fmtDateET would. */}
                           <td className="px-3 py-1.5 text-xs whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>{s.sale_date ? fmtSaleDate(s.sale_date) : fmtDateET(s.created_at)}</td>
+                          {isCoAdmin && (
+                            <td className="px-3 py-1.5">
+                              <span className="inline-flex items-center text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded whitespace-nowrap"
+                                style={{
+                                  backgroundColor: s.paid_to_partner ? 'var(--color-success-100)' : 'var(--color-bg-secondary)',
+                                  color: s.paid_to_partner ? 'var(--color-success-700)' : 'var(--color-text-tertiary)',
+                                }}>
+                                {s.paid_to_partner ? 'Paid' : 'Pending'}
+                              </span>
+                            </td>
+                          )}
                           {hasPermission('delete_sale') && (
                             <td className="px-3 py-1.5">
                               <button onClick={e => { e.stopPropagation(); if (window.confirm('Delete this sale?')) { deleteSale(s.id).then(() => fetchSalesTab()); } }}

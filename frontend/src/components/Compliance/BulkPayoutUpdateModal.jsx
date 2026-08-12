@@ -73,6 +73,7 @@ const BulkPayoutUpdateModal = ({ fetchParams, onClose, onDone }) => {
   const [dpStatus, setDpStatus] = useState('');
   const [payoutConfirmed, setPayoutConfirmed] = useState('');
   const [paidToCloser, setPaidToCloser] = useState('');
+  const [paidToPartner, setPaidToPartner] = useState('');
   const [saving, setSaving] = useState(false);
   // Local search/sort — this modal already holds every row matching the
   // tab's filters, so narrowing further is a client-side operation, not a
@@ -140,7 +141,7 @@ const BulkPayoutUpdateModal = ({ fetchParams, onClose, onDone }) => {
     return next;
   });
 
-  const noFieldChosen = !dpStatus && !payoutConfirmed && !paidToCloser;
+  const noFieldChosen = !dpStatus && !payoutConfirmed && !paidToCloser && !paidToPartner;
 
   const submit = async () => {
     if (!selected.size || noFieldChosen) return;
@@ -151,6 +152,7 @@ const BulkPayoutUpdateModal = ({ fetchParams, onClose, onDone }) => {
         payout_status: dpStatus || undefined,
         payout_confirmed: payoutConfirmed || undefined,
         paid_to_closer: paidToCloser === '' ? undefined : paidToCloser === 'yes',
+        paid_to_partner: paidToPartner === '' ? undefined : paidToPartner === 'yes',
       });
       toast.success(`Updated ${data.updated}${data.skipped ? `, skipped ${data.skipped}` : ''}`);
       onDone();
@@ -229,7 +231,7 @@ const BulkPayoutUpdateModal = ({ fetchParams, onClose, onDone }) => {
         </div>
 
         {/* Footer controls — one set applied to every selected row. */}
-        <div className="flex-shrink-0 p-4 sm:p-6 grid grid-cols-1 sm:grid-cols-3 gap-3" style={{ borderTop: '1px solid var(--color-border)' }}>
+        <div className="flex-shrink-0 p-4 sm:p-6 grid grid-cols-1 sm:grid-cols-4 gap-3" style={{ borderTop: '1px solid var(--color-border)' }}>
           <div>
             <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--color-text)' }}>DP Status</label>
             <ThemedSelect value={dpStatus} onChange={e => setDpStatus(e.target.value)} className="input text-sm w-full">
@@ -248,7 +250,13 @@ const BulkPayoutUpdateModal = ({ fetchParams, onClose, onDone }) => {
               {PAID_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </ThemedSelect>
           </div>
-          <div className="sm:col-span-3 flex gap-3">
+          <div>
+            <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--color-text)' }}>Paid to Partner</label>
+            <ThemedSelect value={paidToPartner} onChange={e => setPaidToPartner(e.target.value)} className="input text-sm w-full">
+              {PAID_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </ThemedSelect>
+          </div>
+          <div className="sm:col-span-4 flex gap-3">
             <button onClick={onClose}
               className="flex-1 py-2.5 rounded-xl border font-semibold text-sm"
               style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>Cancel</button>

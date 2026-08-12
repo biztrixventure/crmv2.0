@@ -14,6 +14,11 @@
 //                                       eligible payout actually gone out.
 //                                       Surfaced to the closer as the
 //                                       "Incentive" pill on their Sale card.
+//   Paid to Partner (paid_to_partner)— mig 249, independent boolean: has the
+//                                       sale's own COMPANY been paid out.
+//                                       Surfaced to that company's
+//                                       company_admin in ManagerShell's
+//                                       Team Sales tab.
 // ============================================================================
 const express = require('express');
 const { supabaseAdmin } = require('../config/database');
@@ -42,7 +47,7 @@ router.use(asyncHandler(async (req, res, next) => {
 const BULK_CHUNK = 150;
 const BULK_MAX_IDS = 10000;
 router.patch('/bulk', asyncHandler(async (req, res) => {
-  const { ids, payout_status, payout_confirmed, paid_to_closer } = req.body || {};
+  const { ids, payout_status, payout_confirmed, paid_to_closer, paid_to_partner } = req.body || {};
   if (!Array.isArray(ids) || !ids.length) {
     return res.status(400).json({ error: 'ids must be a non-empty array' });
   }
@@ -64,8 +69,9 @@ router.patch('/bulk', asyncHandler(async (req, res) => {
     updates.payout_confirmed = payout_confirmed;
   }
   if (paid_to_closer !== undefined) updates.paid_to_closer = !!paid_to_closer;
+  if (paid_to_partner !== undefined) updates.paid_to_partner = !!paid_to_partner;
   if (!Object.keys(updates).length) {
-    return res.status(400).json({ error: 'Send payout_status, payout_confirmed, and/or paid_to_closer' });
+    return res.status(400).json({ error: 'Send payout_status, payout_confirmed, paid_to_closer, and/or paid_to_partner' });
   }
   updates.payout_updated_at = new Date().toISOString();
   updates.payout_updated_by = req.user.id;
@@ -93,7 +99,7 @@ router.patch('/bulk', asyncHandler(async (req, res) => {
 // field may be sent alone; at least one is required.
 router.patch('/:id', asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { payout_status, payout_confirmed, paid_to_closer } = req.body;
+  const { payout_status, payout_confirmed, paid_to_closer, paid_to_partner } = req.body;
 
   const updates = {};
   if (payout_status !== undefined) {
@@ -109,8 +115,9 @@ router.patch('/:id', asyncHandler(async (req, res) => {
     updates.payout_confirmed = payout_confirmed;
   }
   if (paid_to_closer !== undefined) updates.paid_to_closer = !!paid_to_closer;
+  if (paid_to_partner !== undefined) updates.paid_to_partner = !!paid_to_partner;
   if (!Object.keys(updates).length) {
-    return res.status(400).json({ error: 'Send payout_status, payout_confirmed, and/or paid_to_closer' });
+    return res.status(400).json({ error: 'Send payout_status, payout_confirmed, paid_to_closer, and/or paid_to_partner' });
   }
   updates.payout_updated_at = new Date().toISOString();
   updates.payout_updated_by = req.user.id;
@@ -120,7 +127,7 @@ router.patch('/:id', asyncHandler(async (req, res) => {
     .update(updates)
     .eq('id', id)
     .not('compliance_reviewed_at', 'is', null)
-    .select('id, payout_status, payout_confirmed, paid_to_closer, payout_updated_at')
+    .select('id, payout_status, payout_confirmed, paid_to_closer, paid_to_partner, payout_updated_at')
     .maybeSingle();
   if (error) return res.status(500).json({ error: error.message });
   if (!data) return res.status(404).json({ error: 'Sale not found, or it has never been compliance-approved' });

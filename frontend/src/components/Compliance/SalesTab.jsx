@@ -303,6 +303,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
   const [editPayoutStatus, setEditPayoutStatus]       = useState('pending');
   const [editPayoutConfirmed, setEditPayoutConfirmed] = useState('pending');
   const [editPaidToCloser, setEditPaidToCloser]       = useState(false);
+  const [editPaidToPartner, setEditPaidToPartner]     = useState(false);
   const [editSaving, setEditSaving] = useState(false);
   const [editMsg, setEditMsg]       = useState('');
   // Cancel-like statuses gate the cancellation_date field. Keeps the rule
@@ -419,6 +420,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
     setEditPayoutStatus(s.payout_status || 'pending');
     setEditPayoutConfirmed(s.payout_confirmed || 'pending');
     setEditPaidToCloser(!!s.paid_to_closer);
+    setEditPaidToPartner(!!s.paid_to_partner);
     setEditMsg('');
   };
 
@@ -467,10 +469,12 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
         const prevStatus    = editTarget.payout_status || 'pending';
         const prevConfirmed = editTarget.payout_confirmed || 'pending';
         const prevPaid      = !!editTarget.paid_to_closer;
-        if (editPayoutStatus !== prevStatus || editPayoutConfirmed !== prevConfirmed || editPaidToCloser !== prevPaid) {
+        const prevPartner   = !!editTarget.paid_to_partner;
+        if (editPayoutStatus !== prevStatus || editPayoutConfirmed !== prevConfirmed || editPaidToCloser !== prevPaid || editPaidToPartner !== prevPartner) {
           try {
             await client.patch(`payouts/${editTarget.id}`, {
-              payout_status: editPayoutStatus, payout_confirmed: editPayoutConfirmed, paid_to_closer: editPaidToCloser,
+              payout_status: editPayoutStatus, payout_confirmed: editPayoutConfirmed,
+              paid_to_closer: editPaidToCloser, paid_to_partner: editPaidToPartner,
             });
           } catch (payoutErr) {
             toast.error(payoutErr.response?.data?.error || 'Saved the compliance update, but the payout fields failed to save');
@@ -1143,6 +1147,15 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                     </label>
                     <p className="text-[11px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
                       Shows as "Paid" on the closer's own Incentive pill instead of "Eligible".
+                    </p>
+                  </div>
+                  <div className="col-span-2">
+                    <label className="flex items-center gap-2 text-sm font-semibold cursor-pointer" style={{ color: 'var(--color-text)' }}>
+                      <input type="checkbox" checked={editPaidToPartner} onChange={e => setEditPaidToPartner(e.target.checked)} />
+                      Paid to Partner
+                    </label>
+                    <p className="text-[11px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
+                      Independent of "Paid to closer" — this reflects to the company_admin of {editTarget?.companies?.name || 'this sale\'s company'} in their Team Sales tab.
                     </p>
                   </div>
                 </div>
