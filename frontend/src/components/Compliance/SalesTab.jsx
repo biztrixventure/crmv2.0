@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect, useRef, Fragment } from 'react';
 import { createPortal } from 'react-dom';
 import { useFocus, useNavFocus } from '../../contexts/FocusContext';
 import { useSaleDeepLink } from '../../hooks/useSaleDeepLink';
-import { Shield, RotateCcw, Trash2, Eye, ChevronDown, ChevronUp, CheckCircle, Pencil, MoreVertical, Clock, CheckCircle2, XCircle, Download, FileDown } from 'lucide-react';
+import { Shield, RotateCcw, Trash2, Eye, ChevronDown, ChevronUp, CheckCircle, Pencil, MoreVertical, Clock, CheckCircle2, XCircle, Download, FileDown, ListChecks } from 'lucide-react';
 import { Badge } from '../UI';
 import SaleStatusBadge from '../UI/SaleStatusBadge';
 import { toast } from 'sonner';
@@ -10,6 +10,7 @@ import client from '../../api/client';
 import SaleDetailDrawer from '../Shared/SaleDetailDrawer';
 import SaleModal from '../Closer/SaleModal';
 import ExportModal from './ExportModal';
+import BulkPayoutUpdateModal from './BulkPayoutUpdateModal';
 import { TableScroll, KpiTile, accent } from '../UI/kit';
 import FilterBar, { FilterSelect } from '../UI/FilterBar';
 import DateRangePicker, { getPresetRange } from '../UI/DateRangePicker';
@@ -224,6 +225,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
   // Client column filter below.
   const [payoutKpisByClient, setPayoutKpisByClient] = useState([]);
   const [payoutExporting, setPayoutExporting] = useState('');
+  const [bulkModalOpen, setBulkModalOpen] = useState(false);
   // Closer filter — dedicated dropdown, all closer agents.
   const [closerId, setCloserId] = useState('');
   // Sort + per-column filters. Default is unchanged: newest SALE first (by the
@@ -499,8 +501,13 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
   const payoutExportParams = () => ({
     disposition: disposition || undefined, exclude_post_date: disposition ? undefined : 1,
     search: search || undefined, status: status || undefined, company_id: company || undefined,
+    user_ids: closerId || undefined,
     date_from: dateFrom || undefined, date_to: dateTo || undefined,
     payout_status: payoutStatus || undefined, payout_confirmed: payoutConfirmed || undefined,
+    // Column filters (Client, etc.) + sort — same params the on-screen table's
+    // own load() sends. Without this, CSV/PDF/bulk-update silently ignored
+    // whatever the Client column filter was narrowed to.
+    ...tq.params,
   });
   const handlePayoutCsv = async () => {
     if (payoutExporting) return;
@@ -666,6 +673,11 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                   className="p-1.5 rounded-full border disabled:opacity-50 transition-colors"
                   style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)', backgroundColor: 'var(--color-surface)' }}>
                   <FileDown size={12} />
+                </button>
+                <button onClick={() => setBulkModalOpen(true)} title="Bulk update DP Status / Payout Status / Paid to closer"
+                  className="p-1.5 rounded-full border disabled:opacity-50 transition-colors"
+                  style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)', backgroundColor: 'var(--color-surface)' }}>
+                  <ListChecks size={12} />
                 </button>
               </div>
             </div>
@@ -1184,6 +1196,13 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
       {exportOpen && (
         <ExportModal tab="sales" companyList={companyList}
           onClose={() => setExportOpen(false)} onExport={handleExport} />
+      )}
+      {bulkModalOpen && (
+        <BulkPayoutUpdateModal
+          fetchParams={payoutExportParams()}
+          onClose={() => setBulkModalOpen(false)}
+          onDone={() => { setBulkModalOpen(false); load(); }}
+        />
       )}
 
       {/* Compliance field-level edit — SaleModal in update mode. */}

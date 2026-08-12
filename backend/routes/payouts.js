@@ -32,6 +32,63 @@ router.use(asyncHandler(async (req, res, next) => {
   next();
 }));
 
+// PATCH /payouts/bulk — same fields as the single-row PATCH below, applied to
+// many sales at once (the Compliance Sales tab's "Bulk Update" modal). Must
+// be declared BEFORE /:id or Express would match "bulk" as an :id param.
+//
+// ids are chunked at 150 per .in() call — a raw PostgREST filter, so a huge
+// id list overflows the request URL the same way other bulk id lookups in
+// this codebase already chunk at 150 for.
+const BULK_CHUNK = 150;
+const BULK_MAX_IDS = 10000;
+router.patch('/bulk', asyncHandler(async (req, res) => {
+  const { ids, payout_status, payout_confirmed, paid_to_closer } = req.body || {};
+  if (!Array.isArray(ids) || !ids.length) {
+    return res.status(400).json({ error: 'ids must be a non-empty array' });
+  }
+  if (ids.length > BULK_MAX_IDS) {
+    return res.status(400).json({ error: `Too many rows selected (max ${BULK_MAX_IDS} per bulk update).` });
+  }
+
+  const updates = {};
+  if (payout_status !== undefined) {
+    if (!PAYOUT_STATUSES.includes(payout_status)) {
+      return res.status(400).json({ error: 'payout_status must be one of: ' + PAYOUT_STATUSES.join(', ') });
+    }
+    updates.payout_status = payout_status;
+  }
+  if (payout_confirmed !== undefined) {
+    if (!PAYOUT_CONFIRMED_STATUSES.includes(payout_confirmed)) {
+      return res.status(400).json({ error: 'payout_confirmed must be one of: ' + PAYOUT_CONFIRMED_STATUSES.join(', ') });
+    }
+    updates.payout_confirmed = payout_confirmed;
+  }
+  if (paid_to_closer !== undefined) updates.paid_to_closer = !!paid_to_closer;
+  if (!Object.keys(updates).length) {
+    return res.status(400).json({ error: 'Send payout_status, payout_confirmed, and/or paid_to_closer' });
+  }
+  updates.payout_updated_at = new Date().toISOString();
+  updates.payout_updated_by = req.user.id;
+
+  let updated = 0;
+  for (let i = 0; i < ids.length; i += BULK_CHUNK) {
+    const chunk = ids.slice(i, i + BULK_CHUNK);
+    const { data, error } = await supabaseAdmin
+      .from('sales')
+      .update(updates)
+      .in('id', chunk)
+      // Same eligibility gate as the single-row PATCH — a row that was never
+      // compliance-approved silently stays untouched rather than erroring
+      // the whole batch, so a mixed selection just reports it as skipped.
+      .not('compliance_reviewed_at', 'is', null)
+      .select('id');
+    if (error) return res.status(500).json({ error: error.message, updated });
+    updated += (data || []).length;
+  }
+
+  res.json({ updated, skipped: ids.length - updated });
+}));
+
 // PATCH /payouts/:id — set payout_status and/or payout_confirmed. Either
 // field may be sent alone; at least one is required.
 router.patch('/:id', asyncHandler(async (req, res) => {
