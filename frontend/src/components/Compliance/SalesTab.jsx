@@ -229,6 +229,9 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
   // Paid to closer / Paid to Partner counts — plain { paid_to_closer, paid_to_partner }
   // scoped the same as the other payout KPIs (company/client/date/search).
   const [paidFlags, setPaidFlags] = useState(null);
+  // The two count tiles double as filters — booleans, no tri-state needed.
+  const [paidToCloserFilter, setPaidToCloserFilter]   = useState(false);
+  const [paidToPartnerFilter, setPaidToPartnerFilter] = useState(false);
   const [payoutExporting, setPayoutExporting] = useState('');
   const [bulkModalOpen, setBulkModalOpen] = useState(false);
   // Closer filter — dedicated dropdown, all closer agents.
@@ -339,6 +342,8 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
           // Payout section (superadmin only — plain undefined for everyone else).
           payout_status: payoutStatuses.join(',') || undefined,
           payout_confirmed: payoutConfirmeds.join(',') || undefined,
+          paid_to_closer: paidToCloserFilter ? 'true' : undefined,
+          paid_to_partner: paidToPartnerFilter ? 'true' : undefined,
           // sort_by / sort_dir / filters — all resolved by useTableQuery.
           ...tq.params,
           page, limit: LIMIT,
@@ -367,7 +372,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
       const httpStatus = e.response?.status;   // not the `status` filter above
       setLoadError(e.response?.data?.error || (httpStatus ? `the server returned ${httpStatus}` : (e.message || 'the request failed')));
     } finally { setLoading(false); }
-  }, [search, statuses, companyIds, closerIds, disposition, chargeFrom, chargeTo, dateFrom, dateTo, payoutStatuses, payoutConfirmeds, page, tq.version, tq.params, abortable]);
+  }, [search, statuses, companyIds, closerIds, disposition, chargeFrom, chargeTo, dateFrom, dateTo, payoutStatuses, payoutConfirmeds, paidToCloserFilter, paidToPartnerFilter, page, tq.version, tq.params, abortable]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -524,6 +529,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
     user_ids: closerIds.join(',') || undefined,
     date_from: dateFrom || undefined, date_to: dateTo || undefined,
     payout_status: payoutStatuses.join(',') || undefined, payout_confirmed: payoutConfirmeds.join(',') || undefined,
+    paid_to_closer: paidToCloserFilter ? 'true' : undefined, paid_to_partner: paidToPartnerFilter ? 'true' : undefined,
     // Column filters (Client, etc.) + sort — same params the on-screen table's
     // own load() sends. Without this, CSV/PDF/bulk-update silently ignored
     // whatever the Client column filter was narrowed to.
@@ -636,6 +642,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
           setDateFrom(monthRange.date_from || ''); setDateTo(monthRange.date_to || '');
           setChargeFrom(''); setChargeTo(''); setPage(1);
           setPayoutStatuses([]); setPayoutConfirmeds([]);
+          setPaidToCloserFilter(false); setPaidToPartnerFilter(false);
           tq.clearFilter('client_name');
         }}
       />
@@ -750,12 +757,16 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                 tone="muted" active={isSoleFilter(payoutConfirmeds, 'no')}
                 onClick={() => { toggleSoleFilter(setPayoutConfirmeds, payoutConfirmeds, 'no'); setPage(1); }}
                 className="flex-shrink-0" style={{ width: 116 }} />
-              {/* Paid to closer / Paid to Partner counts — plain display, not
-                  filters (neither field has a dedicated filter control yet). */}
+              {/* Paid to closer / Paid to Partner counts — also filters, click
+                  to narrow the table to just that flag. */}
               <KpiTile icon={CheckCircle} label="Paid to Closer" value={(paidFlags?.paid_to_closer ?? 0).toLocaleString()}
-                tone="success" className="flex-shrink-0" style={{ width: 116 }} />
+                tone="success" active={paidToCloserFilter}
+                onClick={() => { setPaidToCloserFilter(v => !v); setPage(1); }}
+                className="flex-shrink-0" style={{ width: 116 }} />
               <KpiTile icon={Handshake} label="Paid to Partner" value={(paidFlags?.paid_to_partner ?? 0).toLocaleString()}
-                tone="success" className="flex-shrink-0" style={{ width: 116 }} />
+                tone="success" active={paidToPartnerFilter}
+                onClick={() => { setPaidToPartnerFilter(v => !v); setPage(1); }}
+                className="flex-shrink-0" style={{ width: 116 }} />
             </div>
           </div>
         )}

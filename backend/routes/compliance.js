@@ -929,7 +929,11 @@ router.get('/sales', asyncHandler(async (req, res) => {
     // Payout section (mig 243/244) — merged into this list from the former
     // standalone Payout tab. payout_status = DP Status (pending/paid/reverted);
     // payout_confirmed = Payout Status, a manual tri-state (pending/yes/no).
-    payout_status, payout_confirmed } = req.query;
+    payout_status, payout_confirmed,
+    // Paid to closer / Paid to Partner (mig 246/249) — plain booleans, the
+    // Payout section's two count tiles double as filters: 'true' narrows the
+    // list to that flag, any other value (including absent) is "no filter".
+    paid_to_closer: paidToCloserFilter, paid_to_partner: paidToPartnerFilter } = req.query;
 
   // Company / Status / DP Status / Payout Status all became multi-select in
   // the Sales tab filter bar — comma-separated on the wire, same convention
@@ -1024,6 +1028,8 @@ router.get('/sales', asyncHandler(async (req, res) => {
   // exposes controls that send these.
   if (payoutStatusList.length)    query = query.in('payout_status', payoutStatusList);
   if (payoutConfirmedList.length) query = query.in('payout_confirmed', payoutConfirmedList);
+  if (paidToCloserFilter === 'true')  query = query.eq('paid_to_closer', true);
+  if (paidToPartnerFilter === 'true') query = query.eq('paid_to_partner', true);
   query = applySaleSearch(query);
 
   // Per-column header filters LAST, so they narrow inside the company scope and
