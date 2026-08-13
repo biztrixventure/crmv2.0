@@ -209,7 +209,12 @@ const BulkPayoutUpdateModal = ({ fetchParams, onClose, onDone }) => {
                           <td className="px-3 py-1.5">
                             <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggleOne(r.id)} aria-label={`Select ${r.customer_name || r.id}`} />
                           </td>
-                          <td className="px-3 py-1.5 text-xs font-semibold" style={{ color: 'var(--color-text)' }}>{r.customer_name || '—'}</td>
+                          <td className="px-3 py-1.5">
+                            <p className="m-0 text-xs font-semibold" style={{ color: 'var(--color-text)' }}>{r.customer_name || '—'}</p>
+                            {r.reference_no && (
+                              <p className="m-0 mt-0.5 text-xs font-mono" style={{ color: 'var(--color-text-tertiary)' }}>#{r.reference_no}</p>
+                            )}
+                          </td>
                           <td className="px-3 py-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{r.customer_phone || '—'}</td>
                           <td className="px-3 py-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{r.client_name || '—'}</td>
                           <td className="px-3 py-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{r.sale_date ? fmtSaleDate(r.sale_date) : '—'}</td>

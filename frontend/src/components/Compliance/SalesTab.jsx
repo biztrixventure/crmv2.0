@@ -798,6 +798,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                   {isPostDate && <Th>Charge Date</Th>}
                   {isSuperadmin && <Th>DP Status</Th>}
                   {isSuperadmin && <Th>Payout Status</Th>}
+                  {isSuperadmin && <Th>Paid to Partner</Th>}
                   <Th>Actions</Th>
                 </tr>
               </thead>
@@ -932,6 +933,23 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                           ) : <span style={{ color: 'var(--color-text-tertiary)' }}>—</span>}
                         </td>
                       )}
+                      {/* Paid to Partner — independent of Payout Status/paid_to_closer
+                          above; the flag surfaced to the sale's own company_admin in
+                          ManagerShell's Team Sales tab. Read-only here; set from the
+                          Update popup. */}
+                      {isSuperadmin && (
+                        <td className="px-3 py-1.5 text-xs">
+                          {s.compliance_reviewed_at ? (
+                            <span className="inline-flex items-center text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded whitespace-nowrap"
+                              style={{
+                                backgroundColor: s.paid_to_partner ? 'var(--color-success-100)' : 'var(--color-bg-secondary)',
+                                color: s.paid_to_partner ? 'var(--color-success-700)' : 'var(--color-text-tertiary)',
+                              }}>
+                              {s.paid_to_partner ? 'Paid' : 'Pending'}
+                            </span>
+                          ) : <span style={{ color: 'var(--color-text-tertiary)' }}>—</span>}
+                        </td>
+                      )}
                       <td className="px-3 py-1.5" onClick={e => e.stopPropagation()}>
                         <div className="flex items-center gap-1 flex-wrap justify-end">
                           {isPostDate && !isReadOnly && roControlAllowed('cc-sales.charge') && (
@@ -995,7 +1013,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                     </tr>
                     {expanded === s.id && Array.isArray(s.edit_history) && (
                       <tr key={`${s.id}-hist`} style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
-                        <td colSpan={(isPostDate ? 11 : 10) + (isSuperadmin ? 2 : 0)} className="px-5 py-3">
+                        <td colSpan={(isPostDate ? 11 : 10) + (isSuperadmin ? 3 : 0)} className="px-5 py-3">
                           <p className="text-xs font-bold mb-2" style={{ color: 'var(--color-text-secondary)' }}>Audit Trail</p>
                           <div className="space-y-1">
                             {s.edit_history.map((h, i) => (
