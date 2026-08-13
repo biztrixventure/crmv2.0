@@ -34,12 +34,22 @@ export default function PendingFromDialer({ onPick, refreshSignal }) {
         {items.map(it => {
           const fd = it.form_data || {};
           const phone = fd.customer_phone || fd.Phone || it.normalized_phone || '';
+          const name = fd.customer_name || [fd.FirstName, fd.LastName].filter(Boolean).join(' ') || null;
+          const vehicle = [fd.CarYear, fd.CarMake, fd.CarModel].filter(Boolean).join(' ') || null;
+          const location = [fd.City, fd.State].filter(Boolean).join(', ') || null;
           return (
             <div key={it.id} className="flex items-center justify-between gap-3 rounded-xl px-3 py-2.5" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
               <div className="min-w-0">
                 <p className="text-sm font-semibold flex items-center gap-2 flex-wrap" style={{ color: 'var(--color-text)' }}>
-                  <Phone size={13} /> {phone || '—'}
-                  <span className="text-[11px] sm:text-[10px] font-mono px-1.5 py-0.5 rounded inline-flex items-center gap-0.5" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}><Hash size={8} /> {it.vicidial_vendor_code}</span>
+                  {name || phone || '—'}
+                  {it.vicidial_vendor_code && (
+                    <span className="text-[11px] sm:text-[10px] font-mono px-1.5 py-0.5 rounded inline-flex items-center gap-0.5" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}><Hash size={8} /> Lead {it.vicidial_vendor_code}</span>
+                  )}
+                </p>
+                <p className="text-xs mt-0.5 flex items-center gap-2 flex-wrap" style={{ color: 'var(--color-text-secondary)' }}>
+                  {name && phone && (<span className="inline-flex items-center gap-1"><Phone size={11} /> {phone}</span>)}
+                  {vehicle && <span>{vehicle}</span>}
+                  {location && <span>{location}</span>}
                 </p>
                 {it.closer_disposition ? (
                   <p className="text-xs mt-1 flex items-center gap-1.5 flex-wrap" style={{ color: 'var(--color-text-secondary)' }}>

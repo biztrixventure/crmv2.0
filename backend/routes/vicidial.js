@@ -238,6 +238,35 @@ async function applyCloserDispo({ transfer, dispoCompanyId, closerUserId, dispoN
   }
 }
 
+// VICIdial recycles lead_id (and therefore our vendor_lead_code) for a genuinely
+// NEW contact attempt weeks/months later. Without this, the code below treated a
+// recycled lead as "the same transfer already exists" and only patched
+// vicidial_agent/normalized_phone — assigned_closer_id/status/vicidial_dispo stayed
+// frozen from the FIRST time it was ever transferred, so a stale (possibly
+// off-shift) closer's name kept showing on the fronter dashboard forever, no
+// matter who actually worked today's call. Reset the row to a fresh, unassigned
+// transfer once it's gone quiet for a while — UNLESS it already produced a real
+// sale, which must never be touched.
+const STALE_HOURS = 20;   // dialer-day boundary — matches fetchAndApplyDispo's "oldish" cutoff
+async function resetIfStale(tr) {
+  const last = tr.vicidial_dispo_at || tr.created_at;
+  if (!last) return tr;
+  const ageHours = (Date.now() - new Date(last).getTime()) / 3600000;
+  if (ageHours < STALE_HOURS) return tr;
+  if (!tr.assigned_closer_id && !tr.vicidial_dispo) return tr;   // nothing stale to clear
+  const { data: sold } = await supabaseAdmin.from('sales').select('id').eq('transfer_id', tr.id).limit(1).maybeSingle();
+  if (sold) return tr;   // this lead already converted — never rewrite sold history
+  const resetFields = {
+    assigned_closer_id: null, assigned_to: null, status: 'pending',
+    vicidial_dispo: null, vicidial_dispo_at: null, vicidial_talk_time: null,
+    rejected_by: null, rejection_reason: null, rejected_at: null,
+    vicidial_pending: true,
+  };
+  await supabaseAdmin.from('transfers').update(resetFields).eq('id', tr.id);
+  logger.info('VICIDIAL_XFER', `Recycled lead — reset stale transfer ${tr.id} (${ageHours.toFixed(0)}h since last activity) for a new contact attempt`);
+  return { ...tr, ...resetFields };
+}
+
 // Ring buffer of recent fronter-xfer hits — the symmetric diagnostic to
 // dispo-debug, so we can SEE which fronter transfers did/didn't create a CRM
 // transfer (agent not mapped / non-transfer dispo / created). In-memory only.
@@ -251,6 +280,28 @@ ingest.all('/fronter-xfer', requireToken, asyncHandler(async (req, res) => {
   const phone = String(p.phone || '').trim();
   const agent = String(p.agent || '').trim();
   const norm  = normPhone(phone);
+  // Full lead detail — matches the Dispo Call URL template in
+  // docs/VICIDIAL_CRM_INTEGRATION.md §8. Previously only code/phone/agent/dispo
+  // were read, so the fronter's pending-transfer card could only ever show a bare
+  // phone number even though the dialer already sends all of this.
+  const first    = String(p.first || '').trim();
+  const last     = String(p.last || '').trim();
+  const carMake  = String(p.car_make || '').trim();
+  const carModel = String(p.car_model || '').trim();
+  const carYear  = String(p.car_year || '').trim();
+  const address  = String(p.address || '').trim();
+  const city     = String(p.city || '').trim();
+  const state    = String(p.state || '').trim();
+  const zip      = String(p.zip || '').trim();
+  const email    = String(p.email || '').trim();
+  const leadFormData = {
+    cli_number: norm || null, customer_phone: phone, Phone: phone,
+    FirstName: first || null, LastName: last || null,
+    customer_name: (first || last) ? `${first} ${last}`.trim() : null,
+    CarMake: carMake || null, CarModel: carModel || null, CarYear: carYear || null,
+    Address: address || null, City: city || null, State: state || null, Zip: zip || null,
+    Email: email || null,
+  };
   const xdbg = {
     at: new Date().toISOString(), code, phone, normalized: norm || '',
     agent, dispo: String(p.dispo || ''), agent_mapped: null, company_id: null, outcome: 'pending',
@@ -260,15 +311,24 @@ ingest.all('/fronter-xfer', requireToken, asyncHandler(async (req, res) => {
 
   // Idempotent on the correlation code.
   const { data: existing } = await supabaseAdmin
-    .from('transfers').select('id').eq('vicidial_vendor_code', code).maybeSingle();
+    .from('transfers').select('id, created_at, form_data, status, assigned_closer_id, vicidial_dispo, vicidial_dispo_at')
+    .eq('vicidial_vendor_code', code).maybeSingle();
 
   if (existing) {
-    await supabaseAdmin.from('transfers')
-      .update({ vicidial_agent: agent || null, normalized_phone: norm || null })
-      .eq('id', existing.id);
+    // A recycled lead re-transferred long after it went quiet is a NEW contact
+    // attempt, not a duplicate webhook fire — clears the stale closer/status/dispo
+    // (see resetIfStale) so it re-appears as a fresh pending card and doesn't keep
+    // crediting whoever worked it last time.
+    const fresh = await resetIfStale(existing);
+    const wasReset = fresh.status !== existing.status || fresh.assigned_closer_id !== existing.assigned_closer_id;
+    const updates = { vicidial_agent: agent || null, normalized_phone: norm || null };
+    // Only overwrite form_data on a genuine reset — a plain duplicate re-fire for
+    // the SAME event must not clobber fields the fronter may have already edited.
+    if (wasReset) updates.form_data = { ...(fresh.form_data || {}), ...leadFormData };
+    await supabaseAdmin.from('transfers').update(updates).eq('id', existing.id);
     await reconcileQueuedDispoForTransfer({ id: existing.id }, norm);
-    xdbg.outcome = `updated existing transfer ${existing.id}`;
-    return res.json({ ok: true, transfer_id: existing.id, updated: true });
+    xdbg.outcome = wasReset ? `recycled lead — reset + updated transfer ${existing.id}` : `updated existing transfer ${existing.id}`;
+    return res.json({ ok: true, transfer_id: existing.id, updated: true, reset: wasReset });
   }
 
   // Route to the fronter the VICIdial agent maps to. Unmapped agent → capture
@@ -341,7 +401,7 @@ ingest.all('/fronter-xfer', requireToken, asyncHandler(async (req, res) => {
     vicidial_vendor_code: code,
     vicidial_agent: agent || null,
     normalized_phone: norm || null,
-    form_data: { cli_number: norm || null, customer_phone: phone, Phone: phone },
+    form_data: leadFormData,
   }).select('id').single();
   if (error) {
     // A concurrent XFER webhook for the SAME code raced us: both passed the
@@ -448,7 +508,7 @@ ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
   const [agentRes, exactRes] = await Promise.all([
     closerAgent ? resolveAgent(closerAgent) : Promise.resolve({ userId: null, companyId: null }),
     exactCodes.length
-      ? supabaseAdmin.from('transfers').select('id, company_id, assigned_closer_id, status, vicidial_vendor_code')
+      ? supabaseAdmin.from('transfers').select('id, company_id, assigned_closer_id, status, vicidial_vendor_code, created_at, vicidial_dispo, vicidial_dispo_at')
           .in('vicidial_vendor_code', exactCodes).order('created_at', { ascending: false }).limit(1)
       : Promise.resolve({ data: null }),
   ]);
@@ -466,7 +526,7 @@ ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
     const ph = normPhone(String(p.phone || ''));
     if (ph) {
       const { data } = await supabaseAdmin
-        .from('transfers').select('id, company_id, assigned_closer_id, status, vicidial_vendor_code')
+        .from('transfers').select('id, company_id, assigned_closer_id, status, vicidial_vendor_code, created_at, vicidial_dispo, vicidial_dispo_at')
         .in('vicidial_vendor_code', prefixedCodes).eq('normalized_phone', ph)
         .order('created_at', { ascending: false }).limit(1);
       if (data && data.length) { tr = data[0]; code = data[0].vicidial_vendor_code; }
@@ -478,11 +538,15 @@ ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
     const ph = normPhone(String(p.phone || ''));
     if (ph) {
       const { data: byPhone } = await supabaseAdmin
-        .from('transfers').select('id, company_id, assigned_closer_id, status')
+        .from('transfers').select('id, company_id, assigned_closer_id, status, created_at, vicidial_dispo, vicidial_dispo_at')
         .eq('normalized_phone', ph).order('created_at', { ascending: false }).limit(1).maybeSingle();
       if (byPhone) { tr = byPhone; code = `phone:${ph}`; }
     }
   }
+  // Whichever path matched, clear a stale closer/status/dispo before applying
+  // today's activity — a recycled lead's old attribution must never survive into
+  // a new contact attempt (see resetIfStale). No-op for an already-fresh match.
+  if (tr) tr = await resetIfStale(tr);
   // NOTE: a "recency" fallback used to live here — attach the dispo to the most
   // recent in-flight lead from any linked fronter company. REMOVED: that pool is
   // shared across ALL closers, so with concurrent calls one closer's disposition
