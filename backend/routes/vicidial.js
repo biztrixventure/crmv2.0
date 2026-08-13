@@ -24,7 +24,7 @@ const logger = require('../utils/logger');
 const { normPhone } = require('../utils/uploadService');
 const { titleCaseFormData } = require('../utils/titleCase');
 const { expandStateInFormData } = require('../utils/stateMap');
-const { isSuperAdmin } = require('../models/helpers');
+const { isSuperAdmin, getCounterpartCompanyIds } = require('../models/helpers');
 const { latestDisposition, leadStatusByCode, leadAgentByCode, boxPrefixes, refreshBoxes, resolveLeadIdByAgentDate, fetchAgentRoster, getBoxes, lookupCallsByPhone, lookupCallsByPhoneDiag } = require('../utils/dialerBoxes');
 const notifications = require('../utils/notificationService');
 const { getConfig } = require('../utils/businessConfig');
@@ -676,20 +676,19 @@ api.get('/closer-dispos', asyncHandler(async (req, res) => {
 }));
 
 // Recent transfers the closer can attach a queued disposition to — assigned to
-// them OR recent leads from their linked fronter companies.
+// them OR recent leads from any fronter company.
 api.get('/closer-assignable', asyncHandler(async (req, res) => {
   const q = String(req.query.q || '').trim();
   const since = new Date(Date.now() - 36 * 60 * 60 * 1000).toISOString();
-  // Fronter companies linked to the closer's companies.
+  // Fronter companies feeding the closer's companies. This used to read
+  // company_links, which was only half-populated — leads from the unlinked
+  // fronter companies never appeared here, so the closer had no lead to attach
+  // their dialer disposition to and it stranded in the queue. Linking is
+  // implicit now (see getCounterpartCompanyIds).
   const { data: myCos } = await supabaseAdmin
     .from('user_company_roles').select('company_id').eq('user_id', req.user.id).eq('is_active', true);
   const closerCoIds = (myCos || []).map(c => c.company_id).filter(Boolean);
-  let fronterCoIds = [];
-  if (closerCoIds.length) {
-    const { data: links } = await supabaseAdmin
-      .from('company_links').select('fronter_company_id').in('closer_company_id', closerCoIds);
-    fronterCoIds = [...new Set((links || []).map(l => l.fronter_company_id).filter(Boolean))];
-  }
+  const fronterCoIds = await getCounterpartCompanyIds(closerCoIds);
 
   // Include BOTH confirmed and still-pending (unconfirmed) leads — the closer may
   // disposition before the fronter confirms the transfer.

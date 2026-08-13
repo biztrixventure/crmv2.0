@@ -464,10 +464,10 @@ router.get('/search-by-phone', asyncHandler(async (req, res) => {
   const globalView = ['superadmin', 'readonly_admin', 'compliance_manager'].includes(userRole);
 
   // Resolve which fronter companies this caller can see.
-  // NOTE: intentionally NOT filtered by `company_links` — only 3 of the 5 active
-  // fronter companies are linked today, and closers legitimately work the shared
-  // pool, so link-scoping here would silently hide live leads. The protection is
-  // the role gate above plus the fronter-side company scope below.
+  // NOTE: every active fronter company, by design — fronter↔closer linking is
+  // implicit across the estate (see getCounterpartCompanyIds in models/helpers)
+  // and closers work the shared lead pool. The protection is the role gate above
+  // plus the fronter-side company scope below.
   const { data: allFronters } = await supabaseAdmin
     .from('companies')
     .select('id')

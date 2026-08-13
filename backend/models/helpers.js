@@ -340,6 +340,43 @@ const getCompanyType = async (companyId) => {
   });
 };
 
+// ── Implicit company linking ────────────────────────────────────────────────
+// The `company_links` table modelled an explicit fronter↔closer pairing, but in
+// practice every fronter company feeds every closer company — the link rows were
+// never kept up to date, and the gaps caused real data loss rather than real
+// isolation: with 5 active fronter companies but only 3 link rows, leads from
+// the two unlinked fronters silently vanished from the closer's "attach a dialer
+// disposition" picker and from QA's reviewable-people list, so dispositions
+// stranded and closer-leg reviews could not be targeted at all.
+//
+// Linking is therefore IMPLICIT now: every active company is linked to every
+// active company of the opposite type. These helpers are the one place that rule
+// lives. The `company_links` table is intentionally left in place (no data is
+// destroyed) — it is simply no longer consulted for scoping. Note this widens
+// nothing security-wise: the closer-side surfaces that use it already read the
+// shared cross-fronter lead pool (see GET /transfers/search-by-phone).
+const getActiveCompanyIdsByType = async (type) => {
+  const { data } = await supabaseAdmin
+    .from('companies').select('id').eq('company_type', type).eq('is_active', true);
+  return (data || []).map(c => c.id);
+};
+
+// Every active company on the OPPOSITE side of the pipeline from the given
+// company (or companies). Replaces the old company_links lookups.
+const getCounterpartCompanyIds = async (companyIds) => {
+  const ids = (Array.isArray(companyIds) ? companyIds : [companyIds]).filter(Boolean);
+  if (!ids.length) return [];
+  const { data } = await supabaseAdmin
+    .from('companies').select('id, company_type').in('id', ids);
+  const types = new Set((data || []).map(c => c.company_type).filter(Boolean));
+  const wanted = new Set();
+  if (types.has('fronter')) (await getActiveCompanyIdsByType('closer')).forEach(id => wanted.add(id));
+  if (types.has('closer'))  (await getActiveCompanyIdsByType('fronter')).forEach(id => wanted.add(id));
+  // Never return the caller's own companies as their own counterpart.
+  ids.forEach(id => wanted.delete(id));
+  return [...wanted];
+};
+
 // Which side of the fronter→closer pipeline does this caller read from?
 //
 // Transfers and sales are STORED under the fronter company's company_id, so
@@ -406,6 +443,8 @@ module.exports = {
   getUserCompanies,
   isCompanyMember,
   getCompanyType,
+  getActiveCompanyIdsByType,
+  getCounterpartCompanyIds,
   isCloserSideScope,
   resolveScopedCompanyId,
   createRole,

@@ -21,7 +21,7 @@
 const express = require('express');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
-const { isSuperAdmin, hasPermission, getUserCompanies } = require('../models/helpers');
+const { isSuperAdmin, hasPermission, getUserCompanies, getCounterpartCompanyIds } = require('../models/helpers');
 const { getConfig, setConfig, getAllConfig } = require('../utils/businessConfig');
 const { isSheetConfig, computeSheetReview, isY, resolveSheetFields, fieldPoints, defaultInputFor } = require('../utils/qaSheetFormula');
 
@@ -4151,7 +4151,7 @@ router.post('/admin/rules/apply', asyncHandler(async (req, res) => {
 // people from DIFFERENT companies — the fronter belongs to the fronter company,
 // but the closer who received the call belongs to the LINKED closer company
 // (e.g. 1-Vertex). So this returns the company's own fronters/closers PLUS the
-// closers of every company linked to it via company_links, tagged with where
+// closers of every company on the other side of the pipeline, tagged with where
 // they come from — otherwise closer-leg reviews could never target a person.
 router.get('/admin/company-users', asyncHandler(async (req, res) => {
   if (!(await canAdminQa(req))) return res.status(403).json({ error: 'Forbidden' });
@@ -4162,11 +4162,12 @@ router.get('/admin/company-users', asyncHandler(async (req, res) => {
   let withLevel = (rows || []).map(r => ({ user_id: r.user_id, company_id: r.company_id, level: lvlOf(r.custom_roles), linked: false }))
     .filter(r => ['fronter', 'closer', 'fronter_manager', 'closer_manager'].includes(r.level));
 
-  // + the closers of LINKED companies (both link directions)
-  const { data: links } = await supabaseAdmin.from('company_links')
-    .select('fronter_company_id, closer_company_id')
-    .or(`fronter_company_id.eq.${companyId},closer_company_id.eq.${companyId}`);
-  const linkedIds = [...new Set((links || []).map(l => l.fronter_company_id === companyId ? l.closer_company_id : l.fronter_company_id).filter(id => id && id !== companyId))];
+  // + the closers of the companies on the OTHER side of the pipeline. This used
+  // to read company_links, which was only half-populated, so for an unlinked
+  // fronter company this list came back with no closers at all and a closer-leg
+  // review simply could not be pointed at the person who took the call. Linking
+  // is implicit now (see getCounterpartCompanyIds).
+  const linkedIds = await getCounterpartCompanyIds(companyId);
   let linkedNames = {};
   if (linkedIds.length) {
     const { data: cos } = await supabaseAdmin.from('companies').select('id, name').in('id', linkedIds);
