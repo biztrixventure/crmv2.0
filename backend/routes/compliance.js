@@ -1233,7 +1233,33 @@ router.get('/sales', asyncHandler(async (req, res) => {
     } catch { /* mig 247's RPC not applied yet — no per-client cards render */ }
   }
 
-  res.json({ sales, total: count || 0, page: parseInt(page), limit: parseInt(limit), status_counts, columns: access.catalog, payout_kpis, payout_confirmed_kpis, payout_kpis_by_client });
+  // Paid to closer / Paid to Partner counts (mig 246/249) — plain head-counts,
+  // not an RPC (no GROUP BY needed for a single boolean-true count). Same
+  // company/client/date/search scope as payout_kpis above — not status or
+  // disposition, this is the payout section's own scope.
+  let paid_flags = null;
+  if (req.user.role === 'superadmin') {
+    paid_flags = { paid_to_closer: 0, paid_to_partner: 0 };
+    try {
+      const scopedPaidCount = (field) => {
+        let q = supabaseAdmin.from('sales').select('id', { count: 'exact', head: true })
+          .not('compliance_reviewed_at', 'is', null)
+          .eq(field, true);
+        if (kpiCompanyIds)  q = q.in('company_id', kpiCompanyIds);
+        if (kpiClientNames) q = q.in('client_name', kpiClientNames);
+        if (date_from) q = q.gte('sale_date', date_from);
+        if (date_to)   q = q.lte('sale_date', date_to);
+        if (search) { const s = escapeOrValue(search); q = q.or(`customer_name.ilike.%${s}%,customer_phone.ilike.%${s}%,reference_no.ilike.%${s}%`); }
+        return q;
+      };
+      const [{ count: ptc }, { count: ptp }] = await Promise.all([
+        scopedPaidCount('paid_to_closer'), scopedPaidCount('paid_to_partner'),
+      ]);
+      paid_flags = { paid_to_closer: ptc || 0, paid_to_partner: ptp || 0 };
+    } catch { /* mig 246/249 not applied yet — tiles just read zero */ }
+  }
+
+  res.json({ sales, total: count || 0, page: parseInt(page), limit: parseInt(limit), status_counts, columns: access.catalog, payout_kpis, payout_confirmed_kpis, payout_kpis_by_client, paid_flags });
 }));
 
 // ── GET /compliance/transfers ─────────────────────────────────────────────────

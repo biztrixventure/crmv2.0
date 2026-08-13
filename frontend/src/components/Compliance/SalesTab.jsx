@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect, useRef, Fragment } from 'react';
 import { createPortal } from 'react-dom';
 import { useFocus, useNavFocus } from '../../contexts/FocusContext';
 import { useSaleDeepLink } from '../../hooks/useSaleDeepLink';
-import { Shield, RotateCcw, Trash2, Eye, ChevronDown, ChevronUp, CheckCircle, Pencil, MoreVertical, Clock, CheckCircle2, XCircle, Download, FileDown, ListChecks } from 'lucide-react';
+import { Shield, RotateCcw, Trash2, Eye, ChevronDown, ChevronUp, CheckCircle, Pencil, MoreVertical, Clock, CheckCircle2, XCircle, Download, FileDown, ListChecks, Handshake } from 'lucide-react';
 import { Badge } from '../UI';
 import SaleStatusBadge from '../UI/SaleStatusBadge';
 import { toast } from 'sonner';
@@ -226,6 +226,9 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
   // — array of { client, pending, paid, reverted }, independent of the
   // Client column filter below.
   const [payoutKpisByClient, setPayoutKpisByClient] = useState([]);
+  // Paid to closer / Paid to Partner counts — plain { paid_to_closer, paid_to_partner }
+  // scoped the same as the other payout KPIs (company/client/date/search).
+  const [paidFlags, setPaidFlags] = useState(null);
   const [payoutExporting, setPayoutExporting] = useState('');
   const [bulkModalOpen, setBulkModalOpen] = useState(false);
   // Closer filter — dedicated dropdown, all closer agents.
@@ -351,6 +354,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
       setPayoutKpis(res.data.payout_kpis || null);
       setPayoutConfirmedKpis(res.data.payout_confirmed_kpis || null);
       setPayoutKpisByClient(res.data.payout_kpis_by_client || []);
+      setPaidFlags(res.data.paid_flags || null);
       // Keep page-1 totals across pages; clear when a status filter is active
       // (then the page-derived breakdown — the one filtered status — is correct).
       setStatusCounts(prev => statuses.length ? null : (res.data.status_counts ?? prev));
@@ -746,6 +750,12 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                 tone="muted" active={isSoleFilter(payoutConfirmeds, 'no')}
                 onClick={() => { toggleSoleFilter(setPayoutConfirmeds, payoutConfirmeds, 'no'); setPage(1); }}
                 className="flex-shrink-0" style={{ width: 116 }} />
+              {/* Paid to closer / Paid to Partner counts — plain display, not
+                  filters (neither field has a dedicated filter control yet). */}
+              <KpiTile icon={CheckCircle} label="Paid to Closer" value={(paidFlags?.paid_to_closer ?? 0).toLocaleString()}
+                tone="success" className="flex-shrink-0" style={{ width: 116 }} />
+              <KpiTile icon={Handshake} label="Paid to Partner" value={(paidFlags?.paid_to_partner ?? 0).toLocaleString()}
+                tone="success" className="flex-shrink-0" style={{ width: 116 }} />
             </div>
           </div>
         )}
