@@ -10,7 +10,9 @@ const authMiddleware = async (req, res, next) => {
       return res.status(401).json({ error: 'Missing authorization header' });
     }
 
-    const token = verifyToken(authHeader);
+    // Signature-verified (JWKS/ES256, or HS256 for legacy projects). Throws —
+    // and this handler 401s — on any token we cannot cryptographically verify.
+    const token = await verifyToken(authHeader);
 
     // Get user's current company and role from database
     let userRole = token.role;

@@ -443,25 +443,41 @@ router.get('/search-by-phone', asyncHandler(async (req, res) => {
   const companyId = req.user.company_id;
   const q         = escapeOrValue(phone.trim());
 
-  // Resolve which fronter companies this closer can see
-  let fronterCompanyIds = [];
+  // ROLE GATE — this endpoint deliberately searches the shared cross-fronter
+  // lead pool (see below), so it must never be reachable by a fronter-side
+  // caller. It had NO role check at all: any authenticated user, including a
+  // plain `fronter`, could pull `select('*')` on transfers — full form_data
+  // customer PII — for EVERY fronter company in the estate, which is exactly
+  // the "fronter sees leads that aren't theirs" report. The UI only ever
+  // renders PhoneSearch for a closer (StaffShell mounts it under `isCloser`);
+  // this makes the server agree with that intent instead of trusting the UI.
+  const SEARCH_ROLES = [
+    'closer', 'closer_manager', 'operations_manager', 'company_admin',
+    'compliance_manager', 'superadmin', 'readonly_admin',
+  ];
+  if (!SEARCH_ROLES.includes(userRole)) {
+    return res.status(403).json({ error: 'Not permitted to search leads by phone' });
+  }
+  // A company_admin/operations_manager on the FRONTER side is not closer-side
+  // staff — scope them to their own company rather than the shared pool.
+  const closerSide = await isCloserSideScope(userRole, companyId);
+  const globalView = ['superadmin', 'readonly_admin', 'compliance_manager'].includes(userRole);
 
-  if (userRole === 'superadmin' || userRole === 'readonly_admin') {
-    // Superadmin sees across all companies
-    const { data: allFronters } = await supabaseAdmin
-      .from('companies')
-      .select('id')
-      .eq('company_type', 'fronter')
-      .eq('is_active', true);
-    fronterCompanyIds = (allFronters || []).map(c => c.id);
-  } else {
-    // No company_links required — search across all active fronter companies
-    const { data: allFronters } = await supabaseAdmin
-      .from('companies')
-      .select('id')
-      .eq('company_type', 'fronter')
-      .eq('is_active', true);
-    fronterCompanyIds = (allFronters || []).map(c => c.id);
+  // Resolve which fronter companies this caller can see.
+  // NOTE: intentionally NOT filtered by `company_links` — only 3 of the 5 active
+  // fronter companies are linked today, and closers legitimately work the shared
+  // pool, so link-scoping here would silently hide live leads. The protection is
+  // the role gate above plus the fronter-side company scope below.
+  const { data: allFronters } = await supabaseAdmin
+    .from('companies')
+    .select('id')
+    .eq('company_type', 'fronter')
+    .eq('is_active', true);
+  let fronterCompanyIds = (allFronters || []).map(c => c.id);
+
+  if (!globalView && !closerSide) {
+    // Fronter-side manager/admin — restrict to their OWN company's leads.
+    fronterCompanyIds = companyId ? fronterCompanyIds.filter(id => id === companyId) : [];
   }
 
   if (!fronterCompanyIds.length) return res.json({ transfers: [] });

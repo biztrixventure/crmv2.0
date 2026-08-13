@@ -21,6 +21,63 @@ const { onSalesActivityChanged: spiffOnSalesChanged } = require('../utils/spiffM
 const router = express.Router();
 
 // ============================================================================
+// canAccessSale — the ONE cross-tenant guard for every :id-addressed sale route.
+//
+// WHY: several :id endpoints checked only the caller's ROLE ("is this person a
+// manager?") and never whether the sale actually belonged to them. Because the
+// role list included ordinary per-company roles (company_admin, closer_manager,
+// fronter_manager, operations_manager), a manager at Company A could read — and
+// on some routes mutate — ANY sale in the estate just by knowing its UUID, which
+// deep-links and reference numbers hand out freely. Role is not authorisation:
+// it must be paired with "…and this record is in a company you belong to".
+//
+// Access is granted when the caller is:
+//   • the sale's own closer/creator/fronter (ownership), OR
+//   • a genuinely cross-company role (superadmin / readonly_admin /
+//     compliance_manager — these are cross-tenant by design per CLAUDE.md), OR
+//   • a manager-tier role AND an active member of the sale's company.
+// Everything else is denied. Fails CLOSED on a missing sale/company.
+// ============================================================================
+const SALE_MANAGER_ROLES = [
+  'company_admin', 'manager', 'operations_manager', 'closer_manager', 'fronter_manager',
+];
+const SALE_GLOBAL_ROLES = ['superadmin', 'readonly_admin', 'compliance_manager'];
+
+// The ONLY genuinely cross-tenant roles per CLAUDE.md. The customer-history /
+// timeline / chain / group routes below used to lump company_admin and
+// operations_manager in with these, which handed two ordinary per-company roles
+// an unscoped, all-companies query — a company_admin could pull any other
+// company's customer timeline and resell chain by phone or sale id.
+const SALE_TRUE_GLOBAL     = ['compliance_manager', 'superadmin', 'readonly_admin'];
+const COMPANY_SCOPED_ROLES = ['company_admin', 'operations_manager'];
+// Scope a sales query to the caller's own company; a caller with no company
+// resolves to a deliberately impossible id rather than an unfiltered query.
+const scopeToOwnCompany = (query, companyId) =>
+  companyId ? query.eq('company_id', companyId) : query.eq('id', '00000000-0000-0000-0000-000000000000');
+
+async function canAccessSale(req, sale) {
+  if (!sale) return false;
+  const userId = req.user.id;
+  const role   = req.user.role;
+  if (sale.created_by === userId || sale.closer_id === userId || sale.fronter_id === userId) return true;
+  if (SALE_GLOBAL_ROLES.includes(role)) return true;
+  if (!SALE_MANAGER_ROLES.includes(role)) return false;
+  if (!sale.company_id) return false;                      // fail closed
+  if (sale.company_id === req.user.company_id) return true;
+  return await isCompanyMember(userId, sale.company_id);   // multi-company managers
+}
+
+// Load a sale's ownership columns and authorise in one step. Returns the sale on
+// success, or null after having already sent the 404/403 response.
+async function loadSaleForAccess(req, res, saleId, columns = 'id, company_id, created_by, closer_id, fronter_id') {
+  const { data: sale } = await supabaseAdmin
+    .from('sales').select(columns).eq('id', saleId).maybeSingle();
+  if (!sale) { res.status(404).json({ error: 'Sale not found' }); return null; }
+  if (!(await canAccessSale(req, sale))) { res.status(403).json({ error: 'Access denied' }); return null; }
+  return sale;
+}
+
+// ============================================================================
 // Resell privacy resolver — returns true when the caller should NOT see
 // is_resell=true sale rows. Looked up per request because the company config
 // can flip on/off independently of the user's role/company.
@@ -869,7 +926,8 @@ router.get('/:id/group', asyncHandler(async (req, res) => {
   else if (role === 'fronter_manager') query = (companyId ? query.eq('company_id', companyId).eq('is_resell', false) : query.eq('id', '00000000-0000-0000-0000-000000000000'));
   else if (role === 'closer') query = query.eq('closer_id', userId);
   else if (role === 'closer_manager') query = (companyId ? query.eq('company_id', companyId) : query.eq('id', '00000000-0000-0000-0000-000000000000'));
-  else if (!['compliance_manager', 'superadmin', 'readonly_admin', 'company_admin', 'operations_manager'].includes(role)) {
+  else if (COMPANY_SCOPED_ROLES.includes(role)) query = scopeToOwnCompany(query, companyId);
+  else if (!SALE_TRUE_GLOBAL.includes(role)) {
     return res.status(403).json({ error: 'Not permitted' });
   }
 
@@ -896,10 +954,11 @@ router.get(
 
     if (error || !sale) return res.status(404).json({ error: 'Sale not found' });
 
-    // Permission: creator, closer, manager, or compliance
-    const isOwner = sale.created_by === userId || sale.closer_id === userId;
-    const isManager = ['superadmin', 'readonly_admin', 'company_admin', 'manager', 'fronter_manager', 'operations_manager', 'closer_manager', 'compliance_manager'].includes(userRole);
-    if (!isOwner && !isManager) return res.status(403).json({ error: 'Access denied' });
+    // Permission: owner, cross-company role, or a manager IN THE SALE'S COMPANY.
+    // The old check was role-only, so any manager-tier user could read any sale
+    // in any company by id (this route backs the drawer + notification
+    // deep-links, so ids circulate widely). See canAccessSale.
+    if (!(await canAccessSale(req, sale))) return res.status(403).json({ error: 'Access denied' });
 
     // Enrich with the display names the LIST route already attaches. Without
     // this, the single-record response is the only place in the app where a
@@ -997,7 +1056,8 @@ router.get('/customer-history/by-phone/:phone', asyncHandler(async (req, res) =>
   else if (role === 'fronter_manager') query = (companyId ? query.eq('company_id', companyId).eq('is_resell', false) : query.eq('id', '00000000-0000-0000-0000-000000000000'));
   else if (role === 'closer')     query = query.eq('closer_id', userId);
   else if (role === 'closer_manager') query = (companyId ? query.eq('company_id', companyId) : query.eq('id', '00000000-0000-0000-0000-000000000000'));
-  else if (!['compliance_manager', 'superadmin', 'readonly_admin', 'company_admin', 'operations_manager'].includes(role)) {
+  else if (COMPANY_SCOPED_ROLES.includes(role)) query = scopeToOwnCompany(query, companyId);
+  else if (!SALE_TRUE_GLOBAL.includes(role)) {
     return res.status(403).json({ error: 'Not permitted' });
   }
 
@@ -1061,7 +1121,8 @@ router.get('/lifetime/by-phone/:phone', asyncHandler(async (req, res) => {
   else if (role === 'fronter_manager') query = (companyId ? query.eq('company_id', companyId).eq('is_resell', false) : query.eq('id', '00000000-0000-0000-0000-000000000000'));
   else if (role === 'closer')     query = query.eq('closer_id', userId);
   else if (role === 'closer_manager') query = (companyId ? query.eq('company_id', companyId) : query.eq('id', '00000000-0000-0000-0000-000000000000'));
-  else if (!['compliance_manager', 'superadmin', 'readonly_admin', 'company_admin', 'operations_manager'].includes(role)) {
+  else if (COMPANY_SCOPED_ROLES.includes(role)) query = scopeToOwnCompany(query, companyId);
+  else if (!SALE_TRUE_GLOBAL.includes(role)) {
     return res.status(403).json({ error: 'Not permitted' });
   }
 
@@ -1098,8 +1159,9 @@ router.get('/timeline/by-phone/:phone', asyncHandler(async (req, res) => {
   if (!norm || norm.length < 7) return res.status(400).json({ error: 'phone must be at least 7 digits' });
 
   const FRONT_VIEW = ['fronter', 'fronter_manager'];
-  const ALL_VIEW   = ['compliance_manager', 'superadmin', 'readonly_admin', 'company_admin', 'operations_manager'];
-  if (!FRONT_VIEW.includes(role) && !ALL_VIEW.includes(role) && !['closer', 'closer_manager'].includes(role)) {
+  const ALL_VIEW   = SALE_TRUE_GLOBAL;
+  if (!FRONT_VIEW.includes(role) && !ALL_VIEW.includes(role)
+      && !COMPANY_SCOPED_ROLES.includes(role) && !['closer', 'closer_manager'].includes(role)) {
     return res.status(403).json({ error: 'Not permitted' });
   }
 
@@ -1127,6 +1189,7 @@ router.get('/timeline/by-phone/:phone', asyncHandler(async (req, res) => {
   else if (role === 'fronter_manager') salesQ = companyId ? salesQ.eq('company_id', companyId).eq('is_resell', false) : salesQ.eq('id', '00000000-0000-0000-0000-000000000000');
   else if (role === 'closer')          salesQ = salesQ.eq('closer_id', userId);
   else if (role === 'closer_manager')  salesQ = companyId ? salesQ.eq('company_id', companyId) : salesQ.eq('id', '00000000-0000-0000-0000-000000000000');
+  else if (COMPANY_SCOPED_ROLES.includes(role)) salesQ = scopeToOwnCompany(salesQ, companyId);
   const { data: salesData } = await salesQ;
   const saleRows = salesData || [];
   const saleById = Object.fromEntries(saleRows.map(s => [s.id, s]));
@@ -1147,6 +1210,7 @@ router.get('/timeline/by-phone/:phone', asyncHandler(async (req, res) => {
       const ids = (coUsers || []).map(u => u.user_id);
       tQ = ids.length ? tQ.in('assigned_closer_id', ids) : tQ.eq('id', '00000000-0000-0000-0000-000000000000');
     }
+    else if (COMPANY_SCOPED_ROLES.includes(role)) tQ = scopeToOwnCompany(tQ, companyId);
     // ALL_VIEW roles: no extra filter — every lead for this customer.
     const { data } = await tQ;
     transfers = data || [];
@@ -1282,7 +1346,9 @@ router.get('/:id/chain', asyncHandler(async (req, res) => {
   } else if (role === 'closer_manager') {
     if (companyId) query = query.eq('company_id', companyId);
     else query = query.eq('id', '00000000-0000-0000-0000-000000000000');
-  } else if (!['compliance_manager', 'superadmin', 'readonly_admin', 'company_admin', 'operations_manager'].includes(role)) {
+  } else if (COMPANY_SCOPED_ROLES.includes(role)) {
+    query = scopeToOwnCompany(query, companyId);
+  } else if (!SALE_TRUE_GLOBAL.includes(role)) {
     // Unknown role → safest is to return only the anchor itself.
     query = query.eq('id', id);
   }
@@ -1724,15 +1790,15 @@ router.post('/:id/charge-failed', asyncHandler(async (req, res) => {
   }
 
   const { data: sale, error } = await supabaseAdmin
-    .from('sales').select('id,closer_id,created_by,closer_disposition,charge_at').eq('id', id).single();
+    .from('sales').select('id,company_id,closer_id,created_by,fronter_id,closer_disposition,charge_at').eq('id', id).single();
   if (error || !sale) return res.status(404).json({ error: 'Sale not found' });
 
   // Owner-or-privileged, same shape as submit-review. A manager or compliance
   // may record the failure on the closer's behalf; another closer may not.
-  const isOwner     = sale.created_by === userId || sale.closer_id === userId;
-  const privileged  = ['superadmin', 'compliance_manager', 'company_admin',
-                       'operations_manager', 'closer_manager'].includes(userRole);
-  if (!isOwner && !privileged) {
+  // The manager tier is additionally scoped to the sale's OWN company — the old
+  // role-only list let a manager at any company reschedule the charge date on
+  // another company's post-date. See canAccessSale.
+  if (!(await canAccessSale(req, sale))) {
     return res.status(403).json({ error: 'Only the sale owner can record a failed charge' });
   }
 
@@ -1784,6 +1850,10 @@ router.post('/:id/charge-failed', asyncHandler(async (req, res) => {
 // ============================================================================
 router.get('/:id/charge-attempts', asyncHandler(async (req, res) => {
   const { id } = req.params;
+  // This route previously had NO access control of any kind — any authenticated
+  // user could read any sale's failed-charge reasons/notes by id. Authorise the
+  // parent sale first (returns null once it has already answered 404/403).
+  if (!(await loadSaleForAccess(req, res, id))) return;
   const { data, error } = await supabaseAdmin
     .from('post_date_attempts')
     .select('id,reason_key,note,previous_charge_at,next_charge_at,actor_id,created_at')
@@ -2217,6 +2287,14 @@ router.post('/:id/resell', [
 
   if (userRole === 'closer' && old.closer_id !== userId) {
     return res.status(403).json({ error: 'You can only resell your own sales.' });
+  }
+  // Only the `closer` branch above was ownership-checked — every other allowed
+  // role could resell ANY sale by id. That is a write-side cross-tenant bug: it
+  // cancels the target company's sale AND forks a new row into their company
+  // stamped with the caller as closer. Scope the manager tier to the sale's own
+  // company (cross-company roles are unaffected). See canAccessSale.
+  if (!(await canAccessSale(req, old))) {
+    return res.status(403).json({ error: 'You can only resell sales in your own company.' });
   }
 
   const companyId = old.company_id;

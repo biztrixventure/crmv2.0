@@ -9,6 +9,39 @@ const { stampActor } = require('../utils/auditColumnGuard');
 
 const ADMIN_ROLES = ['superadmin', 'readonly_admin', 'company_admin', 'operations_manager'];
 
+// ── Transfer access guard ───────────────────────────────────────────────────
+// /submit, /submit-callback and /history/:transferId all took a transfer_id
+// straight from the client and NEVER checked the caller was entitled to it —
+// so any authenticated user (a fronter included) could write a disposition or a
+// callback onto, or read the full note history of, another company's lead.
+//
+// The scoping rule is NOT "same company_id": transfers are stored under the
+// FRONTER company, and closer-side staff legitimately work the shared pool of
+// leads across fronter companies (the same model GET /transfers/search-by-phone
+// uses). So:
+//   • closer-side + cross-company roles → any transfer (by design)
+//   • fronter (the person)              → only leads they created
+//   • fronter-side managers/admins      → only their own company's leads
+const CLOSER_SIDE_ROLES = ['closer', 'closer_manager'];
+const GLOBAL_ROLES      = ['superadmin', 'readonly_admin', 'compliance_manager'];
+
+async function canAccessTransfer(req, transfer) {
+  if (!transfer) return false;
+  const { id: userId, role, company_id: companyId } = req.user;
+  if (GLOBAL_ROLES.includes(role)) return true;
+  if (transfer.created_by === userId || transfer.assigned_closer_id === userId) return true;
+  if (CLOSER_SIDE_ROLES.includes(role)) return true;
+  if (role === 'fronter') return false;              // own leads only (checked above)
+  // Remaining manager/admin tiers are company-scoped to the lead's own company.
+  if (!transfer.company_id || !companyId) return false;   // fail closed
+  if (transfer.company_id === companyId) return true;
+  const { data } = await supabaseAdmin
+    .from('user_company_roles').select('id')
+    .eq('user_id', userId).eq('company_id', transfer.company_id).eq('is_active', true)
+    .limit(1).maybeSingle();
+  return !!data;
+}
+
 // GET /api/disposition-configs
 // Returns active configs: global (company_id IS NULL) + company-specific for caller's company
 router.get('/', async (req, res) => {
@@ -179,6 +212,9 @@ router.post('/submit', async (req, res) => {
     ]);
 
     if (tfErr  || !transfer) return res.status(404).json({ error: 'Transfer not found' });
+    if (!(await canAccessTransfer(req, transfer))) {
+      return res.status(403).json({ error: 'Not permitted to disposition this lead' });
+    }
     if (cfgErr || !config)   return res.status(404).json({ error: 'Disposition config not found' });
     if (config.requires_note && !note?.trim()) {
       return res.status(400).json({ error: `A note is required for "${config.name}"` });
@@ -235,6 +271,9 @@ router.post('/submit-callback', async (req, res) => {
       .eq('id', transfer_id)
       .single();
     if (tfErr || !transfer) return res.status(404).json({ error: 'Transfer not found' });
+    if (!(await canAccessTransfer(req, transfer))) {
+      return res.status(403).json({ error: 'Not permitted to schedule a callback on this lead' });
+    }
 
     const fd           = transfer.form_data || {};
     const customerName = fd.customer_name
@@ -289,10 +328,20 @@ router.post('/submit-callback', async (req, res) => {
 
 // GET /api/disposition-configs/history/:transferId
 // Returns full disposition history for a transfer, enriched with setter name + role.
-// Accessible by any authenticated user who can see the transfer.
+// Accessible by any authenticated user who can see the transfer — which is now
+// actually ENFORCED (it never was: the comment claimed a check that did not
+// exist, so any lead's notes/history were readable by id).
 router.get('/history/:transferId', async (req, res) => {
   try {
     const { transferId } = req.params;
+
+    const { data: transfer } = await supabaseAdmin
+      .from('transfers').select('id, company_id, created_by, assigned_closer_id')
+      .eq('id', transferId).maybeSingle();
+    if (!transfer) return res.status(404).json({ error: 'Transfer not found' });
+    if (!(await canAccessTransfer(req, transfer))) {
+      return res.status(403).json({ error: 'Not permitted to view this lead history' });
+    }
 
     const { data: actions, error } = await supabaseAdmin
       .from('disposition_actions')
