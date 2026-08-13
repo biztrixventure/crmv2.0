@@ -155,7 +155,7 @@ router.get(
         && !(await isCompanyMember(userId, req.query.company_id))) {
       companyId = req.user.company_id;
     }
-    const { status, disposition, charge_from, charge_to, search, page = 1, limit = 50, date_from, date_to, user_id, sort_by, sort_dir, filters, exclude_post_date } = req.query;
+    const { status, disposition, charge_from, charge_to, search, page = 1, limit = 50, date_from, date_to, user_id, sort_by, sort_dir, filters, exclude_post_date, incentive_status } = req.query;
 
     logger.info('GET_SALES', `user=${userId}, role=${userRole}, company=${companyId}`);
 
@@ -240,7 +240,24 @@ router.get(
     const safeCloserId = safeUuid(user_id);
     if (safeCloserId && isManagerRole) query = query.eq('closer_id', safeCloserId);
 
-    if (status)    query = query.eq('status', status);
+    if (status) {
+      // Closer's own "My Sales" filter bar picks several at once (MultiFilterSelect);
+      // a single value keeps the plain .eq() it always had.
+      const statusList = status.split(',').filter(Boolean);
+      query = statusList.length > 1 ? query.in('status', statusList) : query.eq('status', statusList[0] || status);
+    }
+    // Closer-facing "incentive status" — a derived read of two payout columns
+    // (mig 244/246), not a column of its own. Mirrors incentivePill() in
+    // StaffShell.jsx exactly: no payout_confirmed row (NULL) reads as pending.
+    if (incentive_status) {
+      const vals = String(incentive_status).split(',').filter(Boolean);
+      const orParts = [];
+      if (vals.includes('not_eligible')) orParts.push('payout_confirmed.eq.no');
+      if (vals.includes('pending'))      orParts.push('payout_confirmed.eq.pending', 'payout_confirmed.is.null');
+      if (vals.includes('eligible'))     orParts.push('and(payout_confirmed.eq.yes,paid_to_closer.eq.false)');
+      if (vals.includes('paid'))         orParts.push('and(payout_confirmed.eq.yes,paid_to_closer.eq.true)');
+      if (orParts.length) query = query.or(orParts.join(','));
+    }
     // Disposition tab filter (closer_disposition) — drives the dynamic per-
     // disposition tabs (e.g. "Post Date"). Generic: the frontend resolves which
     // value is the post-date one from the live form-field options and passes it.

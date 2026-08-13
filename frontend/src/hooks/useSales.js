@@ -9,6 +9,9 @@ export const useSales = (companyId = null) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [total, setTotal] = useState(0);
+  // Sort/filter catalog the endpoint advertised for THIS caller (resolveColumnAccess
+  // server-side) — consumed by callers wiring a sortable table (useTableQuery).
+  const [columns, setColumns] = useState({});
 
   const fetchSales = useCallback(async (filters = {}) => {
     setLoading(true);
@@ -18,6 +21,7 @@ export const useSales = (companyId = null) => {
       const response = await client.get('sales', { params });
       setSales(response.data.sales || []);
       setTotal(response.data.total || 0);
+      if (response.data.columns) setColumns(response.data.columns);
     } catch (err) {
       const msg = err.response?.data?.error || err.message || 'Failed to fetch sales';
       setError(msg);
@@ -85,5 +89,5 @@ export const useSales = (companyId = null) => {
     }
   }, []);
 
-  return { sales, total, loading, error, fetchSales, createSale, updateSale, deleteSale };
+  return { sales, total, loading, error, columns, fetchSales, createSale, updateSale, deleteSale };
 };

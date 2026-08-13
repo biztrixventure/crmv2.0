@@ -25,6 +25,7 @@ import {
   CheckCircle, XCircle, Plus, User, Car, Star, MessageSquare,
   Users, Shield, FileText, BarChart3, AlertTriangle, RefreshCw, CalendarPlus, Pencil, Trash2, Download,
   ChevronLeft, ChevronRight, HelpCircle, CalendarDays, Copy, UserCircle, Database, CreditCard, Award,
+  LayoutGrid, List as ListIcon,
 } from "lucide-react";
 
 const PAGE_SIZE = 25;
@@ -58,7 +59,10 @@ import StatCardTriple from "../components/UI/StatCardTriple";
 import SaleStatusBadge from "../components/UI/SaleStatusBadge";
 import SaleStatusFilterPills from "../components/UI/SaleStatusFilterPills";
 import TransferStatusFilterPills from "../components/UI/TransferStatusFilterPills";
-import FilterBar from "../components/UI/FilterBar";
+import FilterBar, { MultiFilterSelect } from "../components/UI/FilterBar";
+import { TableScroll } from "../components/UI/kit";
+import ColumnHeader from "../components/UI/ColumnHeader";
+import { useTableQuery } from "../hooks/useTableQuery";
 import DuplicateRecordsModal from "../components/Shared/DuplicateRecordsModal";
 import DateRangePicker, { getPresetRange } from "../components/UI/DateRangePicker";
 import { AppHeader } from "../components/Layout";
@@ -213,7 +217,7 @@ const StaffShell = () => {
 
   const { stats, loading: statsLoading, fetchStats } = useDashboardStats();
   const { transfers, total: transferTotal, loading: tLoading, fetchTransfers, createTransfer, deleteTransfer } = useTransfers(user?.company_id);
-  const { sales, total: salesTotal, loading: sLoading, fetchSales, createSale, deleteSale } = useSales(user?.company_id);
+  const { sales, total: salesTotal, loading: sLoading, columns: salesColumns, fetchSales, createSale, deleteSale } = useSales(user?.company_id);
   const { fields, fetchFields } = useFormFields();
   const { clients: saleClients, plans: salePlans, fetchConfigs } = useSaleConfigs(user?.company_id);
   // Per-user client access: restrict the client dropdown to this user's allowed
@@ -432,6 +436,20 @@ const StaffShell = () => {
   // (e.g. "Completed" → only completed leads). '' = all. Drives fetchTransfers.
   const [myLeadsStatus, setMyLeadsStatus]   = useState('');
   const [closerSalesPage, setCloserSalesPage] = useState(1);
+  // ── "My Sales" filter bar + list/grid toggle (Compliance-Sales-tab parity) ──
+  // Scoped to the My Sales sub-tab only — Assigned Transfers / dispo tabs are
+  // untouched. Grid stays the default; the choice persists per role.
+  const [mySalesView, setMySalesView] = usePersistedState(`biztrix.mySalesView.${user?.role || 'default'}`, 'grid');
+  const [mySalesSearch, setMySalesSearch]         = useState('');
+  const [mySalesStatuses, setMySalesStatuses]     = useState([]);
+  // Eligible/Paid/Pending/Not Eligible — a derived read of payout_confirmed +
+  // paid_to_closer (mig 244/246), same fields incentivePill() reads below.
+  const [mySalesIncentive, setMySalesIncentive]   = useState([]);
+  const mySalesTq = useTableQuery({
+    scope: 'staff:my-sales',
+    columns: salesColumns,
+    defaultSort: { by: 'sale_date', dir: 'desc' },
+  });
   const [leadSearchQ, setLeadSearchQ]       = useState(''); // debounced server search for leads
   const [formData, setFormData]             = useState({});
   const [transferSubmitting, setTransferSubmitting] = useState(false);
@@ -505,9 +523,31 @@ const StaffShell = () => {
       // exclude them) said something different. The Post Date tab above is the
       // one place they live until the card is actually charged.
       p.exclude_post_date = true;
+      // My Sales filter bar + sort — scoped to the actual My Sales view so it
+      // never narrows the Assigned-tab's background sales fetch (that one only
+      // reads salesTotal for the sub-nav count badge). mySalesStatuses (multi)
+      // takes over from the single-value salesStatus (KPI-card click) once the
+      // operator picks anything in the new filter bar.
+      if (closerSection === 'sales') {
+        if (mySalesSearch) p.search = mySalesSearch;
+        if (mySalesStatuses.length) p.status = mySalesStatuses.join(',');
+        if (mySalesIncentive.length) p.incentive_status = mySalesIncentive.join(',');
+        // Default sort is sale_date desc (was: unsorted → server fell back to
+        // created_at, which disagrees with sale_date on bulk-uploaded rows —
+        // that mismatch is why picking a date range looked "unsorted").
+        Object.assign(p, mySalesTq.params);
+      }
     }
     return p;
-  }, [closerSection, closerSalesPage, date_from, date_to, salesStatus]);
+  }, [closerSection, closerSalesPage, date_from, date_to, salesStatus, mySalesSearch, mySalesStatuses, mySalesIncentive, mySalesTq.params]);
+
+  // A new sort / column filter / search / status / incentive pick re-windows
+  // the whole dataset — page 2 of the old result is meaningless.
+  const mySalesFirstQuery = useRef(true);
+  useEffect(() => {
+    if (mySalesFirstQuery.current) { mySalesFirstQuery.current = false; return; }
+    setCloserSalesPage(1);
+  }, [mySalesSearch, mySalesStatuses, mySalesIncentive, mySalesTq.version]);
 
   useEffect(() => {
     if (!isCloser) return;
@@ -898,7 +938,12 @@ const StaffShell = () => {
   // Every data point a staff KPI card can show, keyed to match kpiCatalog. The
   // SuperAdmin builder picks which land in which card / slot; the drill-down
   // for each one is preserved here.
-  const goCloser = (status, range) => () => { setCloserSection('sales'); setSalesStatus(status); setDateRange(getPresetRange(range)); };
+  const goCloser = (status, range) => () => {
+    setCloserSection('sales'); setSalesStatus(status); setDateRange(getPresetRange(range));
+    // A KPI-card click is a fresh, single-status intent — drop any multi-select
+    // filter bar picks so they don't silently mask it.
+    setMySalesStatuses([]); setMySalesIncentive([]); setMySalesSearch('');
+  };
   // Fronter leads KPIs → filter the fronter's own "My Leads" list (and jump to
   // its tab). Previously this set xferStatus, which only drives the separate
   // team_transfers tab — so the fronter's list never filtered and showed all.
@@ -941,6 +986,56 @@ const StaffShell = () => {
         caption={cfg.description || undefined} />
     );
   };
+
+  // Compact action set for the My Sales LIST view — same handlers the grid
+  // cards use, just icon-only so a row stays one line.
+  const renderMySalesActions = (s) => (
+    <div className="flex items-center gap-1 flex-wrap" onClick={e => e.stopPropagation()}>
+      {s.status === 'open' && hasPermission('submit_for_review') && (
+        <button onClick={() => handleSubmitForReview(s.id)} disabled={submitting === s.id}
+          title="Submit for Review" className="p-1.5 rounded-lg text-white disabled:opacity-50"
+          style={{ background: 'var(--gradient-sidebar)' }}>
+          {submitting === s.id ? <RefreshCw size={12} className="animate-spin" /> : <CheckCircle size={12} />}
+        </button>
+      )}
+      {s.status === 'needs_revision' && (
+        <button onClick={() => handleSubmitForReview(s.id)} disabled={submitting === s.id}
+          title="Resubmit" className="p-1.5 rounded-lg text-white disabled:opacity-50"
+          style={{ backgroundColor: 'var(--color-error-600)' }}>
+          <RefreshCw size={12} className={submitting === s.id ? 'animate-spin' : ''} />
+        </button>
+      )}
+      {['open', 'needs_revision'].includes(s.status) && (
+        <button onClick={() => { setEditSale(s); setEditSaleError(''); }} title="Edit"
+          className="p-1.5 rounded-lg border transition-colors hover:bg-bg-secondary"
+          style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+          <Pencil size={12} />
+        </button>
+      )}
+      {hasPermission('manage_callbacks') && (
+        <button onClick={() => { setCallbackSale(s); setCallbackAt(''); setCallbackNotes(''); setCallbackMsg(''); }} title="Schedule Callback"
+          className="p-1.5 rounded-lg border transition-colors hover:bg-info-50"
+          style={{ borderColor: 'var(--color-info-300)', color: 'var(--color-info-600)' }}>
+          <CalendarPlus size={12} />
+        </button>
+      )}
+      {hasPermission('delete_sale') && (
+        <button
+          onClick={() => { if (window.confirm('Delete this sale? This cannot be undone.')) { deleteSale(s.id).then(() => fetchSales(closerSalesParams())); } }}
+          title="Delete" className="p-1.5 rounded-lg border transition-colors hover:bg-error-50"
+          style={{ borderColor: 'var(--color-error-300)', color: 'var(--color-error-600)' }}>
+          <Trash2 size={12} />
+        </button>
+      )}
+    </div>
+  );
+  const MY_SALES_STATUS_OPTIONS = Object.entries(SALE_LABEL).map(([value, label]) => ({ value, label }));
+  const MY_SALES_INCENTIVE_OPTIONS = [
+    { value: 'eligible',     label: 'Eligible' },
+    { value: 'paid',         label: 'Paid' },
+    { value: 'pending',      label: 'Pending' },
+    { value: 'not_eligible', label: 'Not Eligible' },
+  ];
 
   return (
     <div className={`min-h-screen bg-bg relative ${user?.role === 'superadmin' ? '' : 'bsx-no-select'}`}>
@@ -1244,11 +1339,19 @@ const StaffShell = () => {
             {/* Stats — triple-segment cards. Today / MTD / Total each clickable
                 with its own filter scope. Closer sees: My Sales, Approved,
                 Awaiting Review, Cancelled, Resells, Conversion. */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
-              {STAFF_CLOSER_CARDS.map(renderStaffCard)}
+            {/* flex-wrap (not a fixed-column grid) so a card count that doesn't
+                divide evenly (e.g. 6 KPI cards + Conversion = 7 at 3 columns)
+                never leaves a dangling empty row — the last row's cards just
+                grow to fill the space instead of leaving 1-2 empty slots. */}
+            <div className="flex flex-wrap gap-4 mb-8">
+              {STAFF_CLOSER_CARDS.map(key => {
+                const card = renderStaffCard(key);
+                return card ? <div key={key} className="flex-1" style={{ minWidth: 240 }}>{card}</div> : null;
+              })}
 
               {/* Conversion — display-only, kept in the same row. */}
               {isStaffCardVisible('conversion') && (
+              <div className="flex-1" style={{ minWidth: 240 }}>
               <Card
                 className="p-4 min-h-[140px] flex flex-col justify-between"
                 style={{ background: 'linear-gradient(135deg, var(--color-info-50, #ecfeff) 0%, var(--color-surface) 60%)', borderTop: '3px solid var(--color-info-500, #06b6d4)' }}
@@ -1266,6 +1369,7 @@ const StaffShell = () => {
                 </div>
                 <p className="text-[10px] text-text-tertiary text-center">Approved ÷ total transfers</p>
               </Card>
+              </div>
               )}
 
             </div>
@@ -1400,34 +1504,77 @@ const StaffShell = () => {
 
             {closerSection === 'sales' && (
               <Card className="p-6">
-                <div className="mb-4">
-                  <h3 className="text-xl font-bold text-text flex items-center gap-2">
-                    <DollarSign size={20} /> My Sales
-                    <span className="text-sm font-semibold px-2 py-0.5 rounded-full"
-                      style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>{salesTotal}</span>
-                  </h3>
-                  <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
-                    Every sale you’ve created, in any status (draft, awaiting review, approved, returned…). Includes resells,
-                    which is why it can exceed the leads assigned to you.
-                  </p>
+                <div className="mb-4 flex items-start justify-between gap-3 flex-wrap">
+                  <div>
+                    <h3 className="text-xl font-bold text-text flex items-center gap-2">
+                      <DollarSign size={20} /> My Sales
+                      <span className="text-sm font-semibold px-2 py-0.5 rounded-full"
+                        style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>{salesTotal}</span>
+                    </h3>
+                    <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
+                      Every sale you’ve created, in any status (draft, awaiting review, approved, returned…). Includes resells,
+                      which is why it can exceed the leads assigned to you.
+                    </p>
+                  </div>
+                  {/* Grid / List toggle — persists per role. */}
+                  <div className="flex gap-1 p-1 rounded-xl flex-shrink-0"
+                    style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+                    {[{ k: 'grid', icon: LayoutGrid, label: 'Grid' }, { k: 'list', icon: ListIcon, label: 'List' }].map(v => (
+                      <button key={v.k} onClick={() => setMySalesView(v.k)} title={`${v.label} view`}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+                        style={{ background: mySalesView === v.k ? 'var(--gradient-sidebar)' : 'transparent',
+                          color: mySalesView === v.k ? 'white' : 'var(--color-text-secondary)' }}>
+                        <v.icon size={13} /> {v.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
+
+                <FilterBar
+                  search={{
+                    value: mySalesSearch,
+                    onChange: (v) => setMySalesSearch(v),
+                    placeholder: 'Search customer / phone / reference…',
+                  }}
+                  extras={
+                    <>
+                      <MultiFilterSelect value={mySalesStatuses} onChange={setMySalesStatuses}
+                        options={MY_SALES_STATUS_OPTIONS} placeholder="All statuses" title="Filter by status" />
+                      <MultiFilterSelect value={mySalesIncentive} onChange={setMySalesIncentive}
+                        options={MY_SALES_INCENTIVE_OPTIONS} placeholder="All incentive status" title="Filter by incentive status" />
+                    </>
+                  }
+                  dateRange={{
+                    value: { date_from, date_to },
+                    onChange: setDateRange,
+                    defaultPreset: 'today',
+                  }}
+                  onClearAll={() => { setMySalesSearch(''); setMySalesStatuses([]); setMySalesIncentive([]); mySalesTq.clearAll(); }}
+                />
+
                 {sLoading ? (
                   <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" /></div>
                 ) : sales.length === 0 ? (
                   <p className="text-text-secondary text-center py-8">
-                    No sales yet. Use phone search above to find a lead and create a sale.
+                    {mySalesSearch || mySalesStatuses.length || mySalesIncentive.length
+                      ? 'No sales match the current filters.'
+                      : 'No sales yet. Use phone search above to find a lead and create a sale.'}
                   </p>
-                ) : (
+                ) : mySalesView === 'grid' ? (
                   <>
-                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                  {/* flex-wrap (not a fixed-column grid) — a partial last row's
+                      cards grow to fill the row instead of leaving 1-2 empty
+                      slots, which is what a short trailing row in a rigid
+                      xl:grid-cols-3 always did. */}
+                  <div className="flex flex-wrap gap-3">
                     {sales.map(s => {
                       const _f = isFocused('sale', s.id);
                       const incentiveBg = incentiveHighlight(s);
                       return (
                       <div key={s.id} onClick={() => setDetailSale(s)}
                         ref={_f ? focusCardRef : null}
-                        className="p-4 rounded-xl border transition-all hover:shadow-md cursor-pointer"
-                        style={{ borderColor: 'var(--color-border)', backgroundColor: incentiveBg || 'var(--color-bg)', ...focusRing(_f) }}>
+                        className="p-4 rounded-xl border transition-all hover:shadow-md cursor-pointer flex-1"
+                        style={{ minWidth: 300, borderColor: 'var(--color-border)', backgroundColor: incentiveBg || 'var(--color-bg)', ...focusRing(_f) }}>
 
                         {/* Compliance note banner for needs_revision */}
                         {s.status === 'needs_revision' && s.compliance_note && (
@@ -1553,6 +1700,71 @@ const StaffShell = () => {
                       );
                     })}
                   </div>
+                  <Pagination page={closerSalesPage} total={salesTotal} pageSize={PAGE_SIZE} onChange={setCloserSalesPage} />
+                  </>
+                ) : (
+                  <>
+                  <TableScroll stickyFirst inheritRowBg label="My Sales">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
+                          <ColumnHeader tq={mySalesTq} colKey="customer" label="Customer"
+                            className="px-3 py-2.5 text-[11px] font-bold uppercase tracking-wider select-none"
+                            style={{ color: mySalesTq.sort?.by === 'customer' ? 'var(--color-primary-600)' : 'var(--color-text-secondary)' }} />
+                          <ColumnHeader tq={mySalesTq} colKey="status" label="Status" options={MY_SALES_STATUS_OPTIONS}
+                            className="px-3 py-2.5 text-[11px] font-bold uppercase tracking-wider select-none"
+                            style={{ color: mySalesTq.sort?.by === 'status' ? 'var(--color-primary-600)' : 'var(--color-text-secondary)' }} />
+                          <ColumnHeader tq={mySalesTq} colKey="client_name" label="Client / Plan"
+                            className="px-3 py-2.5 text-[11px] font-bold uppercase tracking-wider select-none"
+                            style={{ color: mySalesTq.sort?.by === 'client_name' ? 'var(--color-primary-600)' : 'var(--color-text-secondary)' }} />
+                          <ColumnHeader tq={mySalesTq} colKey="sale_date" label="Sale Date"
+                            className="px-3 py-2.5 text-[11px] font-bold uppercase tracking-wider select-none"
+                            style={{ color: mySalesTq.sort?.by === 'sale_date' ? 'var(--color-primary-600)' : 'var(--color-text-secondary)' }} />
+                          <th className="px-3 py-2.5 text-left text-[11px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>Incentive</th>
+                          {hasPermission('view_financial_data') && (
+                            <th className="px-3 py-2.5 text-left text-[11px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>Monthly</th>
+                          )}
+                          <th className="px-3 py-2.5 text-left text-[11px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sales.map(s => {
+                          const _f = isFocused('sale', s.id);
+                          const incentiveBg = incentiveHighlight(s);
+                          return (
+                            <tr key={s.id} onClick={() => setDetailSale(s)}
+                              ref={_f ? focusCardRef : null}
+                              className="cursor-pointer transition-colors"
+                              style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: incentiveBg || 'var(--color-surface)', ...focusRing(_f) }}
+                              onMouseEnter={e => { if (!incentiveBg) e.currentTarget.style.backgroundColor = 'var(--color-bg-secondary)'; }}
+                              onMouseLeave={e => { e.currentTarget.style.backgroundColor = incentiveBg || 'var(--color-surface)'; }}>
+                              <td className="px-3 py-2">
+                                <p className="font-semibold m-0" style={{ color: 'var(--color-text)' }}>{s.customer_name || 'Sale'}</p>
+                                <p className="text-xs m-0 mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                                  {s.customer_phone || ''}{s.reference_no ? ` · #${s.reference_no}` : ''}
+                                </p>
+                              </td>
+                              <td className="px-3 py-2"><SaleStatusBadge sale={s} size="sm" /></td>
+                              <td className="px-3 py-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{s.client_name || s.plan || '—'}</td>
+                              <td className="px-3 py-2 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>{fmtCardDate(s.sale_date || s.created_at)}</td>
+                              <td className="px-3 py-2">
+                                {s.status === 'closed_won' ? (
+                                  <span className="inline-flex items-center font-bold px-1.5 py-0.5 rounded text-xs"
+                                    style={{ backgroundColor: incentivePill(s).bg, color: incentivePill(s).fg }}>
+                                    {incentivePill(s).label}
+                                  </span>
+                                ) : <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>—</span>}
+                              </td>
+                              {hasPermission('view_financial_data') && (
+                                <td className="px-3 py-2 text-xs font-semibold text-success-600">{s.monthly_payment ? `$${s.monthly_payment}/mo` : '—'}</td>
+                              )}
+                              <td className="px-3 py-2">{renderMySalesActions(s)}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </TableScroll>
                   <Pagination page={closerSalesPage} total={salesTotal} pageSize={PAGE_SIZE} onChange={setCloserSalesPage} />
                   </>
                 )}
