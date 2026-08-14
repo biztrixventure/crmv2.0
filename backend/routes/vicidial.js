@@ -984,10 +984,28 @@ api.delete('/closer-dispos/:id', asyncHandler(async (req, res) => {
 
 // ── API: my pending-from-dialer transfers ────────────────────────────────────
 api.get('/pending', asyncHandler(async (req, res) => {
+  // AGE CUTOFF — the banner is a live work queue ("confirm this transfer"), not
+  // an archive. Unconfirmed dialer transfers accumulate forever: 3,272 were
+  // open, 2,885 of them more than two weeks old and the oldest 55 days. Those
+  // stale cards buried the ones that actually need action, and because they
+  // carry old dispositions they repeatedly read as today's work.
+  //
+  // Nothing is deleted or altered — the rows stay, remain searchable, and any
+  // that a closer has worked now appear in the normal transfers list. This only
+  // decides what the popup shows. Tunable per company via
+  // business_config `pending.max_age_days`; 2 = today + yesterday.
+  const maxAgeDays = Math.max(1, parseInt(await getConfig(req.user.company_id, 'pending.max_age_days', 2), 10) || 2);
+  // Anchor on the DIALER day (EDT, UTC-4) so "yesterday" means the shift the
+  // agent actually worked, not a UTC boundary that cuts mid-evening.
+  const edtNow = new Date(Date.now() - 4 * 3600000);
+  const startOfEdtToday = new Date(Date.UTC(edtNow.getUTCFullYear(), edtNow.getUTCMonth(), edtNow.getUTCDate()));
+  const cutoff = new Date(startOfEdtToday.getTime() - (maxAgeDays - 1) * 86400000 + 4 * 3600000).toISOString();
+
   const { data, error } = await supabaseAdmin
     .from('transfers')
     .select('id, vicidial_vendor_code, normalized_phone, form_data, vicidial_dispo, vicidial_dispo_at, vicidial_agent, assigned_closer_id, created_at')
     .eq('created_by', req.user.id).eq('vicidial_pending', true)
+    .gte('created_at', cutoff)
     .order('created_at', { ascending: false });
   if (error) return res.status(500).json({ error: error.message });
   const rows = data || [];
