@@ -327,10 +327,28 @@ ingest.all('/fronter-xfer', requireToken, asyncHandler(async (req, res) => {
   recentXfer.unshift(xdbg); if (recentXfer.length > 500) recentXfer.pop();
   if (!code || !phone) { xdbg.outcome = 'rejected — missing code or phone'; return res.status(400).json({ ok: false, error: 'code and phone required' }); }
 
-  // Idempotent on the correlation code.
+  // Route to the fronter the VICIdial agent maps to. This MUST happen before the
+  // idempotency lookup: a lead_id identifies a LEAD, not a transfer event, so
+  // when the dialer recycles a lead a different fronter can send the same code.
+  // Keying idempotency on the code alone made that second fronter's XFER update
+  // the FIRST fronter's transfer — no card and no credit for the person who
+  // actually made the call, and the closer's disposition landed on the wrong
+  // agent's dashboard. Idempotency is per (code, fronter) now; see migration 250.
+  // Unmapped agent → capture is skipped (200 so the dialer doesn't retry).
+  const { userId, companyId } = await resolveAgent(agent);
+  xdbg.agent_mapped = !!userId; xdbg.company_id = companyId;
+  if (!userId || !companyId) {
+    logger.warn('VICIDIAL_XFER', `Unmapped agent "${agent}" (code ${code}) — pending transfer not created`);
+    xdbg.outcome = `NO TRANSFER — fronter agent "${agent}" not mapped`;
+    return res.json({ ok: false, reason: 'agent not mapped', code });
+  }
+
+  // Idempotent on (correlation code + this fronter): the same agent re-firing the
+  // same lead still collapses onto one row, a different agent gets their own.
   const { data: existing } = await supabaseAdmin
     .from('transfers').select('id, created_at, form_data, status, assigned_closer_id, vicidial_dispo, vicidial_dispo_at')
-    .eq('vicidial_vendor_code', code).maybeSingle();
+    .eq('vicidial_vendor_code', code).eq('created_by', userId)
+    .order('created_at', { ascending: false }).limit(1).maybeSingle();
 
   if (existing) {
     // A recycled lead re-transferred long after it went quiet is a NEW contact
@@ -348,16 +366,6 @@ ingest.all('/fronter-xfer', requireToken, asyncHandler(async (req, res) => {
     await reconcileQueuedDispoForTransfer({ id: existing.id }, norm);
     xdbg.outcome = wasReset ? `recycled lead — reset + updated transfer ${existing.id}` : `updated existing transfer ${existing.id}`;
     return res.json({ ok: true, transfer_id: existing.id, updated: true, reset: wasReset });
-  }
-
-  // Route to the fronter the VICIdial agent maps to. Unmapped agent → capture
-  // is skipped (200 so the dialer doesn't retry) and logged for the superadmin.
-  const { userId, companyId } = await resolveAgent(agent);
-  xdbg.agent_mapped = !!userId; xdbg.company_id = companyId;
-  if (!userId || !companyId) {
-    logger.warn('VICIDIAL_XFER', `Unmapped agent "${agent}" (code ${code}) — pending transfer not created`);
-    xdbg.outcome = `NO TRANSFER — fronter agent "${agent}" not mapped`;
-    return res.json({ ok: false, reason: 'agent not mapped', code });
   }
 
   // The fronter campaign's Dispo Call URL fires on EVERY disposition. Only the
@@ -395,6 +403,11 @@ ingest.all('/fronter-xfer', requireToken, asyncHandler(async (req, res) => {
       .from('transfers')
       .select('id')
       .eq('company_id', companyId)
+      // Only THIS fronter's own hand-entered row. Matching on company+phone alone
+      // could adopt a colleague's transfer for the same customer and stamp our
+      // code + agent onto it — crediting this XFER to the wrong person and
+      // sending the closer's disposition to their dashboard instead.
+      .eq('created_by', userId)
       .eq('normalized_phone', norm)
       .is('vicidial_vendor_code', null)
       .gte('created_at', since)
@@ -428,8 +441,13 @@ ingest.all('/fronter-xfer', requireToken, asyncHandler(async (req, res) => {
     // (23505). Not an error — re-fetch the row the winner created and treat
     // this call as the idempotent duplicate (mirrors the `existing` path).
     if (error.code === '23505') {
+      // The unique key is (vicidial_vendor_code, created_by) — see migration 250
+      // — so re-fetch on BOTH columns, otherwise a second fronter holding the
+      // same recycled lead code would be mistaken for our own concurrent insert.
       const { data: dup } = await supabaseAdmin
-        .from('transfers').select('id').eq('vicidial_vendor_code', code).maybeSingle();
+        .from('transfers').select('id')
+        .eq('vicidial_vendor_code', code).eq('created_by', userId)
+        .order('created_at', { ascending: false }).limit(1).maybeSingle();
       if (dup) {
         await supabaseAdmin.from('transfers')
           .update({ vicidial_agent: agent || null, normalized_phone: norm || null })
