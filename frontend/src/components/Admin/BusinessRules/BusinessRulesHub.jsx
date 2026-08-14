@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Settings2, RefreshCw, Search, BarChart3, ShieldCheck, Bell, Building2, Copy, LayoutTemplate, Workflow, LayoutDashboard, Car, Gauge, Boxes, Highlighter, CalendarClock, PartyPopper, CircleDollarSign } from 'lucide-react';
+import { Settings2, RefreshCw, Search, BarChart3, ShieldCheck, Bell, Building2, Copy, ClipboardX, LayoutTemplate, Workflow, LayoutDashboard, Car, Gauge, Boxes, Highlighter, CalendarClock, PartyPopper, CircleDollarSign } from 'lucide-react';
 import client from '../../../api/client';
 import ResellRules from './ResellRules';
 import DedupRules from './DedupRules';
@@ -16,6 +16,7 @@ import SaleHighlightRules from './SaleHighlightRules';
 import DpStatusClientsRules from './DpStatusClientsRules';
 import PostDateRules from './PostDateRules';
 import CelebrationRules from './CelebrationRules';
+import CopyProtectionRules from './CopyProtectionRules';
 import ThemedSelect from '../../UI/Select';
 import { useAuth } from '../../../contexts/AuthContext';
 
@@ -37,6 +38,7 @@ const PAGES = [
   { id: 'batch_rules',  label: 'Batch Distribution',     icon: Boxes,       Component: BatchRules },
   { id: 'vehicle',      label: 'Vehicle Eligibility',    icon: Car,         Component: VehicleEligibilityRules },
   { id: 'shells',       label: 'Shell Layouts',          icon: LayoutDashboard, Component: ShellLayoutRules },
+  { id: 'copy_protect', label: 'Copy Protection',        icon: ClipboardX,  Component: CopyProtectionRules },
   { id: 'notifications',label: 'Notifications',          icon: Bell,        Component: NotificationsRules },
   { id: 'drawer',       label: 'Drawer Layout',          icon: LayoutTemplate, Component: DrawerLayoutRules },
   { id: 'system',       label: 'System & Performance',   icon: Gauge,       Component: SystemRules },

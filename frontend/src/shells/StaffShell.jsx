@@ -101,6 +101,7 @@ import DevCredit from "../components/DevCredit";
 import CallChecklistWidget from "../components/Closer/CallChecklistWidget";
 import ChargeFailedModal from "../components/Closer/ChargeFailedModal";
 import { usePostDateFailReasons } from "../hooks/usePostDateFailReasons";
+import { useCopyProtection } from "../hooks/useCopyProtection";
 import FronterNumbersWidget from "../components/Numbers/FronterNumbersWidget";
 
 const TRANSFER_BADGE = { pending: 'warning', assigned: 'info', completed: 'success', cancelled: 'error', rejected: 'error' };
@@ -306,6 +307,9 @@ const StaffShell = () => {
   const [failSale, setFailSale]             = useState(null);
   // Resolves last_charge_fail_reason_key → the admin-configured label.
   const { labelOf: failReasonLabel }        = usePostDateFailReasons();
+  // Selection/copy lock on the shell root — superadmin-configurable in
+  // Business Rules → Copy Protection. Default ON (historical behavior).
+  const copyLocked                          = useCopyProtection('staff');
 
   // ── Team Transfers tab (rich server-side view) ───────────────────────────
   const [xferTabRows,    setXferTabRows]    = useState([]);
@@ -1038,7 +1042,7 @@ const StaffShell = () => {
   ];
 
   return (
-    <div className={`min-h-screen bg-bg relative ${user?.role === 'superadmin' ? '' : 'bsx-no-select'}`}>
+    <div className={`min-h-screen bg-bg relative ${(user?.role === 'superadmin' || !copyLocked) ? '' : 'bsx-no-select'}`}>
       <DotGridBg />
       {updateAvailable && <UpdateBanner />}
       <AppHeader
