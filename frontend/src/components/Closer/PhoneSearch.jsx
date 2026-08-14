@@ -576,6 +576,7 @@ const PhoneSearch = ({ onCreateSale, companyTimezone, refreshTrigger = 0, onRese
   const [resellStatuses,     setResellStatuses]     = useState(null);
   const [manualEntryOpen,    setManualEntryOpen]    = useState(false);
   const [searchedPhone,      setSearchedPhone]      = useState('');     // drives the history banner (only after a search)
+  const [elsewhere,          setElsewhere]          = useState(null);   // { leads, sold, companies } — counts only, no other-tenant data
 
   // Pull eligible statuses once so the "New on lead" button only appears for
   // sales the closer can actually resell per business_config.
@@ -601,6 +602,9 @@ const PhoneSearch = ({ onCreateSale, companyTimezone, refreshTrigger = 0, onRese
     try {
       const res = await client.get('transfers/search-by-phone', { params: { phone: q } });
       setResults(res.data.transfers || []);
+      // Counts only — the server never sends another company's record, just the
+      // fact that one exists, so this warning can't leak a competitor's lead.
+      setElsewhere(res.data.elsewhere || null);
     } catch (err) {
       setError(err.response?.data?.error || 'Search failed. Try again.');
     } finally {
@@ -720,6 +724,27 @@ const PhoneSearch = ({ onCreateSale, companyTimezone, refreshTrigger = 0, onRese
               <UserPlus size={14} /> Manual entry
             </button>
           </div>
+
+          {/* This customer is already with another company. Deliberately says
+              nothing about WHICH company or whose lead it is — that stays
+              compliance-only, same as the double-sold badge. */}
+          {elsewhere && (
+            <div className="mt-3 flex items-start gap-2.5 rounded-xl p-3"
+                 style={{ backgroundColor: 'var(--color-warning-50, #fffbeb)', border: '1px solid var(--color-warning-200, #fde68a)' }}>
+              <AlertTriangle size={16} className="flex-shrink-0 mt-0.5" style={{ color: 'var(--color-warning-700, #b45309)' }} />
+              <p className="text-xs leading-relaxed" style={{ color: 'var(--color-warning-700, #b45309)' }}>
+                {elsewhere.sold
+                  ? <>This customer has <strong>already been sold by another company</strong>.</>
+                  : <>This customer is <strong>already being worked by another company</strong>.</>}
+                {' '}Check with your manager before working this number.
+                <span className="block mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>
+                  {elsewhere.leads > 0 && `${elsewhere.leads} lead${elsewhere.leads === 1 ? '' : 's'} outside your company`}
+                  {elsewhere.leads > 0 && elsewhere.sold ? ' · ' : ''}
+                  {elsewhere.sold && 'sale recorded'}
+                </span>
+              </p>
+            </div>
+          )}
 
           {results.length === 0 ? (
             <p className="text-sm text-center mt-3 py-2" style={{ color: 'var(--color-text-secondary)' }}>

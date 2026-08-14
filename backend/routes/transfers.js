@@ -110,9 +110,15 @@ router.get('/', asyncHandler(async (req, res) => {
   );
 
   // VICIdial "pending from dialer" rows are not real transfers yet — they only
-  // hold lead_id + phone and live in the PendingFromDialer banner (GET /pending).
-  // Hide them from every normal list + count until the fronter confirms.
-  query = query.neq('vicidial_pending', true);
+  // hold lead_id + phone and live in the PendingFromDialer banner (GET /pending),
+  // so an untouched one is hidden from the normal list until the fronter confirms.
+  //
+  // BUT a closer can work and disposition one of those rows before the fronter
+  // ever presses Confirm. Blanket-hiding every pending row meant the lead — and
+  // the closer's disposition on it — never appeared on the fronter's dashboard
+  // at all: 2,798 transfers were in that state, 197 of them in the last week.
+  // Once someone has worked it, it is a real transfer and must be listed.
+  query = query.or('vicidial_pending.is.null,vicidial_pending.eq.false,assigned_closer_id.not.is.null,vicidial_dispo.not.is.null');
 
   // Transfers are stored under the fronter's company_id.
   // Closer-side roles are in a different (closer) company — don't filter by company_id for them.
@@ -471,9 +477,12 @@ router.get('/search-by-phone', asyncHandler(async (req, res) => {
   // staff — scope them to their own company rather than the shared pool.
   const closerSide = await isCloserSideScope(userRole, companyId);
   const globalView = ['superadmin', 'readonly_admin', 'compliance_manager'].includes(userRole);
-  // A plain fronter sees only their own leads — the same rule the transfers list
-  // applies to them, so this search can't become a way around it.
-  const ownLeadsOnly = userRole === 'fronter';
+  // Fronter-side callers are scoped to their OWN COMPANY (below). They still get
+  // told when the same customer exists at another company — but as a COUNT and a
+  // sold/not-sold flag only, never the record. That mirrors the existing
+  // double-sold signal, where a fronter learns a clash exists but never which
+  // competitor company holds it (that detail stays compliance-only).
+  const fronterSide = !globalView && !closerSide;
 
   // Resolve which fronter companies this caller can see.
   // NOTE: every active fronter company, by design — fronter↔closer linking is
@@ -501,19 +510,51 @@ router.get('/search-by-phone', asyncHandler(async (req, res) => {
   const sortCol = sortBy === 'created_at' ? 'created_at' : 'updated_at';
 
   // PostgREST JSONB text-extraction: ->>key (no SQL quotes). Covers both naming conventions.
-  let searchQ = supabaseAdmin
+  const { data, error } = await supabaseAdmin
     .from('transfers')
     .select('*')
-    .in('company_id', fronterCompanyIds);
-  // A plain fronter only ever sees their own leads here (see ownLeadsOnly).
-  if (ownLeadsOnly) searchQ = searchQ.eq('created_by', req.user.id);
-  const { data, error } = await searchQ
+    .in('company_id', fronterCompanyIds)
     .or(`form_data->>customer_phone.ilike.%${q}%,form_data->>Phone.ilike.%${q}%`)
     .order(sortCol, { ascending: false, nullsFirst: false })
     .limit(50);
 
   if (error) return res.status(500).json({ error: error.message });
-  if (!data?.length) return res.json({ transfers: [] });
+
+  // ── Cross-company warning for fronter-side callers ────────────────────────
+  // "This customer is already with another company" is exactly what a fronter
+  // needs before working a lead, but WHO holds it is not theirs to see. Return
+  // counts only — no names, no phone, no form_data — so the warning can be shown
+  // without leaking another tenant's record.
+  let elsewhere = null;
+  if (fronterSide) {
+    const digits = String(phone).replace(/\D/g, '');
+    const norm = digits.length === 11 && digits.startsWith('1') ? digits.slice(1) : digits;
+    if (norm.length >= 7) {
+      const [otherLeads, otherSales] = await Promise.all([
+        supabaseAdmin.from('transfers')
+          .select('company_id', { count: 'exact' })
+          .not('company_id', 'in', `(${fronterCompanyIds.join(',')})`)
+          .eq('normalized_phone', norm).limit(50),
+        supabaseAdmin.from('sales')
+          .select('company_id,status', { count: 'exact' })
+          .not('company_id', 'in', `(${fronterCompanyIds.join(',')})`)
+          .or(`customer_phone.eq.${norm},customer_phone.eq.+1${norm}`).limit(50),
+      ]);
+      const leadN = otherLeads.count || 0;
+      const saleRows = otherSales.data || [];
+      const soldN = saleRows.filter(s => !['cancelled', 'compliance_cancelled', 'closed_lost'].includes(s.status)).length;
+      if (leadN || soldN) {
+        elsewhere = {
+          leads: leadN,
+          sold: soldN > 0,
+          companies: new Set([...(otherLeads.data || []), ...saleRows].map(r => r.company_id)).size,
+        };
+      }
+    }
+  }
+  // No local match is precisely when the cross-company warning matters most —
+  // the fronter is about to work a customer another company already holds.
+  if (!data?.length) return res.json({ transfers: [], elsewhere });
 
   // Fetch company names + slugs in one query
   const companyIds = [...new Set(data.map(t => t.company_id).filter(Boolean))];
@@ -624,7 +665,7 @@ router.get('/search-by-phone', asyncHandler(async (req, res) => {
     };
   });
 
-  res.json({ transfers });
+  res.json({ transfers, elsewhere });
 }));
 
 // ============================================================================

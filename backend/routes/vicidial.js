@@ -964,6 +964,14 @@ api.get('/pending', asyncHandler(async (req, res) => {
       .in('transfer_id', ids).order('created_at', { ascending: false });
     (acts || []).forEach(a => { if (!dispoByT[a.transfer_id]) dispoByT[a.transfer_id] = a; });
     rows.forEach(r => { if (r.assigned_closer_id) closerIds.add(r.assigned_closer_id); });
+    // The card showed a disposition with NO name beside it whenever
+    // transfers.assigned_closer_id was never stamped. applyCloserDispo only sets
+    // that column when the dialer agent resolved to a CRM user at that moment,
+    // so a disposition recorded through any other path left it null even though
+    // the disposition_actions row records exactly who set it. Resolve the name
+    // from the action's own user_id as well — 39 pending leads were in this
+    // state, 25 of them in the last month.
+    Object.values(dispoByT).forEach(a => { if (a.user_id) closerIds.add(a.user_id); });
   }
   let nameById = {};
   if (closerIds.size) {
@@ -975,7 +983,11 @@ api.get('/pending', asyncHandler(async (req, res) => {
     ...r,
     closer_disposition: dispoByT[r.id]?.disposition_name || null,
     closer_disposition_color: dispoByT[r.id]?.color || null,
-    closer_name: r.assigned_closer_id ? (nameById[r.assigned_closer_id] || null) : null,
+    // Prefer the transfer's own closer; fall back to whoever actually recorded
+    // the disposition, so a dispo is never shown with a blank name.
+    closer_name: (r.assigned_closer_id && nameById[r.assigned_closer_id])
+      || (dispoByT[r.id]?.user_id ? nameById[dispoByT[r.id].user_id] : null)
+      || null,
   }));
   res.json({ pending });
 }));
