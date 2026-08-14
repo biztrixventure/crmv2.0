@@ -99,6 +99,58 @@ async function keyForKid(kid) {
   return keyCache.get(kid) || null;
 }
 
+// ── Remote verification fallback ────────────────────────────────────────────
+// Safety net for the cases local verification cannot settle: a legacy HS256
+// project with no SUPABASE_JWT_SECRET configured, or an asymmetric token whose
+// `kid` is not in our JWKS view. Supabase's Auth API is asked to validate the
+// token; it answers authoritatively for whichever scheme the project actually
+// uses, so a signing-scheme mismatch can never lock users out.
+//
+// This is a network call, so successful answers are cached briefly (keyed by a
+// SHA-256 of the token — the raw token is never stored or logged) and never
+// past the token's own expiry. Failures are NOT cached and always deny.
+const remoteCache = new Map();
+const REMOTE_TTL_MS = 60 * 1000;
+const tokenKey = (t) => crypto.createHash('sha256').update(t).digest('hex');
+
+function sweepRemoteCache() {
+  const now = Date.now();
+  for (const [k, v] of remoteCache) if (v.until <= now) remoteCache.delete(k);
+}
+
+async function verifyRemotely(cleanToken, unverifiedPayload) {
+  const key = tokenKey(cleanToken);
+  const hit = remoteCache.get(key);
+  if (hit && hit.until > Date.now()) return hit.payload;
+
+  // Required lazily: config/database pulls in the Supabase client, and importing
+  // it at module scope would create a require cycle with anything auth touches.
+  const { supabaseAdmin } = require('./database');
+  const { data, error } = await supabaseAdmin.auth.getUser(cleanToken);
+  if (error || !data?.user) {
+    throw new Error(`Token verification failed: rejected by Supabase (${error?.message || 'no user'})`);
+  }
+  const u = data.user;
+  // Rebuild the payload from what Supabase itself vouched for. Claims are taken
+  // from the verified user record, never from the unverified token body — the
+  // only fields borrowed are the non-authoritative timestamps.
+  const payload = {
+    sub: u.id,
+    email: u.email,
+    role: u.role,
+    app_metadata: u.app_metadata || {},
+    user_metadata: u.user_metadata || {},
+    iat: unverifiedPayload?.iat,
+    exp: unverifiedPayload?.exp,
+  };
+  // Never cache past the token's own expiry.
+  const expMs = payload.exp ? payload.exp * 1000 : 0;
+  const until = Math.min(Date.now() + REMOTE_TTL_MS, expMs || (Date.now() + REMOTE_TTL_MS));
+  if (until > Date.now()) remoteCache.set(key, { payload, until });
+  if (remoteCache.size > 5000) sweepRemoteCache();
+  return payload;
+}
+
 /**
  * Verify a Supabase JWT and return its payload.
  * @param {string} token - JWT with or without the "Bearer " prefix
@@ -118,21 +170,23 @@ const verifyToken = async (token) => {
 
   // `jwt.verify` enforces exp/nbf itself, so expiry is covered on every path.
   if (alg === 'HS256') {
-    // Legacy symmetric project. Only possible if the secret is configured —
-    // otherwise reject rather than silently trusting an unverifiable token.
-    if (!JWT_SECRET) {
-      throw new Error('Token verification failed: HS256 token but SUPABASE_JWT_SECRET is not configured');
-    }
-    return jwt.verify(cleanToken, JWT_SECRET, { algorithms: ['HS256'] });
+    // Legacy symmetric signing. Verify locally when the secret is configured;
+    // otherwise fall back to asking Supabase (below) rather than either
+    // trusting the token blind (the old bug) or locking every user out.
+    if (JWT_SECRET) return jwt.verify(cleanToken, JWT_SECRET, { algorithms: ['HS256'] });
+    return await verifyRemotely(cleanToken, decoded.payload);
   }
 
   if (alg === 'ES256' || alg === 'RS256') {
     const key = await keyForKid(decoded.header.kid);
-    if (!key) throw new Error(`Token verification failed: no JWKS key for kid ${decoded.header.kid || '(none)'}`);
+    // An unknown kid means our JWKS view is stale or the project signs with a
+    // key we can't see — ask Supabase instead of rejecting a possibly-valid user.
+    if (!key) return await verifyRemotely(cleanToken, decoded.payload);
     return jwt.verify(cleanToken, key, { algorithms: ['ES256', 'RS256'] });
   }
 
-  // Anything else — notably alg:"none" — is refused outright.
+  // Anything else — notably alg:"none" — is refused outright. `none` is the
+  // forged-token case and must never reach the remote fallback.
   throw new Error(`Token verification failed: unsupported algorithm ${alg}`);
 };
 
