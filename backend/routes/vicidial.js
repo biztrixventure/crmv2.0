@@ -81,6 +81,34 @@ async function resolveAgent(agentId) {
   return { userId: ids.sort()[0], companyId: null };   // matched a person but no active company
 }
 
+// Is this CRM user closer-side? Guards the one field that must never hold a
+// fronter: transfers.assigned_closer_id. Cached briefly because it runs on the
+// closer-dispo webhook, which is a hot path — a role change taking a minute to
+// propagate here is harmless, whereas a query per disposition is not.
+const _closerSideCache = new Map();   // userId → { ok, until }
+const CLOSER_SIDE_TTL = 60 * 1000;
+const CLOSER_SIDE_LEVELS = new Set(['closer', 'closer_manager']);
+
+async function isCloserSideUser(userId) {
+  if (!userId) return false;
+  const hit = _closerSideCache.get(userId);
+  if (hit && hit.until > Date.now()) return hit.ok;
+  let ok = false;
+  try {
+    const { data } = await supabaseAdmin
+      .from('user_company_roles')
+      .select('custom_roles(level)')
+      .eq('user_id', userId).eq('is_active', true);
+    ok = (data || []).some(r => CLOSER_SIDE_LEVELS.has(r.custom_roles?.level));
+  } catch { ok = false; }   // fail closed: don't stamp a closer we can't verify
+  _closerSideCache.set(userId, { ok, until: Date.now() + CLOSER_SIDE_TTL });
+  if (_closerSideCache.size > 2000) {
+    const now = Date.now();
+    for (const [k, v] of _closerSideCache) if (v.until <= now) _closerSideCache.delete(k);
+  }
+  return ok;
+}
+
 // A GLOBAL dispo-map row (company_id IS NULL) applies to every company — map a
 // dialer code once and it resolves regardless of which company the closer's
 // agent lands in. Company-specific rows still win when present.
@@ -150,7 +178,7 @@ async function reconcileQueuedDispoForTransfer(transfer, norm) {
       // existing closer or downgrades a completed/rejected transfer to assigned
       // (the new manual-create / confirm call sites can pass a worked transfer).
       const { data: real } = await supabaseAdmin.from('transfers')
-        .select('id, company_id, assigned_closer_id, status').eq('id', transfer.id).maybeSingle();
+        .select('id, company_id, created_by, assigned_closer_id, status').eq('id', transfer.id).maybeSingle();
       const tgt = real || { id: transfer.id, company_id: transfer.company_id, assigned_closer_id: null, status: 'pending' };
       await applyCloserDispo({
         transfer: tgt,
@@ -186,7 +214,18 @@ async function applyCloserDispo({ transfer, dispoCompanyId, closerUserId, dispoN
     vicidial_talk_time: Number.isFinite(talk) ? talk : null,
     vicidial_agent: undefined,
   };
-  if (closerUserId && !transfer.assigned_closer_id) {
+  // Only a CLOSER may be stamped as the transfer's closer. The dispo webhook
+  // accepts whatever agent id the dialer sends, and a fronter dispositioning
+  // their own lead (very common — they mark NI seconds after transferring)
+  // fires it too. With no check, resolveAgent turned that fronter into the
+  // "closer" of their own transfer, so the fronter's name showed where the
+  // closer's should be. 2,472 transfers are in that state, 519 in the last 30
+  // days. The disposition itself is still recorded against whoever set it —
+  // only the closer field is protected.
+  const closerOk = !!closerUserId
+    && closerUserId !== transfer.created_by
+    && await isCloserSideUser(closerUserId);
+  if (closerOk && !transfer.assigned_closer_id) {
     updates.assigned_closer_id = closerUserId;
     updates.assigned_to = closerUserId;
     // Mirror the manual flow: a transfer a closer has worked is "assigned", not
@@ -545,7 +584,7 @@ ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
   const [agentRes, exactRes] = await Promise.all([
     closerAgent ? resolveAgent(closerAgent) : Promise.resolve({ userId: null, companyId: null }),
     exactCodes.length
-      ? supabaseAdmin.from('transfers').select('id, company_id, assigned_closer_id, status, vicidial_vendor_code, created_at, vicidial_dispo, vicidial_dispo_at')
+      ? supabaseAdmin.from('transfers').select('id, company_id, created_by, assigned_closer_id, status, vicidial_vendor_code, created_at, vicidial_dispo, vicidial_dispo_at')
           .in('vicidial_vendor_code', exactCodes).order('created_at', { ascending: false }).limit(1)
       : Promise.resolve({ data: null }),
   ]);
@@ -563,7 +602,7 @@ ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
     const ph = normPhone(String(p.phone || ''));
     if (ph) {
       const { data } = await supabaseAdmin
-        .from('transfers').select('id, company_id, assigned_closer_id, status, vicidial_vendor_code, created_at, vicidial_dispo, vicidial_dispo_at')
+        .from('transfers').select('id, company_id, created_by, assigned_closer_id, status, vicidial_vendor_code, created_at, vicidial_dispo, vicidial_dispo_at')
         .in('vicidial_vendor_code', prefixedCodes).eq('normalized_phone', ph)
         .order('created_at', { ascending: false }).limit(1);
       if (data && data.length) { tr = data[0]; code = data[0].vicidial_vendor_code; }
@@ -575,7 +614,7 @@ ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
     const ph = normPhone(String(p.phone || ''));
     if (ph) {
       const { data: byPhone } = await supabaseAdmin
-        .from('transfers').select('id, company_id, assigned_closer_id, status, created_at, vicidial_dispo, vicidial_dispo_at')
+        .from('transfers').select('id, company_id, created_by, assigned_closer_id, status, created_at, vicidial_dispo, vicidial_dispo_at')
         .eq('normalized_phone', ph).order('created_at', { ascending: false }).limit(1).maybeSingle();
       if (byPhone) { tr = byPhone; code = `phone:${ph}`; }
     }
@@ -831,7 +870,7 @@ async function fetchAndApplyDispo(tr) {
 
 api.post('/fetch-dispo/:transferId', asyncHandler(async (req, res) => {
   const { data: tr } = await supabaseAdmin
-    .from('transfers').select('id, company_id, normalized_phone, assigned_closer_id, status, vicidial_vendor_code, created_at').eq('id', req.params.transferId).maybeSingle();
+    .from('transfers').select('id, company_id, created_by, normalized_phone, assigned_closer_id, status, vicidial_vendor_code, created_at').eq('id', req.params.transferId).maybeSingle();
   if (!tr) return res.status(404).json({ error: 'Transfer not found' });
   if (!tr.normalized_phone) return res.status(400).json({ error: 'This transfer has no phone number to look up' });
   const r = await fetchAndApplyDispo(tr);
@@ -875,7 +914,7 @@ api.post('/fetch-all-dispos', asyncHandler(async (req, res) => {
   }
 
   const { data: rows, error: qErr } = await supabaseAdmin.from('transfers')
-    .select('id, company_id, normalized_phone, assigned_closer_id, status, vicidial_vendor_code, form_data, created_at')
+    .select('id, company_id, created_by, normalized_phone, assigned_closer_id, status, vicidial_vendor_code, form_data, created_at')
     .gte('created_at', from).not('normalized_phone', 'is', null)
     .order('created_at', { ascending: false })
     .range(offset, offset + batch - 1);
@@ -918,7 +957,7 @@ api.post('/closer-dispos/:id/assign', asyncHandler(async (req, res) => {
     return res.status(404).json({ error: 'Pending disposition not found' });
   }
   const { data: tr } = await supabaseAdmin
-    .from('transfers').select('id, company_id, assigned_closer_id, status').eq('id', transferId).maybeSingle();
+    .from('transfers').select('id, company_id, created_by, assigned_closer_id, status').eq('id', transferId).maybeSingle();
   if (!tr) return res.status(404).json({ error: 'Transfer not found' });
 
   const dispoCompanyId = qrow.company_id || tr.company_id;
@@ -1352,7 +1391,7 @@ api.post('/backfill/coded', superOnly, asyncHandler(async (req, res) => {
   const batch  = Math.min(parseInt(req.body.batch, 10) || 25, 50);
   const before = req.body.before || null;  // created_at cursor — process OLDER than this
   let q = supabaseAdmin.from('transfers')
-    .select('id, company_id, normalized_phone, assigned_closer_id, status, vicidial_vendor_code, created_at')
+    .select('id, company_id, created_by, normalized_phone, assigned_closer_id, status, vicidial_vendor_code, created_at')
     .is('vicidial_dispo', null).not('vicidial_vendor_code', 'is', null)
     .order('created_at', { ascending: false }).limit(batch);
   if (before) q = q.lt('created_at', before);
