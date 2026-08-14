@@ -8,7 +8,7 @@
 //
 // UI from components/UI/kit (docs/ui-design-system.md).
 import { useState, useEffect, useCallback } from 'react';
-import { BellRing, BellOff, Check, X, ArrowRight, Users, Clock } from 'lucide-react';
+import { BellRing, BellOff, Check, X, ArrowRight, Clock } from 'lucide-react';
 import client from '../../../api/client';
 import { SectionHeader, useFlash, Loading } from '../../UI/kit';
 import { Alert } from '../../../components/UI';
@@ -19,6 +19,7 @@ const idList = (a) => (a && a.length ? a.join(', ') : 'not set');
 export default function ProfileVerifySection({ account, onChanged }) {
   const [state, setState] = useState(null);
   const [busy, setBusy]   = useState(false);
+  const [askName, setAskName] = useState(false);
   const { msg, flash, clear } = useFlash();
 
   const load = useCallback(() => {
@@ -37,9 +38,11 @@ export default function ProfileVerifySection({ account, onChanged }) {
     finally { setBusy(false); }
   };
 
-  const ask      = () => act(() => client.post('users/profile-verification', { user_ids: [account.user_id], action: 'request' }), 'Asked this user to verify their details.');
+  const ask      = () => act(() => client.post('users/profile-verification', {
+    user_ids: [account.user_id], action: 'request',
+    fields: askName ? ['vicidial_agent_id', 'name'] : ['vicidial_agent_id'],
+  }), 'Asked this user to verify their details.');
   const withdraw = () => act(() => client.post('users/profile-verification', { user_ids: [account.user_id], action: 'cancel' }),  'Request withdrawn — the user will no longer be prompted.');
-  const askAll   = () => { if (window.confirm('Ask EVERY active staff member to verify their details? Each will see the prompt on their next page load.')) act(() => client.post('users/profile-verification', { all: true, action: 'request' }), 'All staff will be asked to verify.'); };
   const review   = (action) => act(() => client.post(`users/${account.user_id}/profile-verification/review`, { action }), action === 'approve' ? 'Approved — the profile has been updated.' : 'Rejected — the user can submit again.');
 
   if (!state) return <Loading />;
@@ -105,6 +108,18 @@ export default function ProfileVerifySection({ account, onChanged }) {
         </div>
       )}
 
+      {/* Choose what to ask for. Dialer ID is always included — it is the whole
+          reason this exists — so only the name is optional. */}
+      {status !== 'asked' && status !== 'awaiting' && (
+        <label className="flex items-center gap-2 cursor-pointer select-none">
+          <input type="checkbox" checked={askName} onChange={e => setAskName(e.target.checked)} />
+          <span className="text-xs" style={{ color: 'var(--color-text)' }}>
+            Also ask for their <strong>name</strong>
+            <span style={{ color: 'var(--color-text-tertiary)' }}> — dialer ID is always included</span>
+          </span>
+        </label>
+      )}
+
       <div className="flex gap-2 flex-wrap">
         {status === 'asked' || status === 'awaiting' ? (
           <button onClick={withdraw} disabled={busy}
@@ -119,14 +134,10 @@ export default function ProfileVerifySection({ account, onChanged }) {
             <BellRing size={13} /> Ask this user to verify
           </button>
         )}
-        <button onClick={askAll} disabled={busy}
-          className="text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 disabled:opacity-60"
-          style={{ color: 'var(--color-text)', backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-          <Users size={13} /> Ask all staff
-        </button>
       </div>
       <p className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>
         The prompt stays on the user's screen until they answer it, or until you stop asking.
+        Estate-wide actions (ask/stop everyone, bulk approve) are on the User Control Center home page.
       </p>
     </div>
   );

@@ -35,6 +35,7 @@ import CompaniesRoleSection from './CompaniesRoleSection';
 import TeamSection from './TeamSection';
 import VicidialSection from './VicidialSection';
 import ProfileVerifySection from './ProfileVerifySection';
+import ProfileVerifyQueue from './ProfileVerifyQueue';
 import GovernanceSection from './GovernanceSection';
 import EgressSection from './EgressSection';
 import ActivitySection from './ActivitySection';
@@ -135,7 +136,14 @@ export default function UserControlCenter() {
 
       {/* ── Step 1: pick a user (company → role → user directory) ──────────── */}
       {!account && !loading && (
-        <UserDirectory onSelect={(uid) => setPicked({ id: uid })} />
+        <>
+          {/* Estate-wide verification controls live here, not inside one user's
+              record: asking/stopping everyone and approving submissions are
+              global actions, and burying them per-user meant opening an
+              unrelated person just to reach them. */}
+          <ProfileVerifyQueue />
+          <UserDirectory onSelect={(uid) => setPicked({ id: uid })} />
+        </>
       )}
 
       {error && <div className="mb-4"><Alert type="error" onDismiss={() => setError(null)}>{error}</Alert></div>}

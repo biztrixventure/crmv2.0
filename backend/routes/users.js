@@ -1873,11 +1873,61 @@ router.put('/:userId/client-access', asyncHandler(async (req, res) => {
 // See migration 251.
 // ============================================================================
 
+// Apply one review decision. Shared by the single-user route and the bulk route
+// so approving from either place behaves identically — including the clash
+// re-check, which matters because an id can be taken between submission and
+// review. Returns { ok } rather than throwing so a bulk run can continue.
+async function applyReview(userId, approve, reviewerId) {
+  const { data: p } = await supabaseAdmin.from('user_profiles')
+    .select('profile_verify_submitted_ids,profile_verify_submitted_at,profile_verify_submitted_first_name,profile_verify_submitted_last_name,profile_verify_fields')
+    .eq('user_id', userId).maybeSingle();
+  if (!p || !p.profile_verify_submitted_at) return { ok: false, error: 'nothing submitted' };
+
+  if (!approve) {
+    // Discard the proposal but leave the request open so they can try again.
+    await supabaseAdmin.from('user_profiles').update({
+      profile_verify_submitted_at: null, profile_verify_submitted_ids: null,
+      profile_verify_previous_ids: null, profile_verify_reviewed_by: reviewerId,
+      profile_verify_submitted_first_name: null, profile_verify_submitted_last_name: null,
+    }).eq('user_id', userId);
+    return { ok: true, action: 'rejected' };
+  }
+
+  const ids = p.profile_verify_submitted_ids || [];
+  const clash = await agentIdClash(ids, userId);
+  if (clash) return { ok: false, error: `dialer ID ${clash} is now assigned to another user` };
+
+  const asked = (p.profile_verify_fields && p.profile_verify_fields.length) ? p.profile_verify_fields : ['vicidial_agent_id'];
+  const patch = {
+    vicidial_agent_id: ids[0] || null,
+    vicidial_agent_ids: ids,
+    profile_verified_at: new Date().toISOString(),
+    profile_verify_reviewed_by: reviewerId,
+    profile_verify_submitted_at: null,
+    profile_verify_submitted_ids: null,
+    profile_verify_previous_ids: null,
+    profile_verify_submitted_first_name: null,
+    profile_verify_submitted_last_name: null,
+  };
+  // Only promote a name if the name was asked for AND the user actually gave one.
+  if (asked.includes('name')) {
+    if (p.profile_verify_submitted_first_name) patch.first_name = p.profile_verify_submitted_first_name;
+    if (p.profile_verify_submitted_last_name)  patch.last_name  = p.profile_verify_submitted_last_name;
+  }
+  let { error } = await supabaseAdmin.from('user_profiles').update(patch).eq('user_id', userId);
+  if (error && /vicidial_agent_ids|column/i.test(error.message || '')) {   // pre-111 fallback
+    const { vicidial_agent_ids, ...rest } = patch;
+    ({ error } = await supabaseAdmin.from('user_profiles').update(rest).eq('user_id', userId));
+  }
+  if (error) return { ok: false, error: error.message };
+  return { ok: true, action: 'approved', ids };
+}
+
 // Is this user currently being asked to verify? Cheap: the shells poll it.
 router.get('/me/profile-verification', asyncHandler(async (req, res) => {
   const { data: p } = await supabaseAdmin
     .from('user_profiles')
-    .select('first_name,last_name,vicidial_agent_id,vicidial_agent_ids,profile_verify_requested_at,profile_verified_at,profile_verify_submitted_at,profile_verify_submitted_ids')
+    .select('first_name,last_name,vicidial_agent_id,vicidial_agent_ids,profile_verify_requested_at,profile_verified_at,profile_verify_submitted_at,profile_verify_submitted_ids,profile_verify_fields')
     .eq('user_id', req.user.id).maybeSingle();
   if (!p) return res.json({ required: false });
   const reqAt = p.profile_verify_requested_at ? new Date(p.profile_verify_requested_at).getTime() : 0;
@@ -1891,6 +1941,10 @@ router.get('/me/profile-verification', asyncHandler(async (req, res) => {
     // in its "sent for confirmation" state so the user isn't asked twice.
     required: open && !(subAt > okAt),
     awaiting_review: open && subAt > okAt,
+    // Which fields to render as editable. NULL predates migration 252 and means
+    // "dialer id only", so old requests keep behaving exactly as they did.
+    fields: (p.profile_verify_fields && p.profile_verify_fields.length)
+      ? p.profile_verify_fields : ['vicidial_agent_id'],
     submitted_ids: (p.profile_verify_submitted_ids || []).join(', '),
     profile: {
       first_name: p.first_name || '',
@@ -1917,15 +1971,25 @@ router.post('/me/profile-verification/confirm', asyncHandler(async (req, res) =>
   if (clash) return res.status(409).json({ error: `Dialer ID ${clash} is already assigned to another user. Check it with your manager.` });
 
   const { data: cur } = await supabaseAdmin.from('user_profiles')
-    .select('vicidial_agent_id,vicidial_agent_ids').eq('user_id', req.user.id).maybeSingle();
+    .select('vicidial_agent_id,vicidial_agent_ids,profile_verify_fields').eq('user_id', req.user.id).maybeSingle();
   const previous = (cur?.vicidial_agent_ids && cur.vicidial_agent_ids.length)
     ? cur.vicidial_agent_ids : (cur?.vicidial_agent_id ? [cur.vicidial_agent_id] : []);
+  const asked = (cur?.profile_verify_fields && cur.profile_verify_fields.length)
+    ? cur.profile_verify_fields : ['vicidial_agent_id'];
 
-  const { error } = await supabaseAdmin.from('user_profiles').update({
+  const patch = {
     profile_verify_submitted_at:  new Date().toISOString(),
     profile_verify_submitted_ids: ids,
     profile_verify_previous_ids:  previous,
-  }).eq('user_id', req.user.id);
+  };
+  // Only accept a name when the name was actually asked for — otherwise a
+  // crafted request could smuggle a rename through the verification flow.
+  if (asked.includes('name')) {
+    patch.profile_verify_submitted_first_name = String(req.body.first_name || '').trim() || null;
+    patch.profile_verify_submitted_last_name  = String(req.body.last_name || '').trim() || null;
+  }
+
+  const { error } = await supabaseAdmin.from('user_profiles').update(patch).eq('user_id', req.user.id);
   if (error) return res.status(500).json({ error: error.message });
   logger.success('PROFILE_VERIFY', `${req.user.email} submitted for review: ${previous.join(', ') || '(none)'} -> ${ids.join(', ') || '(none)'}`);
   res.json({ ok: true, awaiting_review: true, submitted_ids: ids, previous_ids: previous });
@@ -1939,9 +2003,16 @@ router.post('/profile-verification', asyncHandler(async (req, res) => {
   const userIds = Array.isArray(req.body.user_ids) ? req.body.user_ids.filter(Boolean) : [];
   if (!all && !userIds.length) return res.status(400).json({ error: 'Pick at least one user, or pass all:true' });
 
+  // Which details to ask for. Unknown names are dropped rather than trusted, and
+  // the dialer id is always included — it is the reason this feature exists.
+  const ALLOWED_FIELDS = ['vicidial_agent_id', 'name'];
+  const asked = Array.isArray(req.body.fields)
+    ? [...new Set(['vicidial_agent_id', ...req.body.fields.filter(f => ALLOWED_FIELDS.includes(f))])]
+    : ['vicidial_agent_id'];
+
   const patch = action === 'cancel'
     ? { profile_verify_requested_at: null, profile_verify_requested_by: null }
-    : { profile_verify_requested_at: new Date().toISOString(), profile_verify_requested_by: req.user.id };
+    : { profile_verify_requested_at: new Date().toISOString(), profile_verify_requested_by: req.user.id, profile_verify_fields: asked };
 
   let q = supabaseAdmin.from('user_profiles').update(patch);
   if (all) {
@@ -1968,7 +2039,7 @@ router.get('/profile-verification/pending', asyncHandler(async (req, res) => {
   if (!(await saGuard(req))) return res.status(403).json({ error: 'Superadmin only' });
   const { data, error } = await supabaseAdmin
     .from('user_profiles')
-    .select('user_id,first_name,last_name,profile_verify_submitted_at,profile_verify_submitted_ids,profile_verify_previous_ids,profile_verified_at')
+    .select('user_id,first_name,last_name,profile_verify_submitted_at,profile_verify_submitted_ids,profile_verify_previous_ids,profile_verified_at,profile_verify_submitted_first_name,profile_verify_submitted_last_name,profile_verify_fields')
     .not('profile_verify_submitted_at', 'is', null)
     .order('profile_verify_submitted_at', { ascending: true });
   if (error) return res.status(500).json({ error: error.message });
@@ -1978,59 +2049,79 @@ router.get('/profile-verification/pending', asyncHandler(async (req, res) => {
     const v = p.profile_verified_at ? new Date(p.profile_verified_at).getTime() : 0;
     return s > v;
   });
+  // Company + role for each, so the queue can be filtered by side (fronter vs
+  // closer/staff) rather than being one undifferentiated list.
+  const ids = open.map(p => p.user_id);
+  let ctx = {};
+  if (ids.length) {
+    const { data: roles } = await supabaseAdmin
+      .from('user_company_roles')
+      .select('user_id, custom_roles(level), companies(name)')
+      .in('user_id', ids).eq('is_active', true);
+    (roles || []).forEach(r => {
+      if (!ctx[r.user_id]) ctx[r.user_id] = { role: r.custom_roles?.level || null, company: r.companies?.name || null };
+    });
+  }
   res.json({
     pending: open.map(p => ({
       user_id: p.user_id,
       name: `${p.first_name || ''} ${p.last_name || ''}`.trim() || p.user_id.slice(0, 8),
+      role: ctx[p.user_id]?.role || null,
+      company: ctx[p.user_id]?.company || null,
       submitted_at: p.profile_verify_submitted_at,
+      fields: (p.profile_verify_fields && p.profile_verify_fields.length) ? p.profile_verify_fields : ['vicidial_agent_id'],
       previous_ids: p.profile_verify_previous_ids || [],
       submitted_ids: p.profile_verify_submitted_ids || [],
+      submitted_first_name: p.profile_verify_submitted_first_name || null,
+      submitted_last_name:  p.profile_verify_submitted_last_name || null,
     })),
   });
+}));
+
+// Approve/reject MANY at once. Each user is applied independently so one clash
+// (an id taken since submission) can never abort the rest of the batch — the
+// caller gets a per-user result and can act on just the failures.
+router.post('/profile-verification/review-bulk', asyncHandler(async (req, res) => {
+  if (!(await saGuard(req))) return res.status(403).json({ error: 'Superadmin only' });
+  const approve = req.body.action !== 'reject';
+  const all = req.body.all === true;
+  let userIds = Array.isArray(req.body.user_ids) ? req.body.user_ids.filter(Boolean) : [];
+
+  if (all) {   // everything currently awaiting review
+    const { data } = await supabaseAdmin.from('user_profiles')
+      .select('user_id,profile_verify_submitted_at,profile_verified_at')
+      .not('profile_verify_submitted_at', 'is', null);
+    userIds = (data || []).filter(p => {
+      const s = new Date(p.profile_verify_submitted_at).getTime();
+      const v = p.profile_verified_at ? new Date(p.profile_verified_at).getTime() : 0;
+      return s > v;
+    }).map(p => p.user_id);
+  }
+  if (!userIds.length) return res.json({ ok: true, approved: 0, rejected: 0, failed: [] });
+
+  let approved = 0, rejected = 0;
+  const failed = [];
+  for (const uid of userIds) {
+    const r = await applyReview(uid, approve, req.user.id);
+    if (r.ok) { approve ? approved++ : rejected++; }
+    else failed.push({ user_id: uid, error: r.error });
+  }
+  logger.success('PROFILE_VERIFY', `${req.user.email} bulk ${approve ? 'approved' : 'rejected'} ${approved + rejected} submission(s), ${failed.length} failed`);
+  res.json({ ok: true, approved, rejected, failed });
 }));
 
 // Superadmin: approve (apply the user's ids) or reject (discard, prompt stays open).
 router.post('/:userId/profile-verification/review', asyncHandler(async (req, res) => {
   if (!(await saGuard(req))) return res.status(403).json({ error: 'Superadmin only' });
   const approve = req.body.action !== 'reject';
-  const { userId } = req.params;
-  const { data: p } = await supabaseAdmin.from('user_profiles')
-    .select('profile_verify_submitted_ids,profile_verify_submitted_at').eq('user_id', userId).maybeSingle();
-  if (!p || !p.profile_verify_submitted_at) return res.status(404).json({ error: 'Nothing submitted for this user' });
-
-  if (!approve) {
-    // Discard the proposal but leave the request open so they can try again.
-    await supabaseAdmin.from('user_profiles').update({
-      profile_verify_submitted_at: null, profile_verify_submitted_ids: null,
-      profile_verify_previous_ids: null, profile_verify_reviewed_by: req.user.id,
-    }).eq('user_id', userId);
-    logger.info('PROFILE_VERIFY', `${req.user.email} rejected the submission from ${userId}`);
-    return res.json({ ok: true, action: 'rejected' });
+  const r = await applyReview(req.params.userId, approve, req.user.id);
+  if (!r.ok) {
+    if (r.error === 'nothing submitted') return res.status(404).json({ error: 'Nothing submitted for this user' });
+    if (/now assigned to another user/.test(r.error)) return res.status(409).json({ error: `Cannot approve — ${r.error}.` });
+    return res.status(500).json({ error: r.error });
   }
-
-  const ids = p.profile_verify_submitted_ids || [];
-  // Re-check the clash at approval time: another user may have taken the id
-  // between submission and review.
-  const clash = await agentIdClash(ids, userId);
-  if (clash) return res.status(409).json({ error: `Cannot approve — dialer ID ${clash} is now assigned to another user.` });
-
-  const patch = {
-    vicidial_agent_id: ids[0] || null,
-    vicidial_agent_ids: ids,
-    profile_verified_at: new Date().toISOString(),
-    profile_verify_reviewed_by: req.user.id,
-    profile_verify_submitted_at: null,
-    profile_verify_submitted_ids: null,
-    profile_verify_previous_ids: null,
-  };
-  let { error } = await supabaseAdmin.from('user_profiles').update(patch).eq('user_id', userId);
-  if (error && /vicidial_agent_ids|column/i.test(error.message || '')) {   // pre-111 fallback
-    const { vicidial_agent_ids, ...rest } = patch;
-    ({ error } = await supabaseAdmin.from('user_profiles').update(rest).eq('user_id', userId));
-  }
-  if (error) return res.status(500).json({ error: error.message });
-  logger.success('PROFILE_VERIFY', `${req.user.email} approved ${userId} -> dialer ids ${ids.join(', ') || '(none)'}`);
-  res.json({ ok: true, action: 'approved', vicidial_agent_ids: ids });
+  logger.success('PROFILE_VERIFY', `${req.user.email} ${r.action} ${req.params.userId}${r.ids ? ' -> dialer ids ' + (r.ids.join(', ') || '(none)') : ''}`);
+  res.json({ ok: true, action: r.action, vicidial_agent_ids: r.ids || [] });
 }));
 
 // Superadmin: current state for one user (drives the UCC panel).

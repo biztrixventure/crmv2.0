@@ -26,24 +26,42 @@ import client from '../../api/client';
 export default function ProfileVerifyModal() {
   const [state, setState] = useState(null);    // server payload
   const [ids, setIds]     = useState('');
+  const [first, setFirst] = useState('');
+  const [last, setLast]   = useState('');
   const [busy, setBusy]   = useState(false);
   const [error, setError] = useState('');
   const [sent, setSent]   = useState(false);
+  const [dismissed, setDismissed] = useState(false);
 
   const load = useCallback(() => {
     client.get('users/me/profile-verification')
       .then(r => {
         setState(r.data);
-        if (r.data?.profile) setIds(r.data.profile.vicidial_agent_id || '');
+        if (r.data?.profile) {
+          setIds(r.data.profile.vicidial_agent_id || '');
+          setFirst(r.data.profile.first_name || '');
+          setLast(r.data.profile.last_name || '');
+        }
       })
       .catch(() => {});   // never block the app on this
   }, []);
 
   useEffect(() => { load(); }, [load]);
 
-  if (!state) return null;
+  // The thank-you is an acknowledgement, not a task. It used to close only on a
+  // reload, so it sat on the dashboard swallowing clicks — auto-dismiss it, and
+  // let a click anywhere close it too.
+  useEffect(() => {
+    if (!sent) return;
+    const t = setTimeout(() => setDismissed(true), 2500);
+    return () => clearTimeout(t);
+  }, [sent]);
+
+  if (!state || dismissed) return null;
   const awaiting = state.awaiting_review || sent;
   if (!state.required && !awaiting) return null;
+  const fields = state.fields || ['vicidial_agent_id'];
+  const askName = fields.includes('name');
 
   const current = state.profile?.vicidial_agent_id || '';
   const changed = ids.trim() !== current.trim();
@@ -51,7 +69,9 @@ export default function ProfileVerifyModal() {
   const submit = async () => {
     setBusy(true); setError('');
     try {
-      await client.post('users/me/profile-verification/confirm', { vicidial_agent_id: ids });
+      const body = { vicidial_agent_id: ids };
+      if (askName) { body.first_name = first; body.last_name = last; }
+      await client.post('users/me/profile-verification/confirm', body);
       setSent(true);
     } catch (e) {
       setError(e?.response?.data?.error || 'Could not send. Please try again.');
@@ -61,7 +81,8 @@ export default function ProfileVerifyModal() {
   // ── Sent: the answer is with a superadmin, nothing more for the user to do ──
   if (awaiting) {
     return (
-      <Modal isOpen title="Thanks — sent for confirmation" size="md" showCloseButton={false} onClose={() => {}}>
+      <Modal isOpen title="Thanks — sent for confirmation" size="md"
+             showCloseButton onClose={() => setDismissed(true)}>
         <div className="p-6 text-center">
           <CheckCircle2 size={44} className="mx-auto mb-3" style={{ color: 'var(--color-success-600)' }} />
           <p className="text-sm font-semibold mb-1.5" style={{ color: 'var(--color-text)' }}>
@@ -95,22 +116,47 @@ export default function ProfileVerifyModal() {
           </p>
         </div>
 
-        {/* Identity — shown for confirmation only, never editable here. */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {[['Name', `${state.profile.first_name} ${state.profile.last_name}`.trim() || '—'],
-            ['Email', state.profile.email || '—']].map(([label, value]) => (
-            <div key={label}>
-              <label className="block text-[11px] font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>{label}</label>
-              <div className="flex items-center gap-2 rounded-lg px-3 py-2"
-                   style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-                <Lock size={12} style={{ color: 'var(--color-text-tertiary)' }} />
-                <span className="text-sm truncate" style={{ color: 'var(--color-text)' }}>{value}</span>
-              </div>
+        {/* Name: editable only when the request asked for it. Email is never
+            editable — it is the login identity and lives in auth, not here. */}
+        {askName ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[11px] font-semibold mb-1" style={{ color: 'var(--color-text)' }}>First name</label>
+              <input value={first} onChange={e => setFirst(e.target.value)}
+                autoComplete="off" data-lpignore="true" data-1p-ignore data-form-type="other"
+                className="input w-full" placeholder="First name" />
             </div>
-          ))}
+            <div>
+              <label className="block text-[11px] font-semibold mb-1" style={{ color: 'var(--color-text)' }}>Last name</label>
+              <input value={last} onChange={e => setLast(e.target.value)}
+                autoComplete="off" data-lpignore="true" data-1p-ignore data-form-type="other"
+                className="input w-full" placeholder="Last name" />
+            </div>
+          </div>
+        ) : (
+          <div>
+            <label className="block text-[11px] font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>Name</label>
+            <div className="flex items-center gap-2 rounded-lg px-3 py-2"
+                 style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+              <Lock size={12} style={{ color: 'var(--color-text-tertiary)' }} />
+              <span className="text-sm truncate" style={{ color: 'var(--color-text)' }}>
+                {`${state.profile.first_name} ${state.profile.last_name}`.trim() || '—'}
+              </span>
+            </div>
+          </div>
+        )}
+        <div>
+          <label className="block text-[11px] font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>Email</label>
+          <div className="flex items-center gap-2 rounded-lg px-3 py-2"
+               style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+            <Lock size={12} style={{ color: 'var(--color-text-tertiary)' }} />
+            <span className="text-sm truncate" style={{ color: 'var(--color-text)' }}>{state.profile.email || '—'}</span>
+          </div>
         </div>
         <p className="text-[11px] -mt-2" style={{ color: 'var(--color-text-tertiary)' }}>
-          Name and email can't be changed here — contact your manager if either is wrong.
+          {askName
+            ? 'Your email is your login and can\'t be changed here — contact your manager if it\'s wrong.'
+            : 'Name and email can\'t be changed here — contact your manager if either is wrong.'}
         </p>
 
         {/* The one editable field. */}
