@@ -57,6 +57,33 @@ function parseVendorCode(code) {
   return { prefix, leadId: m[2], boxes, exact: boxes.length > 0 };
 }
 
+/**
+ * Recover the box prefix on a BARE numeric lead code.
+ *
+ * A lead_id is unique only WITHIN a box, so a bare code can't name a customer
+ * and `parseVendorCode(...).exact` is false for it — which means every
+ * box-scoped lookup (recording search, QA2 box_id, closer-dispo exact match)
+ * either skips its precise path or has to widen and guess. One box in the
+ * estate sends the raw lead_id instead of the prefixed vendor_lead_code, so a
+ * large share of traffic arrives this way.
+ *
+ * The agent id encodes the box (WTI1003 -> WTI), and the agent who fired the
+ * event is by definition on the box the lead lives on, so the prefix is
+ * recoverable losslessly. Anything ambiguous — no agent, unrecognised prefix,
+ * non-numeric or empty code, already-prefixed code — is returned untouched.
+ *
+ * Lives here, next to parseVendorCode, because BOTH the CRM ingest and the QA2
+ * ingest hook must apply the identical rule; when only one did, QA2 kept
+ * storing bare codes and could not resolve a box for them at all.
+ */
+function normalizeLeadCode(code, agent) {
+  const c = String(code || '').trim();
+  if (!/^\d+$/.test(c)) return c;                        // already prefixed / not a code
+  const pfx = (String(agent || '').trim().match(/^[A-Za-z]+/) || [''])[0].toUpperCase();
+  if (!pfx) return c;
+  return boxPrefixes().map(s => String(s).toUpperCase()).includes(pfx) ? `${pfx}${c}` : c;
+}
+
 // Statuses that are NOT a closer outcome — no customer contact (A/N/DAIR…),
 // in-progress/system states, and the transfer event itself (XFER and friends).
 // "Fetch dispo" wants the closer's actual disposition, so these are skipped; if
@@ -1269,6 +1296,6 @@ module.exports = {
   listCandidatesForSale, listCandidatesByPhone, listCandidatesByLeadId, listCandidatesByPhoneLeads, locationForRecording,
   listDayRecordings, phoneFromLocation, listDayDispositions, leadStatusSearch,
   leadFieldStatus, leadFieldCustomer, fillLeadStatuses, resolveDispos,
-  leadCustomFields, listCustomFieldNames, discoverCustomFieldNames, leadFromVendorCode, parseVendorCode,
+  leadCustomFields, listCustomFieldNames, discoverCustomFieldNames, leadFromVendorCode, parseVendorCode, normalizeLeadCode,
   leadsByPhoneOnBox, findLeadByPhone, annotateHangups, resolveDisposition,
 };

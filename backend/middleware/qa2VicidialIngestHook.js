@@ -21,7 +21,7 @@
 const { supabaseAdmin } = require('../config/database');
 const logger = require('../utils/logger');
 const { normPhone } = require('../utils/uploadService');
-const { parseVendorCode } = require('../utils/dialerBoxes');
+const { parseVendorCode, normalizeLeadCode } = require('../utils/dialerBoxes');
 const { classifyCall } = require('../utils/qa2ClassifyResolver');
 const { checkUnclassifiedThreshold } = require('../utils/qa2UnclassifiedAlert');
 
@@ -71,7 +71,12 @@ async function recordCall(source, req, body) {
   const talkParsed = parseInt(p.talk_time, 10);
   const talkSec = Number.isFinite(talkParsed) ? talkParsed : null;
 
-  const code = String(p.code || p.alt_code || '').trim() || null;
+  // Recover the box prefix on a bare numeric lead_id before anything derives
+  // from it. Without this the box could never be resolved for those calls:
+  // parseVendorCode(...).exact is false for a bare code, so box_id stayed null
+  // and the recording poller had to widen to every box and match on the phone
+  // instead of looking the clip up directly on the lead's own cluster.
+  const code = normalizeLeadCode(String(p.code || p.alt_code || '').trim(), agent) || null;
   const parsed = code ? parseVendorCode(code) : null;
   // Only trust box_id when the prefix resolved to exactly the boxes that
   // carry it (parsed.exact) — a bare numeric lead_id with no prefix is

@@ -25,7 +25,7 @@ const { normPhone } = require('../utils/uploadService');
 const { titleCaseFormData } = require('../utils/titleCase');
 const { expandStateInFormData } = require('../utils/stateMap');
 const { isSuperAdmin, getCounterpartCompanyIds } = require('../models/helpers');
-const { latestDisposition, leadStatusByCode, leadAgentByCode, boxPrefixes, refreshBoxes, resolveLeadIdByAgentDate, fetchAgentRoster, getBoxes, lookupCallsByPhone, lookupCallsByPhoneDiag } = require('../utils/dialerBoxes');
+const { latestDisposition, leadStatusByCode, leadAgentByCode, boxPrefixes, refreshBoxes, resolveLeadIdByAgentDate, fetchAgentRoster, getBoxes, lookupCallsByPhone, lookupCallsByPhoneDiag, normalizeLeadCode } = require('../utils/dialerBoxes');
 const notifications = require('../utils/notificationService');
 const { getConfig } = require('../utils/businessConfig');
 
@@ -289,27 +289,6 @@ async function resetIfStale(tr, { rearmPending = false } = {}) {
 // transfer (agent not mapped / non-transfer dispo / created). In-memory only.
 const recentXfer = [];
 ingest.get('/xfer-debug', requireToken, (req, res) => res.json({ recent: recentXfer }));
-
-// A lead_id is only unique WITHIN a dialer box, so a bare numeric code cannot
-// name a customer on its own — and a recording lookup that can't name the box
-// has to guess or give up. Most boxes send the prefixed vendor_lead_code
-// (TMC10562265, ETC22216208), but one sends the raw lead_id, which is why a
-// large share of a day's transfers land here with no prefix.
-//
-// The agent id carries the box (WTI1003 → WTI, TMC100259 → TMC), and the agent
-// who fired this XFER is by definition on the box the lead lives on, so the
-// prefix can be recovered losslessly. Stamping it at ingest makes every
-// dialer-originated transfer globally unique and recording-resolvable, and lets
-// the closer-dispo exact-code path match instead of falling back to phone.
-// Unknown/blank agent prefix → leave the code exactly as it arrived.
-function normalizeLeadCode(code, agent) {
-  const c = String(code || '').trim();
-  if (!/^\d+$/.test(c)) return c;                       // already prefixed, or not a code
-  const pfx = (String(agent || '').trim().match(/^[A-Za-z]+/) || [''])[0].toUpperCase();
-  if (!pfx) return c;
-  const known = boxPrefixes().map(s => String(s).toUpperCase());
-  return known.includes(pfx) ? `${pfx}${c}` : c;
-}
 
 // ── INGEST: fronter XFER → pending transfer (code + phone only) ──────────────
 ingest.all('/fronter-xfer', requireToken, asyncHandler(async (req, res) => {
