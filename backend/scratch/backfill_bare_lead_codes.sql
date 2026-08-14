@@ -129,7 +129,11 @@ with batch as (
 update qa2_call q
 set vendor_code = b.pfx || q.vendor_code,
     -- box_id was NULL precisely because the bare code named no box; now it can.
-    box_id = coalesce(q.box_id, (select vb.id from vicidial_boxes vb
+    -- NOTE: qa2_call.box_id is TEXT holding the box NAME ('wavetechpk', 'etc'),
+    -- not the vicidial_boxes UUID — refreshBoxes() in utils/dialerBoxes.js maps
+    -- `id: b.name`, and the recording poller stores that value. Selecting vb.id
+    -- here fails with 42804 (COALESCE types text and uuid cannot be matched).
+    box_id = coalesce(q.box_id, (select vb.name from vicidial_boxes vb
                                  where upper(vb.prefix) = b.pfx and vb.is_active limit 1)),
     -- re-arm the poller so it retries with the now-resolvable code
     recording_state = 'pending',
