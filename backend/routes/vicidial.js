@@ -247,8 +247,19 @@ async function applyCloserDispo({ transfer, dispoCompanyId, closerUserId, dispoN
 // matter who actually worked today's call. Reset the row to a fresh, unassigned
 // transfer once it's gone quiet for a while — UNLESS it already produced a real
 // sale, which must never be touched.
+// WHO is re-touching the lead decides how much may be reset:
+//
+//   fronter XFER  → the fronter really did transfer this customer again, so it
+//                   IS a new transfer: re-arm the "confirm to send" card.
+//   closer dispo  → the CLOSER dialled an existing lead again. The fronter did
+//                   NOT create anything, so re-arming `vicidial_pending` here
+//                   would pop "complete the transfer" back onto their dashboard
+//                   for a transfer they never made. Only the stale closer
+//                   attribution is cleared so the disposition re-attributes to
+//                   whoever actually took THIS call; pending/status are left
+//                   exactly as they are.
 const STALE_HOURS = 20;   // dialer-day boundary — matches fetchAndApplyDispo's "oldish" cutoff
-async function resetIfStale(tr) {
+async function resetIfStale(tr, { rearmPending = false } = {}) {
   const last = tr.vicidial_dispo_at || tr.created_at;
   if (!last) return tr;
   const ageHours = (Date.now() - new Date(last).getTime()) / 3600000;
@@ -256,14 +267,20 @@ async function resetIfStale(tr) {
   if (!tr.assigned_closer_id && !tr.vicidial_dispo) return tr;   // nothing stale to clear
   const { data: sold } = await supabaseAdmin.from('sales').select('id').eq('transfer_id', tr.id).limit(1).maybeSingle();
   if (sold) return tr;   // this lead already converted — never rewrite sold history
+  // Always safe to clear: the previous call's closer + dialer outcome.
   const resetFields = {
-    assigned_closer_id: null, assigned_to: null, status: 'pending',
+    assigned_closer_id: null, assigned_to: null,
     vicidial_dispo: null, vicidial_dispo_at: null, vicidial_talk_time: null,
-    rejected_by: null, rejection_reason: null, rejected_at: null,
-    vicidial_pending: true,
   };
+  // Only a genuine new fronter transfer re-opens the confirm flow.
+  if (rearmPending) {
+    Object.assign(resetFields, {
+      status: 'pending', vicidial_pending: true,
+      rejected_by: null, rejection_reason: null, rejected_at: null,
+    });
+  }
   await supabaseAdmin.from('transfers').update(resetFields).eq('id', tr.id);
-  logger.info('VICIDIAL_XFER', `Recycled lead — reset stale transfer ${tr.id} (${ageHours.toFixed(0)}h since last activity) for a new contact attempt`);
+  logger.info('VICIDIAL_XFER', `Recycled lead — cleared stale closer on transfer ${tr.id} (${ageHours.toFixed(0)}h idle)${rearmPending ? ' + re-armed pending (new fronter XFER)' : ' (closer re-call — pending untouched)'}`);
   return { ...tr, ...resetFields };
 }
 
@@ -273,12 +290,34 @@ async function resetIfStale(tr) {
 const recentXfer = [];
 ingest.get('/xfer-debug', requireToken, (req, res) => res.json({ recent: recentXfer }));
 
+// A lead_id is only unique WITHIN a dialer box, so a bare numeric code cannot
+// name a customer on its own — and a recording lookup that can't name the box
+// has to guess or give up. Most boxes send the prefixed vendor_lead_code
+// (TMC10562265, ETC22216208), but one sends the raw lead_id, which is why a
+// large share of a day's transfers land here with no prefix.
+//
+// The agent id carries the box (WTI1003 → WTI, TMC100259 → TMC), and the agent
+// who fired this XFER is by definition on the box the lead lives on, so the
+// prefix can be recovered losslessly. Stamping it at ingest makes every
+// dialer-originated transfer globally unique and recording-resolvable, and lets
+// the closer-dispo exact-code path match instead of falling back to phone.
+// Unknown/blank agent prefix → leave the code exactly as it arrived.
+function normalizeLeadCode(code, agent) {
+  const c = String(code || '').trim();
+  if (!/^\d+$/.test(c)) return c;                       // already prefixed, or not a code
+  const pfx = (String(agent || '').trim().match(/^[A-Za-z]+/) || [''])[0].toUpperCase();
+  if (!pfx) return c;
+  const known = boxPrefixes().map(s => String(s).toUpperCase());
+  return known.includes(pfx) ? `${pfx}${c}` : c;
+}
+
 // ── INGEST: fronter XFER → pending transfer (code + phone only) ──────────────
 ingest.all('/fronter-xfer', requireToken, asyncHandler(async (req, res) => {
   const p = { ...req.query, ...req.body };
-  const code  = String(p.code || '').trim();
-  const phone = String(p.phone || '').trim();
   const agent = String(p.agent || '').trim();
+  const rawCode = String(p.code || '').trim();
+  const code  = normalizeLeadCode(rawCode, agent);
+  const phone = String(p.phone || '').trim();
   const norm  = normPhone(phone);
   // Full lead detail — matches the Dispo Call URL template in
   // docs/VICIDIAL_CRM_INTEGRATION.md §8. Previously only code/phone/agent/dispo
@@ -319,7 +358,8 @@ ingest.all('/fronter-xfer', requireToken, asyncHandler(async (req, res) => {
     // attempt, not a duplicate webhook fire — clears the stale closer/status/dispo
     // (see resetIfStale) so it re-appears as a fresh pending card and doesn't keep
     // crediting whoever worked it last time.
-    const fresh = await resetIfStale(existing);
+    // A fronter XFER genuinely re-transfers the customer → re-arm the confirm card.
+    const fresh = await resetIfStale(existing, { rearmPending: true });
     const wasReset = fresh.status !== existing.status || fresh.assigned_closer_id !== existing.assigned_closer_id;
     const updates = { vicidial_agent: agent || null, normalized_phone: norm || null };
     // Only overwrite form_data on a genuine reset — a plain duplicate re-fire for
@@ -543,10 +583,12 @@ ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
       if (byPhone) { tr = byPhone; code = `phone:${ph}`; }
     }
   }
-  // Whichever path matched, clear a stale closer/status/dispo before applying
-  // today's activity — a recycled lead's old attribution must never survive into
-  // a new contact attempt (see resetIfStale). No-op for an already-fresh match.
-  if (tr) tr = await resetIfStale(tr);
+  // Whichever path matched, clear a stale CLOSER before applying today's dispo —
+  // a recycled lead's old attribution must never survive into a new contact
+  // attempt. rearmPending stays false: the closer dialling again is NOT a new
+  // fronter transfer, so the fronter's "complete the transfer" card must not
+  // reappear for something they never created. No-op for an already-fresh match.
+  if (tr) tr = await resetIfStale(tr, { rearmPending: false });
   // NOTE: a "recency" fallback used to live here — attach the dispo to the most
   // recent in-flight lead from any linked fronter company. REMOVED: that pool is
   // shared across ALL closers, so with concurrent calls one closer's disposition
