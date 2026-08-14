@@ -983,6 +983,13 @@ api.get('/pending', asyncHandler(async (req, res) => {
     ...r,
     closer_disposition: dispoByT[r.id]?.disposition_name || null,
     closer_disposition_color: dispoByT[r.id]?.color || null,
+    // WHEN the disposition was set. The card used to show only the outcome and
+    // the closer's name, so a disposition from weeks ago read exactly like one
+    // from a minute ago — which is why a closer who wasn't even working that day
+    // looked like they had just handled the call. 2,810 pending cards carry a
+    // disposition and 2,648 of those are more than two days old (oldest: 55
+    // days), so the date is essential context, not decoration.
+    closer_disposition_at: dispoByT[r.id]?.created_at || r.vicidial_dispo_at || null,
     // Prefer the transfer's own closer; fall back to whoever actually recorded
     // the disposition, so a dispo is never shown with a blank name.
     closer_name: (r.assigned_closer_id && nameById[r.assigned_closer_id])

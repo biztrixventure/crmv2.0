@@ -55,6 +55,26 @@ export default function PendingFromDialer({ onPick, refreshSignal }) {
                   <p className="text-xs mt-1 flex items-center gap-1.5 flex-wrap" style={{ color: 'var(--color-text-secondary)' }}>
                     <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold" style={{ backgroundColor: (it.closer_disposition_color || '#6b7280') + '22', color: it.closer_disposition_color || '#6b7280', border: `1px solid ${(it.closer_disposition_color || '#6b7280')}44` }}>{it.closer_disposition}</span>
                     {it.closer_name && <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>by {it.closer_name}</span>}
+                    {/* WHEN it was set. Without this a disposition from weeks ago
+                        looked identical to one from a minute ago, so a closer who
+                        wasn't even working appeared to have just handled the
+                        call. Anything not from today is called out explicitly. */}
+                    {it.closer_disposition_at && (() => {
+                      const d = new Date(it.closer_disposition_at);
+                      const isToday = d.toDateString() === new Date().toDateString();
+                      const days = Math.max(0, Math.floor((Date.now() - d.getTime()) / 86400000));
+                      return (
+                        <span className="text-[11px] px-1.5 py-0.5 rounded font-semibold"
+                          title={d.toLocaleString()}
+                          style={isToday
+                            ? { color: 'var(--color-text-tertiary)' }
+                            : { color: 'var(--color-warning-700, #b45309)', backgroundColor: 'var(--color-warning-50, #fffbeb)', border: '1px solid var(--color-warning-200, #fde68a)' }}>
+                          {isToday
+                            ? d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+                            : `${d.toLocaleDateString()} · ${days <= 1 ? 'yesterday' : `${days} days ago`}`}
+                        </span>
+                      );
+                    })()}
                   </p>
                 ) : it.vicidial_dispo && <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>Closer disposition: <strong style={{ color: 'var(--color-text)' }}>{it.vicidial_dispo}</strong></p>}
               </div>
