@@ -24,7 +24,7 @@ const logger = require('../utils/logger');
 const { normPhone } = require('../utils/uploadService');
 const { titleCaseFormData } = require('../utils/titleCase');
 const { expandStateInFormData } = require('../utils/stateMap');
-const { isSuperAdmin, getCounterpartCompanyIds } = require('../models/helpers');
+const { isSuperAdmin, getCounterpartCompanyIds, activeUserNames } = require('../models/helpers');
 const { latestDisposition, leadStatusByCode, leadAgentByCode, boxPrefixes, refreshBoxes, resolveLeadIdByAgentDate, fetchAgentRoster, getBoxes, lookupCallsByPhone, lookupCallsByPhoneDiag, normalizeLeadCode } = require('../utils/dialerBoxes');
 const notifications = require('../utils/notificationService');
 const { getConfig } = require('../utils/businessConfig');
@@ -1012,12 +1012,13 @@ api.get('/pending', asyncHandler(async (req, res) => {
     // state, 25 of them in the last month.
     Object.values(dispoByT).forEach(a => { if (a.user_id) closerIds.add(a.user_id); });
   }
-  let nameById = {};
-  if (closerIds.size) {
-    const { data: profs } = await supabaseAdmin
-      .from('user_profiles').select('user_id, first_name, last_name').in('user_id', [...closerIds]);
-    (profs || []).forEach(p => { nameById[p.user_id] = `${p.first_name || ''} ${p.last_name || ''}`.trim() || null; });
-  }
+  // Names ONLY for users who still hold an active company role. Clearing a bad
+  // assigned_closer_id was not enough on its own: the fallback below then
+  // resolved the name from the disposition's user_id, which still pointed at the
+  // same ghost profile — so an inactive person kept appearing as the closer.
+  // activeUserNames returns nothing for them, and the card shows the
+  // disposition with no name rather than naming someone who cannot have set it.
+  const nameById = await activeUserNames([...closerIds]);
   const pending = rows.map(r => ({
     ...r,
     closer_disposition: dispoByT[r.id]?.disposition_name || null,

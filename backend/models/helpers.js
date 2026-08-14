@@ -340,6 +340,35 @@ const getCompanyType = async (companyId) => {
   });
 };
 
+// Display names for a set of users, but ONLY for those who still hold an ACTIVE
+// company role.
+//
+// A profile with no active role cannot be the person who worked a lead — it is
+// a departed account, a duplicate, or a placeholder like "Abandoned (…)". Their
+// name still reaches the UI through stale attribution: a disposition recorded
+// against a mis-mapped dialer id keeps pointing at them forever. Rendering that
+// name reads as a LIVE attribution, and it has now been reported as a bug three
+// times (an absent closer appearing to have just worked a call).
+//
+// Returning nothing for such a user is the honest answer — the disposition is
+// still shown, just without claiming who set it.
+const activeUserNames = async (userIds) => {
+  const ids = [...new Set((userIds || []).filter(Boolean))];
+  if (!ids.length) return {};
+  const [{ data: profs }, { data: roles }] = await Promise.all([
+    supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').in('user_id', ids),
+    supabaseAdmin.from('user_company_roles').select('user_id').in('user_id', ids).eq('is_active', true),
+  ]);
+  const active = new Set((roles || []).map(r => r.user_id));
+  const out = {};
+  for (const p of (profs || [])) {
+    if (!active.has(p.user_id)) continue;            // ghost / departed → no name
+    const n = `${p.first_name || ''} ${p.last_name || ''}`.trim();
+    if (n) out[p.user_id] = n;
+  }
+  return out;
+};
+
 // ── Implicit company linking ────────────────────────────────────────────────
 // The `company_links` table modelled an explicit fronter↔closer pairing, but in
 // practice every fronter company feeds every closer company — the link rows were
@@ -445,6 +474,7 @@ module.exports = {
   getCompanyType,
   getActiveCompanyIdsByType,
   getCounterpartCompanyIds,
+  activeUserNames,
   isCloserSideScope,
   resolveScopedCompanyId,
   createRole,
