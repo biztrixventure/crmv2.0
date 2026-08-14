@@ -46,10 +46,30 @@ async function loadVisibleBatch(req, id) {
 router.get('/recipients', asyncHandler(async (req, res) => {
   if (!canSend(req)) return res.status(403).json({ error: 'Not allowed to send batches' });
   const q = String(req.query.q || '').trim();
-  let query = supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').limit(30);
+  let query = supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name, vicidial_agent_ids').limit(30);
   if (q) query = query.or(`first_name.ilike.%${q}%,last_name.ilike.%${q}%`);
-  const { data: profs } = await query;
-  const ids = (profs || []).map(p => p.user_id);
+  const { data: nameHits } = await query;
+
+  // Also match on the DIALER ID. "Who is WTI1008?" is the question this
+  // directory gets asked most while auditing dialer mappings, and the name is
+  // usually the part you DON'T know. PostgREST cannot ILIKE inside a text[], so
+  // the id set is pulled and matched here — a small table (~230 profiles, ~170
+  // carrying ids) and only when something was actually typed.
+  // Substring + case-insensitive: typing "1008" finds WTI1008.
+  let profs = nameHits || [];
+  if (q) {
+    const needle = q.toUpperCase();
+    const { data: idRows } = await supabaseAdmin
+      .from('user_profiles').select('user_id, first_name, last_name, vicidial_agent_ids')
+      .not('vicidial_agent_ids', 'is', null);
+    const idHits = (idRows || []).filter(p =>
+      (p.vicidial_agent_ids || []).some(a => String(a).toUpperCase().includes(needle)));
+    const seen = new Set(profs.map(p => p.user_id));
+    for (const p of idHits) if (!seen.has(p.user_id)) { seen.add(p.user_id); profs.push(p); }
+    profs = profs.slice(0, 30);
+  }
+
+  const ids = profs.map(p => p.user_id);
   // attach primary role + company for the picker labels
   const roleByUser = new Map();
   if (ids.length) {
@@ -58,11 +78,13 @@ router.get('/recipients', asyncHandler(async (req, res) => {
       .in('user_id', ids).eq('is_active', true);
     (roles || []).forEach(r => { if (!roleByUser.has(r.user_id)) roleByUser.set(r.user_id, { role: r.custom_roles?.level || null, company_id: r.company_id, company_name: r.companies?.name || null }); });
   }
-  const users = (profs || []).map(p => ({
+  const users = profs.map(p => ({
     id: p.user_id, name: fullName(p) || '(unnamed)',
     role: roleByUser.get(p.user_id)?.role || null,
     company_id: roleByUser.get(p.user_id)?.company_id || null,
     company_name: roleByUser.get(p.user_id)?.company_name || null,
+    // surfaced so a search by dialer id can SHOW which id matched
+    vicidial_agent_ids: p.vicidial_agent_ids || [],
   })).sort((a, b) => a.name.localeCompare(b.name));
   res.json({ users });
 }));

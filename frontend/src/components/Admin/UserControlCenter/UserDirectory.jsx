@@ -101,7 +101,7 @@ export default function UserDirectory({ onSelect }) {
       {/* Global search */}
       <div className="relative mb-3">
         <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
-        <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search any user across all companies by name…"
+        <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search by name or dialer ID (e.g. WTI1008, 5006)…"
           className="w-full text-sm rounded-xl pl-10 pr-9 py-2.5" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }} />
         {q && <button onClick={() => setQ('')} className="absolute right-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }}><X size={15} /></button>}
         {searching && <span className="absolute right-9 top-1/2 -translate-y-1/2"><Loading variant="inline" size={15} label="Searching…" /></span>}
@@ -182,6 +182,14 @@ export default function UserDirectory({ onSelect }) {
                     )}
                     <span className="inline-block mt-1 text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded-full"
                       style={{ background: col + '22', color: col }}>{prettyRole(lvl)}{results && u.company_name ? ` · ${u.company_name}` : ''}</span>
+                    {/* Dialer ids — the point of searching by one is to confirm you
+                        found the right person, so show which ids they hold. */}
+                    {results && u.vicidial_agent_ids?.length > 0 && (
+                      <span className="block mt-1 text-[10px] font-mono truncate" style={{ color: 'var(--color-text-tertiary)' }}
+                            title={u.vicidial_agent_ids.join(', ')}>
+                        {u.vicidial_agent_ids.join(', ')}
+                      </span>
+                    )}
                   </div>
                 </button>
               );
