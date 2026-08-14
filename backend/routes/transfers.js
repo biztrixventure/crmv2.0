@@ -443,17 +443,26 @@ router.get('/search-by-phone', asyncHandler(async (req, res) => {
   const companyId = req.user.company_id;
   const q         = escapeOrValue(phone.trim());
 
-  // ROLE GATE — this endpoint deliberately searches the shared cross-fronter
-  // lead pool (see below), so it must never be reachable by a fronter-side
-  // caller. It had NO role check at all: any authenticated user, including a
-  // plain `fronter`, could pull `select('*')` on transfers — full form_data
-  // customer PII — for EVERY fronter company in the estate, which is exactly
-  // the "fronter sees leads that aren't theirs" report. The UI only ever
-  // renders PhoneSearch for a closer (StaffShell mounts it under `isCloser`);
-  // this makes the server agree with that intent instead of trusting the UI.
+  // SCOPE, NOT A BLANKET BAN. This endpoint searches the shared cross-fronter
+  // lead pool, and it originally had NO check at all: any authenticated user
+  // could pull select('*') on transfers — full form_data customer PII — for
+  // EVERY fronter company in the estate. Locking it to closer-side roles fixed
+  // that but went too far: StaffShell shows PhoneSearch whenever
+  // `user.role === 'closer' || hasPermission('create_sale')`, so a FRONTER who
+  // has been granted create_sale legitimately uses this search and started
+  // getting 403s.
+  //
+  // So fronter-side callers are allowed back in, but narrowed to what is
+  // rightfully theirs rather than the shared pool:
+  //   fronter                        -> only leads they created
+  //   fronter_manager / fronter-side
+  //   company_admin / ops_manager    -> only their own company's leads
+  //   closer-side roles              -> the shared pool (unchanged)
+  //   compliance / superadmin / RO   -> everything (unchanged)
   const SEARCH_ROLES = [
     'closer', 'closer_manager', 'operations_manager', 'company_admin',
     'compliance_manager', 'superadmin', 'readonly_admin',
+    'fronter', 'fronter_manager',
   ];
   if (!SEARCH_ROLES.includes(userRole)) {
     return res.status(403).json({ error: 'Not permitted to search leads by phone' });
@@ -462,6 +471,9 @@ router.get('/search-by-phone', asyncHandler(async (req, res) => {
   // staff — scope them to their own company rather than the shared pool.
   const closerSide = await isCloserSideScope(userRole, companyId);
   const globalView = ['superadmin', 'readonly_admin', 'compliance_manager'].includes(userRole);
+  // A plain fronter sees only their own leads — the same rule the transfers list
+  // applies to them, so this search can't become a way around it.
+  const ownLeadsOnly = userRole === 'fronter';
 
   // Resolve which fronter companies this caller can see.
   // NOTE: every active fronter company, by design — fronter↔closer linking is
@@ -489,10 +501,13 @@ router.get('/search-by-phone', asyncHandler(async (req, res) => {
   const sortCol = sortBy === 'created_at' ? 'created_at' : 'updated_at';
 
   // PostgREST JSONB text-extraction: ->>key (no SQL quotes). Covers both naming conventions.
-  const { data, error } = await supabaseAdmin
+  let searchQ = supabaseAdmin
     .from('transfers')
     .select('*')
-    .in('company_id', fronterCompanyIds)
+    .in('company_id', fronterCompanyIds);
+  // A plain fronter only ever sees their own leads here (see ownLeadsOnly).
+  if (ownLeadsOnly) searchQ = searchQ.eq('created_by', req.user.id);
+  const { data, error } = await searchQ
     .or(`form_data->>customer_phone.ilike.%${q}%,form_data->>Phone.ilike.%${q}%`)
     .order(sortCol, { ascending: false, nullsFirst: false })
     .limit(50);
