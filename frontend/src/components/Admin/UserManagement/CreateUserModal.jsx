@@ -183,8 +183,14 @@ const CreateUserModal = ({ isOpen, onClose, companyId, onCreated }) => {
             </label>
             <div className="relative">
               <Headphones size={15} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-secondary)' }} />
+              {/* Sits in a form with an email + password field, so Chrome happily
+                  autofills an address in here and it gets saved as the dialer id.
+                  Opt out of browser + password-manager autofill; the server also
+                  rejects anything that isn't a real agent id. */}
               <input className="input pl-9" value={form.vicidial_agent_id} onChange={set('vicidial_agent_id')}
-                placeholder="e.g. ETC0895, 2006 (optional)" />
+                placeholder="e.g. ETC0895, 2006 (optional)"
+                autoComplete="off" data-lpignore="true" data-1p-ignore data-form-type="other"
+                spellCheck={false} />
             </div>
             <p className="text-xs mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
               Dialer agent id — maps dispositions to this user. Works two boxes with different ids? List both comma-separated.

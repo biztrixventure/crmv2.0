@@ -143,9 +143,16 @@ const UserForm = ({ user = null, onSubmit, isLoading = false, roles = [] }) => {
         hint="Dialer login/agent id (e.g. ETC0895). If this person works MORE than one box with different ids, list all comma-separated (e.g. ETC0895, 2006) — dispositions from any of them map to this user. Leave blank if not on the dialer.">
         <div className="relative">
           <Headphones size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-tertiary" />
+          {/* Chrome treats this box as an email/username field (it sits in a form
+              with one) and autofills the admin's own address into it. Saving then
+              overwrote the real dialer id, which silently unmapped the agent and
+              stopped their leads reaching the CRM. autoComplete alone is not
+              always honoured, so the password-manager opt-outs are set too; the
+              server rejects a non-agent-id value as the actual guarantee. */}
           <input type="text" name="vicidial_agent_id" value={formData.vicidial_agent_id}
             onChange={handleInputChange} placeholder="e.g. ETC0895, 2006"
-            className="input pl-9" />
+            autoComplete="off" data-lpignore="true" data-1p-ignore data-form-type="other"
+            spellCheck={false} className="input pl-9" />
         </div>
         {user && (user.vicidial_agent_id
           ? <p className="text-xs mt-1 font-semibold" style={{ color: 'var(--color-success-600)' }}>Currently mapped: {user.vicidial_agent_id} — leave as-is to keep it.</p>

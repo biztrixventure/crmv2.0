@@ -65,9 +65,14 @@ export default function VicidialSection({ account, onChanged }) {
       </div>
 
       <div className="flex items-center gap-2">
+        {/* Opt out of browser + password-manager autofill: Chrome was dropping the
+            signed-in admin's email into this box and it got saved as the agent's
+            dialer id, silently unmapping them. The server rejects non-agent-id
+            values too — this just stops it happening in the first place. */}
         <input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && add()}
           placeholder="e.g. ETC0895, 2006" disabled={busy}
-          className="input flex-1" />
+          autoComplete="off" data-lpignore="true" data-1p-ignore data-form-type="other"
+          spellCheck={false} className="input flex-1" />
         <button onClick={add} disabled={busy || !input.trim()}
           className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-50"
           style={{ background: 'var(--color-primary-600)', color: '#fff' }}>

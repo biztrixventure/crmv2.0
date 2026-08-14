@@ -18,12 +18,29 @@ const {
 const { clearFeatureCache } = require('../utils/featureGate');
 const { validatePassword, generateSecurePassword } = require('../utils/passwordValidator');
 
+// A VICIdial agent id is the dialer's `user` field: short, alphanumeric, no
+// punctuation (WTI1002, ETC0895, TMC100259, 5006). Anything else cannot match a
+// dialer event and is therefore worse than blank — it looks mapped while
+// silently dropping every transfer and disposition for that agent.
+const AGENT_ID_RE = /^[A-Z0-9][A-Z0-9._-]{0,29}$/;
+const isValidAgentId = (id) => AGENT_ID_RE.test(id) && !id.includes('@');
+
 // A user can have several dialer agent ids (one per box). Accept a single id or
-// a comma/space-separated list → { primary, ids[] } (trimmed, de-duped).
+// a comma/space-separated list → { primary, ids[], rejected[] } (trimmed, de-duped).
+//
+// GUARD: this used to accept ANY string. Chrome autofill treats the dialer-id
+// box on the user form as an email/username field and silently overwrites it
+// when an admin opens the profile to edit something else — the saved id then
+// became e.g. HAROON@ETC.COM, and that agent's leads stopped reaching the CRM
+// entirely (four real profiles were found in this state). Values that cannot
+// possibly be a dialer id are now rejected outright rather than stored, so an
+// autofill accident can never silently unmap a working agent again.
 function parseAgentIds(raw) {
   // Uppercase so matching is case-consistent with the dialer (see migration 121).
-  const ids = [...new Set(String(raw || '').split(/[,\s]+/).map(s => s.trim().toUpperCase()).filter(Boolean))];
-  return { primary: ids[0] || null, ids };
+  const all = [...new Set(String(raw || '').split(/[,\s]+/).map(s => s.trim().toUpperCase()).filter(Boolean))];
+  const ids = all.filter(isValidAgentId);
+  const rejected = all.filter(id => !isValidAgentId(id));
+  return { primary: ids[0] || null, ids, rejected };
 }
 // Reject if any of these ids already belongs to ANOTHER user (checks the single
 // column + the array). Returns the clashing id or null. excludeUserId skips self.
@@ -686,7 +703,12 @@ router.post(
 
     const { email, role_id, company_id, password, require_verification } = req.body;
     // Optional VICIdial dialer agent id (maps dialer dispositions → this user).
-    const { primary: vicidialAgentId, ids: vicidialAgentIds } = parseAgentIds(req.body.vicidial_agent_id);
+    const { primary: vicidialAgentId, ids: vicidialAgentIds, rejected: agentRejected } = parseAgentIds(req.body.vicidial_agent_id);
+    if (agentRejected.length) {
+      return res.status(400).json({
+        error: `Not a valid VICIdial agent id: ${agentRejected.join(', ')}. Use the dialer login (e.g. ETC0895 or 5006) — an email address is usually the browser autofilling this box.`,
+      });
+    }
     // Derive first/last from full_name when provided; fall back to explicit fields.
     let { first_name, last_name } = req.body.full_name
       ? splitFullName(req.body.full_name)
@@ -933,6 +955,14 @@ router.put(
     // VICIdial dialer agent id — present key means "set it" (empty = clear).
     const hasAgentField = Object.prototype.hasOwnProperty.call(req.body, 'vicidial_agent_id');
     const agentParsed = hasAgentField ? parseAgentIds(req.body.vicidial_agent_id) : null;
+    // Refuse a value that cannot be a dialer id instead of overwriting a good
+    // mapping with it — this is the exact path Chrome autofill took when it
+    // replaced working agent ids with the admin's email address.
+    if (agentParsed && agentParsed.rejected.length) {
+      return res.status(400).json({
+        error: `Not a valid VICIdial agent id: ${agentParsed.rejected.join(', ')}. Use the dialer login (e.g. ETC0895 or 5006) — an email address is usually the browser autofilling this box.`,
+      });
+    }
     const vicidialAgentId  = hasAgentField ? agentParsed.primary : undefined;
     const vicidialAgentIds = hasAgentField ? agentParsed.ids : undefined;
     const userId = req.user.id;

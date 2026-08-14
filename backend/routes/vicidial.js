@@ -1397,7 +1397,17 @@ api.get('/agents/roster', superOnly, asyncHandler(async (req, res) => {
 api.post('/agents', superOnly, asyncHandler(async (req, res) => {
   if (!req.body.user_id) return res.status(400).json({ error: 'user_id required' });
   // Accept one id or a comma/space-separated list (a user can work several boxes).
-  const agentIds = [...new Set(String(req.body.agent_id || '').split(/[,\s]+/).map(s => s.trim().toUpperCase()).filter(Boolean))];
+  const rawIds = [...new Set(String(req.body.agent_id || '').split(/[,\s]+/).map(s => s.trim().toUpperCase()).filter(Boolean))];
+  // Same guard as POST/PUT /users: a dialer agent id is short and alphanumeric.
+  // Chrome autofill drops an email into this box and used to overwrite a working
+  // mapping, which silently stopped that agent's leads reaching the CRM.
+  const badIds = rawIds.filter(id => !/^[A-Z0-9][A-Z0-9._-]{0,29}$/.test(id) || id.includes('@'));
+  if (badIds.length) {
+    return res.status(400).json({
+      error: `Not a valid VICIdial agent id: ${badIds.join(', ')}. Use the dialer login (e.g. ETC0895 or 5006) — an email address is usually the browser autofilling this box.`,
+    });
+  }
+  const agentIds = rawIds;
   const primary = agentIds[0] || null;
   if (agentIds.length) {  // reject ids already mapped to ANOTHER user (both columns)
     const list = agentIds.join(',');
