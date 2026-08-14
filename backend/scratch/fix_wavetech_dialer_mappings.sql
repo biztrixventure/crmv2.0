@@ -67,7 +67,10 @@ returning first_name || ' ' || coalesce(last_name, '') as name, vicidial_agent_i
 -- ── STEP 3 — verify: every id below must resolve to exactly ONE active user ──
 select a.agent,
        count(*) filter (where ucr.is_active) as active_matches,
-       string_agg(distinct up.first_name || ' ' || coalesce(up.last_name, '') || ' [' || coalesce(cr.level, 'no role') || ']', ', ') as resolves_to
+       -- cr.level is the role_level ENUM: it must be cast to text before being
+       -- coalesced with a string literal, otherwise Postgres tries to parse
+       -- 'no role' as an enum member and fails with 22P02.
+       string_agg(distinct up.first_name || ' ' || coalesce(up.last_name, '') || ' [' || coalesce(cr.level::text, 'no role') || ']', ', ') as resolves_to
 from (values ('WTI1066'), ('WTI1029'), ('WTI1056'), ('WTI1008'), ('WTI1010')) as a(agent)
 left join user_profiles up on up.vicidial_agent_ids @> array[a.agent]::text[]
 left join user_company_roles ucr on ucr.user_id = up.user_id and ucr.is_active
