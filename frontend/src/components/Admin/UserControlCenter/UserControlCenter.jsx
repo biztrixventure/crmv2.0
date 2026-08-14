@@ -34,6 +34,7 @@ import AccountSection from './AccountSection';
 import CompaniesRoleSection from './CompaniesRoleSection';
 import TeamSection from './TeamSection';
 import VicidialSection from './VicidialSection';
+import ProfileVerifySection from './ProfileVerifySection';
 import GovernanceSection from './GovernanceSection';
 import EgressSection from './EgressSection';
 import ActivitySection from './ActivitySection';
@@ -218,7 +219,17 @@ export default function UserControlCenter() {
             {tab === 'teams'        && (activeAssignment
               ? <TeamSection account={account} assignment={activeAssignment} />
               : <NoAssignment />)}
-            {tab === 'vicidial'     && <VicidialSection account={account} onChanged={reload} />}
+            {tab === 'vicidial'     && (
+              <div className="space-y-6">
+                <VicidialSection account={account} onChanged={reload} />
+                {/* Asking the user themselves is the reliable way to fix a wrong
+                    dialer id — they know their own login. Lives here rather than
+                    in a new tab so stored readonly-admin tab governance stays valid. */}
+                <div className="pt-5" style={{ borderTop: '1px solid var(--color-border)' }}>
+                  <ProfileVerifySection account={account} onChanged={reload} />
+                </div>
+              </div>
+            )}
             {tab === 'record_views' && (activeAssignment
               ? <UserRecordViewsPanel user={activeAssignment} />
               : <NoAssignment />)}

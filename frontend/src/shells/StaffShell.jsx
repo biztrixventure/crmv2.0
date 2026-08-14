@@ -77,6 +77,7 @@ import { useFormFields } from "../hooks/useFormFields";
 import { dispositionTabs, isPostDateDispo, prettyDispo } from "../utils/dispositions";
 import { useSaleConfigs } from "../hooks/useSaleConfigs";
 import PhoneSearch from "../components/Closer/PhoneSearch";
+import ProfileVerifyModal from "../components/Profile/ProfileVerifyModal";
 import { getTransferDisplayStatus } from "../utils/transferStatus";
 import { fmtDateET, fmtSaleDate } from "../utils/timezone";
 import SaleModal from "../components/Closer/SaleModal";
@@ -1044,6 +1045,9 @@ const StaffShell = () => {
   return (
     <div className={`min-h-screen bg-bg relative ${(user?.role === 'superadmin' || !copyLocked) ? '' : 'bsx-no-select'}`}>
       <DotGridBg />
+      {/* Renders nothing unless a superadmin has asked this user to confirm
+          their details (see components/Profile/ProfileVerifyModal). */}
+      <ProfileVerifyModal />
       {updateAvailable && <UpdateBanner />}
       <AppHeader
         title={user?.role_name || 'Dashboard'}
