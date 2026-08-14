@@ -1440,7 +1440,9 @@ api.post('/backfill/coded', superOnly, asyncHandler(async (req, res) => {
 api.get('/agents', superOnly, asyncHandler(async (req, res) => {
   const q = (req.query.q || '').trim();
   const buildQuery = (cols) => {
-    let query = supabaseAdmin.from('user_profiles').select(cols).order('first_name').limit(100);
+    // Was limit(100) — with 234 profiles that silently hid a third of the estate,
+    // and the page is meant to be the full picture. 1000 covers it with room.
+    let query = supabaseAdmin.from('user_profiles').select(cols).order('first_name').limit(1000);
     if (q) { const s = q.replace(/[%,]/g, ''); query = query.or(`first_name.ilike.%${s}%,last_name.ilike.%${s}%,vicidial_agent_id.ilike.%${s}%`); }
     return query;
   };
@@ -1455,16 +1457,64 @@ api.get('/agents', superOnly, asyncHandler(async (req, res) => {
       .select('user_id, companies(name), custom_roles(level)').in('user_id', ids).eq('is_active', true);
     (ucr || []).forEach(r => { if (!meta[r.user_id]) meta[r.user_id] = { company: r.companies?.name || '', role: r.custom_roles?.level || '' }; });
   }
-  res.json({ agents: (profs || []).map(p => {
+
+  // Duplicate detection has to look at EVERY profile, not just the ones matching
+  // the search — an id shared with someone off-screen is exactly the case that
+  // needs flagging, and it is what makes dialer events land on the wrong person.
+  const { data: allProfs } = await supabaseAdmin
+    .from('user_profiles').select('user_id, first_name, last_name, vicidial_agent_ids')
+    .not('vicidial_agent_ids', 'is', null);
+  const holdersById = new Map();          // agent id -> [{user_id, name}]
+  (allProfs || []).forEach(p => {
+    (p.vicidial_agent_ids || []).forEach(a => {
+      const k = String(a).toUpperCase();
+      if (!holdersById.has(k)) holdersById.set(k, []);
+      holdersById.get(k).push({ user_id: p.user_id, name: `${p.first_name || ''} ${p.last_name || ''}`.trim() });
+    });
+  });
+
+  // A dialer agent id is short and alphanumeric; anything else (an email, most
+  // often from browser autofill) can never match a dialer event.
+  const isValidId = (s) => /^[A-Z0-9][A-Z0-9._-]{0,29}$/.test(String(s).toUpperCase()) && !String(s).includes('@');
+  const knownPrefixes = new Set(boxPrefixes().map(s => String(s).toUpperCase()));
+
+  const agents = (profs || []).map(p => {
     // All dialer ids (multi-box) surfaced as a comma list; round-trips on save.
     const all = (p.vicidial_agent_ids && p.vicidial_agent_ids.length) ? p.vicidial_agent_ids : (p.vicidial_agent_id ? [p.vicidial_agent_id] : []);
+    const upper = all.map(a => String(a).toUpperCase());
     return {
       user_id: p.user_id, name: `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'User',
       vicidial_agent_id: all.join(', '),   // legacy joined string (kept for back-compat)
       agent_ids: all,                       // array → the UI renders removable chips
       company: meta[p.user_id]?.company || '', role: meta[p.user_id]?.role || '',
+      // ── diagnostics the spreadsheet view sorts and filters on ──
+      active: !!meta[p.user_id],                          // has an active company role
+      id_count: all.length,
+      boxes: [...new Set(upper.map(a => (a.match(/^[A-Z]+/) || [''])[0]).filter(b => knownPrefixes.has(b)))],
+      // ids that some OTHER profile also holds — the wrong-person root cause
+      dup_ids: upper.filter(a => (holdersById.get(a) || []).some(h => h.user_id !== p.user_id)),
+      dup_with: [...new Set(upper.flatMap(a => (holdersById.get(a) || [])
+        .filter(h => h.user_id !== p.user_id).map(h => h.name || h.user_id.slice(0, 8))))],
+      bad_ids: all.filter(a => !isValidId(a)),            // email junk etc.
+      numeric_ids: upper.filter(a => /^[0-9]+$/.test(a)), // no box letter → unresolvable prefix
     };
-  }) });
+  });
+
+  res.json({
+    agents,
+    // Headline counts so the page can state the position without the UI
+    // re-deriving it from a truncated page of rows.
+    summary: {
+      users: agents.length,
+      with_ids: agents.filter(a => a.id_count > 0).length,
+      without_ids: agents.filter(a => a.id_count === 0).length,
+      multi_id: agents.filter(a => a.id_count > 1).length,
+      inactive_with_ids: agents.filter(a => a.id_count > 0 && !a.active).length,
+      duplicated: agents.filter(a => a.dup_ids.length).length,
+      invalid: agents.filter(a => a.bad_ids.length).length,
+      total_ids: agents.reduce((n, a) => n + a.id_count, 0),
+    },
+  });
 }));
 
 // Dialer agent roster (agent_stats_export) for a box over a recent window, each

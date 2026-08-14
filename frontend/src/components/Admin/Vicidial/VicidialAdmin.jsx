@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { PhoneCall, Plus, Trash2, Save, Search, Hash, Users, ChevronDown, Loader2, Check, ListChecks, AlertTriangle, DownloadCloud, RotateCcw, Info, Server, ShieldCheck, Wifi } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button, Alert } from '../../UI';
@@ -373,19 +373,55 @@ const AgentRow = ({ a, roster, onSaved }) => {
   const key = nameKey(a.name);
   const suggestions = (roster || []).filter(r => nameKey(r.full_name) === key && !ids.includes(r.login) && !r.mapped_to);
 
+  // Problems worth seeing at a glance, worst first. These are the conditions
+  // that actually break attribution, so they get a column of their own rather
+  // than being something you must notice by reading id strings.
+  const flags = [];
+  if (a.bad_ids?.length)   flags.push({ t: 'Invalid id', d: a.bad_ids.join(', ') + ' — cannot match a dialer event (usually browser autofill)', c: '#dc2626' });
+  if (a.dup_ids?.length)   flags.push({ t: 'Duplicate',  d: a.dup_ids.join(', ') + ' — also held by ' + (a.dup_with || []).join(', '), c: '#dc2626' });
+  if (a.id_count > 0 && !a.active) flags.push({ t: 'Inactive', d: 'Holds dialer ids but has no active company role', c: '#b45309' });
+  if (a.numeric_ids?.length) flags.push({ t: 'No box',   d: a.numeric_ids.join(', ') + ' — numeric login, the box cannot be derived from it', c: '#b45309' });
+
   return (
     <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
-      <td className="px-4 py-2.5 align-top">
-        <p className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>{a.name}</p>
-        <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>{[a.role, a.company].filter(Boolean).join(' · ') || '—'}</p>
+      <td className="px-3 py-2 align-top">
+        <p className="text-sm font-semibold whitespace-nowrap" style={{ color: 'var(--color-text)' }}>{a.name}</p>
       </td>
-      <td className="px-4 py-2.5 align-top">
+      <td className="px-3 py-2 align-top text-xs whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>{a.company || '—'}</td>
+      <td className="px-3 py-2 align-top text-xs whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>{prettyLevel(a.role)}</td>
+      <td className="px-3 py-2 align-top whitespace-nowrap">
+        <span className="text-[11px] font-bold px-1.5 py-0.5 rounded-full"
+          style={a.active ? { background: '#16a34a1f', color: '#16a34a' } : { background: '#b453091f', color: '#b45309' }}>
+          {a.active ? 'Active' : 'Inactive'}
+        </span>
+      </td>
+      <td className="px-3 py-2 align-top text-center text-sm font-bold tabular-nums"
+          style={{ color: a.id_count === 0 ? 'var(--color-text-tertiary)' : a.id_count > 1 ? '#2563eb' : 'var(--color-text)' }}>
+        {a.id_count}
+      </td>
+      <td className="px-3 py-2 align-top whitespace-nowrap">
+        {(a.boxes || []).length
+          ? <span className="text-[11px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>{a.boxes.join(' · ')}</span>
+          : <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>—</span>}
+      </td>
+      <td className="px-3 py-2 align-top" style={{ minWidth: 200 }}>
         <div className="flex flex-wrap items-center gap-1.5">
           {ids.length ? ids.map(id => <IdChip key={id} id={id} onRemove={() => removeId(id)} />) : <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>—</span>}
           {busy && <Loader2 size={13} className="animate-spin" style={{ color: 'var(--color-text-tertiary)' }} />}
         </div>
       </td>
-      <td className="px-4 py-2.5 align-top">
+      <td className="px-3 py-2 align-top">
+        {flags.length ? (
+          <div className="flex flex-wrap gap-1">
+            {flags.map(f => (
+              <span key={f.t} title={f.d}
+                className="text-[10px] font-bold px-1.5 py-0.5 rounded cursor-help whitespace-nowrap"
+                style={{ background: f.c + '1f', color: f.c, border: `1px solid ${f.c}55` }}>{f.t}</span>
+            ))}
+          </div>
+        ) : <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>—</span>}
+      </td>
+      <td className="px-3 py-2 align-top">
         <div className="flex flex-wrap items-center gap-1.5">
           {suggestions.map(s => (
             <button key={s.box_id + s.login} onClick={() => addId(s.login)} disabled={busy}
@@ -397,26 +433,52 @@ const AgentRow = ({ a, roster, onSaved }) => {
           ))}
           <input value={txt} onChange={e => setTxt(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') { addId(txt); setTxt(''); } }}
-            placeholder="add id…" className="input py-1 text-xs" style={{ maxWidth: 120, fontFamily: 'monospace' }} />
+            placeholder="add id…" className="input py-1 text-xs" style={{ maxWidth: 110, fontFamily: 'monospace' }} />
         </div>
       </td>
     </tr>
   );
 };
 
+const prettyLevel = (r) => String(r || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) || '—';
+
+// One column definition drives the header, the sort and the CSV export, so the
+// three can never disagree about what a column is or how it is ordered.
+const COLS = [
+  { k: 'name',     label: 'User',        get: a => a.name || '' },
+  { k: 'company',  label: 'Company',     get: a => a.company || '' },
+  { k: 'role',     label: 'Role',        get: a => a.role || '' },
+  { k: 'active',   label: 'Status',      get: a => (a.active ? 1 : 0) },
+  { k: 'id_count', label: '# Ids',       get: a => a.id_count || 0 },
+  { k: 'boxes',    label: 'Boxes',       get: a => (a.boxes || []).join(',') },
+  { k: 'ids',      label: 'Agent ids',   get: a => (a.agent_ids || []).join(', ') },
+  { k: 'issues',   label: 'Issues',      get: a => [
+      a.bad_ids?.length ? 'invalid' : '', a.dup_ids?.length ? 'duplicate' : '',
+      (a.id_count > 0 && !a.active) ? 'inactive' : '', a.numeric_ids?.length ? 'no-box' : '',
+    ].filter(Boolean).join(' ') },
+  { k: 'add',      label: 'Add / suggested', sortable: false, get: () => '' },
+];
+
 const Agents = () => {
   const [q, setQ] = useState('');
   const [agents, setAgents] = useState([]);
+  const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(false);
   const [boxes, setBoxes] = useState([]);
   const [box, setBox] = useState('');
   const [days, setDays] = useState(14);
   const [roster, setRoster] = useState([]);
   const [rosterLoading, setRosterLoading] = useState(false);
+  const [sort, setSort] = useState({ k: 'name', dir: 'asc' });
+  const [filter, setFilter] = useState('all');
 
   const load = useCallback(async () => {
     setLoading(true);
-    try { const r = await client.get('vicidial/agents', { params: { q: q || undefined } }); setAgents(r.data.agents || []); }
+    try {
+      const r = await client.get('vicidial/agents', { params: { q: q || undefined } });
+      setAgents(r.data.agents || []);
+      setSummary(r.data.summary || null);
+    }
     catch { /* ignore */ } finally { setLoading(false); }
   }, [q]);
   useEffect(() => { const t = setTimeout(load, 250); return () => clearTimeout(t); }, [load]);
@@ -437,6 +499,43 @@ const Agents = () => {
     const key = nameKey(a.name);
     return n + (roster.some(r => nameKey(r.full_name) === key && !(a.agent_ids || []).includes(r.login) && !r.mapped_to) ? 1 : 0);
   }, 0) : 0;
+
+  const toggleSort = (k) => setSort(s => s.k === k ? { k, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { k, dir: 'asc' });
+
+  const MATCH = {
+    all:      () => true,
+    multi:    a => a.id_count > 1,
+    dup:      a => a.dup_ids?.length > 0,
+    bad:      a => a.bad_ids?.length > 0,
+    none:     a => a.id_count === 0,
+    inactive: a => a.id_count > 0 && !a.active,
+  };
+
+  const rows = useMemo(() => {
+    const col = COLS.find(c => c.k === sort.k) || COLS[0];
+    const dir = sort.dir === 'asc' ? 1 : -1;
+    return agents
+      .filter(MATCH[filter] || MATCH.all)
+      .slice()
+      .sort((x, y) => {
+        const a = col.get(x), b = col.get(y);
+        if (typeof a === 'number' && typeof b === 'number') return (a - b) * dir;
+        return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' }) * dir;
+      });
+  }, [agents, sort, filter]);
+
+  // Straight to a spreadsheet — same columns, same order as shown on screen.
+  const exportCsv = () => {
+    const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const head = COLS.filter(c => c.k !== 'add').map(c => esc(c.label)).join(',');
+    const body = rows.map(a => COLS.filter(c => c.k !== 'add')
+      .map(c => esc(c.k === 'active' ? (a.active ? 'Active' : 'Inactive') : c.get(a))).join(',')).join('\n');
+    const blob = new Blob([head + '\n' + body], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url; link.download = `vicidial-agent-mapping-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click(); URL.revokeObjectURL(url);
+  };
 
   return (
     <div className="space-y-3">
@@ -459,19 +558,71 @@ const Agents = () => {
         {roster.length > 0 && <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>{roster.length} dialer agents · <b style={{ color: 'var(--color-warning-700, #b45309)' }}>{suggestedCount}</b> user{suggestedCount === 1 ? '' : 's'} with a suggestion</span>}
       </div>
 
-      <div className="relative max-w-md">
-        <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
-        <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search people or agent id…" className="input" style={{ paddingLeft: 34 }} />
+      {/* Headline counts — the position at a glance, before any filtering. */}
+      {summary && (
+        <div className="flex flex-wrap gap-2">
+          {[
+            ['Users', summary.users, null],
+            ['With ids', summary.with_ids, null],
+            ['No id', summary.without_ids, summary.without_ids ? '#64748b' : null],
+            ['Multi-id', summary.multi_id, summary.multi_id ? '#2563eb' : null],
+            ['Total ids', summary.total_ids, null],
+            ['Duplicated', summary.duplicated, summary.duplicated ? '#dc2626' : null],
+            ['Invalid', summary.invalid, summary.invalid ? '#dc2626' : null],
+            ['Inactive w/ ids', summary.inactive_with_ids, summary.inactive_with_ids ? '#b45309' : null],
+          ].map(([label, n, tint]) => (
+            <div key={label} className="px-3 py-2 rounded-xl"
+              style={{ background: tint ? tint + '14' : 'var(--color-bg-secondary)', border: `1px solid ${tint ? tint + '44' : 'var(--color-border)'}` }}>
+              <p className="m-0 text-[10px] font-bold uppercase tracking-wide" style={{ color: tint || 'var(--color-text-tertiary)' }}>{label}</p>
+              <p className="m-0 text-lg font-bold tabular-nums" style={{ color: tint || 'var(--color-text)' }}>{n ?? 0}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative flex-1" style={{ minWidth: 220, maxWidth: 340 }}>
+          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search people or agent id…" className="input w-full" style={{ paddingLeft: 34 }} />
+        </div>
+        {/* Jump straight to the rows that need attention. */}
+        {[['all', 'All'], ['multi', 'Multi-id'], ['dup', 'Duplicates'], ['bad', 'Invalid'], ['none', 'No id'], ['inactive', 'Inactive w/ ids']].map(([k, label]) => (
+          <button key={k} onClick={() => setFilter(k)}
+            className="text-xs font-bold px-3 py-1.5 rounded-full whitespace-nowrap"
+            style={filter === k
+              ? { background: 'var(--gradient-sidebar)', color: '#fff' }
+              : { background: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}>
+            {label}
+          </button>
+        ))}
+        <button onClick={exportCsv} disabled={!rows.length}
+          className="text-xs font-bold px-3 py-1.5 rounded-lg inline-flex items-center gap-1.5 disabled:opacity-50"
+          style={{ background: 'var(--color-bg-secondary)', color: 'var(--color-text)', border: '1px solid var(--color-border)' }}>
+          <DownloadCloud size={13} /> CSV
+        </button>
       </div>
-      {loading ? <Loading variant="rows" rows={3} /> : agents.length === 0 ? <p className="text-sm py-6 text-center" style={{ color: 'var(--color-text-tertiary)' }}>No users.</p> : (
-        <TableScroll stickyFirst label="VICIdial" className="rounded-2xl" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-          <table className="w-full text-sm">
-            <thead><tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
-              {['User', 'Mapped agent ids', 'Add / suggested from dialer'].map(h => <th key={h} className="px-4 py-2.5 text-left text-xs font-bold uppercase whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>{h}</th>)}
-            </tr></thead>
-            <tbody>{agents.map(a => <AgentRow key={a.user_id} a={a} roster={roster} onSaved={load} />)}</tbody>
-          </table>
-        </TableScroll>
+
+      {loading ? <Loading variant="rows" rows={3} /> : rows.length === 0 ? <p className="text-sm py-6 text-center" style={{ color: 'var(--color-text-tertiary)' }}>No users match.</p> : (
+        <>
+          <p className="m-0 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
+            Showing {rows.length} of {agents.length} · click a column heading to sort
+          </p>
+          <TableScroll stickyFirst label="VICIdial" className="rounded-2xl" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+            <table className="w-full text-sm">
+              <thead><tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
+                {COLS.map(c => (
+                  <th key={c.k} onClick={c.sortable === false ? undefined : () => toggleSort(c.k)}
+                    className={'px-3 py-2.5 text-left text-xs font-bold uppercase whitespace-nowrap' + (c.sortable === false ? '' : ' cursor-pointer select-none')}
+                    style={{ color: sort.k === c.k ? 'var(--color-text)' : 'var(--color-text-secondary)' }}>
+                    {c.label}
+                    {sort.k === c.k && <span style={{ marginLeft: 4 }}>{sort.dir === 'asc' ? '▲' : '▼'}</span>}
+                  </th>
+                ))}
+              </tr></thead>
+              <tbody>{rows.map(a => <AgentRow key={a.user_id} a={a} roster={roster} onSaved={load} />)}</tbody>
+            </table>
+          </TableScroll>
+        </>
       )}
     </div>
   );
