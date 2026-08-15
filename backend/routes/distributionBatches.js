@@ -42,11 +42,30 @@ async function loadVisibleBatch(req, id) {
   return { batch: b, sa };
 }
 
-// ── recipient picker — search ANY active CRM user ─────────────────────────────
+// ── recipient picker ──────────────────────────────────────────────────────────
+// Superadmin / compliance hand numbers anywhere in the org, so they search every
+// user. A manager only ever assigns inside their OWN companies — showing them
+// agents from other companies invited a cross-company mis-assignment and leaked
+// the other tenants' staff names.
+const CROSS_COMPANY_ROLES = new Set(['superadmin', 'readonly_admin', 'compliance_manager']);
 router.get('/recipients', asyncHandler(async (req, res) => {
   if (!canSend(req)) return res.status(403).json({ error: 'Not allowed to send batches' });
   const q = String(req.query.q || '').trim();
+
+  const sa = await isSuperAdmin(req.user.id);
+  const crossCompany = sa || CROSS_COMPANY_ROLES.has(req.user.role);
+  let allowedIds = null;                        // null = no company restriction
+  if (!crossCompany) {
+    const companies = (await getUserCompanies(req.user.id)).map(c => c.id);
+    if (!companies.length) return res.json({ users: [] });
+    const { data: mates } = await supabaseAdmin.from('user_company_roles')
+      .select('user_id').in('company_id', companies).eq('is_active', true);
+    allowedIds = [...new Set((mates || []).map(m => m.user_id))];
+    if (!allowedIds.length) return res.json({ users: [] });
+  }
+
   let query = supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name, vicidial_agent_ids').limit(30);
+  if (allowedIds) query = query.in('user_id', allowedIds);
   if (q) query = query.or(`first_name.ilike.%${q}%,last_name.ilike.%${q}%`);
   const { data: nameHits } = await query;
 
@@ -59,9 +78,11 @@ router.get('/recipients', asyncHandler(async (req, res) => {
   let profs = nameHits || [];
   if (q) {
     const needle = q.toUpperCase();
-    const { data: idRows } = await supabaseAdmin
+    let idQuery = supabaseAdmin
       .from('user_profiles').select('user_id, first_name, last_name, vicidial_agent_ids')
       .not('vicidial_agent_ids', 'is', null);
+    if (allowedIds) idQuery = idQuery.in('user_id', allowedIds);   // same company gate as the name search
+    const { data: idRows } = await idQuery;
     const idHits = (idRows || []).filter(p =>
       (p.vicidial_agent_ids || []).some(a => String(a).toUpperCase().includes(needle)));
     const seen = new Set(profs.map(p => p.user_id));
@@ -740,6 +761,19 @@ router.post('/:id/assign', asyncHandler(async (req, res) => {
   if (!list.length) return res.status(400).json({ error: 'At least one recipient is required' });
   const mode = req.body.mode === 'random' ? 'random' : 'sequential';
 
+  // A manager may only hand numbers to their own companies' people. The picker
+  // already filters, but the check belongs here too — the picker is UI.
+  const sa2 = await isSuperAdmin(req.user.id);
+  if (!sa2 && !CROSS_COMPANY_ROLES.has(req.user.role)) {
+    const myCompanies = (await getUserCompanies(req.user.id)).map(c => c.id);
+    const { data: theirs } = await supabaseAdmin.from('user_company_roles')
+      .select('user_id').in('company_id', myCompanies.length ? myCompanies : ['00000000-0000-0000-0000-000000000000'])
+      .eq('is_active', true).in('user_id', list.map(a => a.recipient_id));
+    const ok = new Set((theirs || []).map(t => t.user_id));
+    const outside = list.filter(a => !ok.has(a.recipient_id));
+    if (outside.length) return res.status(403).json({ error: 'You can only assign to people in your own company' });
+  }
+
   // The assignable pool: unassigned, not rule-excluded, in batch order.
   const { data: poolRows } = await supabaseAdmin.from('distribution_batch_items')
     .select('id, phone_number, lead_id, customer_name, data, position, status, assigned_to')
@@ -792,11 +826,15 @@ router.post('/:id/assign', asyncHandler(async (req, res) => {
 
       // child rows carry the file's data AND point back at the parent row, so a
       // disposition set downstream mirrors up the chain (trigger, mig 254).
+      // The child rows start UNASSIGNED. `assigned_to` means "handed to someone
+      // below out of THIS batch" — ownership of the batch itself is
+      // sent_to_user_id. Stamping the recipient here made every row in their own
+      // batch look already-dealt, so a fronter manager could not pass anything
+      // to their fronters (400: "every number is already assigned").
       const rows = part.items.map((it, idx) => ({
         batch_id: child.id, position: idx + 1, parent_item_id: it.id,
         phone_number: it.phone_number, lead_id: it.lead_id || null, customer_name: it.customer_name || null,
-        data: it.data || {}, status: 'assigned',
-        assigned_to: part.recipient_id, assigned_at: new Date().toISOString(), assigned_by: req.user.id,
+        data: it.data || {}, status: 'new',
       }));
       const { data: inserted, error: iErr } = await supabaseAdmin.from('distribution_batch_items').insert(rows).select('id, parent_item_id');
       if (iErr) throw new Error(iErr.message);
