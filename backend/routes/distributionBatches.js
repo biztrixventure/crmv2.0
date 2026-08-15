@@ -13,6 +13,7 @@ const { isSuperAdmin, getUserCompanies } = require('../models/helpers');
 const { CustomerProfileRepository } = require('../models/domain');
 const notifications = require('../utils/notificationService');
 const { getBatchRules, isDialerRecipient, ruleExclusions, summarize } = require('../utils/batchRules');
+const { canAssignTo } = require('../utils/roleRank');
 const logger = require('../utils/logger');
 
 const router = express.Router();
@@ -99,6 +100,9 @@ router.get('/recipients', asyncHandler(async (req, res) => {
       .in('user_id', ids).eq('is_active', true);
     (roles || []).forEach(r => { if (!roleByUser.has(r.user_id)) roleByUser.set(r.user_id, { role: r.custom_roles?.level || null, company_id: r.company_id, company_name: r.companies?.name || null }); });
   }
+  // Work only ever flows DOWN the ladder — your own level and everyone above it
+  // are not offered at all (utils/roleRank.js). Enforced again in /assign.
+  const myLevel = sa ? 'superadmin' : req.user.role;
   const users = profs.map(p => ({
     id: p.user_id, name: fullName(p) || '(unnamed)',
     role: roleByUser.get(p.user_id)?.role || null,
@@ -106,7 +110,9 @@ router.get('/recipients', asyncHandler(async (req, res) => {
     company_name: roleByUser.get(p.user_id)?.company_name || null,
     // surfaced so a search by dialer id can SHOW which id matched
     vicidial_agent_ids: p.vicidial_agent_ids || [],
-  })).sort((a, b) => a.name.localeCompare(b.name));
+  }))
+    .filter(u => u.id !== req.user.id && canAssignTo(myLevel, u.role))
+    .sort((a, b) => a.name.localeCompare(b.name));
   res.json({ users });
 }));
 
@@ -505,8 +511,17 @@ router.get('/:id/lineage', asyncHandler(async (req, res) => {
     supabaseAdmin.rpc('app_batch_ancestors', { p_batch_id: req.params.id }),
     supabaseAdmin.rpc('app_batch_descendants', { p_batch_id: req.params.id }),
   ]);
-  const names = await namesFor([...(anc || []), ...(desc || [])].flatMap(b => [b.created_by, b.sent_to_user_id]));
-  const deco = (b) => ({ ...b, created_by_name: names[b.created_by] || null, sent_to_name: names[b.sent_to_user_id] || null });
+  const all = [...(anc || []), ...(desc || [])];
+  const names = await namesFor(all.flatMap(b => [b.created_by, b.sent_to_user_id]));
+  // The lineage RPCs (153) predate item_count — the tree view shows how many
+  // numbers each hop carries, so pull it for the ids we are about to return.
+  const counts = {};
+  const ids = [...new Set(all.map(b => b.id))];
+  if (ids.length) {
+    const { data: cRows } = await supabaseAdmin.from('distribution_batches').select('id, item_count').in('id', ids);
+    (cRows || []).forEach(c => { counts[c.id] = c.item_count; });
+  }
+  const deco = (b) => ({ ...b, created_by_name: names[b.created_by] || null, sent_to_name: names[b.sent_to_user_id] || null, item_count: counts[b.id] ?? null });
   res.json({ ancestors: (anc || []).map(deco), descendants: (desc || []).map(deco) });
 }));
 
@@ -638,7 +653,18 @@ router.get('/:id/scoreboard', asyncHandler(async (req, res) => {
     assigned: a.assigned + p.assigned, worked: a.worked + p.worked,
     transferred: a.transferred + p.transferred, touches: a.touches + p.touches,
   }), { assigned: 0, worked: 0, transferred: 0, touches: 0 });
-  res.json({ people, totals });
+
+  // Drill-down: for each person, the batch THEY received out of this one. The UI
+  // uses it to walk the chain — superadmin → fronter manager → his fronters —
+  // without needing to know the batch tree.
+  const { data: kids } = await supabaseAdmin.from('distribution_batches')
+    .select('id, name, sent_to_user_id, item_count')
+    .eq('parent_batch_id', batch.id).eq('status', 'active');
+  const childByHolder = {};
+  (kids || []).forEach(k => { if (!childByHolder[k.sent_to_user_id]) childByHolder[k.sent_to_user_id] = { id: k.id, name: k.name, item_count: k.item_count }; });
+  people.forEach(p => { p.child_batch = childByHolder[p.user_id] || null; });
+
+  res.json({ people, totals, batch: { id: batch.id, name: batch.name } });
 }));
 
 // ── POST /upload — a file becomes a batch, at ANY level ──────────────────────
@@ -761,16 +787,28 @@ router.post('/:id/assign', asyncHandler(async (req, res) => {
   if (!list.length) return res.status(400).json({ error: 'At least one recipient is required' });
   const mode = req.body.mode === 'random' ? 'random' : 'sequential';
 
-  // A manager may only hand numbers to their own companies' people. The picker
-  // already filters, but the check belongs here too — the picker is UI.
+  // Two gates, both server-side because the picker is UI, not a boundary:
+  //   1. the ladder — strictly lower rank than me (utils/roleRank.js)
+  //   2. the company — unless I distribute org-wide (superadmin / compliance)
   const sa2 = await isSuperAdmin(req.user.id);
+  const myLevel = sa2 ? 'superadmin' : req.user.role;
+  const recipientIds = list.map(a => a.recipient_id);
+  const { data: recRoles } = await supabaseAdmin.from('user_company_roles')
+    .select('user_id, company_id, custom_roles(level)')
+    .in('user_id', recipientIds).eq('is_active', true);
+  const levelOf = new Map();
+  (recRoles || []).forEach(r => { if (!levelOf.has(r.user_id)) levelOf.set(r.user_id, r.custom_roles?.level || null); });
+
+  if (recipientIds.includes(req.user.id)) return res.status(403).json({ error: 'You cannot assign numbers to yourself' });
+  const tooSenior = list.filter(a => !canAssignTo(myLevel, levelOf.get(a.recipient_id)));
+  if (tooSenior.length) {
+    return res.status(403).json({ error: 'You can only assign to people below your own level' });
+  }
+
   if (!sa2 && !CROSS_COMPANY_ROLES.has(req.user.role)) {
     const myCompanies = (await getUserCompanies(req.user.id)).map(c => c.id);
-    const { data: theirs } = await supabaseAdmin.from('user_company_roles')
-      .select('user_id').in('company_id', myCompanies.length ? myCompanies : ['00000000-0000-0000-0000-000000000000'])
-      .eq('is_active', true).in('user_id', list.map(a => a.recipient_id));
-    const ok = new Set((theirs || []).map(t => t.user_id));
-    const outside = list.filter(a => !ok.has(a.recipient_id));
+    const mine = new Set((recRoles || []).filter(r => myCompanies.includes(r.company_id)).map(r => r.user_id));
+    const outside = list.filter(a => !mine.has(a.recipient_id));
     if (outside.length) return res.status(403).json({ error: 'You can only assign to people in your own company' });
   }
 
@@ -811,13 +849,19 @@ router.post('/:id/assign', asyncHandler(async (req, res) => {
   }
 
   const cmap = await recipientCompanies(plan.map(p => p.recipient_id));
+  const nameOf = await namesFor(plan.map(p => p.recipient_id));
   const created = []; const summary = [];
   try {
     for (const part of plan) {
       if (!part.items.length) continue;
       const companyId = cmap[part.recipient_id] || batch.company_id || null;
+      // Name the child batches: the caller's base name (or the parent's) plus
+      // the holder, so "WaveTech Aug → Ali R" is what everyone sees in the list
+      // instead of five identical "→ assigned" rows.
+      const holderName = nameOf[part.recipient_id] || 'assigned';
+      const childName = `${String(req.body.name || batch.name).slice(0, 150)} → ${holderName}`;
       const { data: child, error: bErr } = await supabaseAdmin.from('distribution_batches').insert({
-        name: `${batch.name} → assigned`, created_by: req.user.id, parent_batch_id: batch.id, source: 'sub_batch',
+        name: childName, created_by: req.user.id, parent_batch_id: batch.id, source: 'sub_batch',
         sent_to_user_id: part.recipient_id, company_id: companyId, item_count: part.items.length,
         columns: batch.columns || [],
       }).select().single();
@@ -857,7 +901,7 @@ router.post('/:id/assign', asyncHandler(async (req, res) => {
         message: `${req.user.name || 'A manager'} assigned you ${part.items.length} numbers from "${batch.name}".`,
         companyId, data: { batch_id: child.id, kind: 'distribution_batch' }, dedupBase: `batch_${child.id}`,
       }).catch(() => {});
-      summary.push({ batch_id: child.id, recipient_id: part.recipient_id, item_count: part.items.length });
+      summary.push({ batch_id: child.id, batch_name: childName, recipient_id: part.recipient_id, recipient_name: holderName, item_count: part.items.length });
     }
   } catch (e) {
     if (created.length) await supabaseAdmin.from('distribution_batches').delete().in('id', created);

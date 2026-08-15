@@ -56,6 +56,7 @@ export default function BatchWorkspace({ batch, me, canSend, isSuper, onClose, o
   const [view, setView] = useState('items');       // items | activity | people | lineage
   const [activity, setActivity] = useState([]);
   const [board, setBoard] = useState(null);        // per-person scoreboard
+  const [trail, setTrail] = useState([]);          // drill-down breadcrumb of batches
   const [lineage, setLineage] = useState(null);
   const [assignOpen, setAssignOpen] = useState(false);
   const [noteFor, setNoteFor] = useState(null);    // item being noted
@@ -100,9 +101,19 @@ export default function BatchWorkspace({ batch, me, canSend, isSuper, onClose, o
     try { const r = await client.get(`distribution-batches/${batch.id}/activity`, { params: { limit: 200 } }); setActivity(r.data.activity || []); }
     catch { setActivity([]); }
   };
-  const openPeople = async () => {
-    setView('people');
-    try { const r = await client.get(`distribution-batches/${batch.id}/scoreboard`); setBoard(r.data); }
+  // The scoreboard walks the chain: open it on this batch, then click a manager
+  // to see the batch THEY dealt out and how their own agents are doing.
+  const openPeople = async (targetId = batch.id, crumb = null) => {
+    setView('people'); setBoard(null);
+    if (crumb) setTrail(t => [...t, crumb]); else setTrail([]);
+    try { const r = await client.get(`distribution-batches/${targetId}/scoreboard`); setBoard(r.data); }
+    catch (e) { toast.error(e.response?.data?.error || 'Could not load that scoreboard'); setBoard({ people: [], totals: {} }); }
+  };
+  const popTo = async (index) => {
+    const target = index < 0 ? { id: batch.id } : trail[index];
+    setTrail(t => (index < 0 ? [] : t.slice(0, index + 1)));
+    setBoard(null);
+    try { const r = await client.get(`distribution-batches/${target.id}/scoreboard`); setBoard(r.data); }
     catch { setBoard({ people: [], totals: {} }); }
   };
   const openLineage = async () => {
@@ -180,7 +191,7 @@ export default function BatchWorkspace({ batch, me, canSend, isSuper, onClose, o
         </div>
         <div className="ml-auto flex items-center gap-2">
           <button onClick={() => { setView('items'); load(); loadCounts(); }} className="p-2 rounded-lg" style={{ border: '1px solid var(--color-border)' }} title="Refresh"><RefreshCw size={15} className={loading ? 'animate-spin' : ''} style={{ color: 'var(--color-text-secondary)' }} /></button>
-          <button onClick={openPeople} className="text-xs font-semibold px-2.5 py-2 rounded-lg flex items-center gap-1.5" style={{ border: '1px solid var(--color-border)', color: view === 'people' ? 'var(--color-primary-600)' : 'var(--color-text)' }}><Users size={14} /> By person</button>
+          <button onClick={() => openPeople()} className="text-xs font-semibold px-2.5 py-2 rounded-lg flex items-center gap-1.5" style={{ border: '1px solid var(--color-border)', color: view === 'people' ? 'var(--color-primary-600)' : 'var(--color-text)' }}><Users size={14} /> By person</button>
           <button onClick={openActivity} className="text-xs font-semibold px-2.5 py-2 rounded-lg flex items-center gap-1.5" style={{ border: '1px solid var(--color-border)', color: view === 'activity' ? 'var(--color-primary-600)' : 'var(--color-text)' }}><Activity size={14} /> Activity</button>
           <button onClick={openLineage} className="text-xs font-semibold px-2.5 py-2 rounded-lg flex items-center gap-1.5" style={{ border: '1px solid var(--color-border)', color: 'var(--color-text)' }}><GitBranch size={14} /> Lineage</button>
           {canSend && <button onClick={() => setAssignOpen(true)} className="text-sm font-bold px-3 py-2 rounded-lg flex items-center gap-1.5" style={{ background: 'var(--gradient-sidebar)', color: 'var(--color-text-inverse)' }}><Users size={15} /> Assign</button>}
@@ -192,27 +203,11 @@ export default function BatchWorkspace({ batch, me, canSend, isSuper, onClose, o
       {view === 'lineage' ? (
         <div className="flex-1 overflow-y-auto"><Lineage data={lineage} onBack={() => setView('items')} /></div>
       ) : view === 'people' ? (
-        <Scoreboard board={board} onBack={() => setView('items')} />
+        <Scoreboard board={board} trail={trail} rootName={meta.name} onBack={() => setView('items')}
+          onDrill={(p) => openPeople(p.child_batch.id, { id: p.child_batch.id, name: p.name })}
+          onCrumb={popTo} />
       ) : view === 'activity' ? (
-        <div className="flex-1 overflow-y-auto p-4">
-          <button onClick={() => setView('items')} className="text-xs font-semibold mb-3" style={{ color: 'var(--color-primary-600)' }}>← Back to numbers</button>
-          {activity.length === 0 ? <div className="text-sm text-center py-10" style={{ color: 'var(--color-text-tertiary)' }}>No activity yet.</div> : (
-            <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
-              {activity.map(a => (
-                <div key={a.id} className="flex items-center gap-3 px-3 py-2 text-sm flex-wrap" style={{ borderTop: '1px solid var(--color-border)' }}>
-                  <span className="tabular-nums font-semibold" style={{ color: 'var(--color-text)' }}>{a.phone_number || '—'}</span>
-                  {a.customer_name && <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{a.customer_name}</span>}
-                  <span className="text-xs px-2 py-0.5 rounded-full font-bold" style={{ background: `${(STATUS_META[a.to_status]?.color || '#64748b')}1a`, color: STATUS_META[a.to_status]?.color || '#64748b' }}>
-                    {a.action === 'assigned' ? 'assigned' : a.action === 'note' ? 'note' : (STATUS_META[a.to_status]?.label || a.to_status)}
-                  </span>
-                  {a.note && <span className="text-xs italic truncate" style={{ color: 'var(--color-text-secondary)' }}>“{a.note}”</span>}
-                  <span className="ml-auto text-xs" style={{ color: 'var(--color-text-secondary)' }}>{a.actor_name || '—'}</span>
-                  <span className="text-xs whitespace-nowrap" style={{ color: 'var(--color-text-tertiary)' }}>{fmt(a.created_at)}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        <ActivityFeed activity={activity} onBack={() => setView('items')} />
       ) : (
         <>
           {/* status tabs — a disposition never leaves the batch, it moves tab */}
@@ -337,11 +332,122 @@ export default function BatchWorkspace({ batch, me, canSend, isSuper, onClose, o
   );
 }
 
+// ── every action on every number, newest first ────────────────────────────────
+// Grouped by day and filterable, because the raw feed on a 1000-number batch is
+// thousands of lines and the question is always "what happened to THIS number"
+// or "what did THIS person do today".
+function ActivityFeed({ activity, onBack }) {
+  const [f, setF] = useState('all');       // all | assigned | transferred | callback | not_interested | note
+  const [q, setQ] = useState('');
+
+  const filtered = activity.filter(a => {
+    if (f === 'assigned' && a.action !== 'assigned') return false;
+    if (f === 'note' && a.action !== 'note') return false;
+    if (['transferred', 'callback', 'not_interested'].includes(f) && a.to_status !== f) return false;
+    if (q.trim()) {
+      const t = q.trim().toLowerCase();
+      if (!`${a.phone_number || ''} ${a.customer_name || ''} ${a.actor_name || ''} ${a.note || ''}`.toLowerCase().includes(t)) return false;
+    }
+    return true;
+  });
+
+  // day buckets, in the order the events arrived (already newest-first)
+  const days = [];
+  filtered.forEach(a => {
+    const key = new Date(a.created_at).toDateString();
+    const bucket = days.find(d => d.key === key);
+    (bucket ? bucket.rows : (days.push({ key, rows: [] }), days[days.length - 1].rows)).push(a);
+  });
+  const dayLabel = (key) => {
+    const d = new Date(key), today = new Date();
+    const yday = new Date(today); yday.setDate(today.getDate() - 1);
+    if (d.toDateString() === today.toDateString()) return 'Today';
+    if (d.toDateString() === yday.toDateString()) return 'Yesterday';
+    return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+  };
+  const time = (s) => { try { return new Date(s).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }); } catch { return ''; } };
+  const meta = (a) => {
+    if (a.action === 'assigned') return { label: 'Assigned', color: '#4f46e5', Icon: Users };
+    if (a.action === 'note') return { label: 'Note', color: '#64748b', Icon: StickyNote };
+    const m = STATUS_META[a.to_status] || { label: a.to_status, color: '#64748b' };
+    const d = DISPOSITIONS.find(x => x.key === a.to_status);
+    return { label: m.label, color: m.color, Icon: d?.icon || Activity };
+  };
+  const initials = (n) => (n || '?').split(' ').filter(Boolean).slice(0, 2).map(x => x[0]).join('').toUpperCase();
+
+  const FILTERS = [['all', 'Everything'], ['assigned', 'Assignments'], ['transferred', 'Transfers'],
+                   ['callback', 'Callbacks'], ['not_interested', 'Not interested'], ['note', 'Notes']];
+
+  return (
+    <div className="flex-1 overflow-y-auto p-4">
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
+        <button onClick={onBack} className="text-xs font-semibold" style={{ color: 'var(--color-primary-600)' }}>← Back to numbers</button>
+        <div className="flex items-center gap-1 flex-wrap ml-2">
+          {FILTERS.map(([k, label]) => (
+            <button key={k} onClick={() => setF(k)} className="text-xs font-bold px-2.5 py-1.5 rounded-full"
+              style={{ background: f === k ? 'var(--color-primary-600)' : 'var(--color-surface)', color: f === k ? '#fff' : 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}>{label}</button>
+          ))}
+        </div>
+        <div className="relative ml-auto">
+          <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="Number, person or note…"
+            className="text-xs rounded-lg pl-7 pr-2 py-1.5 w-56" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }} />
+        </div>
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="text-sm text-center py-12" style={{ color: 'var(--color-text-tertiary)' }}>
+          {activity.length ? 'Nothing matches that filter.' : 'No activity yet — it fills in as numbers are assigned and worked.'}
+        </div>
+      ) : days.map(day => (
+        <div key={day.key} className="mb-4">
+          <div className="flex items-center gap-2 mb-1.5">
+            <span className="text-[11px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-tertiary)' }}>{dayLabel(day.key)}</span>
+            <span className="flex-1 h-px" style={{ background: 'var(--color-border)' }} />
+            <span className="text-[11px] tabular-nums" style={{ color: 'var(--color-text-tertiary)' }}>{day.rows.length}</span>
+          </div>
+          {day.rows.map(a => {
+            const m = meta(a);
+            return (
+              // one rail of dots down the day, so a burst of activity reads as a run
+              <div key={a.id} className="relative flex items-start gap-3 pl-1 py-1.5">
+                <span aria-hidden className="absolute" style={{ left: 15, top: 0, bottom: 0, width: 1, background: 'var(--color-border)' }} />
+                <span className="relative z-[1] rounded-full p-1.5 flex mt-0.5" style={{ background: `${m.color}1a`, color: m.color, border: '2px solid var(--color-bg)' }}>
+                  <m.Icon size={12} />
+                </span>
+                <div className="flex-1 min-w-0 rounded-xl px-3 py-2" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[11px] font-bold px-2 py-0.5 rounded-full" style={{ background: `${m.color}1a`, color: m.color }}>{m.label}</span>
+                    <span className="tabular-nums font-semibold text-sm" style={{ color: 'var(--color-text)' }}>{a.phone_number || '—'}</span>
+                    {a.customer_name && <span className="text-xs truncate" style={{ color: 'var(--color-text-secondary)' }}>{a.customer_name}</span>}
+                    <span className="ml-auto flex items-center gap-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                      <span className="rounded-full w-5 h-5 flex items-center justify-center text-[9px] font-bold"
+                        style={{ background: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>{initials(a.actor_name)}</span>
+                      {a.actor_name || '—'}
+                    </span>
+                    <span className="text-[11px] tabular-nums whitespace-nowrap" style={{ color: 'var(--color-text-tertiary)' }}>{time(a.created_at)}</span>
+                  </div>
+                  {a.note && <div className="text-xs mt-1 italic" style={{ color: 'var(--color-text-secondary)' }}>“{a.note}”</div>}
+                  {a.from_status && a.to_status && a.from_status !== a.to_status && (
+                    <div className="text-[11px] mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>
+                      {STATUS_META[a.from_status]?.label || a.from_status} → {STATUS_META[a.to_status]?.label || a.to_status}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ── who is actually working this batch ────────────────────────────────────────
 // Ordered by transfers, because that is the column the manager is looking for.
 // "Worked %" is of what they were GIVEN; "Transfer %" is of what they WORKED —
 // mixing those two into one number hides the lazy-but-lucky agent.
-function Scoreboard({ board, onBack }) {
+function Scoreboard({ board, trail = [], rootName, onBack, onDrill, onCrumb }) {
   if (!board) return <div className="flex-1 flex items-center justify-center"><Loader2 className="animate-spin" style={{ color: 'var(--color-text-tertiary)' }} /></div>;
   const { people = [], totals = {} } = board;
   const bar = (pct, color) => (
@@ -353,9 +459,24 @@ function Scoreboard({ board, onBack }) {
 
   return (
     <div className="flex-1 overflow-auto p-4">
-      <button onClick={onBack} className="text-xs font-semibold mb-3" style={{ color: 'var(--color-primary-600)' }}>← Back to numbers</button>
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
+        <button onClick={onBack} className="text-xs font-semibold" style={{ color: 'var(--color-primary-600)' }}>← Back to numbers</button>
+        {/* the chain you drilled: root → manager → their agent */}
+        <div className="flex items-center gap-1 text-xs">
+          <span style={{ color: 'var(--color-text-tertiary)' }}>·</span>
+          <button onClick={() => onCrumb?.(-1)} className="font-semibold" style={{ color: trail.length ? 'var(--color-primary-600)' : 'var(--color-text)' }}>{rootName}</button>
+          {trail.map((c, i) => (
+            <span key={c.id} className="flex items-center gap-1">
+              <ChevronRight size={12} style={{ color: 'var(--color-text-tertiary)' }} />
+              <button onClick={() => onCrumb?.(i)} className="font-semibold" style={{ color: i === trail.length - 1 ? 'var(--color-text)' : 'var(--color-primary-600)' }}>{c.name}</button>
+            </span>
+          ))}
+        </div>
+      </div>
       {people.length === 0 ? (
-        <div className="text-sm text-center py-10" style={{ color: 'var(--color-text-tertiary)' }}>Nothing assigned yet — assign numbers and the scoreboard fills in.</div>
+        <div className="text-sm text-center py-10" style={{ color: 'var(--color-text-tertiary)' }}>
+          {trail.length ? 'This person has not passed their numbers to anyone — they are working them themselves.' : 'Nothing assigned yet — assign numbers and the scoreboard fills in.'}
+        </div>
       ) : (
         <>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
@@ -377,9 +498,18 @@ function Scoreboard({ board, onBack }) {
               <tbody>
                 {people.map(p => (
                   <tr key={p.user_id} style={{ borderTop: '1px solid var(--color-border)' }}>
-                    <td className="px-2 py-2 min-w-[160px]">
-                      <div className="font-semibold" style={{ color: 'var(--color-text)' }}>{p.name}</div>
-                      <div className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{p.worked_pct}% of their list worked</div>
+                    <td className="px-2 py-2 min-w-[190px]">
+                      {p.child_batch ? (
+                        // they passed their numbers on — open THEIR scoreboard
+                        <button onClick={() => onDrill?.(p)} className="font-semibold text-left flex items-center gap-1 hover:underline" style={{ color: 'var(--color-primary-600)' }}>
+                          {p.name} <ChevronRight size={13} />
+                        </button>
+                      ) : (
+                        <div className="font-semibold" style={{ color: 'var(--color-text)' }}>{p.name}</div>
+                      )}
+                      <div className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>
+                        {p.worked_pct}% of their list worked{p.child_batch ? ` · passed ${p.child_batch.item_count} on` : ''}
+                      </div>
                       {bar(p.worked_pct, '#d97706')}
                     </td>
                     {cell(p.assigned)}

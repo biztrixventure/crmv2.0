@@ -58,7 +58,10 @@ export default function BatchUpload({ onDone, onClose }) {
   const [nameCol, setNameCol] = useState(-1);
   const [leadCol, setLeadCol] = useState(-1);
   const [batchName, setBatchName] = useState('');
-  const [recipient, setRecipient] = useState(null);   // null = keep it, assign later
+  const [people, setPeople] = useState([]);           // empty = keep it, assign later
+  const [split, setSplit] = useState('even');         // even | per
+  const [per, setPer] = useState(100);
+  const [order, setOrder] = useState('sequential');
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(null);   // { done, total } while chunks upload
   const [err, setErr] = useState('');
@@ -114,11 +117,13 @@ export default function BatchUpload({ onDone, onClose }) {
       }));
 
       setProgress({ done: 0, total: payload.length });
+      // The uploader always keeps the master batch — assignment happens after,
+      // through the same endpoint the workspace uses, so the split rules and the
+      // per-number lock are identical whichever door you came through.
       const first = await client.post('distribution-batches/upload', {
         name: batchName.trim() || file?.name || 'Uploaded batch',
         file_name: file?.name || null,
         columns: headers,
-        recipient_id: recipient?.id || undefined,
         rows: payload.slice(0, CHUNK),
       });
       const batch = first.data.batch;
@@ -130,7 +135,16 @@ export default function BatchUpload({ onDone, onClose }) {
         imported += r.data.imported;
         setProgress({ done: Math.min(i + CHUNK, payload.length), total: payload.length });
       }
-      toast.success(`Batch created — ${imported} numbers${payload.length - imported ? `, ${payload.length - imported} duplicates skipped` : ''}`);
+      // Split it out straight away when people were picked at upload time.
+      if (people.length) {
+        const assignments = people.map(u => (split === 'per' ? { recipient_id: u.id, count: per } : { recipient_id: u.id }));
+        const a = await client.post(`distribution-batches/${batch.id}/assign`, {
+          assignments, mode: order, name: batchName.trim() || batch.name,
+        });
+        toast.success(`${imported} numbers uploaded · ${a.data.assigned} split into ${a.data.children.length} batches · ${a.data.remaining_unassigned} kept back`);
+      } else {
+        toast.success(`Batch created — ${imported} numbers${payload.length - imported ? `, ${payload.length - imported} duplicates skipped` : ''}`);
+      }
       onDone?.({ ...batch, item_count: imported });
     } catch (e) {
       toast.error(e.response?.status === 413
@@ -199,11 +213,41 @@ export default function BatchUpload({ onDone, onClose }) {
                   style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }} />
               </label>
 
-              <div>
-                <div className="text-xs mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-                  Send straight to someone (optional) — leave empty to keep the batch and assign from it.
+              <div className="rounded-xl p-3 space-y-2" style={{ border: '1px solid var(--color-border)', background: 'var(--color-surface)' }}>
+                <div className="text-xs font-semibold" style={{ color: 'var(--color-text)' }}>Split it now (optional)</div>
+                <div className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                  Pick people and the file is dealt out the moment it lands — one batch each, named
+                  “{batchName.trim() || 'Batch'} → their name”. Leave empty to keep the whole file and assign later.
+                  Only people below your own level are listed.
                 </div>
-                <UserPicker value={recipient} onChange={setRecipient} />
+                <UserPicker multiple selected={people} onToggle={(u) => setPeople(ps => ps.some(x => x.id === u.id) ? ps.filter(x => x.id !== u.id) : [...ps, u])} placeholder="Add people…" />
+                {people.length > 0 && (
+                  <>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
+                        {[['even', 'Even split'], ['per', 'N each']].map(([k, label]) => (
+                          <button key={k} onClick={() => setSplit(k)} className="text-xs font-semibold px-3 py-1.5"
+                            style={{ background: split === k ? 'var(--gradient-sidebar)' : 'transparent', color: split === k ? 'var(--color-text-inverse)' : 'var(--color-text-secondary)' }}>{label}</button>
+                        ))}
+                      </div>
+                      {split === 'per' && (
+                        <input type="number" min={1} value={per} onChange={e => setPer(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                          className="w-20 text-sm rounded-lg px-2 py-1 tabular-nums" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }} />
+                      )}
+                      <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
+                        {[['sequential', 'File order'], ['random', 'Random']].map(([k, label]) => (
+                          <button key={k} onClick={() => setOrder(k)} className="text-xs font-semibold px-3 py-1.5"
+                            style={{ background: order === k ? 'var(--gradient-sidebar)' : 'transparent', color: order === k ? 'var(--color-text-inverse)' : 'var(--color-text-secondary)' }}>{label}</button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>
+                      {split === 'per'
+                        ? <>{Math.min(per * people.length, valid.length)} of {valid.length} numbers go out ({per} each to {people.length}), the rest stay with you.</>
+                        : <>{valid.length} numbers split {people.length} ways — about {Math.floor(valid.length / people.length)} each.</>}
+                    </div>
+                  </>
+                )}
               </div>
 
               <div>
