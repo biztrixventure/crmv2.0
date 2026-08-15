@@ -26,7 +26,9 @@ export default function ComplianceDncReport() {
   const [rowsLoading, setRowsLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
   // searched-numbers (cache) report
-  const [mode, setMode] = useState('sales');            // 'sales' | 'cache'
+  // Opens on the flagged-number list, not the sales report — the reason anyone
+  // comes to this tab is "what has been checked and come back bad".
+  const [mode, setMode] = useState('cache');            // 'cache' | 'sales'
   const [cacheSummary, setCacheSummary] = useState(null);
   const [cacheFilter, setCacheFilter] = useState('blacklisted');   // 'blacklisted' | 'good' | 'all'
   const [cacheSource, setCacheSource] = useState('');    // '' | lookup | bulk | scan
@@ -173,7 +175,10 @@ export default function ComplianceDncReport() {
     <div className="w-full py-2">
       <div className="mb-4">
         <h2 className="text-2xl font-extrabold flex items-center gap-2" style={{ color: 'var(--color-text)' }}><Shield size={22} style={{ color: 'var(--color-primary-600)' }} /> DNC / Blacklist</h2>
-        <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>Check one number, or scan every sale's number against the DNC / litigation database and report on it.</p>
+        <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+          Every number checked anywhere in the CRM lands here — a closer's inline badge, a compliance lookup,
+          the superadmin bulk check or a sales scan. Anything that came back bad is in <strong>Flagged numbers</strong>.
+        </p>
       </div>
 
       {/* full-width: left rail = lookup + KPIs + scan, right = report table */}
@@ -247,11 +252,14 @@ export default function ComplianceDncReport() {
 
       {/* report list + filter + export — main column */}
       <div className="rounded-2xl border" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}>
-        {/* which report: sales verdicts, or every number anyone searched */}
+        {/* Flagged numbers lead: this tab's job is "show me every bad number
+            anyone has hit", whoever ran the check — the closer's inline badge,
+            a compliance lookup and the superadmin bulk tool all write to the
+            same cache, so all three land in this one list. */}
         <div className="flex items-center gap-1 px-3 pt-3">
           {[
+            { k: 'cache', label: 'Flagged numbers', badge: cacheSummary ? cacheSummary.blacklisted.phones : null },
             { k: 'sales', label: 'Sales' },
-            { k: 'cache', label: 'Searched numbers', badge: cacheSummary ? cacheSummary.blacklisted.phones : null },
           ].map(t => (
             <button key={t.k} onClick={() => setMode(t.k)}
               className="text-xs font-bold px-3 py-2 rounded-t-lg inline-flex items-center gap-1.5 transition-colors"
