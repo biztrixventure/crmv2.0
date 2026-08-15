@@ -32,7 +32,25 @@ export default defineConfig({
   build: {
     outDir: "dist",
     sourcemap: false,
-    minify: "terser",
+    // esbuild, NOT terser. Terser minifies in worker threads that each hold a
+    // whole chunk's AST — on the 1MB admin chunk that peaks past what the build
+    // container has, and the worker is OOM-killed at "rendering chunks" with no
+    // error message (the deploy just exits 255). esbuild minifies in-process,
+    // an order of magnitude cheaper, for a couple of percent more output.
+    minify: "esbuild",
+    chunkSizeWarningLimit: 1200,
+    rollupOptions: {
+      output: {
+        // Split the heavy, rarely-changing libraries out of the app chunks. Two
+        // wins: no single chunk is huge while minifying, and an app change stops
+        // busting the browser cache of the vendor code.
+        manualChunks: {
+          react: ['react', 'react-dom', 'react-router-dom'],
+          charts: ['chart.js', 'react-chartjs-2'],
+          supabase: ['@supabase/supabase-js'],
+        },
+      },
+    },
   },
   preview: {
     port: 5173,
