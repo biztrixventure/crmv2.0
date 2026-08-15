@@ -193,7 +193,19 @@ router.get('/cache/summary', asyncHandler(async (req, res) => {
   if (error) return res.status(500).json({ error: error.message });
   const out = { good: { phones: 0, lookups: 0 }, blacklisted: { phones: 0, lookups: 0 } };
   (data || []).forEach(r => { if (out[r.dnc_status]) out[r.dnc_status] = { phones: Number(r.phones), lookups: Number(r.lookups) }; });
-  res.json(out);
+
+  // The superadmin cache window (blacklist.cache_days) decides which of these
+  // verdicts are still trusted: past it the next lookup re-calls the API. Show
+  // compliance the window + the split so an old verdict is never read as today's.
+  const cfg = await bl.settings();
+  const cutoff = new Date(Date.now() - cfg.cacheDays * 86400000).toISOString();
+  const countAt = async (fresh) => {
+    const q = supabaseAdmin.from('v_blacklist_cache').select('phone', { count: 'exact', head: true });
+    const { count } = await (fresh ? q.gte('checked_at', cutoff) : q.lt('checked_at', cutoff));
+    return count || 0;
+  };
+  const [fresh, stale] = await Promise.all([countAt(true), countAt(false)]);
+  res.json({ ...out, cache_days: cfg.cacheDays, enabled: cfg.enabled, version: cfg.version, fresh, stale });
 }));
 
 // ── GET /cache — the searched-numbers list (filter + search + page) ───────────
@@ -205,6 +217,10 @@ router.get('/cache', asyncHandler(async (req, res) => {
   const limit  = Math.min(parseInt(req.query.limit, 10) || 100, 1000);
   const offset = (page - 1) * limit;
   const days   = parseInt(req.query.days, 10) || 0;
+  // fresh / stale is measured against the superadmin cache window, not a
+  // hardcoded number — change blacklist.cache_days and this follows it.
+  const freshness = ['fresh', 'stale'].includes(req.query.freshness) ? req.query.freshness : null;
+  const cfg = await bl.settings();
 
   let q = supabaseAdmin.from('v_blacklist_cache')
     .select('phone, message, codes, wireless, carrier, checked_at, first_checked_at, last_searched_at, lookup_count, last_source, dnc_status, searched_by_name, searched_by_email, sales_count', { count: 'exact' })
@@ -212,6 +228,10 @@ router.get('/cache', asyncHandler(async (req, res) => {
   if (status) q = q.eq('dnc_status', status);
   if (source) q = q.eq('last_source', source);
   if (days > 0) q = q.gte('last_searched_at', new Date(Date.now() - days * 86400000).toISOString());
+  if (freshness) {
+    const cutoff = new Date(Date.now() - cfg.cacheDays * 86400000).toISOString();
+    q = freshness === 'fresh' ? q.gte('checked_at', cutoff) : q.lt('checked_at', cutoff);
+  }
   if (req.query.search) {
     const digits = bl.norm(req.query.search);
     if (digits) q = q.ilike('phone', `%${digits}%`);
@@ -220,7 +240,7 @@ router.get('/cache', asyncHandler(async (req, res) => {
 
   const { data, error, count } = await q;
   if (error) return res.status(500).json({ error: error.message });
-  res.json({ numbers: data || [], total: count || 0, page, limit });
+  res.json({ numbers: data || [], total: count || 0, page, limit, cache_days: cfg.cacheDays });
 }));
 
 module.exports = router;

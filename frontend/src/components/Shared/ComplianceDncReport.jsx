@@ -30,6 +30,7 @@ export default function ComplianceDncReport() {
   const [cacheSummary, setCacheSummary] = useState(null);
   const [cacheFilter, setCacheFilter] = useState('blacklisted');   // 'blacklisted' | 'good' | 'all'
   const [cacheSource, setCacheSource] = useState('');    // '' | lookup | bulk | scan
+  const [cacheFresh, setCacheFresh] = useState('');      // '' | fresh | stale (vs the cache window)
   const [cacheSearch, setCacheSearch] = useState('');
   const [cacheRows, setCacheRows] = useState([]);
   const [cacheTotal, setCacheTotal] = useState(0);
@@ -53,9 +54,10 @@ export default function ComplianceDncReport() {
   const cacheParams = useCallback((extra = {}) => ({
     ...(cacheFilter === 'all' ? {} : { status: cacheFilter }),
     ...(cacheSource ? { source: cacheSource } : {}),
+    ...(cacheFresh ? { freshness: cacheFresh } : {}),
     ...(cacheSearch.trim() ? { search: cacheSearch.trim() } : {}),
     ...extra,
-  }), [cacheFilter, cacheSource, cacheSearch]);
+  }), [cacheFilter, cacheSource, cacheFresh, cacheSearch]);
 
   const loadCache = useCallback(async () => {
     setCacheLoading(true);
@@ -125,12 +127,12 @@ export default function ComplianceDncReport() {
         out.push(...list);
         if (list.length < 1000) break;
       }
-      const headers = ['Phone', 'Verdict', 'Message', 'Lists', 'Wireless', 'Searched by', 'Source', 'Times', 'Last searched', 'Verdict checked', 'Sales'];
+      const headers = ['Phone', 'Verdict', 'Message', 'Lists', 'Wireless', 'Searched by', 'Source', 'Times', 'Last searched', 'Verdict checked', 'Expired', 'Sales'];
       const lines = [headers.join(',')];
       out.forEach(n => lines.push([
         n.phone, n.dnc_status, n.message, (n.codes || []).join(' | '), n.wireless ? 'yes' : 'no',
         n.searched_by_name || n.searched_by_email || '', SOURCE_LABEL[n.last_source] || n.last_source || '',
-        n.lookup_count, fmtDateTime(n.last_searched_at), fmtDateTime(n.checked_at), n.sales_count,
+        n.lookup_count, fmtDateTime(n.last_searched_at), fmtDateTime(n.checked_at), isStale(n) ? 'yes' : 'no', n.sales_count,
       ].map(csvCell).join(',')));
       const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
       const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
@@ -146,6 +148,14 @@ export default function ComplianceDncReport() {
       <div className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{sub}</div>
     </div>
   );
+
+  // A verdict older than the superadmin cache window is no longer trusted — the
+  // next lookup on that number re-calls the API.
+  const isStale = (n) => {
+    const days = cacheSummary?.cache_days;
+    if (!days || !n.checked_at) return false;
+    return Date.now() - new Date(n.checked_at).getTime() > days * 86400000;
+  };
 
   const pct = scanProg && scanProg.total ? Math.round((scanProg.done / scanProg.total) * 100) : 0;
   const STATUS_COLOR = { blacklisted: '#dc2626', good: '#16a34a', unchecked: '#6b7280' };
@@ -187,6 +197,12 @@ export default function ComplianceDncReport() {
             <div className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>
               {cacheSummary.blacklisted.lookups + cacheSummary.good.lookups} searches by all users — click to open
             </div>
+            {cacheSummary.cache_days ? (
+              <div className="text-[11px] mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>
+                Cache window <strong style={{ color: 'var(--color-text-secondary)' }}>{cacheSummary.cache_days} days</strong>
+                {cacheSummary.stale ? <> · <span style={{ color: '#d97706' }}>{cacheSummary.stale} expired</span></> : null}
+              </div>
+            ) : null}
           </button>
         )}
 
@@ -254,6 +270,11 @@ export default function ComplianceDncReport() {
                   <button key={v || 'any'} onClick={() => setCacheSource(v)} className="text-xs font-semibold px-2.5 py-1.5 rounded-full transition-colors"
                     style={{ backgroundColor: cacheSource === v ? 'var(--color-primary-600)' : 'var(--color-bg-secondary)', color: cacheSource === v ? '#fff' : 'var(--color-text-secondary)' }}>{label}</button>
                 ))}
+                <span className="mx-1" style={{ color: 'var(--color-border)' }}>|</span>
+                {[['', 'Any age'], ['fresh', 'Within cache'], ['stale', 'Expired']].map(([v, label]) => (
+                  <button key={v || 'anyage'} onClick={() => setCacheFresh(v)} className="text-xs font-semibold px-2.5 py-1.5 rounded-full transition-colors"
+                    style={{ backgroundColor: cacheFresh === v ? (v === 'stale' ? '#d97706' : 'var(--color-primary-600)') : 'var(--color-bg-secondary)', color: cacheFresh === v ? '#fff' : 'var(--color-text-secondary)' }}>{label}</button>
+                ))}
               </div>
               <div className="flex items-center gap-2">
                 <div className="relative">
@@ -273,8 +294,16 @@ export default function ComplianceDncReport() {
                 )}
               </div>
             </div>
-            <div className="px-4 py-1.5 text-[11px]" style={{ color: 'var(--color-text-tertiary)', borderBottom: '1px solid var(--color-border)' }}>
-              Every number checked by anyone — closer, compliance or admin. Showing {cacheRows.length} of {cacheTotal}.
+            <div className="px-4 py-1.5 text-[11px] flex items-center gap-2 flex-wrap" style={{ color: 'var(--color-text-tertiary)', borderBottom: '1px solid var(--color-border)' }}>
+              <span>Every number checked by anyone — closer, compliance or admin. Showing {cacheRows.length} of {cacheTotal}.</span>
+              {cacheSummary?.cache_days ? (
+                <span className="font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>
+                  Cache window {cacheSummary.cache_days}d
+                  {' · '}<span style={{ color: '#16a34a' }}>{cacheSummary.fresh} within</span>
+                  {' · '}<span style={{ color: cacheSummary.stale ? '#d97706' : 'var(--color-text-tertiary)' }}>{cacheSummary.stale} expired</span>
+                  {cacheSummary.enabled === false ? <span style={{ color: '#dc2626' }}> · lookup OFF</span> : null}
+                </span>
+              ) : null}
             </div>
             {cacheLoading ? (
               <div className="flex justify-center py-10"><Loader2 size={22} className="animate-spin" style={{ color: 'var(--color-primary-600)' }} /></div>
@@ -286,7 +315,7 @@ export default function ComplianceDncReport() {
               <div className="overflow-x-auto max-h-[calc(100vh-16rem)] overflow-y-auto">
                 <table className="w-full text-sm">
                   <thead><tr style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
-                    {['Number', 'Verdict', 'Lists', 'Searched by', 'Source', 'Times', 'Last searched', 'Sales'].map(h => <th key={h} className="text-left px-3 py-2 text-[11px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>{h}</th>)}
+                    {['Number', 'Verdict', 'Lists', 'Searched by', 'Source', 'Times', 'Last searched', 'Verdict age', 'Sales'].map(h => <th key={h} className="text-left px-3 py-2 text-[11px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>{h}</th>)}
                   </tr></thead>
                   <tbody>
                     {cacheRows.map(n => (
@@ -304,6 +333,9 @@ export default function ComplianceDncReport() {
                         <td className="px-3 py-2 text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{SOURCE_LABEL[n.last_source] || n.last_source || '—'}</td>
                         <td className="px-3 py-2 tabular-nums" style={{ color: 'var(--color-text-secondary)' }}>{n.lookup_count}</td>
                         <td className="px-3 py-2 text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{fmtDateTime(n.last_searched_at)}</td>
+                        <td className="px-3 py-2 text-[11px]" style={{ color: isStale(n) ? '#d97706' : 'var(--color-text-tertiary)' }}>
+                          {fmtDate(n.checked_at)}{isStale(n) ? ' · expired' : ''}
+                        </td>
                         <td className="px-3 py-2 tabular-nums" style={{ color: n.sales_count ? 'var(--color-text)' : 'var(--color-text-tertiary)' }}>{n.sales_count || '—'}</td>
                       </tr>
                     ))}
