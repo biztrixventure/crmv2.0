@@ -626,6 +626,26 @@ router.get('/:id/scoreboard', asyncHandler(async (req, res) => {
 // EVERY column the file carried is kept verbatim in item.data — the fronter
 // working the number sees the same record the uploader saw.
 const MAX_UPLOAD_ROWS = 20000;
+// Rows are normalized + deduped here; the caller sends them in chunks (a whole
+// 1000-row wide file in one request is megabytes and trips the reverse proxy's
+// body cap long before Express sees it).
+function cleanRows(rows) {
+  const seen = new Set(); const out = [];
+  for (const r of rows) {
+    const d = digits(r.phone ?? r.phone_number ?? '');
+    const phone = d.length === 11 && d[0] === '1' ? d.slice(1) : d;
+    if (phone.length !== 10 || seen.has(phone)) continue;
+    seen.add(phone);
+    out.push({
+      phone_number: phone,
+      lead_id: r.lead_id ? String(r.lead_id).slice(0, 60) : null,
+      customer_name: r.customer_name ? String(r.customer_name).slice(0, 200) : null,
+      data: (r.data && typeof r.data === 'object') ? r.data : {},
+    });
+  }
+  return out;
+}
+
 router.post('/upload', asyncHandler(async (req, res) => {
   if (!canSend(req)) return res.status(403).json({ error: 'Not allowed to create batches' });
   const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
@@ -643,19 +663,7 @@ router.post('/upload', asyncHandler(async (req, res) => {
     .order('created_at', { ascending: true }).limit(1).maybeSingle();
 
   // normalize + dedupe on phone (the CRM's unit of distribution — see 153)
-  const seen = new Set(); const clean = [];
-  for (const r of rows) {
-    const phone = digits(r.phone ?? r.phone_number ?? '');
-    if (phone.length < 10 || seen.has(phone)) continue;
-    seen.add(phone);
-    const data = (r.data && typeof r.data === 'object') ? r.data : {};
-    clean.push({
-      phone_number: phone.length === 11 && phone[0] === '1' ? phone.slice(1) : phone,
-      lead_id: r.lead_id ? String(r.lead_id).slice(0, 60) : null,
-      customer_name: r.customer_name ? String(r.customer_name).slice(0, 200) : null,
-      data,
-    });
-  }
+  const clean = cleanRows(rows);
   if (!clean.length) return res.status(400).json({ error: 'No valid phone numbers found in the file' });
 
   const { data: batch, error: bErr } = await supabaseAdmin.from('distribution_batches').insert({
@@ -677,6 +685,42 @@ router.post('/upload', asyncHandler(async (req, res) => {
   }
   logger.success('DIST_BATCH', `upload ${batch.id} "${name}" — ${clean.length} numbers by ${req.user.id}`);
   res.status(201).json({ batch, imported: clean.length, skipped: rows.length - clean.length });
+}));
+
+// ── POST /:id/append — the rest of a chunked upload ──────────────────────────
+// Positions continue from what is already there, and phones already in the batch
+// are skipped, so a retried chunk cannot duplicate a number.
+router.post('/:id/append', asyncHandler(async (req, res) => {
+  if (!canSend(req)) return res.status(403).json({ error: 'Not allowed' });
+  const { batch, error } = await loadVisibleBatch(req, req.params.id);
+  if (error) return res.status(error).json({ error: error === 404 ? 'Batch not found' : 'Not allowed' });
+  if (batch.created_by !== req.user.id && !(await isSuperAdmin(req.user.id))) {
+    return res.status(403).json({ error: 'Only the batch creator can add to it' });
+  }
+  const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
+  if (!rows.length) return res.json({ imported: 0, skipped: 0, item_count: batch.item_count });
+  if (rows.length > 2000) return res.status(400).json({ error: 'Max 2000 rows per chunk' });
+
+  const clean = cleanRows(rows);
+  const phones = clean.map(c => c.phone_number);
+  const { data: existing } = await supabaseAdmin.from('distribution_batch_items')
+    .select('phone_number').eq('batch_id', batch.id).in('phone_number', phones);
+  const have = new Set((existing || []).map(e => e.phone_number));
+  const fresh = clean.filter(c => !have.has(c.phone_number));
+  if (!fresh.length) return res.json({ imported: 0, skipped: rows.length, item_count: batch.item_count });
+
+  const { data: last } = await supabaseAdmin.from('distribution_batch_items')
+    .select('position').eq('batch_id', batch.id)
+    .order('position', { ascending: false, nullsFirst: false }).limit(1).maybeSingle();
+  const base = last?.position || 0;
+
+  const { error: iErr } = await supabaseAdmin.from('distribution_batch_items')
+    .insert(fresh.map((c, i) => ({ batch_id: batch.id, position: base + i + 1, ...c })));
+  if (iErr) return res.status(500).json({ error: iErr.message });
+
+  const item_count = (batch.item_count || 0) + fresh.length;
+  await supabaseAdmin.from('distribution_batches').update({ item_count }).eq('id', batch.id);
+  res.json({ imported: fresh.length, skipped: rows.length - fresh.length, item_count });
 }));
 
 // ── POST /:id/assign — hand numbers DOWN, and lock them to that person ───────

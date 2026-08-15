@@ -59,6 +59,7 @@ export default function BatchUpload({ onDone, onClose }) {
   const [batchName, setBatchName] = useState('');
   const [recipient, setRecipient] = useState(null);   // null = keep it, assign later
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState(null);   // { done, total } while chunks upload
   const [err, setErr] = useState('');
   const inputRef = useRef(null);
 
@@ -93,6 +94,12 @@ export default function BatchUpload({ onDone, onClose }) {
     seen.add(p); return true;
   });
 
+  // A wide 1000-row file is megabytes of JSON — one request dies at the reverse
+  // proxy's body cap (413) before Express ever sees it. So: create the batch with
+  // the first chunk, then append the rest. Each chunk is its own small request,
+  // and a re-sent chunk can't duplicate a number (the server skips phones the
+  // batch already has).
+  const CHUNK = 250;
   const send = async () => {
     if (!valid.length) return toast.error('No valid phone numbers in that column');
     setBusy(true);
@@ -104,17 +111,32 @@ export default function BatchUpload({ onDone, onClose }) {
         // every OTHER column, keyed by its header — this is what the fronter sees
         data: Object.fromEntries(headers.map((h, i) => [h, r[i] ?? '']).filter(([, v]) => v !== '')),
       }));
-      const r = await client.post('distribution-batches/upload', {
+
+      setProgress({ done: 0, total: payload.length });
+      const first = await client.post('distribution-batches/upload', {
         name: batchName.trim() || file?.name || 'Uploaded batch',
         file_name: file?.name || null,
         columns: headers,
         recipient_id: recipient?.id || undefined,
-        rows: payload,
+        rows: payload.slice(0, CHUNK),
       });
-      toast.success(`Batch created — ${r.data.imported} numbers${r.data.skipped ? `, ${r.data.skipped} skipped` : ''}`);
-      onDone?.(r.data.batch);
-    } catch (e) { toast.error(e.response?.data?.error || 'Upload failed'); }
-    finally { setBusy(false); }
+      const batch = first.data.batch;
+      let imported = first.data.imported;
+      setProgress({ done: Math.min(CHUNK, payload.length), total: payload.length });
+
+      for (let i = CHUNK; i < payload.length; i += CHUNK) {
+        const r = await client.post(`distribution-batches/${batch.id}/append`, { rows: payload.slice(i, i + CHUNK) });
+        imported += r.data.imported;
+        setProgress({ done: Math.min(i + CHUNK, payload.length), total: payload.length });
+      }
+      toast.success(`Batch created — ${imported} numbers${payload.length - imported ? `, ${payload.length - imported} duplicates skipped` : ''}`);
+      onDone?.({ ...batch, item_count: imported });
+    } catch (e) {
+      toast.error(e.response?.status === 413
+        ? 'The server rejected the upload as too large — tell your admin to raise the proxy body limit.'
+        : (e.response?.data?.error || 'Upload failed'));
+    }
+    finally { setBusy(false); setProgress(null); }
   };
 
   const Field = ({ label, value, onChange, allowNone }) => (
@@ -203,7 +225,15 @@ export default function BatchUpload({ onDone, onClose }) {
         </div>
 
         {headers.length > 0 && (
-          <div className="p-4 flex justify-end gap-2" style={{ borderTop: '1px solid var(--color-border)' }}>
+          <div className="p-4 flex items-center justify-end gap-2" style={{ borderTop: '1px solid var(--color-border)' }}>
+            {progress && (
+              <div className="flex-1 mr-2">
+                <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--color-bg-secondary)' }}>
+                  <div className="h-full transition-all" style={{ width: `${Math.round((progress.done / progress.total) * 100)}%`, background: 'var(--gradient-sidebar)' }} />
+                </div>
+                <div className="text-[11px] mt-1" style={{ color: 'var(--color-text-secondary)' }}>Uploading {progress.done} of {progress.total}…</div>
+              </div>
+            )}
             <button onClick={onClose} className="text-sm font-semibold px-3 py-2 rounded-lg" style={{ color: 'var(--color-text-secondary)' }}>Cancel</button>
             <button onClick={send} disabled={busy || !valid.length} className="text-sm font-bold px-4 py-2 rounded-lg flex items-center gap-2 disabled:opacity-50" style={{ background: 'var(--gradient-sidebar)', color: 'var(--color-text-inverse)' }}>
               {busy ? <Loader2 size={15} className="animate-spin" /> : <Upload size={15} />} Create batch ({valid.length})

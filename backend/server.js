@@ -256,6 +256,10 @@ app.use('/api/chat/upload', express.json({ limit: '16mb' }));
 app.use('/api/emails/upload', express.json({ limit: '16mb' }));
 // Kanban image attachments (+ annotations) are base64 data URLs — raised limit.
 app.use('/api/kanban', express.json({ limit: '14mb' }));
+// Batch uploads post parsed spreadsheet rows (the browser does the parsing).
+// The client chunks them so no single request is large, but a wide file — 40
+// columns kept verbatim per row — still outgrows the global limit.
+app.use('/api/distribution-batches', express.json({ limit: '16mb' }));
 
 // Body parser — raised from the 100kb default so announcements (and other
 // payloads) can carry embedded base64 images.
