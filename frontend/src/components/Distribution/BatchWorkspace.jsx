@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import {
   X, Loader2, Users, Send, Trash2, GitBranch, RefreshCw, Search, StickyNote,
   PhoneForwarded, Clock, ThumbsDown, Voicemail, PhoneOff, CheckCircle2, Circle,
@@ -161,8 +162,12 @@ export default function BatchWorkspace({ batch, me, canSend, isSuper, onClose, o
   const tabCount = (t) => t === 'all' ? counts.total : t === 'unassigned' ? counts.unassigned : (counts.counts?.[t] || 0);
   const visibleTabs = TAB_ORDER.filter(t => ['all', 'unassigned', 'assigned', 'transferred', 'callback'].includes(t) || tabCount(t) > 0);
 
-  return (
-    <div className="fixed inset-0 z-50 flex flex-col" style={{ background: 'var(--color-bg)' }}>
+  // Portalled to <body> and above the shell chrome. Rendered inside the tab it
+  // sat below the sticky app header (z-50) and the sidebar (z-50) — the Assign
+  // and disposition buttons live in that header row, so they were the part that
+  // disappeared. Same portal + stacking convention as DrawerShell.
+  return createPortal(
+    <div className="fixed inset-0 z-[70] flex flex-col" style={{ background: 'var(--color-bg)' }}>
       {/* header */}
       <div className="flex items-center gap-3 px-4 py-3 flex-wrap" style={{ borderBottom: '1px solid var(--color-border)' }}>
         <button onClick={onClose} className="p-1.5 rounded-lg" style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}><ChevronLeft size={16} /></button>
@@ -314,7 +319,7 @@ export default function BatchWorkspace({ batch, me, canSend, isSuper, onClose, o
         onClose={() => setAssignOpen(false)} onDone={() => { setAssignOpen(false); setSel(new Set()); load(); loadCounts(); }} />}
 
       {noteFor && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={() => setNoteFor(null)}>
+        <div className="fixed inset-0 z-[80] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={() => setNoteFor(null)}>
           <div className="w-full max-w-md rounded-2xl p-4" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }} onClick={e => e.stopPropagation()}>
             <div className="font-bold mb-1" style={{ color: 'var(--color-text)' }}>Note · {noteFor.phone_number}</div>
             <div className="text-xs mb-2" style={{ color: 'var(--color-text-secondary)' }}>Everyone above this batch can read it.</div>
@@ -327,7 +332,8 @@ export default function BatchWorkspace({ batch, me, canSend, isSuper, onClose, o
           </div>
         </div>
       )}
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -447,7 +453,7 @@ function AssignPanel({ batchId, unassigned, selectedIds, onClose, onDone }) {
   );
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={onClose}>
+    <div className="fixed inset-0 z-[80] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={onClose}>
       <div className="w-full max-w-lg rounded-2xl overflow-hidden flex flex-col max-h-[90vh]" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }} onClick={e => e.stopPropagation()}>
         <div className="flex items-center gap-2 p-4" style={{ borderBottom: '1px solid var(--color-border)' }}>
           <Users size={17} style={{ color: 'var(--color-primary-600)' }} />

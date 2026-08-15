@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Upload, Loader2, X, FileSpreadsheet, CheckCircle2 } from 'lucide-react';
 import { toast } from 'sonner';
 import client from '../../api/client';
@@ -149,8 +150,10 @@ export default function BatchUpload({ onDone, onClose }) {
     </label>
   );
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={onClose}>
+  // Portalled above the shell chrome — the sticky app header and sidebar both
+  // sit at z-50 and were covering the dialog's own header and footer buttons.
+  return createPortal(
+    <div className="fixed inset-0 z-[80] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={onClose}>
       <div className="w-full max-w-3xl max-h-[92vh] flex flex-col rounded-2xl overflow-hidden" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }} onClick={e => e.stopPropagation()}>
         <div className="flex items-center gap-3 p-4" style={{ borderBottom: '1px solid var(--color-border)' }}>
           <Upload size={18} style={{ color: 'var(--color-primary-600)' }} />
@@ -241,6 +244,7 @@ export default function BatchUpload({ onDone, onClose }) {
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
