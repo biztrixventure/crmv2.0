@@ -186,7 +186,7 @@ function NumbersBody({ numbers, loading, filter, setFilter, onCopy, copied, onSt
 
   const act = (n, status, Icon, color, title) => (
     n.status !== status ? (
-      <button onClick={() => onStatus(n.id, status, n.source)} title={title}
+      <button onClick={() => onStatus(n.id, status)} title={title}
         style={{ border: 'none', background: 'transparent', padding: 4, borderRadius: 6, cursor: 'pointer', display: 'flex' }}>
         <Icon size={14} color={color} />
       </button>
@@ -293,23 +293,16 @@ export default function FronterNumbersWidget({ user }) {
   const pipRootRef = useRef(null);
   const copyTimer  = useRef(null);
 
-  // INTENTIONAL PARALLEL (confirmed, not forgotten): this widget reads BOTH
-  // legacy number_lists AND the newer distribution_batch_items assigned to me,
-  // merged into one list. Each item is tagged with its `source` so a status
-  // update PUTs to the right endpoint (number-lists vs distribution-batches).
-  // TODO(consolidation): once all number assignment flows through
-  // distribution_batch_items, migrate number_lists into it and drop this dual
-  // fetch + the source-routing in setStatus. Kept parallel for now so nothing
-  // in the existing number-lists flow breaks during rollout.
+  // The consolidation this widget carried a TODO for is done: numbers only
+  // arrive through distribution batches now, so the legacy number_lists fetch
+  // and the per-item source routing went with that endpoint.
   const load = useCallback(() => {
     setLoading(true);
-    Promise.all([
-      user?.company_id
-        ? client.get('number-lists', { params: { company_id: user.company_id } }).then(r => (r.data.numbers || []).map(n => ({ ...n, source: 'list' }))).catch(() => [])
-        : Promise.resolve([]),
-      client.get('distribution-batches/my-numbers').then(r => (r.data.numbers || []).map(n => ({ ...n, source: 'batch' }))).catch(() => []),
-    ]).then(([list, batch]) => setNumbers([...batch, ...list])).finally(() => setLoading(false));
-  }, [user?.company_id]);
+    client.get('distribution-batches/my-numbers')
+      .then(r => setNumbers((r.data.numbers || []).map(n => ({ ...n, source: 'batch' }))))
+      .catch(() => setNumbers([]))
+      .finally(() => setLoading(false));
+  }, []);
 
   const copyNumber = useCallback((num) => {
     const digits = String(num || '').replace(/\D/g, '');
@@ -322,17 +315,14 @@ export default function FronterNumbersWidget({ user }) {
     copyTimer.current = setTimeout(() => setCopied(c => (c === num ? null : c)), 1200);
   }, []);
 
-  const setStatus = useCallback((id, status, source) => {
-    const url = source === 'batch' ? `distribution-batches/items/${id}` : `number-lists/${id}`;
-    client.put(url, { status })
+  const setStatus = useCallback((id, status) => {
+    client.put(`distribution-batches/items/${id}`, { status })
       .then(() => setNumbers(prev => prev.map(n => n.id === id ? { ...n, status } : n)))
       .catch(() => {});
   }, []);
 
-  // Save a per-number note (routes to the item's own source, both accept notes).
   const saveNote = useCallback((item, notes) => {
-    const url = item.source === 'batch' ? `distribution-batches/items/${item.id}` : `number-lists/${item.id}`;
-    client.put(url, { notes })
+    client.put(`distribution-batches/items/${item.id}`, { notes })
       .then(() => setNumbers(prev => prev.map(n => n.id === item.id ? { ...n, notes } : n)))
       .catch(() => {});
   }, []);

@@ -6,7 +6,6 @@ import { useVersionCheck } from "../hooks/useVersionCheck";
 import UpdateBanner from "../components/UI/UpdateBanner";
 import DotGridBg from "../components/UI/DotGridBg";
 import BatchInbox from "../components/Distribution/BatchInbox";
-import BatchRoster from "../components/Distribution/BatchRoster";
 import NoteShortcodesManager from "../components/Numbers/NoteShortcodesManager";
 import ThemedSelect from '../components/UI/Select';
 import TeamManager from '../components/Admin/Teams/TeamManager';
@@ -85,7 +84,6 @@ import TransferStatusFilterPills from "../components/UI/TransferStatusFilterPill
 import FilterBar from "../components/UI/FilterBar";
 import ManagerCallbacksTab from "../components/Callbacks/ManagerCallbacksTab";
 import CallbackNumbers from "../components/CallbackNumbers/CallbackNumbers";
-import NumberUploadManager from "../components/Numbers/NumberUploadManager";
 import SaleSearch from "../components/Sales/SaleSearch";
 import FAQPanel from "../components/FAQ/FAQPanel";
 import ScriptPanel from "../components/FAQ/ScriptPanel";
@@ -1319,7 +1317,6 @@ const ManagerShell = ({ workspaceMode = false }) => {
         )}
         {activeTab === 'search'    && <SaleSearch />}
         {activeTab === 'batches'   && <BatchInbox />}
-        {activeTab === 'roster'    && <BatchRoster />}
         {activeTab === 'note_shortcodes' && <NoteShortcodesManager />}
         {activeTab === 'faqs'      && (hasPermission('manage_faqs') ? <FAQManager /> : <FAQPanel />)}
         {activeTab === 'scripts'   && (hasPermission('manage_faqs') ? <ScriptManager /> : <ScriptPanel />)}

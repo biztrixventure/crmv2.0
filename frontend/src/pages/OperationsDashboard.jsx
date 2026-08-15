@@ -17,7 +17,6 @@ import { AppHeader } from "../components/Layout";
 import CreateUserModal from "../components/Admin/UserManagement/CreateUserModal";
 import { useNotifications } from "../hooks/useNotifications";
 import CallbacksOverview from "../components/Callbacks/CallbacksOverview";
-import NumberUploadManager from "../components/Numbers/NumberUploadManager";
 import SaleSearch from "../components/Sales/SaleSearch";
 import CallbackNumbers from "../components/CallbackNumbers/CallbackNumbers";
 import CrossRoleContent from "../components/Navigation/CrossRoleContent";
@@ -253,7 +252,6 @@ const OperationsDashboard = () => {
     ...(hasPermission('search_sales')                                            ? [{ key: 'search',          label: 'Search Sales',    icon: Search     }] : []),
     ...(hasPermission('manage_callback_numbers')                                 ? [{ key: 'tracked_numbers', label: 'Tracked Numbers', icon: Phone      }] : []),
     ...(hasPermission('view_team_callbacks')                                     ? [{ key: 'callbacks',       label: 'Team Callbacks',  icon: Phone      }] : []),
-    ...(hasPermission('manage_callback_numbers')                                 ? [{ key: 'numbers',         label: 'Number Lists',    icon: Hash       }] : []),
     { key: 'activity_log', label: 'Activity Log', icon: Activity },
   ];
 
@@ -758,7 +756,6 @@ const OperationsDashboard = () => {
         {activeTab === 'search'          && <SaleSearch companyId={companyId} />}
         {activeTab === 'tracked_numbers' && <CallbackNumbers user={user} />}
         {activeTab === 'callbacks'       && <CallbacksOverview user={user} />}
-        {activeTab === 'numbers'         && <NumberUploadManager user={user} />}
       </main>
 
       {/* Reassign Modal */}

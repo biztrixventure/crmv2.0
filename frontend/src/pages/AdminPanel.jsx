@@ -18,7 +18,6 @@ import { useNotifications } from "../hooks/useNotifications";
 import AdminAnalyticsDashboard from "../components/Admin/AdminAnalyticsDashboard";
 import LeadIntelligence from "../components/Admin/LeadIntelligence";
 import CustomerProfile from "../components/Admin/CustomerProfile/CustomerProfile";
-import NumbersIntelligence from "../components/Admin/NumbersIntelligence";
 const FormBuilder = lazy(() => import("../components/Admin/FormBuilder/FormBuilder"));
 import FeatureFlagsManager from "../components/Admin/FeatureFlagsManager";
 import FAQManager from "../components/Admin/FAQManager/FAQManager";
@@ -42,14 +41,12 @@ import EgressGovernance from "../components/Admin/EgressGovernance/EgressGoverna
 import BrandingManager from "../components/Admin/Branding/BrandingManager";
 import AppearanceManager from "../components/Admin/Appearance/AppearanceManager";
 import PwaManager from "../components/Admin/Pwa/PwaManager";
-import NumberAssignmentPanel from "../components/Numbers/NumberAssignmentPanel";
 import { useFeatureFlags } from "../contexts/FeatureFlagsContext";
 import EventsCalendar from "../components/Calendar/EventsCalendar";
 import EngagementBanners from "../components/Engagement/EngagementBanners";
 import PaymentRemindersPanel from "../components/Payments/PaymentRemindersPanel";
 import ActivityPanel from "../components/Admin/ActivityPanel";
 import BatchInbox from "../components/Distribution/BatchInbox";
-import BatchRoster from "../components/Distribution/BatchRoster";
 import NoteShortcodesManager from "../components/Numbers/NoteShortcodesManager";
 import client from "../api/client";
 import DotGridBg from "../components/UI/DotGridBg";
@@ -196,7 +193,6 @@ const AdminPanel = () => {
     ...(user?.role === 'superadmin'                    ? [{ id: "branding",       label: "Branding & SEO"       }] : []),
     ...(user?.role === 'superadmin'                    ? [{ id: "appearance",     label: "Appearance"           }] : []),
     ...(user?.role === 'superadmin'                    ? [{ id: "pwa",            label: "Progressive Web App"  }] : []),
-    ...(isSAorRO && isEnabled('number_assignment')     ? [{ id: "number-lists",   label: "Number Assignment"    }] : []),
     // SuperAdmin-only management of readonly_admin users (count, nav config, create/revoke).
     ...(user?.role === 'superadmin'                    ? [{ id: "readonly-admins", label: "Readonly Admins"     }] : []),
     ...(user?.role === 'superadmin'                    ? [{ id: "user-control",   label: "User Control Center"  }] : []),
@@ -239,10 +235,8 @@ const AdminPanel = () => {
       case 'quota_report':      return <QuotaReport />;
       case 'sale-search':       return <LeadIntelligence />;
       case 'customer-profiles': return <CustomerProfile />;
-      case 'numbers':           return <NumbersIntelligence />;
       case 'data-analyzer':     return <DataAnalyzer />;
       case 'batches':           return <BatchInbox />;
-      case 'roster':            return <BatchRoster />;
       case 'note-shortcodes':   return <NoteShortcodesManager />;
       case 'data-cleanup':      return <DataCleanup />;
       case 'vicidial':          return <VicidialAdmin />;
@@ -264,7 +258,6 @@ const AdminPanel = () => {
       case 'branding':          return <BrandingManager />;
       case 'appearance':        return <AppearanceManager />;
       case 'pwa':               return <PwaManager />;
-      case 'number-lists':      return <NumberAssignmentPanel user={user} />;
       case 'readonly-admins':   return <ReadonlyAdminManager />;
       case 'user-control':      return user?.role === 'superadmin' ? <UserControlCenter /> : null;
       default:                  return null;

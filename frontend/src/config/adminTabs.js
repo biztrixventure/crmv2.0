@@ -53,9 +53,7 @@ export const ADMIN_TAB_CATALOG = [
   // Tools / intelligence
   { id: 'sale-search',      label: 'Lead Search',          group: 'tools',         roEligible: true,  defaultForRo: true,  gate: 'search_sales' },
   { id: 'customer-profiles',label: 'Customer Profiles',    group: 'tools',         roEligible: true,  defaultForRo: true,  gate: null },
-  { id: 'numbers',          label: 'Numbers Intelligence', group: 'tools',         roEligible: true,  defaultForRo: false, gate: null },
   { id: 'data-analyzer',    label: 'Data Analyzer',        group: 'tools',         roEligible: true,  defaultForRo: true,  gate: null },
-  { id: 'number-lists',     label: 'Number Assignment',    group: 'tools',         roEligible: true,  defaultForRo: false, gate: 'feature:number_assignment' },
 
   // Content
   { id: 'faqs',             label: 'FAQs',                 group: 'content',       roEligible: true,  defaultForRo: false, gate: 'manage_faqs' },
@@ -69,7 +67,6 @@ export const ADMIN_TAB_CATALOG = [
 
   // SuperAdmin-only — NEVER a readonly_admin (roEligible:false)
   { id: 'batches',          label: 'Batches',              group: 'superadmin',    roEligible: false, defaultForRo: false, gate: null },
-  { id: 'roster',           label: 'Assigned Numbers',     group: 'superadmin',    roEligible: false, defaultForRo: false, gate: null },
   { id: 'note-shortcodes',  label: 'Note Shortcuts',       group: 'superadmin',    roEligible: false, defaultForRo: false, gate: null },
   { id: 'data-cleanup',     label: 'Data Cleanup',         group: 'superadmin',    roEligible: false, defaultForRo: false, gate: null },
   { id: 'vicidial',         label: 'VICIdial',             group: 'superadmin',    roEligible: false, defaultForRo: false, gate: null },

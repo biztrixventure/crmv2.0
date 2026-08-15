@@ -84,7 +84,6 @@ import SaleModal from "../components/Closer/SaleModal";
 import CallbacksPage from "../components/Callbacks/CallbacksPage";
 import CallbackNumbers from "../components/CallbackNumbers/CallbackNumbers";
 import CallbacksOverview from "../components/Callbacks/CallbacksOverview";
-import AssignedNumbersList from "../components/Numbers/AssignedNumbersList";
 import SaleSearch from "../components/Sales/SaleSearch";
 import FAQPanel from "../components/FAQ/FAQPanel";
 import ScriptPanel from "../components/FAQ/ScriptPanel";
@@ -1150,7 +1149,6 @@ const StaffShell = () => {
         {activeTab === 'callbacks'       && <CallbacksPage user={user} />}
         {activeTab === 'team_callbacks'  && <CallbacksOverview user={user} companyId={user?.company_id} />}
         {activeTab === 'tracked_numbers' && <CallbackNumbers user={user} />}
-        {activeTab === 'numbers'         && <AssignedNumbersList user={user} />}
         {activeTab === 'batches'         && <BatchInbox />}
         {activeTab === 'search'          && <SaleSearch />}
         {activeTab === 'faqs'            && <FAQPanel />}

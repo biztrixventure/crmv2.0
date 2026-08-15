@@ -39,9 +39,7 @@ import CallQuestionsManager from '../components/Compliance/CallQuestionsManager'
 import RecordingReviewTab  from '../components/Compliance/RecordingReviewTab';
 import QaAdminTab          from '../components/Compliance/QaAdminTab';
 import DoubleSoldTab       from '../components/Compliance/DoubleSoldTab';
-import NumberAssignmentPanel from '../components/Numbers/NumberAssignmentPanel';
 import BatchInbox          from '../components/Distribution/BatchInbox';
-import BatchRoster         from '../components/Distribution/BatchRoster';
 
 const CODE_TABS = [
   { key: 'companies',   label: 'Companies',          icon: Building2 },
@@ -299,13 +297,11 @@ const ComplianceShell = () => {
         )}
         {activeTab === 'rec_review' && <RecordingReviewTab companyList={companyList} />}
         {activeTab === 'batches' && <BatchInbox />}
-        {activeTab === 'roster' && <BatchRoster />}
         {activeTab === 'payments' && <PaymentRemindersPanel />}
         {activeTab === 'dnc' && <ComplianceDncReport />}
         {activeTab === 'card_validator' && <CardValidator />}
         {activeTab === 'qa_admin' && <QaAdminTab />}
         {activeTab === 'double_sold' && <DoubleSoldTab />}
-        {activeTab === 'number_lists' && <NumberAssignmentPanel user={user} />}
         {activeTab === 'bulk_status' && <BulkStatusUpdate />}
         {activeTab === 'transfers' && (
           <TransfersTab

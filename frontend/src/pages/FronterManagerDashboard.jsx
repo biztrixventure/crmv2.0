@@ -21,7 +21,6 @@ import { useSaleConfigs } from "../hooks/useSaleConfigs";
 import TransferFormModal from "../components/Transfers/TransferFormModal";
 import SaleSearch from "../components/Sales/SaleSearch";
 import CallbacksOverview from "../components/Callbacks/CallbacksOverview";
-import NumberUploadManager from "../components/Numbers/NumberUploadManager";
 import CallbackNumbers from "../components/CallbackNumbers/CallbackNumbers";
 import CrossRoleContent from "../components/Navigation/CrossRoleContent";
 import client from "../api/client";
@@ -264,7 +263,6 @@ const FronterManagerDashboard = () => {
     ...(hasPermission('view_fronter_stats')      ? [{ key: 'leaderboard',    label: 'Leaderboard',    icon: TrendingUp }] : []),
     ...(hasPermission('manage_callback_numbers') ? [{ key: 'tracked_numbers',label: 'Numbers',        icon: Phone      }] : []),
     ...(hasPermission('view_team_callbacks')     ? [{ key: 'callbacks',      label: 'Callbacks',      icon: Phone      }] : []),
-    ...(hasPermission('manage_callback_numbers') ? [{ key: 'number_lists',   label: 'Number Lists',   icon: Hash       }] : []),
     ...(hasPermission('search_sales')            ? [{ key: 'search',         label: 'Search',         icon: Search     }] : []),
     { key: 'activity_log', label: 'Activity',   icon: Activity   },
   ];
@@ -750,7 +748,6 @@ const FronterManagerDashboard = () => {
         {activeTab === 'search'         && <SaleSearch companyId={companyId} />}
         {activeTab === 'tracked_numbers' && <CallbackNumbers user={user} />}
         {activeTab === 'callbacks'       && <CallbacksOverview user={user} />}
-        {activeTab === 'number_lists'    && <NumberUploadManager user={user} />}
       </main>
 
       {/* ── REASSIGN MODAL ─────────────────────────────────────────────── */}
