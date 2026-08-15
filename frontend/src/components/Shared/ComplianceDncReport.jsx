@@ -35,6 +35,8 @@ export default function ComplianceDncReport() {
   const [cacheRows, setCacheRows] = useState([]);
   const [cacheTotal, setCacheTotal] = useState(0);
   const [cacheLoading, setCacheLoading] = useState(false);
+  const [cachePage, setCachePage] = useState(1);
+  const [cacheLimit, setCacheLimit] = useState(100);
 
   const loadSummary = useCallback(() => client.get('blacklist/report/summary').then(r => setSummary(r.data)).catch(() => setSummary(null)), []);
   const loadPrepare = useCallback(() => client.get('blacklist/scan/prepare').then(r => setPrep(r.data)).catch(e => toast.error(e.response?.data?.error || 'Could not prepare scan')), []);
@@ -51,24 +53,31 @@ export default function ComplianceDncReport() {
     () => client.get('blacklist/cache/summary').then(r => setCacheSummary(r.data)).catch(() => setCacheSummary(null)), []);
   useEffect(() => { loadCacheSummary(); }, [loadCacheSummary]);
 
-  const cacheParams = useCallback((extra = {}) => ({
+  // Searching a number searches the WHOLE cache — the verdict/source/age pills
+  // are dropped for that query. Otherwise looking up a number you believe is bad
+  // while the "good" pill is active returns nothing, which reads as "not found".
+  const searching = !!cacheSearch.trim();
+  const cacheParams = useCallback((extra = {}) => (searching ? {
+    search: cacheSearch.trim(), ...extra,
+  } : {
     ...(cacheFilter === 'all' ? {} : { status: cacheFilter }),
     ...(cacheSource ? { source: cacheSource } : {}),
     ...(cacheFresh ? { freshness: cacheFresh } : {}),
-    ...(cacheSearch.trim() ? { search: cacheSearch.trim() } : {}),
     ...extra,
-  }), [cacheFilter, cacheSource, cacheFresh, cacheSearch]);
+  }), [searching, cacheFilter, cacheSource, cacheFresh, cacheSearch]);
 
   const loadCache = useCallback(async () => {
     setCacheLoading(true);
     try {
-      const r = await client.get('blacklist/cache', { params: cacheParams({ limit: 300 }) });
+      const r = await client.get('blacklist/cache', { params: cacheParams({ page: cachePage, limit: cacheLimit }) });
       setCacheRows(r.data.numbers || []); setCacheTotal(r.data.total || 0);
     } catch { setCacheRows([]); setCacheTotal(0); }
     finally { setCacheLoading(false); }
-  }, [cacheParams]);
+  }, [cacheParams, cachePage, cacheLimit]);
   // debounce so typing a number doesn't fire a request per keystroke
   useEffect(() => { const t = setTimeout(loadCache, cacheSearch ? 350 : 0); return () => clearTimeout(t); }, [loadCache, cacheSearch]);
+  // any filter change restarts at page 1 — otherwise page 7 of a 3-page result is blank
+  useEffect(() => { setCachePage(1); }, [cacheFilter, cacheSource, cacheFresh, cacheSearch, cacheLimit]);
 
   const runScan = async () => {
     if (!prep || prep.to_check === 0) { toast.info('Nothing new to check — all cached.'); return; }
@@ -295,7 +304,15 @@ export default function ComplianceDncReport() {
               </div>
             </div>
             <div className="px-4 py-1.5 text-[11px] flex items-center gap-2 flex-wrap" style={{ color: 'var(--color-text-tertiary)', borderBottom: '1px solid var(--color-border)' }}>
-              <span>Every number checked by anyone — closer, compliance or admin. Showing {cacheRows.length} of {cacheTotal}.</span>
+              <span>
+                Every number checked by anyone — closer, compliance or admin.{' '}
+                {cacheTotal ? <>Showing <strong style={{ color: 'var(--color-text-secondary)' }}>{(cachePage - 1) * cacheLimit + 1}–{Math.min(cachePage * cacheLimit, cacheTotal)}</strong> of {cacheTotal}.</> : 'Nothing to show.'}
+              </span>
+              {searching ? (
+                <span className="font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-primary-600)' }}>
+                  Searching all {cacheSummary ? cacheSummary.blacklisted.phones + cacheSummary.good.phones : ''} numbers — filters ignored
+                </span>
+              ) : null}
               {cacheSummary?.cache_days ? (
                 <span className="font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>
                   Cache window {cacheSummary.cache_days}d
@@ -309,10 +326,11 @@ export default function ComplianceDncReport() {
               <div className="flex justify-center py-10"><Loader2 size={22} className="animate-spin" style={{ color: 'var(--color-primary-600)' }} /></div>
             ) : cacheRows.length === 0 ? (
               <p className="text-sm text-center py-10" style={{ color: 'var(--color-text-tertiary)' }}>
-                No {cacheFilter === 'all' ? '' : `${cacheFilter} `}numbers searched yet.
+                {searching ? <>No cached number matches “{cacheSearch.trim()}”. Check it in the lookup panel and it lands here.</>
+                           : <>No {cacheFilter === 'all' ? '' : `${cacheFilter} `}numbers searched yet.</>}
               </p>
             ) : (
-              <div className="overflow-x-auto max-h-[calc(100vh-16rem)] overflow-y-auto">
+              <div className="overflow-x-auto max-h-[calc(100vh-20rem)] overflow-y-auto">
                 <table className="w-full text-sm">
                   <thead><tr style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
                     {['Number', 'Verdict', 'Lists', 'Searched by', 'Source', 'Times', 'Last searched', 'Verdict age', 'Sales'].map(h => <th key={h} className="text-left px-3 py-2 text-[11px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>{h}</th>)}
@@ -341,6 +359,42 @@ export default function ComplianceDncReport() {
                     ))}
                   </tbody>
                 </table>
+              </div>
+            )}
+
+            {/* pager — the cache is thousands of numbers, never a single page */}
+            {cacheTotal > 0 && (
+              <div className="flex items-center justify-between gap-3 px-4 py-2.5 flex-wrap" style={{ borderTop: '1px solid var(--color-border)' }}>
+                <div className="flex items-center gap-2 text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>
+                  <span>Rows per page</span>
+                  {[100, 250, 500, 1000].map(n => (
+                    <button key={n} onClick={() => setCacheLimit(n)} className="text-[11px] font-bold px-2 py-1 rounded-lg transition-colors"
+                      style={{ backgroundColor: cacheLimit === n ? 'var(--color-primary-600)' : 'var(--color-bg-secondary)', color: cacheLimit === n ? '#fff' : 'var(--color-text-secondary)' }}>{n}</button>
+                  ))}
+                </div>
+                <div className="flex items-center gap-1.5">
+                  {(() => {
+                    const pages = Math.max(1, Math.ceil(cacheTotal / cacheLimit));
+                    const go = (p) => setCachePage(Math.min(Math.max(1, p), pages));
+                    // a short window around the current page — 88 page buttons helps nobody
+                    const from = Math.max(1, Math.min(cachePage - 2, pages - 4));
+                    const win = Array.from({ length: Math.min(5, pages) }, (_, i) => from + i);
+                    const navBtn = { borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' };
+                    return (
+                      <>
+                        <button onClick={() => go(1)} disabled={cachePage === 1} className="text-[11px] font-semibold px-2 py-1 rounded-lg border disabled:opacity-40" style={navBtn}>« First</button>
+                        <button onClick={() => go(cachePage - 1)} disabled={cachePage === 1} className="text-[11px] font-semibold px-2 py-1 rounded-lg border disabled:opacity-40" style={navBtn}>‹ Prev</button>
+                        {win.map(p => (
+                          <button key={p} onClick={() => go(p)} className="text-[11px] font-bold px-2.5 py-1 rounded-lg transition-colors"
+                            style={{ backgroundColor: p === cachePage ? 'var(--color-primary-600)' : 'var(--color-bg-secondary)', color: p === cachePage ? '#fff' : 'var(--color-text-secondary)' }}>{p}</button>
+                        ))}
+                        <button onClick={() => go(cachePage + 1)} disabled={cachePage >= pages} className="text-[11px] font-semibold px-2 py-1 rounded-lg border disabled:opacity-40" style={navBtn}>Next ›</button>
+                        <button onClick={() => go(pages)} disabled={cachePage >= pages} className="text-[11px] font-semibold px-2 py-1 rounded-lg border disabled:opacity-40" style={navBtn}>Last »</button>
+                        <span className="text-[11px] ml-1" style={{ color: 'var(--color-text-tertiary)' }}>of {pages}</span>
+                      </>
+                    );
+                  })()}
+                </div>
               </div>
             )}
           </>
