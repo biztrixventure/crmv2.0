@@ -45,11 +45,21 @@ function toResult(row, cached) {
   };
 }
 
+// Cache HIT bookkeeping — a number everyone keeps looking up must not look like
+// a one-off, and the last searcher should still be the person who just asked.
+async function touchCache(phone, userId, source) {
+  await supabaseAdmin.rpc('app_touch_blacklist_lookup', {
+    p_phone: phone, p_user: userId || null, p_source: source || 'lookup',
+  }).then(() => {}, () => {});
+}
+
 /**
  * Lookup one number. Returns { ok, ...result } or { ok:false, error }.
  * Uses the cache unless it's older than cache_days (or force=true).
+ * `userId` / `source` are stamped on the cache row so compliance can see who
+ * searched what and how often (mig 253).
  */
-async function lookup(phone, { force = false } = {}) {
+async function lookup(phone, { force = false, userId = null, source = 'lookup' } = {}) {
   const p = norm(phone);
   if (p.length !== 10) return { ok: false, error: 'invalid phone number' };
 
@@ -59,6 +69,7 @@ async function lookup(phone, { force = false } = {}) {
   if (!force) {
     const { data: cached } = await supabaseAdmin.from('blacklist_lookups').select('*').eq('phone', p).maybeSingle();
     if (cached && (Date.now() - new Date(cached.checked_at).getTime()) < cfg.cacheDays * 86400000) {
+      await touchCache(p, userId, source);
       return toResult(cached, true);
     }
   }
@@ -92,7 +103,15 @@ async function lookup(phone, { force = false } = {}) {
     raw: data,
     checked_at: new Date().toISOString(),
   };
-  await supabaseAdmin.from('blacklist_lookups').upsert(row, { onConflict: 'phone' }).then(() => {}, () => {});
+  // Atomic upsert + counter bump (a plain upsert can't read the old count).
+  await supabaseAdmin.rpc('app_record_blacklist_lookup', {
+    p_phone: row.phone, p_status: row.status, p_message: row.message, p_codes: row.codes,
+    p_wireless: row.wireless, p_carrier: row.carrier, p_results: row.results, p_raw: row.raw,
+    p_user: userId || null, p_source: source || 'lookup',
+  }).then(({ error }) => {
+    // Pre-253 database: fall back to the plain upsert so lookups never break.
+    if (error) return supabaseAdmin.from('blacklist_lookups').upsert(row, { onConflict: 'phone' });
+  }, () => {});
   return toResult(row, false);
 }
 

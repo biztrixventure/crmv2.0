@@ -38,7 +38,11 @@ router.get('/lookup/:phone', asyncHandler(async (req, res) => {
   const enabled = sa || await isFeatureEnabled('tool_blacklist_lookup', req.user.company_id || null, req.user.id).catch(() => false);
   if (!enabled) return res.status(403).json({ error: 'Blacklist lookup is not enabled for you' });
 
-  const r = await bl.lookup(req.params.phone, { force: sa && req.query.refresh === 'true' });
+  const r = await bl.lookup(req.params.phone, {
+    force: sa && req.query.refresh === 'true',
+    userId: req.user.id,
+    source: 'lookup',
+  });
   if (!r.ok) {
     const code = /invalid phone/i.test(r.error) ? 422 : (/api key/i.test(r.error) ? 503 : 400);
     return res.status(code).json({ error: r.error });
@@ -99,7 +103,7 @@ router.post('/scan/run', asyncHandler(async (req, res) => {
   await Promise.all(Array.from({ length: Math.min(5, list.length || 1) }, async () => {
     while (i < list.length) {
       const p = list[i++];
-      const r = await bl.lookup(p, { force: true });
+      const r = await bl.lookup(p, { force: true, userId: req.user.id, source: 'scan' });
       if (!r.ok) { failed++; continue; }
       checked++; r.blacklisted ? blacklisted++ : good++;
     }
@@ -135,7 +139,7 @@ router.post('/bulk-check', asyncHandler(async (req, res) => {
   await Promise.all(Array.from({ length: Math.min(6, phones.length) }, async () => {
     while (i < phones.length) {
       const idx = i++; const p = phones[idx];
-      const r = await bl.lookup(p, { force });
+      const r = await bl.lookup(p, { force, userId: req.user.id, source: 'bulk' });
       if (!r.ok) { failed++; results[idx] = { phone: p, ok: false, error: r.error }; continue; }
       if (r.cached) cachedCount++;
       r.blacklisted ? blacklisted++ : good++;
@@ -177,6 +181,46 @@ router.get('/report/sales', asyncHandler(async (req, res) => {
   const { data, error, count } = await q;
   if (error) return res.status(500).json({ error: error.message });
   res.json({ sales: data || [], total: count || 0, page, limit });
+}));
+
+// ── GET /cache/summary — every number ANYONE has ever searched, by verdict ────
+// The cache is fed by every lookup path (closer single lookup, compliance bulk,
+// superadmin scan), so this is the full searched-numbers picture — not just the
+// numbers that happen to be attached to a sale.
+router.get('/cache/summary', asyncHandler(async (req, res) => {
+  if (!(await canScan(req))) return res.status(403).json({ error: 'Compliance only' });
+  const { data, error } = await supabaseAdmin.rpc('app_blacklist_cache_summary');
+  if (error) return res.status(500).json({ error: error.message });
+  const out = { good: { phones: 0, lookups: 0 }, blacklisted: { phones: 0, lookups: 0 } };
+  (data || []).forEach(r => { if (out[r.dnc_status]) out[r.dnc_status] = { phones: Number(r.phones), lookups: Number(r.lookups) }; });
+  res.json(out);
+}));
+
+// ── GET /cache — the searched-numbers list (filter + search + page) ───────────
+router.get('/cache', asyncHandler(async (req, res) => {
+  if (!(await canScan(req))) return res.status(403).json({ error: 'Compliance only' });
+  const status = ['good', 'blacklisted'].includes(req.query.status) ? req.query.status : null;
+  const source = ['lookup', 'bulk', 'scan'].includes(req.query.source) ? req.query.source : null;
+  const page   = Math.max(parseInt(req.query.page, 10) || 1, 1);
+  const limit  = Math.min(parseInt(req.query.limit, 10) || 100, 1000);
+  const offset = (page - 1) * limit;
+  const days   = parseInt(req.query.days, 10) || 0;
+
+  let q = supabaseAdmin.from('v_blacklist_cache')
+    .select('phone, message, codes, wireless, carrier, checked_at, first_checked_at, last_searched_at, lookup_count, last_source, dnc_status, searched_by_name, searched_by_email, sales_count', { count: 'exact' })
+    .order('last_searched_at', { ascending: false });
+  if (status) q = q.eq('dnc_status', status);
+  if (source) q = q.eq('last_source', source);
+  if (days > 0) q = q.gte('last_searched_at', new Date(Date.now() - days * 86400000).toISOString());
+  if (req.query.search) {
+    const digits = bl.norm(req.query.search);
+    if (digits) q = q.ilike('phone', `%${digits}%`);
+  }
+  q = q.range(offset, offset + limit - 1);
+
+  const { data, error, count } = await q;
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ numbers: data || [], total: count || 0, page, limit });
 }));
 
 module.exports = router;

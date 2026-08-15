@@ -16,7 +16,7 @@ const CODE_LABEL = {
 const pretty = (c) => CODE_LABEL[c] || c;
 const fmtPhone = (d) => d && d.length === 10 ? `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}` : d;
 
-export default function DncLookupPanel({ compact = false }) {
+export default function DncLookupPanel({ compact = false, onResult }) {
   const [phone, setPhone] = useState('');
   const [res, setRes] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -25,7 +25,9 @@ export default function DncLookupPanel({ compact = false }) {
     const d = String(phone).replace(/\D/g, '').slice(-10);
     if (d.length !== 10) { setRes({ error: 'Enter a 10-digit US phone number' }); return; }
     setBusy(true); setRes(r => (refresh ? r : null));
-    try { const r = await client.get(`blacklist/lookup/${d}${refresh ? '?refresh=true' : ''}`); setRes(r.data); }
+    // every lookup lands in the shared cache — tell the parent so a cache report
+    // sitting next to this panel refreshes right away.
+    try { const r = await client.get(`blacklist/lookup/${d}${refresh ? '?refresh=true' : ''}`); setRes(r.data); onResult?.(r.data); }
     catch (e) { setRes({ error: e.response?.data?.error || 'Lookup failed' }); }
     finally { setBusy(false); }
   };

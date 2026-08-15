@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Shield, ShieldAlert, ShieldCheck, HelpCircle, Play, Loader2, Download, RefreshCw } from 'lucide-react';
+import { Shield, ShieldAlert, ShieldCheck, HelpCircle, Play, Loader2, Download, RefreshCw, Search, X } from 'lucide-react';
 import { toast } from 'sonner';
 import client from '../../api/client';
 import DncLookupPanel from './DncLookupPanel';
@@ -7,8 +7,12 @@ import { useAuth } from '../../contexts/AuthContext';
 import { buildFilename } from '../../utils/downloadFilename';
 
 // Compliance bulk DNC: single lookup + "scan all sales" (cost-previewed, paced,
-// cached) + a filterable, exportable report of every sale's DNC verdict.
+// cached) + two reports — every SALE's DNC verdict, and every NUMBER anyone has
+// ever searched (the shared cache: closer lookups, bulk checks and scans all
+// land there, so a bad number a closer checked shows up here even with no sale).
 const fmtDate = (s) => { try { return s ? new Date(s).toLocaleDateString() : ''; } catch { return ''; } };
+const fmtDateTime = (s) => { try { return s ? new Date(s).toLocaleString() : ''; } catch { return ''; } };
+const SOURCE_LABEL = { lookup: 'Lookup', bulk: 'Bulk check', scan: 'Sales scan' };
 const csvCell = (v) => { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
 
 export default function ComplianceDncReport() {
@@ -21,6 +25,15 @@ export default function ComplianceDncReport() {
   const [rows, setRows] = useState([]);
   const [rowsLoading, setRowsLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
+  // searched-numbers (cache) report
+  const [mode, setMode] = useState('sales');            // 'sales' | 'cache'
+  const [cacheSummary, setCacheSummary] = useState(null);
+  const [cacheFilter, setCacheFilter] = useState('blacklisted');   // 'blacklisted' | 'good' | 'all'
+  const [cacheSource, setCacheSource] = useState('');    // '' | lookup | bulk | scan
+  const [cacheSearch, setCacheSearch] = useState('');
+  const [cacheRows, setCacheRows] = useState([]);
+  const [cacheTotal, setCacheTotal] = useState(0);
+  const [cacheLoading, setCacheLoading] = useState(false);
 
   const loadSummary = useCallback(() => client.get('blacklist/report/summary').then(r => setSummary(r.data)).catch(() => setSummary(null)), []);
   const loadPrepare = useCallback(() => client.get('blacklist/scan/prepare').then(r => setPrep(r.data)).catch(e => toast.error(e.response?.data?.error || 'Could not prepare scan')), []);
@@ -32,6 +45,28 @@ export default function ComplianceDncReport() {
     catch { setRows([]); } finally { setRowsLoading(false); }
   }, [filter]);
   useEffect(() => { loadRows(); }, [loadRows]);
+
+  const loadCacheSummary = useCallback(
+    () => client.get('blacklist/cache/summary').then(r => setCacheSummary(r.data)).catch(() => setCacheSummary(null)), []);
+  useEffect(() => { loadCacheSummary(); }, [loadCacheSummary]);
+
+  const cacheParams = useCallback((extra = {}) => ({
+    ...(cacheFilter === 'all' ? {} : { status: cacheFilter }),
+    ...(cacheSource ? { source: cacheSource } : {}),
+    ...(cacheSearch.trim() ? { search: cacheSearch.trim() } : {}),
+    ...extra,
+  }), [cacheFilter, cacheSource, cacheSearch]);
+
+  const loadCache = useCallback(async () => {
+    setCacheLoading(true);
+    try {
+      const r = await client.get('blacklist/cache', { params: cacheParams({ limit: 300 }) });
+      setCacheRows(r.data.numbers || []); setCacheTotal(r.data.total || 0);
+    } catch { setCacheRows([]); setCacheTotal(0); }
+    finally { setCacheLoading(false); }
+  }, [cacheParams]);
+  // debounce so typing a number doesn't fire a request per keystroke
+  useEffect(() => { const t = setTimeout(loadCache, cacheSearch ? 350 : 0); return () => clearTimeout(t); }, [loadCache, cacheSearch]);
 
   const runScan = async () => {
     if (!prep || prep.to_check === 0) { toast.info('Nothing new to check — all cached.'); return; }
@@ -53,7 +88,7 @@ export default function ComplianceDncReport() {
       }
       toast.success(`Scan complete — ${blacklisted} blacklisted, ${good} good${failed ? `, ${failed} failed` : ''}.`);
     } catch (e) { toast.error(e.response?.data?.error || 'Scan failed'); }
-    finally { setScanning(false); loadSummary(); loadPrepare(); loadRows(); }
+    finally { setScanning(false); loadSummary(); loadPrepare(); loadRows(); loadCache(); loadCacheSummary(); }
   };
 
   const exportCsv = async () => {
@@ -80,6 +115,30 @@ export default function ComplianceDncReport() {
     finally { setExporting(false); }
   };
 
+  const exportCacheCsv = async () => {
+    setExporting(true);
+    try {
+      const out = [];
+      for (let page = 1; page <= 60; page++) {
+        const r = await client.get('blacklist/cache', { params: cacheParams({ page, limit: 1000 }) });
+        const list = r.data.numbers || [];
+        out.push(...list);
+        if (list.length < 1000) break;
+      }
+      const headers = ['Phone', 'Verdict', 'Message', 'Lists', 'Wireless', 'Searched by', 'Source', 'Times', 'Last searched', 'Verdict checked', 'Sales'];
+      const lines = [headers.join(',')];
+      out.forEach(n => lines.push([
+        n.phone, n.dnc_status, n.message, (n.codes || []).join(' | '), n.wireless ? 'yes' : 'no',
+        n.searched_by_name || n.searched_by_email || '', SOURCE_LABEL[n.last_source] || n.last_source || '',
+        n.lookup_count, fmtDateTime(n.last_searched_at), fmtDateTime(n.checked_at), n.sales_count,
+      ].map(csvCell).join(',')));
+      const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+      a.download = buildFilename({ dataset: `dnc-searched-${cacheFilter}-numbers` }); a.click(); URL.revokeObjectURL(a.href);
+    } catch { toast.error('Export failed'); }
+    finally { setExporting(false); }
+  };
+
   const Stat = ({ icon: Icon, label, value, sub, color }) => (
     <div className="rounded-xl border p-3" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}>
       <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide" style={{ color }}><Icon size={13} /> {label}</div>
@@ -102,7 +161,7 @@ export default function ComplianceDncReport() {
       <div className="grid grid-cols-1 xl:grid-cols-[minmax(320px,380px)_1fr] gap-5 items-start">
        <div className="space-y-4">
         {/* single lookup */}
-        <div className="rounded-2xl border p-4" style={{ borderColor: 'var(--color-border)' }}><DncLookupPanel compact /></div>
+        <div className="rounded-2xl border p-4" style={{ borderColor: 'var(--color-border)' }}><DncLookupPanel compact onResult={() => { loadCache(); loadCacheSummary(); }} /></div>
 
         {/* summary counts — stacked on the side */}
         {summary && (
@@ -111,6 +170,24 @@ export default function ComplianceDncReport() {
             <Stat icon={ShieldAlert} label="Blacklisted" value={summary.blacklisted.sales} sub={`${summary.blacklisted.phones} #`} color="#dc2626" />
             <Stat icon={HelpCircle} label="Not checked" value={summary.unchecked.sales} sub={`${summary.unchecked.phones} #`} color="#6b7280" />
           </div>
+        )}
+
+        {/* the shared cache — every number ANY user has ever searched */}
+        {cacheSummary && (
+          <button onClick={() => setMode('cache')} className="w-full text-left rounded-xl border p-3 transition-colors"
+            style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}>
+            <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>
+              <Search size={13} /> Searched numbers (cache)
+            </div>
+            <div className="text-sm mt-1 font-semibold" style={{ color: 'var(--color-text)' }}>
+              <span style={{ color: '#dc2626' }}>{cacheSummary.blacklisted.phones} bad</span>
+              <span style={{ color: 'var(--color-text-tertiary)' }}> · </span>
+              <span style={{ color: '#16a34a' }}>{cacheSummary.good.phones} good</span>
+            </div>
+            <div className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>
+              {cacheSummary.blacklisted.lookups + cacheSummary.good.lookups} searches by all users — click to open
+            </div>
+          </button>
         )}
 
         {/* scan */}
@@ -145,6 +222,98 @@ export default function ComplianceDncReport() {
 
       {/* report list + filter + export — main column */}
       <div className="rounded-2xl border" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}>
+        {/* which report: sales verdicts, or every number anyone searched */}
+        <div className="flex items-center gap-1 px-3 pt-3">
+          {[
+            { k: 'sales', label: 'Sales' },
+            { k: 'cache', label: 'Searched numbers', badge: cacheSummary ? cacheSummary.blacklisted.phones : null },
+          ].map(t => (
+            <button key={t.k} onClick={() => setMode(t.k)}
+              className="text-xs font-bold px-3 py-2 rounded-t-lg inline-flex items-center gap-1.5 transition-colors"
+              style={{
+                backgroundColor: mode === t.k ? 'var(--color-bg-secondary)' : 'transparent',
+                color: mode === t.k ? 'var(--color-text)' : 'var(--color-text-secondary)',
+                borderBottom: mode === t.k ? '2px solid var(--color-primary-600)' : '2px solid transparent',
+              }}>
+              {t.label}
+              {t.badge ? <span className="text-[10px] font-extrabold px-1.5 py-0.5 rounded-full" style={{ backgroundColor: '#dc2626', color: '#fff' }}>{t.badge}</span> : null}
+            </button>
+          ))}
+        </div>
+
+        {mode === 'cache' ? (
+          <>
+            <div className="flex items-center justify-between gap-3 px-4 py-3 flex-wrap" style={{ borderBottom: '1px solid var(--color-border)' }}>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {['blacklisted', 'good', 'all'].map(s => (
+                  <button key={s} onClick={() => setCacheFilter(s)} className="text-xs font-bold px-2.5 py-1.5 rounded-full capitalize transition-colors"
+                    style={{ backgroundColor: cacheFilter === s ? (STATUS_COLOR[s] || 'var(--color-primary-600)') : 'var(--color-bg-secondary)', color: cacheFilter === s ? '#fff' : 'var(--color-text-secondary)' }}>{s}</button>
+                ))}
+                <span className="mx-1" style={{ color: 'var(--color-border)' }}>|</span>
+                {[['', 'Any source'], ['lookup', 'Lookup'], ['bulk', 'Bulk check'], ['scan', 'Sales scan']].map(([v, label]) => (
+                  <button key={v || 'any'} onClick={() => setCacheSource(v)} className="text-xs font-semibold px-2.5 py-1.5 rounded-full transition-colors"
+                    style={{ backgroundColor: cacheSource === v ? 'var(--color-primary-600)' : 'var(--color-bg-secondary)', color: cacheSource === v ? '#fff' : 'var(--color-text-secondary)' }}>{label}</button>
+                ))}
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="relative">
+                  <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
+                  <input value={cacheSearch} onChange={e => setCacheSearch(e.target.value)} placeholder="Find a number…"
+                    className="text-xs rounded-lg border pl-7 pr-7 py-1.5 w-44 outline-none"
+                    style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text)' }} />
+                  {cacheSearch && <button onClick={() => setCacheSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2"><X size={12} style={{ color: 'var(--color-text-tertiary)' }} /></button>}
+                </div>
+                <button onClick={() => { loadCache(); loadCacheSummary(); }} disabled={cacheLoading} className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border inline-flex items-center gap-1.5" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+                  <RefreshCw size={13} /> Refresh
+                </button>
+                {canExport('sales') && (
+                  <button onClick={exportCacheCsv} disabled={exporting} className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border inline-flex items-center gap-1.5" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+                    {exporting ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />} Export CSV
+                  </button>
+                )}
+              </div>
+            </div>
+            <div className="px-4 py-1.5 text-[11px]" style={{ color: 'var(--color-text-tertiary)', borderBottom: '1px solid var(--color-border)' }}>
+              Every number checked by anyone — closer, compliance or admin. Showing {cacheRows.length} of {cacheTotal}.
+            </div>
+            {cacheLoading ? (
+              <div className="flex justify-center py-10"><Loader2 size={22} className="animate-spin" style={{ color: 'var(--color-primary-600)' }} /></div>
+            ) : cacheRows.length === 0 ? (
+              <p className="text-sm text-center py-10" style={{ color: 'var(--color-text-tertiary)' }}>
+                No {cacheFilter === 'all' ? '' : `${cacheFilter} `}numbers searched yet.
+              </p>
+            ) : (
+              <div className="overflow-x-auto max-h-[calc(100vh-16rem)] overflow-y-auto">
+                <table className="w-full text-sm">
+                  <thead><tr style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
+                    {['Number', 'Verdict', 'Lists', 'Searched by', 'Source', 'Times', 'Last searched', 'Sales'].map(h => <th key={h} className="text-left px-3 py-2 text-[11px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>{h}</th>)}
+                  </tr></thead>
+                  <tbody>
+                    {cacheRows.map(n => (
+                      <tr key={n.phone} style={{ borderTop: '1px solid var(--color-border)' }}>
+                        <td className="px-3 py-2 tabular-nums font-semibold" style={{ color: 'var(--color-text)' }}>
+                          {n.phone}{n.wireless ? <span className="text-[10px] ml-1.5" style={{ color: 'var(--color-text-tertiary)' }}>wireless</span> : null}
+                        </td>
+                        <td className="px-3 py-2">
+                          <span className="text-[11px] font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: `${STATUS_COLOR[n.dnc_status]}1a`, color: STATUS_COLOR[n.dnc_status] }}>
+                            {n.message || n.dnc_status}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-[11px]" style={{ color: STATUS_COLOR[n.dnc_status] }}>{(n.codes || []).join(', ') || (n.dnc_status === 'good' ? 'clean' : '—')}</td>
+                        <td className="px-3 py-2" style={{ color: 'var(--color-text-secondary)' }}>{n.searched_by_name || n.searched_by_email || '—'}</td>
+                        <td className="px-3 py-2 text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{SOURCE_LABEL[n.last_source] || n.last_source || '—'}</td>
+                        <td className="px-3 py-2 tabular-nums" style={{ color: 'var(--color-text-secondary)' }}>{n.lookup_count}</td>
+                        <td className="px-3 py-2 text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{fmtDateTime(n.last_searched_at)}</td>
+                        <td className="px-3 py-2 tabular-nums" style={{ color: n.sales_count ? 'var(--color-text)' : 'var(--color-text-tertiary)' }}>{n.sales_count || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
+        ) : (
+        <>
         <div className="flex items-center justify-between gap-3 px-4 py-3 flex-wrap" style={{ borderBottom: '1px solid var(--color-border)' }}>
           <div className="flex items-center gap-1.5">
             {['blacklisted', 'good', 'unchecked'].map(s => (
@@ -182,6 +351,8 @@ export default function ComplianceDncReport() {
               </tbody>
             </table>
           </div>
+        )}
+        </>
         )}
       </div>
       </div>
