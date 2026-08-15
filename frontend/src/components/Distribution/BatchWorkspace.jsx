@@ -52,8 +52,9 @@ export default function BatchWorkspace({ batch, me, canSend, isSuper, onClose, o
   const [q, setQ] = useState('');
   const [loading, setLoading] = useState(true);
   const [sel, setSel] = useState(new Set());
-  const [view, setView] = useState('items');       // items | activity | lineage
+  const [view, setView] = useState('items');       // items | activity | people | lineage
   const [activity, setActivity] = useState([]);
+  const [board, setBoard] = useState(null);        // per-person scoreboard
   const [lineage, setLineage] = useState(null);
   const [assignOpen, setAssignOpen] = useState(false);
   const [noteFor, setNoteFor] = useState(null);    // item being noted
@@ -97,6 +98,11 @@ export default function BatchWorkspace({ batch, me, canSend, isSuper, onClose, o
     setView('activity');
     try { const r = await client.get(`distribution-batches/${batch.id}/activity`, { params: { limit: 200 } }); setActivity(r.data.activity || []); }
     catch { setActivity([]); }
+  };
+  const openPeople = async () => {
+    setView('people');
+    try { const r = await client.get(`distribution-batches/${batch.id}/scoreboard`); setBoard(r.data); }
+    catch { setBoard({ people: [], totals: {} }); }
   };
   const openLineage = async () => {
     try { const r = await client.get(`distribution-batches/${batch.id}/lineage`); setLineage(r.data); setView('lineage'); }
@@ -169,6 +175,7 @@ export default function BatchWorkspace({ batch, me, canSend, isSuper, onClose, o
         </div>
         <div className="ml-auto flex items-center gap-2">
           <button onClick={() => { setView('items'); load(); loadCounts(); }} className="p-2 rounded-lg" style={{ border: '1px solid var(--color-border)' }} title="Refresh"><RefreshCw size={15} className={loading ? 'animate-spin' : ''} style={{ color: 'var(--color-text-secondary)' }} /></button>
+          <button onClick={openPeople} className="text-xs font-semibold px-2.5 py-2 rounded-lg flex items-center gap-1.5" style={{ border: '1px solid var(--color-border)', color: view === 'people' ? 'var(--color-primary-600)' : 'var(--color-text)' }}><Users size={14} /> By person</button>
           <button onClick={openActivity} className="text-xs font-semibold px-2.5 py-2 rounded-lg flex items-center gap-1.5" style={{ border: '1px solid var(--color-border)', color: view === 'activity' ? 'var(--color-primary-600)' : 'var(--color-text)' }}><Activity size={14} /> Activity</button>
           <button onClick={openLineage} className="text-xs font-semibold px-2.5 py-2 rounded-lg flex items-center gap-1.5" style={{ border: '1px solid var(--color-border)', color: 'var(--color-text)' }}><GitBranch size={14} /> Lineage</button>
           {canSend && <button onClick={() => setAssignOpen(true)} className="text-sm font-bold px-3 py-2 rounded-lg flex items-center gap-1.5" style={{ background: 'var(--gradient-sidebar)', color: 'var(--color-text-inverse)' }}><Users size={15} /> Assign</button>}
@@ -179,6 +186,8 @@ export default function BatchWorkspace({ batch, me, canSend, isSuper, onClose, o
 
       {view === 'lineage' ? (
         <div className="flex-1 overflow-y-auto"><Lineage data={lineage} onBack={() => setView('items')} /></div>
+      ) : view === 'people' ? (
+        <Scoreboard board={board} onBack={() => setView('items')} />
       ) : view === 'activity' ? (
         <div className="flex-1 overflow-y-auto p-4">
           <button onClick={() => setView('items')} className="text-xs font-semibold mb-3" style={{ color: 'var(--color-primary-600)' }}>← Back to numbers</button>
@@ -317,6 +326,77 @@ export default function BatchWorkspace({ batch, me, canSend, isSuper, onClose, o
             </div>
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+// ── who is actually working this batch ────────────────────────────────────────
+// Ordered by transfers, because that is the column the manager is looking for.
+// "Worked %" is of what they were GIVEN; "Transfer %" is of what they WORKED —
+// mixing those two into one number hides the lazy-but-lucky agent.
+function Scoreboard({ board, onBack }) {
+  if (!board) return <div className="flex-1 flex items-center justify-center"><Loader2 className="animate-spin" style={{ color: 'var(--color-text-tertiary)' }} /></div>;
+  const { people = [], totals = {} } = board;
+  const bar = (pct, color) => (
+    <div className="h-1.5 rounded-full mt-1" style={{ background: 'var(--color-bg-secondary)' }}>
+      <div className="h-full rounded-full" style={{ width: `${Math.min(100, pct)}%`, background: color }} />
+    </div>
+  );
+  const cell = (v, color) => <td className="px-2 py-2 tabular-nums text-center" style={{ color: v ? (color || 'var(--color-text)') : 'var(--color-text-tertiary)' }}>{v || '—'}</td>;
+
+  return (
+    <div className="flex-1 overflow-auto p-4">
+      <button onClick={onBack} className="text-xs font-semibold mb-3" style={{ color: 'var(--color-primary-600)' }}>← Back to numbers</button>
+      {people.length === 0 ? (
+        <div className="text-sm text-center py-10" style={{ color: 'var(--color-text-tertiary)' }}>Nothing assigned yet — assign numbers and the scoreboard fills in.</div>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
+            {[['Assigned', totals.assigned, 'var(--color-text)'], ['Worked', totals.worked, '#d97706'],
+              ['Transferred', totals.transferred, '#059669'], ['Touches', totals.touches, 'var(--color-text-secondary)']].map(([l, v, c]) => (
+              <div key={l} className="rounded-xl p-3" style={{ border: '1px solid var(--color-border)', background: 'var(--color-surface)' }}>
+                <div className="text-[11px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>{l}</div>
+                <div className="text-2xl font-extrabold tabular-nums" style={{ color: c }}>{v || 0}</div>
+              </div>
+            ))}
+          </div>
+          <div className="rounded-xl overflow-x-auto" style={{ border: '1px solid var(--color-border)' }}>
+            <table className="w-full text-sm">
+              <thead><tr style={{ background: 'var(--color-surface)' }}>
+                {['Person', 'Assigned', 'Worked', 'Left', 'Transfer', 'Callback', 'Not int.', 'Ans m/c', 'No ans', 'Called', 'Touches', 'Transfer %', 'Last activity'].map((h, i) => (
+                  <th key={h} className={`px-2 py-2 text-[11px] font-bold uppercase tracking-wide whitespace-nowrap ${i === 0 ? 'text-left' : 'text-center'}`} style={{ color: 'var(--color-text-secondary)' }}>{h}</th>
+                ))}
+              </tr></thead>
+              <tbody>
+                {people.map(p => (
+                  <tr key={p.user_id} style={{ borderTop: '1px solid var(--color-border)' }}>
+                    <td className="px-2 py-2 min-w-[160px]">
+                      <div className="font-semibold" style={{ color: 'var(--color-text)' }}>{p.name}</div>
+                      <div className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{p.worked_pct}% of their list worked</div>
+                      {bar(p.worked_pct, '#d97706')}
+                    </td>
+                    {cell(p.assigned)}
+                    {cell(p.worked, '#d97706')}
+                    {cell(p.untouched, 'var(--color-text-secondary)')}
+                    {cell(p.transferred, STATUS_META.transferred.color)}
+                    {cell(p.callback, STATUS_META.callback.color)}
+                    {cell(p.not_interested, STATUS_META.not_interested.color)}
+                    {cell(p.answering_machine, STATUS_META.answering_machine.color)}
+                    {cell(p.no_answer, STATUS_META.no_answer.color)}
+                    {cell(p.called, STATUS_META.called.color)}
+                    {cell(p.touches, 'var(--color-text-secondary)')}
+                    <td className="px-2 py-2 tabular-nums text-center font-bold" style={{ color: p.transfer_pct >= 10 ? '#059669' : 'var(--color-text-secondary)' }}>{p.worked ? `${p.transfer_pct}%` : '—'}</td>
+                    <td className="px-2 py-2 text-[11px] whitespace-nowrap text-center" style={{ color: 'var(--color-text-tertiary)' }}>{fmt(p.last_activity) || 'never'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="text-[11px] mt-2" style={{ color: 'var(--color-text-tertiary)' }}>
+            Worked % = of what they were given. Transfer % = of what they actually worked. Touches counts every disposition, so a callback that later transfers shows as two.
+          </div>
+        </>
       )}
     </div>
   );

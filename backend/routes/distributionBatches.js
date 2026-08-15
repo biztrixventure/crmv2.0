@@ -567,6 +567,40 @@ router.get('/number-detail', asyncHandler(async (req, res) => {
   res.json({ found: true, phone, customer_uuid: uuid, customer, vehicles: [...vehMap.values()] });
 }));
 
+// ── GET /:id/scoreboard — who is actually working this batch ─────────────────
+// Per-person counts straight off the parent rows: the mirror trigger (254) puts
+// each fronter's live disposition there, so no child fan-out is needed.
+router.get('/:id/scoreboard', asyncHandler(async (req, res) => {
+  const { batch, error } = await loadVisibleBatch(req, req.params.id);
+  if (error) return res.status(error).json({ error: error === 404 ? 'Batch not found' : 'Not allowed' });
+  const { data, error: rErr } = await supabaseAdmin.rpc('app_batch_scoreboard', { p_batch_id: batch.id });
+  if (rErr) return res.status(500).json({ error: rErr.message });
+
+  const rows = data || [];
+  const names = await namesFor(rows.map(r => r.assigned_to));
+  const num = (v) => Number(v || 0);
+  const people = rows.map(r => {
+    const assigned = num(r.assigned), worked = num(r.worked), transferred = num(r.transferred);
+    return {
+      user_id: r.assigned_to, name: names[r.assigned_to] || '(unnamed)',
+      assigned, worked, transferred,
+      callback: num(r.callback), not_interested: num(r.not_interested),
+      answering_machine: num(r.answering_machine), no_answer: num(r.no_answer),
+      called: num(r.called), untouched: num(r.untouched), touches: num(r.touches),
+      last_activity: r.last_activity,
+      // % of what they were GIVEN that they have touched, and of what they
+      // touched that converted — the two questions a manager actually asks.
+      worked_pct:   assigned ? Math.round((worked / assigned) * 100) : 0,
+      transfer_pct: worked   ? Math.round((transferred / worked) * 100) : 0,
+    };
+  });
+  const totals = people.reduce((a, p) => ({
+    assigned: a.assigned + p.assigned, worked: a.worked + p.worked,
+    transferred: a.transferred + p.transferred, touches: a.touches + p.touches,
+  }), { assigned: 0, worked: 0, transferred: 0, touches: 0 });
+  res.json({ people, totals });
+}));
+
 // ── POST /upload — a file becomes a batch, at ANY level ──────────────────────
 // The file is parsed in the browser (the xlsx/CSV reader already used by the
 // number uploader) and posted as rows, so the server needs no multipart stack.
