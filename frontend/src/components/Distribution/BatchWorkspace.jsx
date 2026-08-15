@@ -149,10 +149,10 @@ export default function BatchWorkspace({ batch, me, canSend, isSuper, onClose, o
     finally { setBusy(false); }
   };
   const del = async () => {
-    if (!window.confirm('Delete this batch AND every sub-batch it was sent to? This cannot be undone.')) return;
+    if (!window.confirm('Delete this batch AND every sub-batch it was sent to?\n\nEveryone it was assigned to loses it. Numbers nobody has worked yet go back to unassigned so they can be dealt again. This cannot be undone.')) return;
     try {
       const r = await client.delete(`distribution-batches/${batch.id}`);
-      toast.success(`Deleted ${r.data.deleted_batches} batch(es)`);
+      toast.success(`Deleted ${r.data.deleted_batches} batch(es)${r.data.released_numbers ? ` · ${r.data.released_numbers} numbers freed to assign again` : ''}`);
       onChanged?.();
     } catch (e) { toast.error(e.response?.data?.error || 'Could not delete'); }
   };

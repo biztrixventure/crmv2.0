@@ -451,10 +451,29 @@ router.delete('/:id', asyncHandler(async (req, res) => {
   if (!b) return res.status(404).json({ error: 'Batch not found' });
   const sa = await isSuperAdmin(req.user.id);
   if (!sa && b.created_by !== req.user.id) return res.status(403).json({ error: 'Only the batch creator or a superadmin can delete it' });
+  // The subtree ids BEFORE the delete — afterwards they are just 'deleted' rows.
+  const { data: desc } = await supabaseAdmin.rpc('app_batch_descendants', { p_batch_id: b.id });
+  const subtree = [...new Set([b.id, ...(desc || []).map(d => d.id)])];
+
   const { data, error } = await supabaseAdmin.rpc('app_delete_batch_cascade', { p_batch_id: b.id, p_deleted_by: req.user.id });
   if (error) return res.status(500).json({ error: error.message });
-  logger.success('DIST_BATCH', `cascade-deleted ${b.id} + subtree (${data} batches) by ${req.user.id}`);
-  res.json({ ok: true, deleted_batches: data });
+
+  // Deleting an assignment must RELEASE the lock. The parent row keeps
+  // assigned_to pointing at someone whose batch no longer exists otherwise, and
+  // that number can never be dealt again. Only untouched rows are released — a
+  // real disposition is history and stays on the row.
+  const { data: childItems } = await supabaseAdmin.from('distribution_batch_items')
+    .select('parent_item_id').in('batch_id', subtree).not('parent_item_id', 'is', null).limit(20000);
+  const parentIds = [...new Set((childItems || []).map(c => c.parent_item_id))];
+  let released = 0;
+  for (let i = 0; i < parentIds.length; i += 500) {
+    const { data: freed } = await supabaseAdmin.from('distribution_batch_items')
+      .update({ assigned_to: null, assigned_at: null, assigned_by: null, status: 'new', updated_at: new Date().toISOString() })
+      .in('id', parentIds.slice(i, i + 500)).eq('status', 'assigned').select('id');
+    released += (freed || []).length;
+  }
+  logger.success('DIST_BATCH', `cascade-deleted ${b.id} + subtree (${data} batches, ${released} numbers released) by ${req.user.id}`);
+  res.json({ ok: true, deleted_batches: data, released_numbers: released });
 }));
 
 // ── lineage: ancestor chain + descendant tree ─────────────────────────────────

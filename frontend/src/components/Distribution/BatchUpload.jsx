@@ -158,8 +158,14 @@ export default function BatchUpload({ onDone, onClose }) {
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <Field label="Phone column" value={phoneCol} onChange={setPhoneCol} />
-                <Field label="Customer name" value={nameCol} onChange={setNameCol} allowNone />
-                <Field label="Lead ID" value={leadCol} onChange={setLeadCol} allowNone />
+                <Field label="Customer name (optional)" value={nameCol} onChange={setNameCol} allowNone />
+                <Field label="Dialer lead ID (optional)" value={leadCol} onChange={setLeadCol} allowNone />
+              </div>
+
+              <div className="text-[11px] -mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
+                Only the phone column is required — numbers are matched and assigned on the phone.
+                Map the lead ID only for VICIdial exports, so a number can be traced back to the dialer record
+                (a lead id is unique per box, not across boxes). Every other column is kept and shown anyway.
               </div>
 
               <label className="block text-xs" style={{ color: 'var(--color-text-secondary)' }}>
