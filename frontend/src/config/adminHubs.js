@@ -49,11 +49,11 @@ export const ADMIN_HUBS = [
     id: 'hub-numbers',
     label: 'Numbers',
     icon: Hash,
-    subtitle: 'Phone numbers, who they belong to, and how they get distributed.',
+    subtitle: 'Upload, assign and work numbers — Batches is the whole flow.',
+    // Intelligence / Assigned Numbers / Number Assignment retired: Batches now
+    // owns upload → assignment → dispositions → reporting. Their tab ids stay in
+    // adminTabs.js (RO governance references them), they are just off the nav.
     members: [
-      { id: 'numbers',         label: 'Intelligence',      icon: Hash },
-      { id: 'roster',          label: 'Assigned Numbers',  icon: Users },
-      { id: 'number-lists',    label: 'Number Assignment', icon: PhoneCall },
       { id: 'batches',         label: 'Batches',           icon: Send },
       { id: 'note-shortcodes', label: 'Note Shortcuts',    icon: Tag },
     ],

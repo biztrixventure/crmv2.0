@@ -104,6 +104,7 @@ import ChargeFailedModal from "../components/Closer/ChargeFailedModal";
 import { usePostDateFailReasons } from "../hooks/usePostDateFailReasons";
 import { useCopyProtection } from "../hooks/useCopyProtection";
 import FronterNumbersWidget from "../components/Numbers/FronterNumbersWidget";
+import BatchInbox from "../components/Distribution/BatchInbox";
 
 const TRANSFER_BADGE = { pending: 'warning', assigned: 'info', completed: 'success', cancelled: 'error', rejected: 'error' };
 
@@ -917,6 +918,9 @@ const StaffShell = () => {
       ? [{ key: 'tracked_numbers', label: 'Tracked Numbers', icon: Hash      }] : []),
     ...(isFronter && isEnabled('number_assignment')
       ? [{ key: 'numbers',        label: 'My Numbers',      icon: Hash       }] : []),
+    // Batches assigned to this fronter — the same workspace their manager sees,
+    // minus the assign controls: work the numbers, disposition them, add notes.
+    ...(isFronter ? [{ key: 'batches',        label: 'Batches',         icon: Hash       }] : []),
     ...(hasPermission('search_sales') && isEnabled('search_sales')
       ? [{ key: 'search',         label: 'Search Sales',    icon: Search     }] : []),
     { key: 'faqs',              label: 'FAQs',            icon: HelpCircle },
@@ -1147,6 +1151,7 @@ const StaffShell = () => {
         {activeTab === 'team_callbacks'  && <CallbacksOverview user={user} companyId={user?.company_id} />}
         {activeTab === 'tracked_numbers' && <CallbackNumbers user={user} />}
         {activeTab === 'numbers'         && <AssignedNumbersList user={user} />}
+        {activeTab === 'batches'         && <BatchInbox />}
         {activeTab === 'search'          && <SaleSearch />}
         {activeTab === 'faqs'            && <FAQPanel />}
         {activeTab === 'scripts'         && <ScriptPanel />}

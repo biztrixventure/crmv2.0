@@ -169,12 +169,12 @@ const AdminPanel = () => {
     ...(isSAorRO && hasPermission('manage_forms')      ? [{ id: "forms",          label: "Form Builder"         }] : []),
     ...(hasPermission('search_sales')                  ? [{ id: "sale-search",    label: "Lead Search"          }] : []),
     ...(isSAorRO                                       ? [{ id: "customer-profiles", label: "Customer Profiles"  }] : []),
-    ...(isSAorRO                                       ? [{ id: "numbers",        label: "Numbers Intelligence" }] : []),
     ...(isSAorRO                                       ? [{ id: "data-analyzer",  label: "Data Analyzer"        }] : []),
-    // Batch distribution inbox — superadmin manages their own sent batches
-    // (created_by=me) + an "All" view (BatchInbox's built-in superadmin scoping).
+    // Numbers Intelligence / Assigned Numbers / Number Assignment are retired
+    // from the nav: Batches is now the one place numbers are uploaded, assigned,
+    // worked and reported on. The tab ids + renderers stay so old deep-links and
+    // the readonly-admin governance rows keep resolving.
     ...(user?.role === 'superadmin'                    ? [{ id: "batches",        label: "Batches"              }] : []),
-    ...(user?.role === 'superadmin'                    ? [{ id: "roster",         label: "Assigned Numbers"     }] : []),
     ...(user?.role === 'superadmin'                    ? [{ id: "note-shortcodes",label: "Note Shortcuts"       }] : []),
     // Data Cleanup is a destructive batch tool — superadmin only (never RO).
     ...(user?.role === 'superadmin'                    ? [{ id: "data-cleanup",   label: "Data Cleanup"         }] : []),

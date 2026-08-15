@@ -179,14 +179,52 @@ router.get('/roster', asyncHandler(async (req, res) => {
   res.json({ roster, total, limit, offset });
 }));
 
-// ── one batch's items ─────────────────────────────────────────────────────────
+// ── one batch's items — paged, filtered, with every column the file carried ───
+// A batch is routinely 1000+ rows, so this pages through app_batch_items (254)
+// instead of dumping the table. `columns` is the uploaded file's header order so
+// the UI renders the extra fields in the order the user saw them in Excel.
 router.get('/:id/items', asyncHandler(async (req, res) => {
   const { batch, error } = await loadVisibleBatch(req, req.params.id);
   if (error) return res.status(error).json({ error: error === 404 ? 'Batch not found' : 'Not allowed' });
-  const { data: items } = await supabaseAdmin.from('distribution_batch_items')
-    .select('id, phone_number, lead_id, customer_name, status, notes, exclusion_reason, created_at')
-    .eq('batch_id', batch.id).order('created_at', { ascending: true });
-  res.json({ batch: { id: batch.id, name: batch.name, item_count: batch.item_count }, items: items || [] });
+  const limit  = Math.min(parseInt(req.query.limit, 10) || 100, 1000);
+  const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+
+  const { data, error: rErr } = await supabaseAdmin.rpc('app_batch_items', {
+    p_batch_id: batch.id,
+    p_status:   req.query.status || null,
+    p_search:   (req.query.q || '').trim() || null,
+    p_assigned: ['yes', 'no'].includes(req.query.assigned) ? req.query.assigned : null,
+    p_limit: limit, p_offset: offset,
+  });
+  if (rErr) return res.status(500).json({ error: rErr.message });
+
+  const rows = data || [];
+  const total = rows.length ? Number(rows[0].total_count) : 0;
+  const names = await namesFor(rows.flatMap(r => [r.assigned_to, r.assigned_by]));
+  res.json({
+    batch: {
+      id: batch.id, name: batch.name, item_count: batch.item_count, source: batch.source,
+      columns: batch.columns || [], file_name: batch.file_name || null,
+      created_by: batch.created_by, sent_to_user_id: batch.sent_to_user_id, sent_at: batch.sent_at,
+    },
+    items: rows.map(({ total_count, ...r }) => ({
+      ...r,
+      assigned_to_name: names[r.assigned_to] || null,
+      assigned_by_name: names[r.assigned_by] || null,
+    })),
+    total, limit, offset,
+  });
+}));
+
+// ── disposition counts — drives the status tabs above the item table ─────────
+router.get('/:id/status-counts', asyncHandler(async (req, res) => {
+  const { batch, error } = await loadVisibleBatch(req, req.params.id);
+  if (error) return res.status(error).json({ error: error === 404 ? 'Batch not found' : 'Not allowed' });
+  const { data, error: rErr } = await supabaseAdmin.rpc('app_batch_status_counts', { p_batch_id: batch.id });
+  if (rErr) return res.status(500).json({ error: rErr.message });
+  const counts = {}; let total = 0, assigned = 0;
+  (data || []).forEach(r => { counts[r.status] = Number(r.n); total += Number(r.n); assigned += Number(r.assigned); });
+  res.json({ counts, total, assigned, unassigned: total - assigned });
 }));
 
 // ── sub-batch: COPY selected (or all) items into a NEW child batch ────────────
@@ -440,7 +478,7 @@ router.get('/my-numbers', asyncHandler(async (req, res) => {
   if (!ids.length) return res.json({ numbers: [] });
   const nameById = Object.fromEntries((myBatches || []).map(b => [b.id, b.name]));
   const { data: items } = await supabaseAdmin.from('distribution_batch_items')
-    .select('id, phone_number, customer_name, status, notes, batch_id, position, lead_id, created_at')
+    .select('id, phone_number, customer_name, status, notes, batch_id, position, lead_id, created_at, data, assigned_to, worked_at')
     .in('batch_id', ids).neq('status', 'excluded')   // fronter never sees rule-excluded numbers
     .order('created_at', { ascending: false }).limit(2000);
   // list_name = the batch name so the #Numbers page can group batch items like
@@ -529,19 +567,289 @@ router.get('/number-detail', asyncHandler(async (req, res) => {
   res.json({ found: true, phone, customer_uuid: uuid, customer, vehicles: [...vehMap.values()] });
 }));
 
+// ── POST /upload — a file becomes a batch, at ANY level ──────────────────────
+// The file is parsed in the browser (the xlsx/CSV reader already used by the
+// number uploader) and posted as rows, so the server needs no multipart stack.
+// EVERY column the file carried is kept verbatim in item.data — the fronter
+// working the number sees the same record the uploader saw.
+const MAX_UPLOAD_ROWS = 20000;
+router.post('/upload', asyncHandler(async (req, res) => {
+  if (!canSend(req)) return res.status(403).json({ error: 'Not allowed to create batches' });
+  const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
+  if (!rows.length) return res.status(400).json({ error: 'No rows to upload' });
+  if (rows.length > MAX_UPLOAD_ROWS) return res.status(400).json({ error: `Max ${MAX_UPLOAD_ROWS} rows per upload — split the file` });
+
+  const name = String(req.body.name || req.body.file_name || 'Uploaded batch').slice(0, 200);
+  const columns = Array.isArray(req.body.columns) ? req.body.columns.map(c => String(c).slice(0, 120)) : [];
+  // recipient is OPTIONAL: no recipient = the batch stays with the uploader to
+  // assign from (the 1000-number pool the whole feature is built around).
+  const recipientId = req.body.recipient_id || req.user.id;
+
+  const { data: rcr } = await supabaseAdmin.from('user_company_roles')
+    .select('company_id').eq('user_id', recipientId).eq('is_active', true)
+    .order('created_at', { ascending: true }).limit(1).maybeSingle();
+
+  // normalize + dedupe on phone (the CRM's unit of distribution — see 153)
+  const seen = new Set(); const clean = [];
+  for (const r of rows) {
+    const phone = digits(r.phone ?? r.phone_number ?? '');
+    if (phone.length < 10 || seen.has(phone)) continue;
+    seen.add(phone);
+    const data = (r.data && typeof r.data === 'object') ? r.data : {};
+    clean.push({
+      phone_number: phone.length === 11 && phone[0] === '1' ? phone.slice(1) : phone,
+      lead_id: r.lead_id ? String(r.lead_id).slice(0, 60) : null,
+      customer_name: r.customer_name ? String(r.customer_name).slice(0, 200) : null,
+      data,
+    });
+  }
+  if (!clean.length) return res.status(400).json({ error: 'No valid phone numbers found in the file' });
+
+  const { data: batch, error: bErr } = await supabaseAdmin.from('distribution_batches').insert({
+    name, created_by: req.user.id, parent_batch_id: null, source: 'upload',
+    sent_to_user_id: recipientId, company_id: rcr?.company_id || req.user.company_id || null,
+    item_count: clean.length, file_name: req.body.file_name || null, columns,
+  }).select().single();
+  if (bErr) return res.status(500).json({ error: bErr.message });
+
+  // chunked insert — a 20k-row single insert trips PostgREST's payload ceiling
+  const CH = 500;
+  for (let i = 0; i < clean.length; i += CH) {
+    const slice = clean.slice(i, i + CH).map((c, idx) => ({ batch_id: batch.id, position: i + idx + 1, ...c }));
+    const { error: iErr } = await supabaseAdmin.from('distribution_batch_items').insert(slice);
+    if (iErr) {
+      await supabaseAdmin.from('distribution_batches').delete().eq('id', batch.id);   // rollback
+      return res.status(500).json({ error: iErr.message });
+    }
+  }
+  logger.success('DIST_BATCH', `upload ${batch.id} "${name}" — ${clean.length} numbers by ${req.user.id}`);
+  res.status(201).json({ batch, imported: clean.length, skipped: rows.length - clean.length });
+}));
+
+// ── POST /:id/assign — hand numbers DOWN, and lock them to that person ───────
+// One endpoint covering every way the user asked to assign:
+//   • explicit rows            → assignments:[{recipient_id, item_ids:[…]}]
+//   • N per person             → assignments:[{recipient_id, count:100}, …]
+//   • even split across people → assignments:[{recipient_id}, …] + split:'even'
+// Only UNASSIGNED rows are ever dealt, so a number can never reach two fronters.
+// The parent batch keeps every row (upper command still sees all 1000) — the row
+// just gains the holder's name and flips to 'assigned'.
+router.post('/:id/assign', asyncHandler(async (req, res) => {
+  if (!canSend(req)) return res.status(403).json({ error: 'Not allowed to assign' });
+  const { batch, error } = await loadVisibleBatch(req, req.params.id);
+  if (error) return res.status(error).json({ error: error === 404 ? 'Batch not found' : 'Not allowed' });
+
+  const list = Array.isArray(req.body?.assignments) ? req.body.assignments.filter(a => a && a.recipient_id) : [];
+  if (!list.length) return res.status(400).json({ error: 'At least one recipient is required' });
+  const mode = req.body.mode === 'random' ? 'random' : 'sequential';
+
+  // The assignable pool: unassigned, not rule-excluded, in batch order.
+  const { data: poolRows } = await supabaseAdmin.from('distribution_batch_items')
+    .select('id, phone_number, lead_id, customer_name, data, position, status, assigned_to')
+    .eq('batch_id', batch.id).is('assigned_to', null).neq('status', 'excluded')
+    .order('position', { ascending: true, nullsFirst: false }).order('created_at', { ascending: true })
+    .limit(MAX_UPLOAD_ROWS);
+  let pool = poolRows || [];
+  if (!pool.length) return res.status(400).json({ error: 'Every number in this batch is already assigned' });
+  if (mode === 'random') shuffleInPlace(pool);
+
+  // explicit ids first (they name their own rows), then count/even from the rest
+  const byId = new Map(pool.map(p => [p.id, p]));
+  const taken = new Set();
+  const plan = list.map(a => {
+    const ids = Array.isArray(a.item_ids) ? a.item_ids.filter(id => byId.has(id) && !taken.has(id)) : [];
+    ids.forEach(id => taken.add(id));
+    return { recipient_id: a.recipient_id, items: ids.map(id => byId.get(id)), count: a.count != null ? Math.max(0, parseInt(a.count, 10) || 0) : null };
+  });
+  const rest = pool.filter(p => !taken.has(p.id));
+  const needCount = plan.filter(p => !p.items.length);
+  if (needCount.length) {
+    // explicit counts where given; the rest share what's left evenly
+    const explicit = needCount.filter(p => p.count != null);
+    const evenPeople = needCount.filter(p => p.count == null);
+    const explicitTotal = explicit.reduce((a, p) => a + p.count, 0);
+    if (explicitTotal > rest.length) return res.status(400).json({ error: `Only ${rest.length} unassigned numbers left — asked for ${explicitTotal}` });
+    let idx = 0;
+    explicit.forEach(p => { p.items = rest.slice(idx, idx + p.count); idx += p.count; });
+    if (evenPeople.length) {
+      const remaining = rest.slice(idx);
+      const base = Math.floor(remaining.length / evenPeople.length), rem = remaining.length % evenPeople.length;
+      let j = 0;
+      evenPeople.forEach((p, i) => { const take = base + (i < rem ? 1 : 0); p.items = remaining.slice(j, j + take); j += take; });
+    }
+  }
+
+  const cmap = await recipientCompanies(plan.map(p => p.recipient_id));
+  const created = []; const summary = [];
+  try {
+    for (const part of plan) {
+      if (!part.items.length) continue;
+      const companyId = cmap[part.recipient_id] || batch.company_id || null;
+      const { data: child, error: bErr } = await supabaseAdmin.from('distribution_batches').insert({
+        name: `${batch.name} → assigned`, created_by: req.user.id, parent_batch_id: batch.id, source: 'sub_batch',
+        sent_to_user_id: part.recipient_id, company_id: companyId, item_count: part.items.length,
+        columns: batch.columns || [],
+      }).select().single();
+      if (bErr) throw new Error(bErr.message);
+      created.push(child.id);
+
+      // child rows carry the file's data AND point back at the parent row, so a
+      // disposition set downstream mirrors up the chain (trigger, mig 254).
+      const rows = part.items.map((it, idx) => ({
+        batch_id: child.id, position: idx + 1, parent_item_id: it.id,
+        phone_number: it.phone_number, lead_id: it.lead_id || null, customer_name: it.customer_name || null,
+        data: it.data || {}, status: 'assigned',
+        assigned_to: part.recipient_id, assigned_at: new Date().toISOString(), assigned_by: req.user.id,
+      }));
+      const { data: inserted, error: iErr } = await supabaseAdmin.from('distribution_batch_items').insert(rows).select('id, parent_item_id');
+      if (iErr) throw new Error(iErr.message);
+
+      // the LOCK: stamp the parent rows so nobody can deal them twice
+      const parentIds = part.items.map(i => i.id);
+      await supabaseAdmin.from('distribution_batch_items').update({
+        assigned_to: part.recipient_id, assigned_at: new Date().toISOString(), assigned_by: req.user.id,
+        status: 'assigned', updated_at: new Date().toISOString(),
+      }).in('id', parentIds).is('assigned_to', null);
+
+      const events = (inserted || []).map(r => ({
+        item_id: r.parent_item_id, batch_id: batch.id, actor_id: req.user.id,
+        action: 'assigned', to_status: 'assigned', note: null,
+      }));
+      if (events.length) await supabaseAdmin.from('distribution_batch_item_events').insert(events).then(() => {}, () => {});
+
+      notifications.notifyUsers([part.recipient_id], {
+        type: 'batch_received', title: 'Numbers assigned to you',
+        message: `${req.user.name || 'A manager'} assigned you ${part.items.length} numbers from "${batch.name}".`,
+        companyId, data: { batch_id: child.id, kind: 'distribution_batch' }, dedupBase: `batch_${child.id}`,
+      }).catch(() => {});
+      summary.push({ batch_id: child.id, recipient_id: part.recipient_id, item_count: part.items.length });
+    }
+  } catch (e) {
+    if (created.length) await supabaseAdmin.from('distribution_batches').delete().in('id', created);
+    return res.status(500).json({ error: e.message });
+  }
+  const assigned = summary.reduce((a, s) => a + s.item_count, 0);
+  logger.success('DIST_BATCH', `assign ${batch.id} → ${summary.length} recipients, ${assigned} numbers, by ${req.user.id}`);
+  res.status(201).json({ assigned, children: summary, remaining_unassigned: pool.length - assigned });
+}));
+
+// ── POST /:id/unassign — take numbers back (the lock is reversible) ──────────
+router.post('/:id/unassign', asyncHandler(async (req, res) => {
+  if (!canSend(req)) return res.status(403).json({ error: 'Not allowed' });
+  const { batch, error } = await loadVisibleBatch(req, req.params.id);
+  if (error) return res.status(error).json({ error: error === 404 ? 'Batch not found' : 'Not allowed' });
+  const itemIds = Array.isArray(req.body?.item_ids) ? req.body.item_ids.filter(Boolean) : [];
+  if (!itemIds.length) return res.status(400).json({ error: 'item_ids is required' });
+  // only rows nobody has worked yet — a disposition is history, not a draft
+  const { data, error: uErr } = await supabaseAdmin.from('distribution_batch_items')
+    .update({ assigned_to: null, assigned_at: null, assigned_by: null, status: 'new', updated_at: new Date().toISOString() })
+    .eq('batch_id', batch.id).in('id', itemIds).eq('status', 'assigned').select('id');
+  if (uErr) return res.status(500).json({ error: uErr.message });
+  res.json({ unassigned: (data || []).length, skipped: itemIds.length - (data || []).length });
+}));
+
+// ── GET /:id/activity — every action on every number in this batch ───────────
+// The "higher command sees every activity" view: assignment stamps and fronter
+// dispositions, newest first, with names resolved.
+router.get('/:id/activity', asyncHandler(async (req, res) => {
+  const { batch, error } = await loadVisibleBatch(req, req.params.id);
+  if (error) return res.status(error).json({ error: error === 404 ? 'Batch not found' : 'Not allowed' });
+  const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
+
+  // events on this batch's rows AND on its descendants' rows (the fronter works
+  // the child row, so that is where the disposition event is written).
+  const { data: desc } = await supabaseAdmin.rpc('app_batch_descendants', { p_batch_id: batch.id });
+  const batchIds = [...new Set([batch.id, ...(desc || []).map(d => d.id)])];
+  const { data: rows, error: eErr } = await supabaseAdmin.from('distribution_batch_item_events')
+    .select('id, item_id, batch_id, actor_id, action, from_status, to_status, note, created_at')
+    .in('batch_id', batchIds).order('created_at', { ascending: false }).limit(limit);
+  if (eErr) return res.status(500).json({ error: eErr.message });
+
+  const list = rows || [];
+  const names = await namesFor(list.map(e => e.actor_id));
+  const itemIds = [...new Set(list.map(e => e.item_id))];
+  const phoneById = {};
+  if (itemIds.length) {
+    const { data: its } = await supabaseAdmin.from('distribution_batch_items').select('id, phone_number, customer_name').in('id', itemIds);
+    (its || []).forEach(i => { phoneById[i.id] = { phone_number: i.phone_number, customer_name: i.customer_name }; });
+  }
+  res.json({ activity: list.map(e => ({ ...e, actor_name: names[e.actor_id] || null, ...(phoneById[e.item_id] || {}) })) });
+}));
+
+// ── GET /items/:id/events — one number's full history ────────────────────────
+router.get('/items/:id/events', asyncHandler(async (req, res) => {
+  const { data: rows } = await supabaseAdmin.from('distribution_batch_item_events')
+    .select('id, actor_id, action, from_status, to_status, note, created_at')
+    .eq('item_id', req.params.id).order('created_at', { ascending: false }).limit(100);
+  const list = rows || [];
+  const names = await namesFor(list.map(e => e.actor_id));
+  res.json({ events: list.map(e => ({ ...e, actor_name: names[e.actor_id] || null })) });
+}));
+
 // ── item status / notes update (from the PIP widget) ──────────────────────────
+// Fronter dispositions live here. The disposition mirrors UP the parent chain
+// (trigger, mig 254) so every level above reads the outcome on the row it
+// already has open, and each change is written to the event log so the history
+// survives the next disposition.
+const ITEM_STATUSES = ['new', 'assigned', 'called', 'callback', 'completed', 'skip', 'transferred',
+                       'not_interested', 'answering_machine', 'no_answer'];
 router.put('/items/:id', asyncHandler(async (req, res) => {
-  const { data: item } = await supabaseAdmin.from('distribution_batch_items').select('id, batch_id').eq('id', req.params.id).maybeSingle();
+  const { data: item } = await supabaseAdmin.from('distribution_batch_items').select('id, batch_id, status, notes, assigned_to').eq('id', req.params.id).maybeSingle();
   if (!item) return res.status(404).json({ error: 'Item not found' });
   const { data: b } = await supabaseAdmin.from('distribution_batches').select('sent_to_user_id, created_by, status').eq('id', item.batch_id).maybeSingle();
   const sa = await isSuperAdmin(req.user.id);
-  if (!sa && b?.sent_to_user_id !== req.user.id && b?.created_by !== req.user.id) return res.status(403).json({ error: 'Not allowed' });
+  if (!sa && b?.sent_to_user_id !== req.user.id && b?.created_by !== req.user.id && item.assigned_to !== req.user.id) {
+    return res.status(403).json({ error: 'Not allowed' });
+  }
   const patch = { updated_at: new Date().toISOString() };
-  if (req.body.status && ['new', 'called', 'callback', 'completed', 'skip', 'transferred'].includes(req.body.status)) patch.status = req.body.status;
+  if (req.body.status && ITEM_STATUSES.includes(req.body.status)) { patch.status = req.body.status; patch.worked_at = new Date().toISOString(); }
   if (req.body.notes !== undefined) patch.notes = req.body.notes ? String(req.body.notes).slice(0, 2000) : null;
   const { data, error } = await supabaseAdmin.from('distribution_batch_items').update(patch).eq('id', item.id).select().single();
   if (error) return res.status(500).json({ error: error.message });
+
+  const events = [];
+  if (patch.status && patch.status !== item.status) {
+    events.push({ item_id: item.id, batch_id: item.batch_id, actor_id: req.user.id, action: 'status', from_status: item.status, to_status: patch.status, note: patch.notes ?? null });
+  } else if (patch.notes !== undefined && patch.notes !== item.notes) {
+    events.push({ item_id: item.id, batch_id: item.batch_id, actor_id: req.user.id, action: 'note', note: patch.notes });
+  }
+  if (events.length) await supabaseAdmin.from('distribution_batch_item_events').insert(events).then(() => {}, () => {});
   res.json({ item: data });
+}));
+
+// ── PUT /items/bulk — disposition or note many rows at once ──────────────────
+router.put('/items-bulk/apply', asyncHandler(async (req, res) => {
+  const ids = Array.isArray(req.body?.item_ids) ? req.body.item_ids.filter(Boolean).slice(0, 1000) : [];
+  if (!ids.length) return res.status(400).json({ error: 'item_ids is required' });
+  const status = ITEM_STATUSES.includes(req.body?.status) ? req.body.status : null;
+  const notes = req.body?.notes !== undefined ? (req.body.notes ? String(req.body.notes).slice(0, 2000) : null) : undefined;
+  if (!status && notes === undefined) return res.status(400).json({ error: 'Nothing to apply' });
+
+  const { data: rows } = await supabaseAdmin.from('distribution_batch_items')
+    .select('id, batch_id, status, assigned_to').in('id', ids);
+  const items = rows || [];
+  if (!items.length) return res.status(404).json({ error: 'No matching items' });
+
+  const sa = await isSuperAdmin(req.user.id);
+  const batchIds = [...new Set(items.map(i => i.batch_id))];
+  const { data: batches } = await supabaseAdmin.from('distribution_batches').select('id, sent_to_user_id, created_by').in('id', batchIds);
+  const okBatch = new Set((batches || []).filter(b => sa || b.sent_to_user_id === req.user.id || b.created_by === req.user.id).map(b => b.id));
+  const allowed = items.filter(i => okBatch.has(i.batch_id) || i.assigned_to === req.user.id);
+  if (!allowed.length) return res.status(403).json({ error: 'Not allowed' });
+
+  const patch = { updated_at: new Date().toISOString() };
+  if (status) { patch.status = status; patch.worked_at = new Date().toISOString(); }
+  if (notes !== undefined) patch.notes = notes;
+  const { error } = await supabaseAdmin.from('distribution_batch_items').update(patch).in('id', allowed.map(i => i.id));
+  if (error) return res.status(500).json({ error: error.message });
+
+  const events = allowed.map(i => ({
+    item_id: i.id, batch_id: i.batch_id, actor_id: req.user.id,
+    action: status ? 'status' : 'note', from_status: status ? i.status : null, to_status: status || null,
+    note: notes ?? null,
+  }));
+  await supabaseAdmin.from('distribution_batch_item_events').insert(events).then(() => {}, () => {});
+  res.json({ updated: allowed.length, skipped: ids.length - allowed.length });
 }));
 
 module.exports = router;

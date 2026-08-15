@@ -41,7 +41,7 @@ import CompanyPerformance from "../components/Manager/CompanyPerformance";
 const TAB_GROUPS = [
   { id: 'g_overview',  label: 'Overview',  icon: TrendingUp, tabs: ['overview'] },
   { id: 'g_records',   label: 'Records',   icon: Database,   tabs: ['transfers', 'team_sales', 'my_sales', 'search', 'activity_log'] },
-  { id: 'g_callbacks', label: 'Callbacks', icon: Phone,      tabs: ['callbacks', 'numbers', 'batches', 'roster'] },
+  { id: 'g_callbacks', label: 'Callbacks', icon: Phone,      tabs: ['callbacks', 'numbers', 'batches'] },
   { id: 'g_team',      label: 'Team',      icon: Users,      tabs: ['my_team', 'teams', 'quota_report', 'spiffs'] },
   { id: 'g_resources', label: 'Resources', icon: HelpCircle, tabs: ['faqs', 'scripts', 'note_shortcodes'] },
   { id: 'g_tools',     label: 'Tools',     icon: Shield,     tabs: ['tool_customer_profiles', 'tool_data_analyzer', 'tool_chat_control', 'dnc', 'card_validator'] },
@@ -312,8 +312,9 @@ const ManagerShell = ({ workspaceMode = false }) => {
     ...(['company_admin', 'operations_manager', 'closer_manager', 'fronter_manager', 'manager'].includes(user?.role)
       ? [{ key: 'quota_report', label: 'Quotas',       icon: Target     }] : []),
     { key: 'activity_log', label: 'Activity Log', icon: Activity },
+    // Batches = upload → assign → dispositions → reporting, one surface.
+    // "Assigned Numbers" is retired from the nav (renderer kept for deep-links).
     { key: 'batches',      label: 'Batches',      icon: Send },
-    { key: 'roster',       label: 'Assigned Numbers', icon: Hash },
     { key: 'note_shortcodes', label: 'Note Shortcuts', icon: FileText },
     { key: 'faqs',         label: 'FAQs',         icon: HelpCircle },
     { key: 'scripts',      label: 'Scripts',      icon: FileText },
@@ -351,7 +352,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
   // never renamed or deleted) because readonly-admin governance stores them.
   const coType    = user?.company_type || null;
   const isCoAdmin = user?.role === 'company_admin';
-  const FRONTER_SIDE_TABS = ['numbers', 'batches', 'roster'];
+  const FRONTER_SIDE_TABS = ['numbers', 'batches'];
   const CLOSER_SIDE_TABS  = ['search', 'dnc', 'card_validator'];
   const sideAllowsTab = useCallback((key) => {
     if (!isCoAdmin || !coType) return true;
@@ -1312,7 +1313,8 @@ const ManagerShell = ({ workspaceMode = false }) => {
         {activeTab === 'numbers'   && (
           <div className="space-y-6">
             {isEnabled('callback_numbers') && <CallbackNumbers user={user} />}
-            {isEnabled('number_assignment') && hasPermission('manage_callback_numbers') && <NumberUploadManager companyId={companyId} />}
+            {/* Number Assignment (day-scoped number_lists) retired — uploading and
+                assigning numbers now happens in Batches. */}
           </div>
         )}
         {activeTab === 'search'    && <SaleSearch />}

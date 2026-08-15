@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Phone, RefreshCw, X, Copy, Check, PhoneCall, Clock, CheckCircle, SkipForward, StickyNote, Info } from 'lucide-react';
+import { Phone, RefreshCw, X, Copy, Check, PhoneCall, Clock, CheckCircle, SkipForward, StickyNote, Info,
+  PhoneForwarded, ThumbsDown, Voicemail, PhoneOff } from 'lucide-react';
 import client from '../../api/client';
 import NumberDetail, { PIP_PALETTE } from './NumberDetail';
 
@@ -43,13 +44,20 @@ function copyToClipboard(text, win) {
 }
 
 const STATUS = {
-  new:       { l: 'New',      c: '#2563eb', bg: '#eff6ff' },
-  called:    { l: 'Called',   c: '#d97706', bg: '#fef3c7' },
-  callback:  { l: 'Callback', c: '#7c3aed', bg: '#f3e8ff' },
-  completed: { l: 'Done',     c: '#059669', bg: '#d1fae5' },
-  skip:      { l: 'Skip',     c: '#6b7280', bg: '#f3f4f6' },
+  new:               { l: 'New',         c: '#2563eb', bg: '#eff6ff' },
+  assigned:          { l: 'Assigned',    c: '#4f46e5', bg: '#eef2ff' },
+  called:            { l: 'Called',      c: '#d97706', bg: '#fef3c7' },
+  callback:          { l: 'Callback',    c: '#7c3aed', bg: '#f3e8ff' },
+  transferred:       { l: 'Transferred', c: '#059669', bg: '#d1fae5' },
+  not_interested:    { l: 'Not int.',    c: '#dc2626', bg: '#fee2e2' },
+  answering_machine: { l: 'Ans. m/c',    c: '#0891b2', bg: '#cffafe' },
+  no_answer:         { l: 'No answer',   c: '#64748b', bg: '#f1f5f9' },
+  completed:         { l: 'Done',        c: '#059669', bg: '#d1fae5' },
+  skip:              { l: 'Skip',        c: '#6b7280', bg: '#f3f4f6' },
 };
-const FILTERS = ['all', 'new', 'called', 'callback', 'completed'];
+// The outcome chips a fronter works through — same set as the batch workspace,
+// so a number dispositioned here lands in that tab for everyone above.
+const FILTERS = ['all', 'new', 'assigned', 'called', 'callback', 'transferred', 'not_interested', 'answering_machine', 'no_answer'];
 
 // Per-number note editor with "/" shortcode autocomplete. INLINE styles only
 // (lives inside the PiP window, which has none of the app CSS). Mirrors the
@@ -237,10 +245,12 @@ function NumbersBody({ numbers, loading, filter, setFilter, onCopy, copied, onSt
               </div>
               {n.customer_name && <div style={{ fontSize: 11, color: C.sub, marginTop: 2 }}>{n.customer_name}</div>}
               <div style={{ display: 'flex', gap: 2, marginTop: 4, alignItems: 'center' }}>
+                {act(n, 'transferred', PhoneForwarded, '#059669', 'Transferred')}
+                {act(n, 'callback', Clock, '#7c3aed', 'Callback')}
+                {act(n, 'not_interested', ThumbsDown, '#dc2626', 'Not interested')}
+                {act(n, 'answering_machine', Voicemail, '#0891b2', 'Answering machine')}
+                {act(n, 'no_answer', PhoneOff, '#64748b', 'No answer')}
                 {act(n, 'called', PhoneCall, '#d97706', 'Mark Called')}
-                {act(n, 'callback', Clock, '#7c3aed', 'Mark Callback')}
-                {act(n, 'completed', CheckCircle, '#059669', 'Mark Done')}
-                {act(n, 'skip', SkipForward, '#6b7280', 'Skip')}
                 <button onClick={() => setDetail(n)} title="Lead detail — last fronter/closer + history"
                   style={{ border: 'none', background: 'transparent', padding: 4, borderRadius: 6, cursor: 'pointer', display: 'flex', marginLeft: 'auto' }}>
                   <Info size={14} color="#4f46e5" />

@@ -5,7 +5,7 @@ import client from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 import FilterBar from '../UI/FilterBar';
 import ThemedSelect from '../UI/Select';
-import { Lineage } from './BatchInbox';
+import { Lineage } from './BatchLineage';
 import { TableScroll } from "../UI/kit";
 
 const PAGE = 100;

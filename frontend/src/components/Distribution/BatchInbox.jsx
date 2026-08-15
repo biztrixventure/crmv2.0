@@ -1,19 +1,15 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import {
-  Boxes, Loader2, RefreshCw, X, Send, Trash2, GitBranch, Inbox, Upload, Globe,
-  CheckCircle2, Circle, ChevronRight, ArrowDownRight, Ban, Filter, Split, Shuffle,
-} from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { Boxes, Loader2, RefreshCw, Inbox, Upload, Globe, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
 import client from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
-import UserPicker from './UserPicker';
-import RulePreview from './RulePreview';
+import BatchWorkspace from './BatchWorkspace';
+import BatchUpload from './BatchUpload';
 import FilterBar from '../UI/FilterBar';
 import ThemedSelect from '../UI/Select';
 import { TableScroll } from "../UI/kit";
 
 const SENDER_ROLES = new Set(['superadmin', 'compliance_manager', 'fronter_manager', 'closer_manager', 'operations_manager', 'company_admin']);
-const EX_REASON = { already_assigned: 'already assigned', transferred_by_you: 'they transferred it', transferred_by_anyone: 'transferred by someone' };
 const fmt = (d) => { try { return d ? new Date(d).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : ''; } catch { return d || ''; } };
 
 // Batch distribution inbox — receive, re-batch (sub-batch = copy downstream),
@@ -30,6 +26,7 @@ export default function BatchInbox() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [active, setActive] = useState(null);   // batch being viewed
+  const [uploadOpen, setUploadOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -75,7 +72,13 @@ export default function BatchInbox() {
       <div className="flex items-center gap-2">
         <Boxes size={18} style={{ color: 'var(--color-primary-600)' }} />
         <h2 className="text-lg font-bold" style={{ color: 'var(--color-text)' }}>Batch Distribution</h2>
-        <button onClick={load} className="ml-auto p-2 rounded-lg" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }} title="Refresh">
+        {canSend && (
+          <button onClick={() => setUploadOpen(true)} className="ml-auto text-sm font-bold px-3 py-2 rounded-lg flex items-center gap-1.5"
+            style={{ background: 'var(--gradient-sidebar)', color: 'var(--color-text-inverse)' }}>
+            <Upload size={15} /> Upload file
+          </button>
+        )}
+        <button onClick={load} className={`${canSend ? '' : 'ml-auto '}p-2 rounded-lg`} style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }} title="Refresh">
           <RefreshCw size={15} className={loading ? 'animate-spin' : ''} style={{ color: 'var(--color-text-secondary)' }} />
         </button>
       </div>
@@ -115,252 +118,8 @@ export default function BatchInbox() {
         </table>
       </TableScroll>
 
-      {active && <BatchDetail batch={active} me={user} canSend={canSend} isSuper={isSuper} onClose={() => setActive(null)} onChanged={() => { setActive(null); load(); }} />}
-    </div>
-  );
-}
-
-// ── one batch: items + sub-batch + lineage + delete ───────────────────────────
-function BatchDetail({ batch, me, canSend, isSuper, onClose, onChanged }) {
-  const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [sel, setSel] = useState(new Set());
-  const [subOpen, setSubOpen] = useState(false);
-  const [recipient, setRecipient] = useState(null);
-  const [subName, setSubName] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [lineage, setLineage] = useState(null);
-  const [rules, setRules] = useState(null);
-  const [subPreview, setSubPreview] = useState(null);
-  const [subPreviewing, setSubPreviewing] = useState(false);
-  // Split & distribute (multi-recipient) state
-  const [splitOpen, setSplitOpen] = useState(false);
-  const [splitRecipients, setSplitRecipients] = useState([]);   // user objects
-  const [splitMode, setSplitMode] = useState('sequential');     // 'sequential' | 'random'
-  const [rangeFrom, setRangeFrom] = useState('');
-  const [rangeTo, setRangeTo] = useState('');
-  const [splitPreview, setSplitPreview] = useState(null);
-  const [splitPreviewing, setSplitPreviewing] = useState(false);
-  const [splitting, setSplitting] = useState(false);
-  const canDelete = isSuper || batch.created_by === me?.id;
-  const rulesActive = rules && (rules.block_reassign_same_person || rules.skip_if_transferred_by_recipient || rules.skip_if_transferred_by_anyone);
-  const splitRecipIds = splitRecipients.map(r => r.id);
-  const positions = items.map(i => i.position).filter(p => p != null);
-  const minPos = positions.length ? Math.min(...positions) : 1;
-  const maxPos = positions.length ? Math.max(...positions) : items.length;
-
-  useEffect(() => {
-    client.get(`distribution-batches/${batch.id}/items`).then(r => setItems(r.data.items || [])).catch(() => {}).finally(() => setLoading(false));
-    client.get('distribution-batches/rules').then(r => setRules(r.data.rules)).catch(() => {});
-  }, [batch.id]);
-
-  // dry-run rule preview when a sub-batch recipient is chosen.
-  // Y4 — recipient change / open fires immediately; selection toggles (which can
-  // fire rapidly as the user checks many boxes) are debounced ~350ms so they
-  // don't spam the preview RPC.
-  const prevRecipRef = useRef(null);
-  useEffect(() => {
-    if (!subOpen || !recipient) { setSubPreview(null); prevRecipRef.current = null; return; }
-    let cancelled = false;
-    const run = () => {
-      if (cancelled) return;
-      setSubPreviewing(true);
-      client.post(`distribution-batches/${batch.id}/sub-batch/preview`, { recipient_id: recipient.id, item_ids: sel.size ? [...sel] : undefined })
-        .then(r => { if (!cancelled) setSubPreview(r.data); }).catch(() => { if (!cancelled) setSubPreview(null); }).finally(() => { if (!cancelled) setSubPreviewing(false); });
-    };
-    const recipientChanged = prevRecipRef.current !== recipient.id;
-    prevRecipRef.current = recipient.id;
-    if (recipientChanged) { run(); return () => { cancelled = true; }; }
-    const t = setTimeout(run, 350);
-    return () => { cancelled = true; clearTimeout(t); };
-  }, [subOpen, recipient, sel, batch.id]);
-
-  // dry-run split preview (debounced): per-recipient chunk sizes + exclusion counts.
-  useEffect(() => {
-    if (!splitOpen || !splitRecipIds.length) { setSplitPreview(null); return; }
-    let cancelled = false;
-    const t = setTimeout(() => {
-      setSplitPreviewing(true);
-      client.post(`distribution-batches/${batch.id}/split/preview`, { recipient_ids: splitRecipIds, mode: splitMode, from: rangeFrom || undefined, to: rangeTo || undefined })
-        .then(r => { if (!cancelled) setSplitPreview(r.data); }).catch(() => { if (!cancelled) setSplitPreview(null); }).finally(() => { if (!cancelled) setSplitPreviewing(false); });
-    }, 350);
-    return () => { cancelled = true; clearTimeout(t); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [splitOpen, splitRecipIds.join(','), splitMode, rangeFrom, rangeTo, batch.id]);
-
-  const selectable = items.filter(i => i.status !== 'excluded');
-  const toggle = (id) => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  const allSel = selectable.length > 0 && sel.size === selectable.length;
-  const toggleAll = () => setSel(allSel ? new Set() : new Set(selectable.map(i => i.id)));
-
-  const createSub = async () => {
-    if (!recipient) return toast.error('Pick a recipient');
-    setSaving(true);
-    try {
-      await client.post(`distribution-batches/${batch.id}/sub-batch`, {
-        recipient_id: recipient.id, name: subName.trim() || undefined,
-        item_ids: sel.size ? [...sel] : undefined,   // undefined = all items
-      });
-      toast.success(`Sub-batch sent to ${recipient.name} (${sel.size || items.length} numbers)`);
-      onChanged();
-    } catch (e) { toast.error(e.response?.data?.error || 'Could not create sub-batch'); }
-    finally { setSaving(false); }
-  };
-
-  const toggleSplitRecipient = (u) => setSplitRecipients(rs => rs.some(x => x.id === u.id) ? rs.filter(x => x.id !== u.id) : [...rs, u]);
-  const doSplit = async () => {
-    if (!splitRecipIds.length) return toast.error('Pick at least one recipient');
-    setSplitting(true);
-    try {
-      const r = await client.post(`distribution-batches/${batch.id}/split`, { recipient_ids: splitRecipIds, mode: splitMode, from: rangeFrom || undefined, to: rangeTo || undefined });
-      const total = (r.data.children || []).reduce((a, c) => a + c.item_count, 0);
-      toast.success(`Split ${total} numbers across ${r.data.children.length} recipients (${r.data.mode})`);
-      onChanged();
-    } catch (e) { toast.error(e.response?.data?.error || 'Could not split'); }
-    finally { setSplitting(false); }
-  };
-
-  const del = async () => {
-    if (!window.confirm('Delete this batch AND every sub-batch it was re-sent to, everywhere downstream? This cannot be undone.')) return;
-    setSaving(true);
-    try {
-      const r = await client.delete(`distribution-batches/${batch.id}`);
-      toast.success(`Deleted ${r.data.deleted_batches} batch(es) across the chain`);
-      onChanged();
-    } catch (e) { toast.error(e.response?.data?.error || 'Could not delete'); setSaving(false); }
-  };
-
-  const openLineage = async () => {
-    try { const r = await client.get(`distribution-batches/${batch.id}/lineage`); setLineage(r.data); }
-    catch (e) { toast.error(e.response?.data?.error || 'Could not load lineage'); }
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={onClose}>
-      <div className="w-full max-w-2xl max-h-[90vh] flex flex-col rounded-2xl overflow-hidden" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }} onClick={e => e.stopPropagation()}>
-        <div className="flex items-center gap-3 p-4" style={{ borderBottom: '1px solid var(--color-border)' }}>
-          <div className="min-w-0 flex-1">
-            <div className="font-bold truncate" style={{ color: 'var(--color-text)' }}>{batch.name}</div>
-            <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{batch.item_count} numbers · from {batch.created_by_name || '—'} · {fmt(batch.sent_at)}</div>
-          </div>
-          <button onClick={openLineage} className="text-xs font-semibold px-2.5 py-1.5 rounded-lg flex items-center gap-1" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}><GitBranch size={13} /> Lineage</button>
-          <button onClick={onClose} style={{ color: 'var(--color-text-secondary)' }}><X size={18} /></button>
-        </div>
-
-        {lineage ? (
-          <Lineage data={lineage} onBack={() => setLineage(null)} />
-        ) : (
-          <>
-            <div className="px-4 py-2 flex items-center gap-2 text-xs" style={{ borderBottom: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>
-              <button onClick={toggleAll} className="flex items-center gap-1">{allSel ? <CheckCircle2 size={15} style={{ color: 'var(--color-primary-600)' }} /> : <Circle size={15} />}<span>{sel.size ? `${sel.size} selected` : 'Select all'}</span></button>
-            </div>
-            {rulesActive && (
-              <div className="px-4 py-1.5 text-[11px] flex items-center gap-1.5" style={{ color: 'var(--color-warning-600)', borderBottom: '1px solid var(--color-border)' }}>
-                <Filter size={11} /> Skip rules active — matching numbers are excluded when a fronter receives this.
-              </div>
-            )}
-            <div className="flex-1 overflow-y-auto p-2">
-              {loading ? <div className="text-center py-8"><Loader2 className="animate-spin inline" style={{ color: 'var(--color-text-tertiary)' }} /></div>
-                : items.map(i => {
-                  const excluded = i.status === 'excluded';
-                  const on = sel.has(i.id);
-                  return (
-                    <div key={i.id} onClick={() => !excluded && toggle(i.id)} className="w-full text-left flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg"
-                      style={{ background: on ? 'var(--color-surface-hover)' : 'transparent', opacity: excluded ? 0.6 : 1, cursor: excluded ? 'default' : 'pointer' }}>
-                      {excluded ? <Ban size={16} style={{ color: 'var(--color-warning-600)' }} /> : on ? <CheckCircle2 size={16} style={{ color: 'var(--color-primary-600)' }} /> : <Circle size={16} style={{ color: 'var(--color-text-tertiary)' }} />}
-                      <span className="tabular-nums text-sm font-semibold" style={{ color: 'var(--color-text)', textDecoration: excluded ? 'line-through' : 'none' }}>{i.phone_number}</span>
-                      {i.customer_name && <span className="text-xs truncate" style={{ color: 'var(--color-text-secondary)' }}>{i.customer_name}</span>}
-                      {excluded
-                        ? <span className="ml-auto text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded whitespace-nowrap" style={{ color: 'var(--color-warning-600)' }}>excluded · {EX_REASON[i.exclusion_reason] || i.exclusion_reason}</span>
-                        : <span className="ml-auto text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text-tertiary)' }}>{i.status}</span>}
-                    </div>
-                  );
-                })}
-            </div>
-
-            <div className="p-4 space-y-2" style={{ borderTop: '1px solid var(--color-border)' }}>
-              {subOpen && canSend && (
-                <div className="p-3 rounded-xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-                  <div className="text-xs font-semibold mb-2" style={{ color: 'var(--color-text-secondary)' }}>Create sub-batch — copies {sel.size ? `${sel.size} selected` : `all ${items.length}`} numbers to a new recipient (this batch keeps its copy).</div>
-                  <input value={subName} onChange={e => setSubName(e.target.value)} placeholder="Sub-batch name (optional)" className="w-full text-sm rounded-lg px-3 py-2 mb-2" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }} />
-                  <UserPicker value={recipient} onChange={setRecipient} />
-                  {recipient && <RulePreview preview={subPreview} previewing={subPreviewing} recipientName={recipient.name} />}
-                  <div className="flex justify-end gap-2 mt-2">
-                    <button onClick={() => setSubOpen(false)} className="text-xs font-semibold px-3 py-1.5 rounded-lg" style={{ color: 'var(--color-text-secondary)' }}>Cancel</button>
-                    <button onClick={createSub} disabled={saving || !recipient} className="text-sm font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 disabled:opacity-50" style={{ background: 'var(--gradient-sidebar)', color: 'var(--color-text-inverse)' }}>{saving ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />} Send</button>
-                  </div>
-                </div>
-              )}
-              {splitOpen && canSend && (
-                <div className="p-3 rounded-xl space-y-2" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-                  <div className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>Split &amp; distribute — deal a range of this batch across multiple recipients (one child batch each; this batch keeps its copy).</div>
-                  <div className="flex items-center gap-2 text-xs flex-wrap">
-                    <span style={{ color: 'var(--color-text-tertiary)' }}>Positions</span>
-                    <input value={rangeFrom} onChange={e => setRangeFrom(e.target.value.replace(/\D/g, ''))} placeholder={`${minPos}`} className="w-16 text-sm rounded-lg px-2 py-1 tabular-nums" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }} />
-                    <span style={{ color: 'var(--color-text-tertiary)' }}>to</span>
-                    <input value={rangeTo} onChange={e => setRangeTo(e.target.value.replace(/\D/g, ''))} placeholder={`${maxPos}`} className="w-16 text-sm rounded-lg px-2 py-1 tabular-nums" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }} />
-                    <span style={{ color: 'var(--color-text-tertiary)' }}>· blank = all {items.length}</span>
-                  </div>
-                  <div className="flex rounded-lg overflow-hidden w-fit" style={{ border: '1px solid var(--color-border)' }}>
-                    {[['sequential', 'Sequential', Split], ['random', 'Random', Shuffle]].map(([m, label, Icon]) => (
-                      <button key={m} onClick={() => setSplitMode(m)} className="text-xs font-semibold px-3 py-1.5 flex items-center gap-1" style={{ background: splitMode === m ? 'var(--gradient-sidebar)' : 'transparent', color: splitMode === m ? 'var(--color-text-inverse)' : 'var(--color-text-secondary)' }}><Icon size={12} /> {label}</button>
-                    ))}
-                  </div>
-                  <UserPicker multiple selected={splitRecipients} onToggle={toggleSplitRecipient} placeholder="Add recipients…" />
-                  {splitRecipIds.length > 0 && (
-                    <div className="text-xs rounded-lg p-2" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
-                      {splitPreviewing ? <span style={{ color: 'var(--color-text-tertiary)' }}><Loader2 size={12} className="animate-spin inline mr-1" /> computing split…</span>
-                        : splitPreview ? (
-                          <div className="space-y-0.5">
-                            <div className="font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>{splitPreview.total} numbers → {splitPreview.recipients.length} recipients ({splitMode})</div>
-                            {splitPreview.recipients.map(rp => {
-                              const u = splitRecipients.find(x => x.id === rp.recipient_id);
-                              return <div key={rp.recipient_id} className="flex justify-between"><span style={{ color: 'var(--color-text)' }}>{u?.name || '—'}</span><span className="tabular-nums" style={{ color: 'var(--color-text-secondary)' }}>{rp.count} numbers{rp.excluded ? <span style={{ color: 'var(--color-warning-600)' }}> · {rp.excluded} excluded</span> : ''}</span></div>;
-                            })}
-                            {splitMode === 'random' && <div className="text-[11px] mt-1 pt-1" style={{ color: 'var(--color-text-tertiary)', borderTop: '1px solid var(--color-border)' }}>Estimate — final exclusion count may vary slightly, since the actual shuffle happens at send time.</div>}
-                          </div>
-                        ) : <span style={{ color: 'var(--color-text-tertiary)' }}>Pick recipients to preview the split.</span>}
-                    </div>
-                  )}
-                  <div className="flex justify-end gap-2">
-                    <button onClick={() => setSplitOpen(false)} className="text-xs font-semibold px-3 py-1.5 rounded-lg" style={{ color: 'var(--color-text-secondary)' }}>Cancel</button>
-                    <button onClick={doSplit} disabled={splitting || !splitRecipIds.length} className="text-sm font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 disabled:opacity-50" style={{ background: 'var(--gradient-sidebar)', color: 'var(--color-text-inverse)' }}>{splitting ? <Loader2 size={14} className="animate-spin" /> : <Split size={14} />} Distribute</button>
-                  </div>
-                </div>
-              )}
-              <div className="flex items-center gap-2">
-                {canDelete && <button onClick={del} disabled={saving} className="text-xs font-semibold px-3 py-2 rounded-lg flex items-center gap-1" style={{ color: 'var(--color-error-600)' }}><Trash2 size={13} /> Delete (cascades downstream)</button>}
-                {canSend && !subOpen && !splitOpen && (
-                  <div className="ml-auto flex gap-2">
-                    <button onClick={() => { setSplitOpen(true); setSubOpen(false); }} className="text-sm font-bold px-4 py-2 rounded-lg flex items-center gap-2" style={{ border: '1px solid var(--color-border)', color: 'var(--color-text)' }}><Split size={15} /> Split &amp; distribute</button>
-                    <button onClick={() => { setSubOpen(true); setSplitOpen(false); }} className="text-sm font-bold px-4 py-2 rounded-lg flex items-center gap-2" style={{ background: 'var(--gradient-sidebar)', color: 'var(--color-text-inverse)' }}><Send size={15} /> Create sub-batch</button>
-                  </div>
-                )}
-              </div>
-            </div>
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
-
-export function Lineage({ data, onBack }) {
-  const Row = ({ b }) => (
-    <div className="flex items-center gap-2 py-1.5" style={{ paddingLeft: (b.depth || 0) * 16 }}>
-      {b.depth > 0 && <ArrowDownRight size={13} style={{ color: 'var(--color-text-tertiary)' }} />}
-      <span className="text-[11px] sm:text-[9px] font-bold px-1 py-0.5 rounded" style={{ background: 'var(--color-surface-hover)', color: b.source === 'data_analyzer' ? 'var(--color-primary-600)' : 'var(--color-text-tertiary)' }}>{b.source === 'data_analyzer' ? 'ORIGINAL' : 'SUB'}</span>
-      <span className="text-sm font-medium" style={{ color: b.status === 'deleted' ? 'var(--color-text-tertiary)' : 'var(--color-text)', textDecoration: b.status === 'deleted' ? 'line-through' : 'none' }}>{b.name}</span>
-      <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{b.created_by_name} → {b.sent_to_name}</span>
-    </div>
-  );
-  return (
-    <div className="flex-1 overflow-y-auto p-4">
-      <button onClick={onBack} className="text-xs font-semibold mb-3" style={{ color: 'var(--color-primary-600)' }}>← Back to items</button>
-      <div className="text-[11px] sm:text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: 'var(--color-text-tertiary)' }}>Ancestors (origin → here)</div>
-      {(data.ancestors || []).slice().reverse().map(b => <Row key={b.id} b={{ ...b, depth: 0 }} />)}
-      <div className="text-[11px] sm:text-[10px] font-bold uppercase tracking-wide mt-4 mb-1" style={{ color: 'var(--color-text-tertiary)' }}>Descendants (everywhere re-sent)</div>
-      {(data.descendants || []).map(b => <Row key={b.id} b={b} />)}
+      {active && <BatchWorkspace batch={active} me={user} canSend={canSend} isSuper={isSuper} onClose={() => { setActive(null); load(); }} onChanged={() => { setActive(null); load(); }} />}
+      {uploadOpen && <BatchUpload onClose={() => setUploadOpen(false)} onDone={(b) => { setUploadOpen(false); load(); if (b) setActive({ ...b, created_by_name: 'you' }); }} />}
     </div>
   );
 }
