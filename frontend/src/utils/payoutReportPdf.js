@@ -21,8 +21,12 @@ const PAYOUT_CONFIRMED_TINT = { pending: AMBER, yes: GREEN, no: MUTE };
 const CANCEL_LIKE = new Set(['cancelled', 'compliance_cancelled', 'closed_lost', 'chargeback', 'dispute']);
 
 export function exportPayoutReportPdf({ rows = [], kpis = null, filters = {}, companyName = '', labelOf } = {}) {
-  const doc = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
-  const W = 210, H = 297, M = 14;
+  // LANDSCAPE: the report carries company / fronter / closer / both paid-to
+  // flags now — 14 columns need more than the 182mm A4 portrait gives. Every
+  // other element (header band, KPI cards, donut, footer) is derived from W/H,
+  // so the flip is just these two numbers.
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4', compress: true });
+  const W = 297, H = 210, M = 14;
   let y = 0;
 
   const fill = (h) => { const [r, g, b] = hx(h); doc.setFillColor(r, g, b); };
@@ -123,16 +127,22 @@ export function exportPayoutReportPdf({ rows = [], kpis = null, filters = {}, co
   }
 
   // ── row table ──────────────────────────────────────────────────────────────
+  // Widths total 269mm = the landscape text column (297 - 2*14).
   const cols = [
-    { k: 'sale_date',         label: 'Sale Date',      w: 18, align: 'left' },
-    { k: 'customer_name',     label: 'Customer',       w: 30, align: 'left' },
+    { k: 'sale_date',         label: 'Sale Date',      w: 16, align: 'left' },
+    { k: 'company_name',      label: 'Company',        w: 26, align: 'left' },
+    { k: 'customer_name',     label: 'Customer',       w: 28, align: 'left' },
     { k: 'customer_phone',    label: 'Phone',          w: 22, align: 'left' },
-    { k: 'client_name',       label: 'Client',         w: 22, align: 'left' },
+    { k: 'client_name',       label: 'Client',         w: 20, align: 'left' },
+    { k: 'fronter_name',      label: 'Fronter',        w: 24, align: 'left' },
+    { k: 'closer_name',       label: 'Closer',         w: 24, align: 'left' },
     { k: 'down_payment',      label: 'Down Payment',   w: 18, align: 'right' },
-    { k: 'plan',              label: 'Plan',           w: 18, align: 'left' },
-    { k: 'status',            label: 'Status',         w: 14, align: 'left' },
+    { k: 'plan',              label: 'Plan',           w: 16, align: 'left' },
+    { k: 'status',            label: 'Status',         w: 20, align: 'left' },
     { k: 'payout_status',     label: 'DP Status',      w: 14, align: 'left' },
     { k: 'payout_confirmed',  label: 'Payout Status',  w: 14, align: 'left' },
+    { k: 'paid_to_closer',    label: 'Paid Closer',    w: 13, align: 'left' },
+    { k: 'paid_to_partner',   label: 'Paid Partner',   w: 14, align: 'left' },
   ];
   const rowH = 6.6;
   const tableHead = () => {
@@ -162,6 +172,11 @@ export function exportPayoutReportPdf({ rows = [], kpis = null, filters = {}, co
         else if (col.k === 'status') { text = statusCell; }
         else if (col.k === 'payout_status') { text = PAYOUT_LABEL[s.payout_status] || s.payout_status || 'Pending'; tint = payoutTint; style = 'bold'; }
         else if (col.k === 'payout_confirmed') { text = PAYOUT_CONFIRMED_LABEL[s.payout_confirmed] || 'Pending'; tint = PAYOUT_CONFIRMED_TINT[s.payout_confirmed] || AMBER; style = 'bold'; }
+        // company arrives as the joined companies{name} on /compliance/sales
+        else if (col.k === 'company_name') text = s.companies?.name || s.company_name || '—';
+        else if (col.k === 'paid_to_closer' || col.k === 'paid_to_partner') {
+          const on = !!s[col.k]; text = on ? 'Yes' : 'No'; tint = on ? GREEN : MUTE; style = on ? 'bold' : 'normal';
+        }
         else text = s[col.k] || '—';
         font(style, 7); ink(tint);
         doc.text(clip(text, col.w - 2, 7, style), col.align === 'right' ? cx + col.w - 2 : cx, y + 4.4, { align: col.align });

@@ -94,6 +94,10 @@ export const DATASETS = {
       { key: 'payout_status',   label: 'DP Status',       get: s => PAYOUT_STATUS_LABEL[s.payout_status] || s.payout_status || '' },
       // Payout Status (mig 244, payout_confirmed) — manual tri-state.
       { key: 'payout_confirmed', label: 'Payout Status',  get: s => PAYOUT_CONFIRMED_LABEL[s.payout_confirmed] || s.payout_confirmed || 'Pending' },
+      // Paid-to flags (migs 246 / 249) — booleans on the sale, shown as Yes/No
+      // so a spreadsheet filter on the column behaves like the on-screen pill.
+      { key: 'paid_to_closer',  label: 'Paid to Closer',  get: s => (s.paid_to_closer  ? 'Yes' : 'No') },
+      { key: 'paid_to_partner', label: 'Paid to Partner', get: s => (s.paid_to_partner ? 'Yes' : 'No') },
     ],
     surfaces: {
       // The reference export — every other sales surface converges on this list
@@ -105,7 +109,11 @@ export const DATASETS = {
       // SuperAdmin payout report — exact column order requested: sale date,
       // phone, customer, client, down payment, plan, compliance status,
       // DP Status, Payout Status.
-      payout_sales:     { columns: ['sale_date', 'customer_phone', 'customer_name', 'client_name', 'down_payment', 'plan', 'status', 'payout_status', 'payout_confirmed'] },
+      // Payout report (the CSV/PDF buttons in compliance All Sales). Carries WHO
+      // and WHERE — company, fronter, closer — plus both paid-to flags: a payout
+      // sheet that cannot say which company or which closer a down payment
+      // belongs to cannot be reconciled against anything.
+      payout_sales:     { columns: ['sale_date', 'company_name', 'customer_phone', 'customer_name', 'client_name', 'fronter_name', 'closer_name', 'down_payment', 'plan', 'status', 'payout_status', 'payout_confirmed', 'paid_to_closer', 'paid_to_partner'] },
       // manager_sales is DYNAMIC: its default columns come from form_fields at
       // runtime (saleExportColumns), which is why `columns` is empty — an empty
       // surface list means "use the caller's extraColumns". Its headers are
