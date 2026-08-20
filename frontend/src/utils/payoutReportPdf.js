@@ -127,22 +127,24 @@ export function exportPayoutReportPdf({ rows = [], kpis = null, filters = {}, co
   }
 
   // ── row table ──────────────────────────────────────────────────────────────
-  // Widths total 269mm = the landscape text column (297 - 2*14).
+  // Widths total 269mm = the landscape text column (297 - 2*14). Adding Sale
+  // Reference meant trimming the others rather than overflowing the page.
   const cols = [
-    { k: 'sale_date',         label: 'Sale Date',      w: 16, align: 'left' },
-    { k: 'company_name',      label: 'Company',        w: 26, align: 'left' },
-    { k: 'customer_name',     label: 'Customer',       w: 28, align: 'left' },
-    { k: 'customer_phone',    label: 'Phone',          w: 22, align: 'left' },
-    { k: 'client_name',       label: 'Client',         w: 20, align: 'left' },
-    { k: 'fronter_name',      label: 'Fronter',        w: 24, align: 'left' },
-    { k: 'closer_name',       label: 'Closer',         w: 24, align: 'left' },
-    { k: 'down_payment',      label: 'Down Payment',   w: 18, align: 'right' },
-    { k: 'plan',              label: 'Plan',           w: 16, align: 'left' },
-    { k: 'status',            label: 'Status',         w: 20, align: 'left' },
+    { k: 'sale_date',         label: 'Sale Date',      w: 15, align: 'left' },
+    { k: 'company_name',      label: 'Company',        w: 25, align: 'left' },
+    { k: 'customer_name',     label: 'Customer',       w: 26, align: 'left' },
+    { k: 'customer_phone',    label: 'Phone',          w: 21, align: 'left' },
+    { k: 'reference_no',      label: 'Sale Reference', w: 18, align: 'left' },
+    { k: 'client_name',       label: 'Client',         w: 18, align: 'left' },
+    { k: 'fronter_name',      label: 'Fronter',        w: 22, align: 'left' },
+    { k: 'closer_name',       label: 'Closer',         w: 22, align: 'left' },
+    { k: 'down_payment',      label: 'Down Payment',   w: 17, align: 'right' },
+    { k: 'plan',              label: 'Plan',           w: 14, align: 'left' },
+    { k: 'status',            label: 'Status',         w: 18, align: 'left' },
     { k: 'payout_status',     label: 'DP Status',      w: 14, align: 'left' },
     { k: 'payout_confirmed',  label: 'Payout Status',  w: 14, align: 'left' },
-    { k: 'paid_to_closer',    label: 'Paid Closer',    w: 13, align: 'left' },
-    { k: 'paid_to_partner',   label: 'Paid Partner',   w: 14, align: 'left' },
+    { k: 'paid_to_closer',    label: 'Paid Closer',    w: 12, align: 'left' },
+    { k: 'paid_to_partner',   label: 'Paid Partner',   w: 13, align: 'left' },
   ];
   const rowH = 6.6;
   const tableHead = () => {

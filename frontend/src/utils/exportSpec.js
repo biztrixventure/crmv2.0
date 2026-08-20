@@ -113,7 +113,7 @@ export const DATASETS = {
       // and WHERE — company, fronter, closer — plus both paid-to flags: a payout
       // sheet that cannot say which company or which closer a down payment
       // belongs to cannot be reconciled against anything.
-      payout_sales:     { columns: ['sale_date', 'company_name', 'customer_phone', 'customer_name', 'client_name', 'fronter_name', 'closer_name', 'down_payment', 'plan', 'status', 'payout_status', 'payout_confirmed', 'paid_to_closer', 'paid_to_partner'] },
+      payout_sales:     { columns: ['sale_date', 'company_name', 'customer_phone', 'customer_name', 'reference_no', 'client_name', 'fronter_name', 'closer_name', 'down_payment', 'plan', 'status', 'payout_status', 'payout_confirmed', 'paid_to_closer', 'paid_to_partner'] },
       // manager_sales is DYNAMIC: its default columns come from form_fields at
       // runtime (saleExportColumns), which is why `columns` is empty — an empty
       // surface list means "use the caller's extraColumns". Its headers are
