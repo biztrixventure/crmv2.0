@@ -160,4 +160,33 @@ async function purgeStaleQa2Assignments() {
   } catch (e) { logger.warn('QA2_AUTOASSIGN', `retention purge error: ${e.message}`); return 0; }
 }
 
-module.exports = { runQa2AutoAssign, purgeStaleQa2Assignments };
+// ── retention for the calls QA will never open ──────────────────────────────
+// Every dial becomes a qa2_call row (~50k/day). Mig 262 parks the ones nobody
+// reviews as 'skipped' so their audio is never chased; this clears the parked
+// rows out once they are old enough. The RPC only touches rows that carry no
+// method, transfer, sale, paired leg, recording, evaluation, assignment or
+// listen-log — anything a human or the CRM touched is left alone. Batched,
+// looped until a pass comes back short so a long backlog drains over several
+// ticks instead of one giant delete.
+const PARKED_RETENTION_DAYS = 14;
+const PARKED_BATCH = 5000;
+const PARKED_MAX_BATCHES = 10;
+
+async function purgeParkedQa2Calls() {
+  let total = 0;
+  try {
+    for (let i = 0; i < PARKED_MAX_BATCHES; i++) {
+      const { data, error } = await supabaseAdmin.rpc('app_qa2_purge_parked', {
+        p_days: PARKED_RETENTION_DAYS, p_limit: PARKED_BATCH,
+      });
+      if (error) { logger.warn('QA2_AUTOASSIGN', `parked purge: ${error.message}`); break; }
+      const n = Number(data || 0);
+      total += n;
+      if (n < PARKED_BATCH) break;   // caught up
+    }
+    if (total) logger.info('QA2_AUTOASSIGN', `QA v2 retention: purged ${total} parked call(s) older than ${PARKED_RETENTION_DAYS}d`);
+  } catch (e) { logger.warn('QA2_AUTOASSIGN', `parked purge error: ${e.message}`); }
+  return total;
+}
+
+module.exports = { runQa2AutoAssign, purgeStaleQa2Assignments, purgeParkedQa2Calls };

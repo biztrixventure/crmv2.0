@@ -16,7 +16,7 @@ const { runPaymentReminderScan } = require('./paymentReminders');
 const { runQaMaterialization } = require('./qaMaterializer');
 const { sweepMilestones } = require('./quotaMilestoneWatcher');
 const { pollPendingRecordings } = require('./qa2RecordingPoller');
-const { runQa2AutoAssign, purgeStaleQa2Assignments } = require('./qa2AutoAssign');
+const { runQa2AutoAssign, purgeStaleQa2Assignments, purgeParkedQa2Calls } = require('./qa2AutoAssign');
 const { runCrmDayForAllCompanies } = require('./qa2CrmDay');
 
 const REFRESH_SEGMENTS_MS = 10 * 60 * 1000;     // every 10 min
@@ -119,7 +119,10 @@ function startBackgroundJobs() {
   _timers.push(setTimeout(auto2, QA2_AUTOASSIGN_INIT));
   _timers.push(setInterval(auto2, QA2_AUTOASSIGN_MS));
 
-  const ret2 = () => purgeStaleQa2Assignments().catch(e => logger.warn('JOBS', `qa2 retention purge error: ${e.message}`));
+  const ret2 = () => Promise.all([
+    purgeStaleQa2Assignments(),
+    purgeParkedQa2Calls(),          // parked (non-reviewable) calls — mig 266
+  ]).catch(e => logger.warn('JOBS', `qa2 retention purge error: ${e.message}`));
   _timers.push(setTimeout(ret2, QA2_RETENTION_INIT));
   _timers.push(setInterval(ret2, QA2_RETENTION_MS));
 

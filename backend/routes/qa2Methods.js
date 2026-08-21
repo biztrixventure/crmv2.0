@@ -195,15 +195,27 @@ router.delete('/methods/:id/rules/:ruleId', asyncHandler(async (req, res) => {
 // Zero rule matches -> a call sits here (method_id IS NULL) until a QA
 // manager assigns a method or rejects it as not QA-relevant. Nothing is ever
 // silently dropped (build brief section 3).
-
+//
+// REVIEWABLE ONLY. Every dialed call becomes a qa2_call row, so "matched no
+// rule" describes a quarter of a million no-answers and dead-air dials — the
+// pool showed 264,291 rows, 239,934 of them parked calls nobody will ever
+// listen to, burying the handful that genuinely need a human decision. QA only
+// ever reviews a fronter's XFER and the closer leg that follows it, so the pool
+// now shows exactly that population: 363 rows, 242 of them from the last week.
+// Mirrors fn_qa2_is_reviewable (mig 262) — keep the two in step.
+// Ordered by when the CALL happened, not when the row was written: a swept row
+// can be created days after the conversation.
 router.get('/unclassified', asyncHandler(async (req, res) => {
   const scope = await requireManager(req, res);
   if (!scope) return;
+  const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 365);
   let query = supabaseAdmin
     .from('qa2_call')
-    .select('id, box_id, company_id, leg, agent_user, customer_phone, dispo_raw, call_at, source, created_at, companies(name)')
+    .select('id, box_id, company_id, leg, agent_user, customer_phone, dispo_raw, call_at, source, created_at, recording_state, transfer_id, companies(name)')
     .is('method_id', null).eq('qa_relevant', true)
-    .order('created_at', { ascending: false })
+    .or('dispo_raw.ilike.xfer,transfer_id.not.is.null,sale_id.not.is.null,linked_call_id.not.is.null')
+    .gte('call_at', new Date(Date.now() - days * 86400000).toISOString())
+    .order('call_at', { ascending: false })
     .limit(200);
   if (scope.operationalCompanyIds !== 'all') {
     if (!scope.operationalCompanyIds.length) return res.json({ calls: [] });
