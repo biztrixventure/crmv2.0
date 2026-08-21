@@ -11,7 +11,7 @@
 // ============================================================================
 
 import { useState, useEffect, useCallback } from 'react';
-import { Inbox as InboxIcon } from 'lucide-react';
+import { Inbox as InboxIcon, X } from 'lucide-react';
 import { toast } from 'sonner';
 import client from '../../api/client';
 import { Panel, SectionHeader, TableScroll, EmptyState, Loading } from '../UI/kit';
@@ -70,14 +70,58 @@ export default function PoolTab({ scope }) {
 
   if (open) return <ReviewScreen assignment={open} onDone={() => { setOpen(null); load(); }} />;
 
+  // ACTIVE FILTERS, VISIBLY. Column filters live in the header menus and persist
+  // per user, so a filter set yesterday still applies today with nothing on
+  // screen saying so — an empty table then looks like "no work" and there is no
+  // obvious way back. Each active filter is now a chip you can remove, plus one
+  // Clear all, and the empty state offers the same escape.
+  const FILTER_LABELS = { company: 'Company', method: 'Method', leg: 'Leg', recording_state: 'Recording', call_at: 'Date' };
+  const OPTION_LOOKUP = { company: companyOptions, method: methodOptions, leg: LEG_OPTIONS, recording_state: REC_OPTIONS };
+  const filterText = (key, f) => {
+    if (!f) return '';
+    if (f.op === 'empty') return 'is empty';
+    if (f.op === 'notempty') return 'is not empty';
+    const pretty = (v) => (OPTION_LOOKUP[key] || []).find(o => String(o.value) === String(v))?.label ?? v;
+    if (f.op === 'in')      return (Array.isArray(f.v) ? f.v : [f.v]).map(pretty).join(', ');
+    if (f.op === 'between') return `${f.v} → ${f.v2 || '…'}`;
+    if (f.op === 'gte')     return `≥ ${f.v}`;
+    if (f.op === 'lte')     return `≤ ${f.v}`;
+    return String(pretty(f.v));
+  };
+  const activeFilters = Object.entries(tq.filters || {});
+
   return (
     <div className="max-w-5xl mx-auto space-y-4">
       <SectionHeader level="page" icon={InboxIcon} title="Pool" subtitle="Unassigned calls within your granted companies and methods — claim one to start." />
 
+      {activeFilters.length > 0 && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>Filtered by</span>
+          {activeFilters.map(([key, f]) => (
+            <button key={key} onClick={() => tq.clearFilter(key)} title="Remove this filter"
+              className="text-xs font-semibold px-2 py-1 rounded-full inline-flex items-center gap-1.5"
+              style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}>
+              {FILTER_LABELS[key] || key}: {filterText(key, f)} <X size={11} />
+            </button>
+          ))}
+          <button onClick={tq.clearAll} className="text-xs font-bold px-2.5 py-1 rounded-full"
+            style={{ background: 'var(--color-primary-600)', color: '#fff' }}>
+            Clear all
+          </button>
+        </div>
+      )}
+
       {loadError && <Panel tone="inset"><p className="text-sm" style={{ color: 'var(--color-error-600)' }}>{loadError}</p></Panel>}
       {!loadError && rows === null && <Loading variant="table" rows={4} />}
       {!loadError && rows && rows.length === 0 && (
-        <EmptyState icon={InboxIcon} title="Pool is empty" hint="Nothing waiting to be claimed right now, or nothing matches your filters." />
+        (tq.activeCount > 0 ? (
+          <EmptyState icon={InboxIcon} title="No calls match your filters"
+            hint="The pool may still have work — these filters are hiding it."
+            action={<button onClick={tq.clearAll} className="text-sm font-bold px-3 py-2 rounded-lg"
+              style={{ background: 'var(--gradient-sidebar)', color: 'var(--color-text-inverse)' }}>Clear all filters</button>} />
+        ) : (
+          <EmptyState icon={InboxIcon} title="Pool is empty" hint="Nothing waiting to be claimed right now." />
+        ))
       )}
 
       {!loadError && rows && rows.length > 0 && (
