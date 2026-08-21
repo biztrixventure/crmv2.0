@@ -86,7 +86,24 @@ router.get('/queue', asyncHandler(async (req, res) => {
   const assignments = (data || []).map(a => (a.qa2_call
     ? { ...a, qa2_call: { ...a.qa2_call, agent_name: names.get(a.qa2_call.agent_user_id) || a.qa2_call.agent_user || null } }
     : a));
-  res.json({ assignments, columns: access.catalog });
+
+  // Counts for EVERY status, not just the one being viewed. The queue's status
+  // tiles are a switcher, and a switcher that can only count the tab you are
+  // already on is useless — it showed "—" for the other two, so an agent could
+  // not see they had work waiting without clicking each tile in turn. Cheap:
+  // three head-only counts, no rows fetched.
+  const countFor = async (st) => {
+    const { count } = await supabaseAdmin
+      .from('qa2_assignment')
+      .select('id', { count: 'exact', head: true })
+      .eq('assigned_to', req.user.id).eq('status', st);
+    return count || 0;
+  };
+  const [pending, in_review, scored] = await Promise.all([
+    countFor('pending'), countFor('in_review'), countFor('scored'),
+  ]);
+
+  res.json({ assignments, columns: access.catalog, counts: { pending, in_review, scored } });
 }));
 
 // ── /qa2/pool — self-claimable within my grants ────────────────────────────
@@ -125,7 +142,24 @@ router.get('/pool', asyncHandler(async (req, res) => {
   const assignments = (data || []).map(a => (a.qa2_call
     ? { ...a, qa2_call: { ...a.qa2_call, agent_name: names.get(a.qa2_call.agent_user_id) || a.qa2_call.agent_user || null } }
     : a));
-  res.json({ assignments, columns: access.catalog });
+
+  // Counts for EVERY status, not just the one being viewed. The queue's status
+  // tiles are a switcher, and a switcher that can only count the tab you are
+  // already on is useless — it showed "—" for the other two, so an agent could
+  // not see they had work waiting without clicking each tile in turn. Cheap:
+  // three head-only counts, no rows fetched.
+  const countFor = async (st) => {
+    const { count } = await supabaseAdmin
+      .from('qa2_assignment')
+      .select('id', { count: 'exact', head: true })
+      .eq('assigned_to', req.user.id).eq('status', st);
+    return count || 0;
+  };
+  const [pending, in_review, scored] = await Promise.all([
+    countFor('pending'), countFor('in_review'), countFor('scored'),
+  ]);
+
+  res.json({ assignments, columns: access.catalog, counts: { pending, in_review, scored } });
 }));
 
 // ── claim / manual push / unassign / skip / calibrate ──────────────────────

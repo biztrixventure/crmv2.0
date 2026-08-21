@@ -34,12 +34,26 @@ export default function LoadDayTab({ scope }) {
   const [loadError, setLoadError] = useState(null);
   const [columns, setColumns] = useState({});
   const [methodOptions, setMethodOptions] = useState([]);
+  const [methodTab, setMethodTab] = useState('all');
   const [selected, setSelected] = useState(new Set());
   const [agents, setAgents] = useState([]);
   const [pickedAgents, setPickedAgents] = useState([]);
   const [assigning, setAssigning] = useState(false);
 
   const tq = useTableQuery({ scope: 'qa2:loadday', columns, defaultSort: { by: 'call_at', dir: 'desc' } });
+
+  // METHOD TABS. A pulled day is one long list mixing TRA, Unclosed and Closed,
+  // and a manager assigns per method — different scorecards, often different
+  // agents. Splitting client-side keeps the single day-calls request: the rows
+  // are already in memory, so switching tabs costs nothing.
+  const methodOf = (c) => c.qa2_method?.label || 'Unclassified';
+  const methodTabs = (() => {
+    const seen = new Map();
+    (calls || []).forEach(c => { const k = methodOf(c); seen.set(k, (seen.get(k) || 0) + 1); });
+    return [{ key: 'all', label: 'All', n: (calls || []).length },
+            ...[...seen.entries()].sort((a, b) => b[1] - a[1]).map(([k, n]) => ({ key: k, label: k, n }))];
+  })();
+  const visibleCalls = (calls || []).filter(c => methodTab === 'all' || methodOf(c) === methodTab);
   const abortable = useAbortable();
 
   const myCompanyIds = scope?.operationalCompanyIds === 'all' ? null : (scope?.operationalCompanyIds || []);
@@ -84,7 +98,10 @@ export default function LoadDayTab({ scope }) {
   };
 
   const toggleOne = (id) => setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  const toggleAll = () => setSelected(prev => (prev.size === (calls || []).length ? new Set() : new Set((calls || []).map(c => c.id))));
+  // Select-all follows the METHOD TAB you are on, not the whole day — picking
+  // "all" while filtered to TRA and getting Unclosed calls assigned too would be
+  // a nasty surprise, and assignment is per method.
+  const toggleAll = () => setSelected(prev => (prev.size === visibleCalls.length ? new Set() : new Set(visibleCalls.map(c => c.id))));
 
   const toggleAgent = (id) => setPickedAgents(prev => (prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]));
 
@@ -129,13 +146,29 @@ export default function LoadDayTab({ scope }) {
         <EmptyState icon={CalendarClock} title="Nothing here yet" hint={`No classified calls for this company on ${date} — try "Pull this day from the CRM", or check your filters.`} />
       )}
 
+      {!loadError && calls && calls.length > 0 && methodTabs.length > 2 && (
+        <div className="flex items-center gap-1 flex-wrap">
+          {methodTabs.map(t => (
+            <button key={t.key} onClick={() => { setMethodTab(t.key); setSelected(new Set()); }}
+              className="text-xs font-bold px-3 py-1.5 rounded-full transition-colors"
+              style={{
+                background: methodTab === t.key ? 'var(--color-primary-600)' : 'var(--color-surface)',
+                color: methodTab === t.key ? '#fff' : 'var(--color-text-secondary)',
+                border: '1px solid var(--color-border)',
+              }}>
+              {t.label} <span className="tabular-nums opacity-80">{t.n}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
       {!loadError && calls && calls.length > 0 && (
         <>
           <Panel pad="none">
             <TableScroll>
               <table className="w-full text-sm">
                 <thead><tr style={{ color: 'var(--color-text-secondary)' }}>
-                  <th className="px-3 py-2"><input type="checkbox" checked={selected.size === calls.length} onChange={toggleAll} /></th>
+                  <th className="px-3 py-2"><input type="checkbox" checked={visibleCalls.length > 0 && selected.size === visibleCalls.length} onChange={toggleAll} /></th>
                   <ColumnHeader tq={tq} colKey="method" label="Method" options={methodOptions} className={th} />
                   <ColumnHeader tq={tq} colKey="leg" label="Leg" options={LEG_OPTIONS} className={th} />
                   <th className={th}>Agent</th>
@@ -145,7 +178,7 @@ export default function LoadDayTab({ scope }) {
                   <th className={th}>Assignment</th>
                 </tr></thead>
                 <tbody>
-                  {calls.map(c => (
+                  {visibleCalls.map(c => (
                     <tr key={c.id} style={{ borderTop: '1px solid var(--color-border)' }}>
                       <td className="px-3 py-2"><input type="checkbox" checked={selected.has(c.id)} onChange={() => toggleOne(c.id)} /></td>
                       <td className="px-3 py-2">{c.qa2_method?.label || '—'}</td>

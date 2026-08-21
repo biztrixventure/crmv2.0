@@ -8,10 +8,19 @@
 // every compliance list already drives off, alongside the existing KpiTile
 // status switcher (a separate axis — pending/in_review/scored — not part of
 // the column-filter catalog).
+//
+// The status tiles COUNT every status, not just the one being viewed. They used
+// to render "—" for the two tabs you were not on, because the only number the
+// component had was rows.length of the current fetch — so an agent could not
+// tell they had work waiting without clicking each tile in turn. The queue
+// endpoint now returns all three counts.
 // ============================================================================
 
 import { useState, useEffect, useCallback } from 'react';
-import { ListTodo, Clock, PlayCircle, CheckCircle2 } from 'lucide-react';
+import {
+  ListTodo, Clock, PlayCircle, CheckCircle2, Headphones, HeadphoneOff,
+  Loader2, PhoneForwarded, PhoneIncoming,
+} from 'lucide-react';
 import client from '../../api/client';
 import { Panel, SectionHeader, TableScroll, EmptyState, Loading, KpiTile } from '../UI/kit';
 import ColumnHeader from '../UI/ColumnHeader';
@@ -30,12 +39,44 @@ const REC_OPTIONS = [
 ];
 const th = 'text-left font-semibold px-3 py-2';
 
+// Recording state decides whether a row can be scored at all, so it reads as a
+// status pill rather than the raw enum the API returns.
+const REC_META = {
+  found:   { label: 'Ready',    color: '#16a34a', icon: Headphones },
+  pending: { label: 'Fetching', color: '#d97706', icon: Loader2 },
+  missing: { label: 'No audio', color: '#dc2626', icon: HeadphoneOff },
+  error:   { label: 'Error',    color: '#dc2626', icon: HeadphoneOff },
+  skipped: { label: 'Skipped',  color: '#64748b', icon: HeadphoneOff },
+};
+const LEG_META = {
+  fronter: { label: 'Fronter', color: '#4f46e5', icon: PhoneForwarded },
+  closer:  { label: 'Closer',  color: '#0891b2', icon: PhoneIncoming },
+};
+const EMPTY_COPY = {
+  pending:   { title: 'Nothing waiting',    hint: 'Claim a call from the Pool tab, or wait for your manager to assign one.' },
+  in_review: { title: 'Nothing in review',  hint: 'Calls you have opened but not finished scoring appear here.' },
+  scored:    { title: 'Nothing scored yet', hint: 'Once you finish a review it moves here.' },
+};
+
+// Today / Yesterday read faster than a bare date when the whole queue is recent.
+const fmtWhen = (iso) => {
+  if (!iso) return '—';
+  const d = new Date(iso); const now = new Date();
+  const day = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = Math.round((day(now) - day(d)) / 86400000);
+  const t = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  if (diff === 0) return 'Today ' + t;
+  if (diff === 1) return 'Yesterday ' + t;
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' + t;
+};
+
 export default function QueueTab({ scope }) {
   const [filter, setFilter] = useState('pending');
   const [rows, setRows] = useState(null);
   const [loadError, setLoadError] = useState(null);
   const [open, setOpen] = useState(null);
   const [columns, setColumns] = useState({});
+  const [counts, setCounts] = useState(null);
   const [companyOptions, setCompanyOptions] = useState([]);
   const [methodOptions, setMethodOptions] = useState([]);
 
@@ -54,12 +95,18 @@ export default function QueueTab({ scope }) {
   const load = useCallback(() => {
     setLoadError(null);
     client.get('qa2/queue', { params: { status: filter, ...tq.params }, signal: abortable() })
-      .then(r => { setRows(r.data.assignments || []); if (r.data.columns) setColumns(r.data.columns); })
+      .then(r => {
+        setRows(r.data.assignments || []);
+        if (r.data.columns) setColumns(r.data.columns);
+        if (r.data.counts) setCounts(r.data.counts);
+      })
       .catch(e => { if (!isCanceled(e)) setLoadError(e.response?.data?.error || 'Could not load your queue'); });
   }, [filter, tq.params, abortable]);
   useEffect(() => { load(); }, [filter, tq.version]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (open) return <ReviewScreen assignment={open} onDone={() => { setOpen(null); load(); }} />;
+
+  const activeFilters = Object.entries(tq.filters || {});
 
   return (
     <div className="max-w-5xl mx-auto space-y-4">
@@ -67,15 +114,33 @@ export default function QueueTab({ scope }) {
 
       <div className="grid grid-cols-3 gap-3">
         {FILTERS.map(f => (
-          <KpiTile key={f.key} icon={f.icon} label={f.label} value={filter === f.key ? (rows?.length ?? '…') : '—'}
+          <KpiTile key={f.key} icon={f.icon} label={f.label}
+            value={counts ? (counts[f.key] ?? 0) : '…'}
             active={filter === f.key} onClick={() => setFilter(f.key)} />
         ))}
       </div>
 
+      {activeFilters.length > 0 && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>Filtered</span>
+          <button onClick={tq.clearAll} className="text-xs font-bold px-2.5 py-1 rounded-full"
+            style={{ background: 'var(--color-primary-600)', color: '#fff' }}>
+            Clear {activeFilters.length} filter{activeFilters.length > 1 ? 's' : ''}
+          </button>
+        </div>
+      )}
+
       {loadError && <Panel tone="inset"><p className="text-sm" style={{ color: 'var(--color-error-600)' }}>{loadError}</p></Panel>}
       {!loadError && rows === null && <Loading variant="table" rows={4} />}
       {!loadError && rows && rows.length === 0 && (
-        <EmptyState icon={ListTodo} title="Nothing here" hint="Claim work from the Pool tab, wait for a manager to push you something, or check your filters." />
+        activeFilters.length > 0 ? (
+          <EmptyState icon={ListTodo} title="No calls match your filters"
+            hint="You may still have work here — these filters are hiding it."
+            action={<button onClick={tq.clearAll} className="text-sm font-bold px-3 py-2 rounded-lg"
+              style={{ background: 'var(--gradient-sidebar)', color: 'var(--color-text-inverse)' }}>Clear all filters</button>} />
+        ) : (
+          <EmptyState icon={ListTodo} title={EMPTY_COPY[filter].title} hint={EMPTY_COPY[filter].hint} />
+        )
       )}
 
       {!loadError && rows && rows.length > 0 && (
@@ -92,19 +157,50 @@ export default function QueueTab({ scope }) {
                 <th className="px-3 py-2" />
               </tr></thead>
               <tbody>
-                {rows.map(a => (
-                  <tr key={a.id} style={{ borderTop: '1px solid var(--color-border)' }}>
-                    <td className="px-3 py-2">{a.qa2_call?.companies?.name || '—'}</td>
-                    <td className="px-3 py-2">{a.qa2_call?.qa2_method?.label || '—'}</td>
-                    <td className="px-3 py-2">{a.qa2_call?.leg || '—'}</td>
-                    <td className="px-3 py-2">{a.qa2_call?.agent_name || a.qa2_call?.agent_user || '—'}</td>
-                    <td className="px-3 py-2">{a.qa2_call?.recording_state || '—'}</td>
-                    <td className="px-3 py-2">{a.qa2_call?.call_at ? new Date(a.qa2_call.call_at).toLocaleDateString() : '—'}</td>
-                    <td className="px-3 py-2 text-right">
-                      <button className="btn btn-primary text-xs" onClick={() => setOpen(a)}>Open</button>
-                    </td>
-                  </tr>
-                ))}
+                {rows.map(a => {
+                  const c = a.qa2_call || {};
+                  const rec = REC_META[c.recording_state] || REC_META.pending;
+                  const legM = LEG_META[c.leg] || {};
+                  const LegIcon = legM.icon;
+                  // A call with no audio cannot be scored — say so on the row
+                  // rather than letting someone open an empty player.
+                  const playable = c.recording_state === 'found';
+                  return (
+                    <tr key={a.id} className="hover:bg-black/[0.02]"
+                      style={{ borderTop: '1px solid var(--color-border)', cursor: playable ? 'pointer' : 'default' }}
+                      onClick={() => playable && setOpen(a)}>
+                      <td className="px-3 py-2" style={{ color: 'var(--color-text)' }}>{c.companies?.name || '—'}</td>
+                      <td className="px-3 py-2">
+                        <span className="text-[11px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap"
+                          style={{ background: 'var(--color-surface-hover)', color: 'var(--color-primary-600)' }}>
+                          {c.qa2_method?.label || 'Unclassified'}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2">
+                        {c.leg ? (
+                          <span className="inline-flex items-center gap-1 text-xs font-semibold" style={{ color: legM.color }}>
+                            {LegIcon ? <LegIcon size={12} /> : null}{legM.label}
+                          </span>
+                        ) : '—'}
+                      </td>
+                      <td className="px-3 py-2" style={{ color: 'var(--color-text-secondary)' }}>{c.agent_name || c.agent_user || '—'}</td>
+                      <td className="px-3 py-2">
+                        <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap"
+                          style={{ background: rec.color + '1a', color: rec.color }}>
+                          <rec.icon size={11} className={c.recording_state === 'pending' ? 'animate-spin' : ''} /> {rec.label}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap" style={{ color: 'var(--color-text-tertiary)' }}>{fmtWhen(c.call_at)}</td>
+                      <td className="px-3 py-2 text-right">
+                        <button className="btn btn-primary text-xs disabled:opacity-40" disabled={!playable}
+                          title={playable ? 'Open and score' : 'Waiting for the recording'}
+                          onClick={(e) => { e.stopPropagation(); setOpen(a); }}>
+                          {filter === 'scored' ? 'View' : 'Score'}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </TableScroll>
