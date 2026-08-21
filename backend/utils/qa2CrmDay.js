@@ -71,12 +71,30 @@ async function resolveRecording({ vendorCode, phone, agentIds, date, dialerAt })
 // Every qa2_call row (any source) that already carries this company's
 // transfer_id/sale_id — the dedup guard so a re-run, or a call that ALSO
 // landed via live ingest, never gets a second review task.
-async function existingKeys(companyId) {
-  const { data } = await supabaseAdmin.from('qa2_call').select('transfer_id, sale_id, leg').eq('company_id', companyId);
+// Which of THIS DAY's transfers/sales already have a qa2_call row.
+//
+// This used to select every qa2_call row for the company with no filter and no
+// limit, purely to build a lookup set. That was survivable when qa2_call was
+// small; it is not now — The Mejor alone has 135,744 rows, Wavetech 110,450 —
+// and "load a day" started failing outright with a 500 because the request
+// never came back. Ask only about the few hundred ids the day actually has.
+async function existingKeys(companyId, transferIds = [], saleIds = []) {
   const keys = new Set();
-  for (const r of (data || [])) {
-    if (r.transfer_id) keys.add(`t:${r.transfer_id}:${r.leg}`);
-    if (r.sale_id) keys.add(`s:${r.sale_id}:${r.leg}`);
+  const CH = 150;   // keep the PostgREST .in() URL well under any length cap
+
+  for (let i = 0; i < transferIds.length; i += CH) {
+    const { data, error } = await supabaseAdmin.from('qa2_call')
+      .select('transfer_id, leg').eq('company_id', companyId)
+      .in('transfer_id', transferIds.slice(i, i + CH));
+    if (error) throw new Error(`existingKeys(transfers): ${error.message}`);
+    for (const r of (data || [])) if (r.transfer_id) keys.add(`t:${r.transfer_id}:${r.leg}`);
+  }
+  for (let i = 0; i < saleIds.length; i += CH) {
+    const { data, error } = await supabaseAdmin.from('qa2_call')
+      .select('sale_id, leg').eq('company_id', companyId)
+      .in('sale_id', saleIds.slice(i, i + CH));
+    if (error) throw new Error(`existingKeys(sales): ${error.message}`);
+    for (const r of (data || [])) if (r.sale_id) keys.add(`s:${r.sale_id}:${r.leg}`);
   }
   return keys;
 }
@@ -152,7 +170,11 @@ async function populateCrmDay(companyId, date) {
     .select('id, customer_phone, normalized_phone, sale_date, created_at, closer_id, status, vicidial_vendor_code, closer_disposition')
     .eq('company_id', companyId).is('transfer_id', null).eq('sale_date', date);
 
-  const existing = await existingKeys(companyId);
+  const saleIds = [
+    ...[...salesByTransfer.values()].map(s => s.id),
+    ...(standaloneSales || []).map(s => s.id),
+  ].filter(Boolean);
+  const existing = await existingKeys(companyId, tids, saleIds);
   const tasks = [];
 
   for (const t of (transfers || [])) {
