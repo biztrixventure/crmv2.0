@@ -278,11 +278,32 @@ router.post('/assignments/:id/calibrate', asyncHandler(async (req, res) => {
 
 // ── /qa2/calls/:id + recording ticket ───────────────────────────────────────
 
+// Three ways a user may see a call: it is inside their granted companies and
+// methods, it is assigned to them, or it is THE OTHER LEG of a call assigned to
+// them.
+//
+// That third rule is the whole point of leg pairing (mig 258/260). Reviewing a
+// closer leg means listening to the fronter's leg for context, and that fronter
+// leg usually belongs to a different company (EasyTech fronts, 1-Vertex closes)
+// and a different method (TRA), so neither of the first two rules covers it —
+// the Review screen showed the linked call and then 403'd on its audio.
 async function canSeeCall(scope, userId, call) {
   if (callInScope(scope, call)) return true;
+  const ids = [call.id, call.linked_call_id].filter(Boolean);
   const { data: mine } = await supabaseAdmin
-    .from('qa2_assignment').select('id').eq('call_id', call.id).eq('assigned_to', userId).maybeSingle();
-  return !!mine;
+    .from('qa2_assignment').select('id').in('call_id', ids).eq('assigned_to', userId).limit(1);
+  if (mine && mine.length) return true;
+  // The link is written on both rows, but a row can also be the twin of a call
+  // that points AT it — check that direction too rather than trusting symmetry.
+  const { data: pointing } = await supabaseAdmin
+    .from('qa2_call').select('id').eq('linked_call_id', call.id).limit(5);
+  if (pointing && pointing.length) {
+    const { data: theirs } = await supabaseAdmin
+      .from('qa2_assignment').select('id')
+      .in('call_id', pointing.map(p => p.id)).eq('assigned_to', userId).limit(1);
+    if (theirs && theirs.length) return true;
+  }
+  return false;
 }
 
 router.get('/calls/:id', asyncHandler(async (req, res) => {
@@ -336,7 +357,7 @@ router.post('/calls/:id/recording-ticket', asyncHandler(async (req, res) => {
   if (!scope) return;
   const { id } = req.params;
   const { data: call } = await supabaseAdmin
-    .from('qa2_call').select('id, company_id, method_id, box_id, dialer_lead_id, recording_id, recording_state').eq('id', id).maybeSingle();
+    .from('qa2_call').select('id, company_id, method_id, box_id, dialer_lead_id, recording_id, recording_state, linked_call_id').eq('id', id).maybeSingle();
   if (!call) return res.status(404).json({ error: 'Call not found' });
   if (call.recording_state !== 'found' || !call.recording_id) {
     return res.status(404).json({ error: 'No recording available for this call yet' });
