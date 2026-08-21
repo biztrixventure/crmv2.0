@@ -70,27 +70,34 @@ const fmtWhen = (iso) => {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' + t;
 };
 
-export default function QueueTab({ scope }) {
+export default function QueueTab() {
   const [filter, setFilter] = useState('pending');
   const [rows, setRows] = useState(null);
   const [loadError, setLoadError] = useState(null);
   const [open, setOpen] = useState(null);
   const [columns, setColumns] = useState({});
   const [counts, setCounts] = useState(null);
-  const [companyOptions, setCompanyOptions] = useState([]);
-  const [methodOptions, setMethodOptions] = useState([]);
 
   const tq = useTableQuery({ scope: 'qa2:queue', columns, defaultSort: { by: 'call_at', dir: 'desc' } });
   const abortable = useAbortable();
 
-  const myCompanyIds = scope?.operationalCompanyIds === 'all' ? null : (scope?.operationalCompanyIds || []);
-  useEffect(() => {
-    client.get('compliance/companies').then(r => {
-      const all = r.data.companies || [];
-      setCompanyOptions((myCompanyIds ? all.filter(c => myCompanyIds.includes(c.id)) : all).map(c => ({ value: c.id, label: c.name })));
-    }).catch(() => {});
-    client.get('qa2/methods').then(r => setMethodOptions((r.data.methods || []).map(m => ({ value: m.id, label: m.label })))).catch(() => {});
-  }, [myCompanyIds]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Filter options come from the ROWS, not from /compliance/companies and
+  // /qa2/methods. Those two are manager/compliance-only, so a QA agent — the
+  // main user of this screen — got a 403 pair on every mount and ended up with
+  // empty filter dropdowns. Every row already carries company_id + name and
+  // method_id + label, so the lists are built from what the agent can actually
+  // see, which is also the only set worth offering them.
+  const optionsFrom = (list, idKey, labelOf) => {
+    const seen = new Map();
+    (list || []).forEach(a => {
+      const c = a.qa2_call || {};
+      const id = c[idKey]; const label = labelOf(c);
+      if (id && label && !seen.has(id)) seen.set(id, { value: id, label });
+    });
+    return [...seen.values()].sort((a, b) => a.label.localeCompare(b.label));
+  };
+  const companyOptions = optionsFrom(rows, 'company_id', c => c.companies?.name);
+  const methodOptions  = optionsFrom(rows, 'method_id',  c => c.qa2_method?.label);
 
   const load = useCallback(() => {
     setLoadError(null);

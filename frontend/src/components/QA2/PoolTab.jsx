@@ -26,26 +26,32 @@ const REC_OPTIONS = [
 ];
 const th = 'text-left font-semibold px-3 py-2';
 
-export default function PoolTab({ scope }) {
+export default function PoolTab() {
   const [rows, setRows] = useState(null);
   const [loadError, setLoadError] = useState(null);
   const [claimingId, setClaimingId] = useState(null);
   const [open, setOpen] = useState(null);
   const [columns, setColumns] = useState({});
-  const [companyOptions, setCompanyOptions] = useState([]);
-  const [methodOptions, setMethodOptions] = useState([]);
 
   const tq = useTableQuery({ scope: 'qa2:pool', columns, defaultSort: { by: 'call_at', dir: 'desc' } });
   const abortable = useAbortable();
 
-  const myCompanyIds = scope?.operationalCompanyIds === 'all' ? null : (scope?.operationalCompanyIds || []);
-  useEffect(() => {
-    client.get('compliance/companies').then(r => {
-      const all = r.data.companies || [];
-      setCompanyOptions((myCompanyIds ? all.filter(c => myCompanyIds.includes(c.id)) : all).map(c => ({ value: c.id, label: c.name })));
-    }).catch(() => {});
-    client.get('qa2/methods').then(r => setMethodOptions((r.data.methods || []).map(m => ({ value: m.id, label: m.label })))).catch(() => {});
-  }, [myCompanyIds]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Filter options come from the ROWS, not from /compliance/companies and
+  // /qa2/methods. Both are manager/compliance-only, so a QA agent — who lives in
+  // this screen to claim work — got a 403 pair on every mount and empty filter
+  // dropdowns. Each row already carries company_id + name and method_id + label,
+  // so the lists describe exactly what this agent can see.
+  const optionsFrom = (list, idKey, labelOf) => {
+    const seen = new Map();
+    (list || []).forEach(a => {
+      const c = a.qa2_call || {};
+      const id = c[idKey]; const label = labelOf(c);
+      if (id && label && !seen.has(id)) seen.set(id, { value: id, label });
+    });
+    return [...seen.values()].sort((a, b) => a.label.localeCompare(b.label));
+  };
+  const companyOptions = optionsFrom(rows, 'company_id', c => c.companies?.name);
+  const methodOptions  = optionsFrom(rows, 'method_id',  c => c.qa2_method?.label);
 
   const load = useCallback(() => {
     setLoadError(null);
