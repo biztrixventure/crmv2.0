@@ -38,7 +38,7 @@
 
 const { supabaseAdmin } = require('../config/database');
 const logger = require('../utils/logger');
-const { recordingLookup, parseVendorCode, getBoxes, phoneTail, onlyDigits } = require('./dialerBoxes');
+const { recordingLookup, parseVendorCode, getBoxes, phoneTail, onlyDigits, lookupCallsByPhone } = require('./dialerBoxes');
 
 const MAX_ATTEMPTS = 10;
 const BATCH_SIZE = 60; // capped per tick
@@ -95,16 +95,61 @@ async function loginsFor(row) {
 async function pollByAgentDay(row) {
   const tail = phoneTail(row.normalized_phone || row.customer_phone || '');
   if (!tail || !row.call_at) return null;
-  const logins = await loginsFor(row);
-  if (!logins.length) return null;
   const date = new Date(row.call_at).toISOString().slice(0, 10);
 
-  const results = await Promise.all(
-    getBoxes().flatMap(b => logins.map(a => recordingLookup(b, { agent_user: a, date }))),
+  // 1. the agent we think made the call, on the day we think they made it
+  const logins = await loginsFor(row);
+  if (logins.length) {
+    const results = await Promise.all(
+      getBoxes().flatMap(b => logins.map(a => recordingLookup(b, { agent_user: a, date }))),
+    );
+    const hit = await chooseClip(
+      results.flat().filter(r => r && r.recording_id && r.location && onlyDigits(r.location).includes(tail)),
+      row,
+    );
+    if (hit) return hit;
+  }
+
+  // 2. ask the DIALER who called this number and when, then fetch that agent's
+  //    clips for that day. A hand-typed transfer (no vendor code, no dialer
+  //    agent — 290 of them in 14 days, 19% of EasyTech's) records the CRM's
+  //    guess at who and when, and the guess is often wrong: one of the reported
+  //    numbers was dialled a day later by a different agent entirely. The call
+  //    log is the dialer's own account, so it beats our guess every time.
+  let log = [];
+  try { log = await lookupCallsByPhone(row.normalized_phone || row.customer_phone || ''); }
+  catch { return null; }
+  if (!Array.isArray(log) || !log.length) return null;   // never dialled anywhere
+
+  // Only calls near this one. The same customer can be dialled again weeks
+  // later by someone else entirely, and attaching that clip to this review
+  // would put another agent's conversation in front of the reviewer. A
+  // hand-typed transfer is stamped when the fronter typed it, not when they
+  // dialled, so the window has to allow a day either side — but no more.
+  const NEAR_DAYS = 2;
+  const at = new Date(row.call_at).getTime();
+  const near = log.filter(e => {
+    const t = new Date(String(e.call_date || '').replace(' ', 'T')).getTime();
+    return Number.isFinite(t) && Math.abs(t - at) <= NEAR_DAYS * 86400000;
+  });
+  if (!near.length) return null;
+
+  const seen = new Set();
+  const probes = [];
+  for (const entry of near.slice(0, 8)) {
+    const day = String(entry.call_date || '').slice(0, 10);
+    const key = `${entry.box}|${entry.user}|${day}`;
+    if (!entry.box || !entry.user || !day || seen.has(key)) continue;
+    seen.add(key);
+    const box = getBoxes().find(b => b.id === entry.box);
+    if (box) probes.push(recordingLookup(box, { agent_user: entry.user, date: day }));
+  }
+  if (!probes.length) return null;
+  const rows2 = (await Promise.all(probes)).flat();
+  return chooseClip(
+    rows2.filter(r => r && r.recording_id && r.location && onlyDigits(r.location).includes(tail)),
+    row,
   );
-  const candidates = results.flat()
-    .filter(r => r && r.recording_id && r.location && onlyDigits(r.location).includes(tail));
-  return chooseClip(candidates, row);
 }
 
 async function pollOne(row) {
