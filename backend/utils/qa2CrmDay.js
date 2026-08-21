@@ -129,10 +129,15 @@ async function insertCrmDayCall({ companyId, leg, transferId, saleId, vendorCode
     talk_sec: Number.isFinite(rec?.duration) ? rec.duration : null,
     recording_id: rec?.recording_id ? String(rec.recording_id) : null,
     recording_location: rec?.location || null,
-    // A row with no lead code at all can never resolve later either — the
-    // poller (qa2RecordingPoller.js) only ever retries by dialer_lead_id, so
-    // marking it 'missing' immediately is honest, not a missed retry.
-    recording_state: rec ? 'found' : (parsedLeadId ? 'pending' : 'missing'),
+    // A row with no lead code USED to be written off here, because the poller
+    // only ever retried by dialer_lead_id. It now has a second route — the
+    // agent's own recordings for that day, matched on the customer's number —
+    // so a row with an agent and a phone is worth queueing rather than burying.
+    // That distinction is the whole difference between one found recording and
+    // forty-seven on a day where the CRM transfers carried no vendor code.
+    // Only a row with neither a lead code NOR an agent+phone is truly hopeless.
+    recording_state: rec ? 'found'
+      : ((parsedLeadId || (agentUserId && phone)) ? 'pending' : 'missing'),
     qa_relevant: true,
     source: 'crm_day',
   };
