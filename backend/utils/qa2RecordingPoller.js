@@ -75,9 +75,55 @@ async function chooseClip(candidates, row) {
     .sort((a, b) => a.d - b.d)[0]?.c || pool[0];
 }
 
+// A call with no dialer lead id can still be found: ask the dialer for that
+// AGENT's recordings on that DAY and keep the clip whose file path carries this
+// customer's number. Needed since transfers materialised from the CRM (mig 265)
+// often have no vendor code at all — 40 of yesterday's TRA calls were marked
+// missing on the spot for exactly this reason. Costlier than a lead_id lookup
+// (one call per box per agent-day, though the lookup cache absorbs repeats), so
+// it gets a shorter leash than the main path.
+const MAX_ATTEMPTS_NO_LEAD = 3;
+
+async function loginsFor(row) {
+  if (row.agent_user) return [String(row.agent_user)];
+  if (!row.agent_user_id) return [];
+  const { data } = await supabaseAdmin.from('user_profiles')
+    .select('vicidial_agent_ids').eq('user_id', row.agent_user_id).maybeSingle();
+  return (data?.vicidial_agent_ids || []).map(String).filter(Boolean);
+}
+
+async function pollByAgentDay(row) {
+  const tail = phoneTail(row.normalized_phone || row.customer_phone || '');
+  if (!tail || !row.call_at) return null;
+  const logins = await loginsFor(row);
+  if (!logins.length) return null;
+  const date = new Date(row.call_at).toISOString().slice(0, 10);
+
+  const results = await Promise.all(
+    getBoxes().flatMap(b => logins.map(a => recordingLookup(b, { agent_user: a, date }))),
+  );
+  const candidates = results.flat()
+    .filter(r => r && r.recording_id && r.location && onlyDigits(r.location).includes(tail));
+  return chooseClip(candidates, row);
+}
+
 async function pollOne(row) {
   if (!row.dialer_lead_id) {
-    await supabaseAdmin.from('qa2_call').update({ recording_state: 'missing' }).eq('id', row.id);
+    const attempts = (row.recording_attempts || 0) + 1;
+    const hit = await pollByAgentDay(row);
+    if (hit) {
+      const updates = {
+        box_id: hit.box, recording_id: String(hit.recording_id), recording_location: hit.location,
+        recording_state: 'found', recording_attempts: attempts,
+      };
+      if (Number.isFinite(hit.duration)) updates.talk_sec = hit.duration;
+      const { error } = await supabaseAdmin.from('qa2_call').update(updates).eq('id', row.id);
+      if (!error) return;
+    }
+    await supabaseAdmin.from('qa2_call').update({
+      recording_attempts: attempts,
+      recording_state: attempts >= MAX_ATTEMPTS_NO_LEAD ? 'missing' : 'pending',
+    }).eq('id', row.id);
     return;
   }
 
@@ -124,7 +170,7 @@ async function pollOne(row) {
   await supabaseAdmin.from('qa2_call').update({ recording_attempts: attempts, recording_state: state }).eq('id', row.id);
 }
 
-const COLS = 'id, vendor_code, dialer_lead_id, recording_attempts, normalized_phone, customer_phone, agent_user, call_at, leg';
+const COLS = 'id, vendor_code, dialer_lead_id, recording_attempts, normalized_phone, customer_phone, agent_user, agent_user_id, call_at, leg';
 
 // QA-RELEVANT ROWS GO FIRST, NEWEST FIRST. Every dialed call becomes a qa2_call
 // row, so 'pending' is a quarter of a million deep — at a batch a minute the
