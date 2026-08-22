@@ -111,7 +111,26 @@ export default function QueueTab() {
   }, [filter, tq.params, abortable]);
   useEffect(() => { load(); }, [filter, tq.version]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (open) return <ReviewScreen assignment={open} onDone={() => { setOpen(null); load(); }} />;
+  // Reviewing runs down the list you are looking at. Handing ReviewScreen the
+  // NEXT row means an agent can score a whole queue without returning here
+  // between every call — the round trip was: back, find your place, click, wait.
+  // Rows already scored drop out of the list on the next load, so "next" is
+  // taken from the list as it stands when the screen opens.
+  if (open) {
+    const idx = rows.findIndex(r => r.id === open.id);
+    const next = idx >= 0 ? rows[idx + 1] : null;
+    const remaining = idx >= 0 ? Math.max(0, rows.length - idx - 1) : 0;
+    return (
+      <ReviewScreen
+        key={open.id}
+        assignment={open}
+        remaining={remaining}
+        nextLabel={next ? 'Next record' : null}
+        onNext={next ? () => setOpen(next) : null}
+        onDone={() => { setOpen(null); load(); }}
+      />
+    );
+  }
 
   const activeFilters = Object.entries(tq.filters || {});
 

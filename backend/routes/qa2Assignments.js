@@ -46,6 +46,24 @@ async function requireScope(req, res) {
 // Batch-resolve display names for CRM user ids — same shape qa2Reports.js's
 // own nameMap() already uses. agent_user (the raw dialer login string) stays
 // on every response as a fallback for whoever has no user_profiles row yet.
+// What the CLOSER did with the transfer, for a batch of calls (mig 277's
+// resolver). A TRA row is the fronter's leg, so its own dispo is 'XFER' and
+// says nothing about how the lead actually went — reviewing a fronter without
+// that is half the picture. Best-effort: a failure here must never take a queue
+// or a review screen down with it.
+async function closerDispoMap(callIds) {
+  const ids = [...new Set((callIds || []).filter(Boolean))];
+  if (!ids.length) return new Map();
+  try {
+    const { data, error } = await supabaseAdmin.rpc('app_qa2_closer_dispo', { p_call_ids: ids });
+    if (error) throw new Error(error.message);
+    return new Map((data || []).map(r => [r.call_id, { dispo: r.closer_dispo, source: r.closer_dispo_source }]));
+  } catch (e) {
+    logger.warn('QA2_CALLS', `closer dispo lookup failed: ${e.message}`);
+    return new Map();
+  }
+}
+
 async function nameMap(userIds) {
   const ids = [...new Set((userIds || []).filter(Boolean))];
   if (!ids.length) return new Map();
@@ -83,8 +101,12 @@ router.get('/queue', asyncHandler(async (req, res) => {
   const { data, error } = await query;
   if (error) return res.status(500).json({ error: error.message });
   const names = await nameMap((data || []).map(a => a.qa2_call?.agent_user_id));
+  const closerDispos = await closerDispoMap((data || []).map(a => a.qa2_call?.id));
   const assignments = (data || []).map(a => (a.qa2_call
-    ? { ...a, qa2_call: { ...a.qa2_call, agent_name: names.get(a.qa2_call.agent_user_id) || a.qa2_call.agent_user || null } }
+    ? { ...a, qa2_call: { ...a.qa2_call,
+        agent_name: names.get(a.qa2_call.agent_user_id) || a.qa2_call.agent_user || null,
+        closer_dispo: closerDispos.get(a.qa2_call.id)?.dispo || null,
+        closer_dispo_source: closerDispos.get(a.qa2_call.id)?.source || null } }
     : a));
 
   // Counts for EVERY status, not just the one being viewed. The queue's status
@@ -157,8 +179,12 @@ router.get('/pool', asyncHandler(async (req, res) => {
   const { data, error } = await query;
   if (error) return res.status(500).json({ error: error.message });
   const names = await nameMap((data || []).map(a => a.qa2_call?.agent_user_id));
+  const closerDispos = await closerDispoMap((data || []).map(a => a.qa2_call?.id));
   const assignments = (data || []).map(a => (a.qa2_call
-    ? { ...a, qa2_call: { ...a.qa2_call, agent_name: names.get(a.qa2_call.agent_user_id) || a.qa2_call.agent_user || null } }
+    ? { ...a, qa2_call: { ...a.qa2_call,
+        agent_name: names.get(a.qa2_call.agent_user_id) || a.qa2_call.agent_user || null,
+        closer_dispo: closerDispos.get(a.qa2_call.id)?.dispo || null,
+        closer_dispo_source: closerDispos.get(a.qa2_call.id)?.source || null } }
     : a));
 
   // Counts for EVERY status, not just the one being viewed. The queue's status
@@ -361,6 +387,10 @@ router.get('/calls/:id', asyncHandler(async (req, res) => {
   }
 
   const names = await nameMap([call.agent_user_id, linked?.agent_user_id]);
+  const closerDispos = await closerDispoMap([call.id, linked?.id]);
+  call.closer_dispo = closerDispos.get(call.id)?.dispo || null;
+  call.closer_dispo_source = closerDispos.get(call.id)?.source || null;
+  if (linked) linked.closer_dispo = closerDispos.get(linked.id)?.dispo || null;
   call.agent_name = names.get(call.agent_user_id) || call.agent_user || null;
   call.company_name = call.companies?.name || null;
   if (linked) {

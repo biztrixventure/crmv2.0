@@ -20,6 +20,7 @@ const { etDateToUtcStart, etDateToUtcEnd } = require('../utils/etUtils');
 const { applySort } = require('../utils/sortHelper');
 const { applyColumnFilters, resolveColumnAccess } = require('../utils/columnFilter');
 const { QA2_CALL_COLUMNS } = require('../config/recordColumns');
+const logger = require('../utils/logger');
 
 async function requireManager(req, res) {
   const scope = await resolveQa2Scope(req);
@@ -381,11 +382,22 @@ router.get('/day-calls', asyncHandler(async (req, res) => {
     ...(assignments || []).map(a => a.assigned_to),
   ]);
 
+  // What the CLOSER made of each transfer (mig 277). A TRA row is the fronter's
+  // leg and its own dispo is 'XFER', which tells a reviewer nothing about how
+  // the lead went — this is the column that does. Best-effort: the day list
+  // must still render if the lookup fails.
+  let closerDispos = new Map();
+  try {
+    const { data: cd } = await supabaseAdmin.rpc('app_qa2_closer_dispo', { p_call_ids: callIds });
+    closerDispos = new Map((cd || []).map(r => [r.call_id, r.closer_dispo]));
+  } catch (e) { logger.warn('QA2_TEAM', `closer dispo lookup failed: ${e.message}`); }
+
   const rows = (calls || []).map(c => {
     const a = assignByCall.get(c.id);
     return {
       ...c,
       agent_name: names.get(c.agent_user_id) || c.agent_user || null,
+      closer_dispo: closerDispos.get(c.id) || null,
       // The row carries its assignment id so a manager can take the work back
       // off an agent from the same table they handed it out in.
       assignment_id: a?.id || null,

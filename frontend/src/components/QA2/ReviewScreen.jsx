@@ -12,7 +12,7 @@
 // ============================================================================
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { ArrowLeft, Play, Pause, Phone, Building2, User, Clock, Send, SkipForward, Car, Hash } from 'lucide-react';
+import { ArrowLeft, Play, Pause, Phone, Building2, User, Clock, Send, SkipForward, Car, Hash, CheckCircle2, ArrowRight } from 'lucide-react';
 import { toast } from 'sonner';
 import client from '../../api/client';
 import ThemedSelect from '../UI/Select';
@@ -153,7 +153,7 @@ export function ParameterInput({ param, answer, onChange }) {
   );
 }
 
-export default function ReviewScreen({ assignment, onDone }) {
+export default function ReviewScreen({ assignment, onDone, onNext, nextLabel, remaining }) {
   const [call, setCall] = useState(null);
   const [linked, setLinked] = useState(null);
   const [customerContext, setCustomerContext] = useState(null);
@@ -165,6 +165,7 @@ export default function ReviewScreen({ assignment, onDone }) {
   const [score, setScore] = useState(null);
   const [loadError, setLoadError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(null);   // the score, once it is in
   const saveTimer = useRef(null);
 
   useEffect(() => {
@@ -219,9 +220,13 @@ export default function ReviewScreen({ assignment, onDone }) {
     setSubmitting(true);
     try {
       await client.put(`qa2/evaluations/${evaluation.id}`, { answers: Object.entries(answers).map(([parameter_id, v]) => ({ parameter_id, ...v })), overall_notes: notes });
-      await client.post(`qa2/evaluations/${evaluation.id}/submit`);
+      const r = await client.post(`qa2/evaluations/${evaluation.id}/submit`);
       toast.success('Submitted');
-      onDone();
+      // Landing back on the queue after every single review meant finding your
+      // place again, opening the next one, waiting for it to load — for every
+      // call. Stay here and offer the next record instead; going back is still
+      // one click for anyone who wants it.
+      setSubmitted(r.data?.evaluation || { final_score: score?.final_score ?? null });
     } catch (e) { toast.error(e.response?.data?.error || 'Could not submit'); }
     finally { setSubmitting(false); }
   };
@@ -254,6 +259,54 @@ export default function ReviewScreen({ assignment, onDone }) {
     </div>
   );
   if (!call || !def) return <Loading variant="cards" />;
+
+  // ── submitted ────────────────────────────────────────────────────────────
+  // The scored call is done; the only thing worth doing next is the next call.
+  // Everything below is deliberately quiet — one obvious action, one way back.
+  if (submitted) {
+    const finalScore = submitted.final_score ?? score?.final_score ?? null;
+    const verdict = submitted.result || submitted.autofail_result || null;
+    return (
+      <div className="max-w-2xl mx-auto space-y-4 pt-6">
+        <Panel className="text-center space-y-3">
+          <div className="flex items-center justify-center gap-2">
+            <CheckCircle2 size={22} style={{ color: 'var(--color-success-600, #16a34a)' }} />
+            <span className="text-lg font-semibold">Review submitted</span>
+          </div>
+          {finalScore != null && (
+            <div>
+              <div className="text-3xl font-bold">{finalScore}</div>
+              {verdict && <div className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>{verdict}</div>}
+            </div>
+          )}
+          <div className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+            {call.agent_name || call.agent_user || 'This agent'} · {call.customer_phone || '—'}
+          </div>
+
+          <div className="flex items-center justify-center gap-2 pt-2 flex-wrap">
+            {onNext ? (
+              <button className="btn btn-primary text-sm flex items-center gap-1.5" onClick={onNext}>
+                {nextLabel || 'Next record'} <ArrowRight size={14} />
+              </button>
+            ) : (
+              <span className="text-sm" style={{ color: 'var(--color-text-tertiary)' }}>
+                That was the last one in this list.
+              </span>
+            )}
+            <button className="btn text-sm" style={{ border: '1px solid var(--color-border)' }} onClick={onDone}>
+              Back to queue
+            </button>
+          </div>
+
+          {remaining > 0 && (
+            <div className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
+              {remaining} more waiting in this list
+            </div>
+          )}
+        </Panel>
+      </div>
+    );
+  }
 
   const s = score || evaluation;
 
@@ -295,6 +348,15 @@ export default function ReviewScreen({ assignment, onDone }) {
               <div className="flex items-center gap-2"><Phone size={13} style={{ color: 'var(--color-text-tertiary)' }} />{call.customer_phone || '—'}</div>
               <div className="flex items-center gap-2"><Clock size={13} style={{ color: 'var(--color-text-tertiary)' }} />{call.call_at ? new Date(call.call_at).toLocaleString() : '—'}</div>
               {call.dispo_raw && <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>Dispo: {call.dispo_raw}</div>}
+              {/* On a TRA the row above is the FRONTER's leg, so its dispo is
+                  'XFER' and says nothing about how the lead went. This is what
+                  the closer made of it — the thing you actually need to know to
+                  score the transfer. */}
+              {call.closer_dispo && (
+                <div className="text-xs font-semibold" style={{ color: 'var(--color-text)' }}>
+                  Closer dispo: {call.closer_dispo}
+                </div>
+              )}
             </div>
           </Panel>
 
