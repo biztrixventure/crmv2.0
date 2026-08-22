@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   ClipboardList, Plus, Edit2, Trash2, Send, BarChart3, Clock, Users, User, X,
-  CheckCircle2, AlertTriangle, Search, Minus, Save, Trophy, Tag, Target, TrendingUp,
+  CheckCircle2, AlertTriangle, Search, Minus, Save, Trophy, Tag, Target, TrendingUp, Copy,
 } from 'lucide-react';
 import client from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
@@ -12,11 +12,15 @@ import { Panel, SectionHeader, Loading, EmptyState, KpiTile, PillTabs } from '..
 import { pct, fmtDue, categoryColor, CategoryBadge, RankBadge, MiniBar } from './quizUtils';
 
 const MIN_OPTIONS = 2;
-const MAX_OPTIONS = 8;
-const blankQuestion = () => ({ question_text: '', options: ['', ''], correct_index: 0, points: 1 });
+// 8 made a "pick the state" or "pick the plan" question impossible. Matches the
+// route's limit (mig 279). Past a handful of options a dropdown reads far
+// better than a column of radio buttons, which is what display_type selects.
+const MAX_OPTIONS = 100;
+const BULK_ADD = 10;
+const blankQuestion = () => ({ question_text: '', options: ['', ''], correct_index: 0, points: 1, display_type: 'radio' });
 
 // ── Question editor (create/edit) ────────────────────────────────────────────
-function QuestionEditor({ question, index, onChange, onRemove, canRemove }) {
+function QuestionEditor({ question, index, onChange, onRemove, onDuplicate, canRemove }) {
   const set = (patch) => onChange({ ...question, ...patch });
   const setOption = (i, v) => {
     const options = [...question.options];
@@ -24,6 +28,11 @@ function QuestionEditor({ question, index, onChange, onRemove, canRemove }) {
     set({ options });
   };
   const addOption = () => { if (question.options.length < MAX_OPTIONS) set({ options: [...question.options, ''] }); };
+  const addManyOptions = () => {
+    const room = MAX_OPTIONS - question.options.length;
+    if (room <= 0) return;
+    set({ options: [...question.options, ...Array(Math.min(BULK_ADD, room)).fill('')] });
+  };
   const removeOption = (i) => {
     if (question.options.length <= MIN_OPTIONS) return;
     const options = question.options.filter((_, idx) => idx !== i);
@@ -33,13 +42,35 @@ function QuestionEditor({ question, index, onChange, onRemove, canRemove }) {
 
   return (
     <Panel tone="inset" className="space-y-3">
-      <div className="flex items-start justify-between gap-2">
+      <div className="flex items-start justify-between gap-2 flex-wrap">
         <p className="text-xs font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>Question {index + 1}</p>
-        {canRemove && (
-          <button type="button" onClick={onRemove} className="p-1 rounded-lg hover:bg-error-50" title="Remove question">
-            <Trash2 size={14} style={{ color: 'var(--color-error-500)' }} />
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {/* Same data either way — a list of options and one correct answer.
+              This picks how the person taking the quiz sees it, which is what
+              makes a forty-option question workable. */}
+          <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
+            {[{ k: 'radio', label: 'Choices' }, { k: 'dropdown', label: 'Dropdown' }].map(t => (
+              <button key={t.k} type="button" onClick={() => set({ display_type: t.k })}
+                className="text-xs font-semibold px-2 py-1"
+                style={{
+                  background: (question.display_type || 'radio') === t.k ? 'var(--color-primary-600)' : 'transparent',
+                  color: (question.display_type || 'radio') === t.k ? '#fff' : 'var(--color-text-secondary)',
+                }}>
+                {t.label}
+              </button>
+            ))}
+          </div>
+          {onDuplicate && (
+            <button type="button" onClick={onDuplicate} className="p-1 rounded-lg" title="Duplicate this question">
+              <Copy size={14} style={{ color: 'var(--color-text-secondary)' }} />
+            </button>
+          )}
+          {canRemove && (
+            <button type="button" onClick={onRemove} className="p-1 rounded-lg hover:bg-error-50" title="Remove question">
+              <Trash2 size={14} style={{ color: 'var(--color-error-500)' }} />
+            </button>
+          )}
+        </div>
       </div>
       <input value={question.question_text} onChange={e => set({ question_text: e.target.value })}
         placeholder="Question text…" className="input w-full" />
@@ -65,9 +96,20 @@ function QuestionEditor({ question, index, onChange, onRemove, canRemove }) {
           </div>
         ))}
         {question.options.length < MAX_OPTIONS && (
-          <button type="button" onClick={addOption} className="text-xs font-semibold flex items-center gap-1" style={{ color: 'var(--color-primary-600)' }}>
-            <Plus size={12} /> Add option
-          </button>
+          <div className="flex items-center gap-3 flex-wrap">
+            <button type="button" onClick={addOption} className="text-xs font-semibold flex items-center gap-1" style={{ color: 'var(--color-primary-600)' }}>
+              <Plus size={12} /> Add option
+            </button>
+            {/* Clicking "add" forty times is not a workflow. */}
+            <button type="button" onClick={addManyOptions} className="text-xs font-semibold flex items-center gap-1" style={{ color: 'var(--color-primary-600)' }}>
+              <Plus size={12} /> Add {BULK_ADD}
+            </button>
+            <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
+              {question.options.length} of {MAX_OPTIONS}
+              {question.options.length > 8 && (question.display_type || 'radio') === 'radio'
+                ? ' — long lists read better as a dropdown' : ''}
+            </span>
+          </div>
         )}
       </div>
 
@@ -99,12 +141,22 @@ function QuizEditorModal({ quizId, existingCategories, onClose, onSaved }) {
       setCategory(r.data.quiz.category || '');
       setPassThreshold(r.data.quiz.pass_threshold ?? 70);
       setTimeLimit(r.data.quiz.time_limit_minutes || '');
-      setQuestions((r.data.questions || []).map(q => ({ question_text: q.question_text, options: q.options, correct_index: q.correct_index, points: q.points })));
+      setQuestions((r.data.questions || []).map(q => ({ question_text: q.question_text, options: q.options, correct_index: q.correct_index, points: q.points, display_type: q.display_type || 'radio' })));
     }).catch(e => setErr(e.response?.data?.error || 'Failed to load quiz')).finally(() => setLoading(false));
   }, [quizId]);
 
   const setQuestion = (i, q) => setQuestions(prev => prev.map((p, idx) => idx === i ? q : p));
   const addQuestion = () => setQuestions(prev => [...prev, blankQuestion()]);
+
+  // Building a quiz where every question offers the same forty options meant
+  // retyping all forty each time. A copy lands directly beneath its original,
+  // carrying the options, the correct answer, the points and the display type —
+  // everything except the question text, which is the part that changes.
+  const duplicateQuestion = (i) => setQuestions(prev => {
+    const src = prev[i];
+    const copy = { ...src, options: [...src.options], question_text: src.question_text ? `${src.question_text} (copy)` : '' };
+    return [...prev.slice(0, i + 1), copy, ...prev.slice(i + 1)];
+  });
   const removeQuestion = (i) => setQuestions(prev => prev.filter((_, idx) => idx !== i));
 
   const submit = async (e) => {
@@ -177,12 +229,22 @@ function QuizEditorModal({ quizId, existingCategories, onClose, onSaved }) {
             <div className="space-y-3">
               <p className="text-[11px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>Questions</p>
               {questions.map((q, i) => (
-                <QuestionEditor key={i} question={q} index={i} onChange={qq => setQuestion(i, qq)} onRemove={() => removeQuestion(i)} canRemove={questions.length > 1} />
+                <QuestionEditor key={i} question={q} index={i} onChange={qq => setQuestion(i, qq)} onRemove={() => removeQuestion(i)} onDuplicate={() => duplicateQuestion(i)} canRemove={questions.length > 1} />
               ))}
-              <button type="button" onClick={addQuestion} className="w-full py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-1.5"
-                style={{ border: '1px dashed var(--color-border)', color: 'var(--color-primary-600)' }}>
-                <Plus size={15} /> Add question
-              </button>
+              <div className="flex gap-2">
+                <button type="button" onClick={addQuestion} className="flex-1 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-1.5"
+                  style={{ border: '1px dashed var(--color-border)', color: 'var(--color-primary-600)' }}>
+                  <Plus size={15} /> Add question
+                </button>
+                {questions.length > 0 && (
+                  <button type="button" onClick={() => duplicateQuestion(questions.length - 1)}
+                    className="flex-1 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-1.5"
+                    style={{ border: '1px dashed var(--color-border)', color: 'var(--color-primary-600)' }}
+                    title="Copy the last question, options and all">
+                    <Copy size={15} /> Duplicate last
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="flex gap-3 pt-2">

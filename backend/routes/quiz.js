@@ -19,8 +19,14 @@ const { notifyUsers } = require('../utils/notificationService');
 
 const router = express.Router();
 
-const MAX_OPTIONS = 8;
+// Was 8, which made a "pick the state" or "pick the plan" question impossible.
+// jsonb never had a limit of its own — this was always just the route's rule.
+// 100 is past anything a real question needs and still refuses a runaway paste.
+// A question with dozens of options should be a dropdown, which is what
+// display_type is for (mig 279).
+const MAX_OPTIONS = 100;
 const MIN_OPTIONS = 2;
+const DISPLAY_TYPES = ['radio', 'dropdown'];
 
 // A user may manage quizzes if they hold quiz.manage in their own company, or
 // are compliance_manager (cross-company by role, same as the rest of the
@@ -66,6 +72,7 @@ function validateQuestions(questions) {
       return `Every question needs ${MIN_OPTIONS}-${MAX_OPTIONS} options`;
     }
     if (q.options.some(o => !String(o || '').trim())) return 'Options cannot be blank';
+    if (q.display_type && !DISPLAY_TYPES.includes(q.display_type)) return 'A question is either radio or dropdown';
     const ci = Number(q.correct_index);
     if (!Number.isInteger(ci) || ci < 0 || ci >= q.options.length) return 'Each question needs a valid correct answer';
   }
@@ -96,6 +103,7 @@ router.post('/', asyncHandler(async (req, res) => {
     question_text: String(q.question_text).slice(0, 2000),
     options: q.options.map(o => String(o).slice(0, 500)),
     correct_index: +q.correct_index,
+    display_type: DISPLAY_TYPES.includes(q.display_type) ? q.display_type : 'radio',
     points: q.points && +q.points > 0 ? +q.points : 1,
     order_index: i,
   }));
@@ -202,6 +210,7 @@ router.put('/:id', asyncHandler(async (req, res) => {
       question_text: String(q.question_text).slice(0, 2000),
       options: q.options.map(o => String(o).slice(0, 500)),
       correct_index: +q.correct_index,
+      display_type: DISPLAY_TYPES.includes(q.display_type) ? q.display_type : 'radio',
       points: q.points && +q.points > 0 ? +q.points : 1,
       order_index: i,
     }));
@@ -417,7 +426,7 @@ router.get('/my/:attemptId/take', asyncHandler(async (req, res) => {
   if (!attempt.started_at) {
     await supabaseAdmin.from('quiz_attempts').update({ started_at: new Date().toISOString() }).eq('id', attempt.id);
   }
-  const { data: questions } = await supabaseAdmin.from('quiz_questions').select('id, question_text, options, points, order_index').eq('quiz_id', quiz.id).order('order_index', { ascending: true });
+  const { data: questions } = await supabaseAdmin.from('quiz_questions').select('id, question_text, options, display_type, points, order_index').eq('quiz_id', quiz.id).order('order_index', { ascending: true });
   res.json({ quiz, questions: questions || [], started_at: attempt.started_at || new Date().toISOString() });
 }));
 

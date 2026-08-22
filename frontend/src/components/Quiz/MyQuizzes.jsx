@@ -3,6 +3,7 @@ import {
   ClipboardList, Clock, CheckCircle2, XCircle, Award, AlertTriangle, X, Users, ChevronRight,
 } from 'lucide-react';
 import client from '../../api/client';
+import ThemedSelect from '../UI/Select';
 import { Button, Alert } from '../UI';
 import { Panel, SectionHeader, Loading, EmptyState, KpiTile } from '../UI/kit';
 import { pct, fmtDue, CategoryBadge, MiniBar, PassFailBadge } from './quizUtils';
@@ -82,18 +83,35 @@ function TakeQuizModal({ attemptId, onClose, onSubmitted }) {
             {(data?.questions || []).map((q, i) => (
               <Panel key={q.id} tone="inset" className="space-y-2.5">
                 <p className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>{i + 1}. {q.question_text}</p>
-                <div className="space-y-1.5">
-                  {q.options.map((opt, oi) => {
-                    const selected = answers[q.id] === oi;
-                    return (
-                      <label key={oi} className="flex items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer transition-colors"
-                        style={{ background: selected ? 'var(--color-primary-50, rgba(37,99,235,0.08))' : 'transparent', border: `1px solid ${selected ? 'var(--color-primary-500)' : 'var(--color-border)'}` }}>
-                        <input type="radio" name={q.id} checked={selected} onChange={() => setAnswers(a => ({ ...a, [q.id]: oi }))} />
-                        <span className="text-sm" style={{ color: 'var(--color-text)' }}>{opt}</span>
-                      </label>
-                    );
-                  })}
-                </div>
+                {/* Same answer either way — the index of the chosen option. A
+                    question with dozens of options is unreadable as a column of
+                    radio buttons, so the builder can send it as a dropdown. */}
+                {q.display_type === 'dropdown' ? (
+                  <ThemedSelect
+                    value={answers[q.id] ?? ''}
+                    onChange={e => setAnswers(a => {
+                      const next = { ...a };
+                      if (e.target.value === '') delete next[q.id];
+                      else next[q.id] = Number(e.target.value);
+                      return next;
+                    })}>
+                    <option value="">Choose an answer…</option>
+                    {q.options.map((opt, oi) => <option key={oi} value={oi}>{opt}</option>)}
+                  </ThemedSelect>
+                ) : (
+                  <div className="space-y-1.5">
+                    {q.options.map((opt, oi) => {
+                      const selected = answers[q.id] === oi;
+                      return (
+                        <label key={oi} className="flex items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer transition-colors"
+                          style={{ background: selected ? 'var(--color-primary-50, rgba(37,99,235,0.08))' : 'transparent', border: `1px solid ${selected ? 'var(--color-primary-500)' : 'var(--color-border)'}` }}>
+                          <input type="radio" name={q.id} checked={selected} onChange={() => setAnswers(a => ({ ...a, [q.id]: oi }))} />
+                          <span className="text-sm" style={{ color: 'var(--color-text)' }}>{opt}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
               </Panel>
             ))}
 
