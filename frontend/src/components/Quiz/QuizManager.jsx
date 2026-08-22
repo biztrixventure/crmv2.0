@@ -413,7 +413,10 @@ export default function QuizManager() {
   const { user, hasPermission } = useAuth();
   const isSuperadmin = user?.role === 'superadmin';
   const crossCompany = isSuperadmin || user?.role === 'compliance_manager';
-  const canManage = isSuperadmin || hasPermission('quiz.manage');
+  // Mirror the backend's canManageQuizzes(): compliance_manager is always
+  // allowed, independent of the quiz.manage role_permissions row — so this
+  // still works even before/without migration 273's permission grant landing.
+  const canManage = isSuperadmin || user?.role === 'compliance_manager' || hasPermission('quiz.manage');
 
   const [quizzes, setQuizzes] = useState([]);
   const [loading, setLoading] = useState(true);
