@@ -84,6 +84,8 @@ router.post('/', asyncHandler(async (req, res) => {
     company_id: req.user.company_id || null,
     title: String(b.title).slice(0, 200),
     description: b.description || null,
+    category: b.category ? String(b.category).slice(0, 60) : null,
+    pass_threshold: Number.isFinite(+b.pass_threshold) ? Math.min(100, Math.max(0, +b.pass_threshold)) : 70,
     time_limit_minutes: b.time_limit_minutes ? +b.time_limit_minutes : null,
     created_by: req.user.id,
   }).select().single();
@@ -118,13 +120,16 @@ router.get('/', asyncHandler(async (req, res) => {
   const ids = (quizzes || []).map(z => z.id);
   const [{ data: qc }, { data: ac }] = ids.length ? await Promise.all([
     supabaseAdmin.from('quiz_questions').select('quiz_id').in('quiz_id', ids),
-    supabaseAdmin.from('quiz_attempts').select('quiz_id, status').in('quiz_id', ids),
+    supabaseAdmin.from('quiz_attempts').select('quiz_id, status, percent').in('quiz_id', ids),
   ]) : [{ data: [] }, { data: [] }];
   const qCount = {}; (qc || []).forEach(r => { qCount[r.quiz_id] = (qCount[r.quiz_id] || 0) + 1; });
-  const aCount = {}, sCount = {};
+  const aCount = {}, sCount = {}, percentSum = {};
   (ac || []).forEach(r => {
     aCount[r.quiz_id] = (aCount[r.quiz_id] || 0) + 1;
-    if (r.status === 'submitted') sCount[r.quiz_id] = (sCount[r.quiz_id] || 0) + 1;
+    if (r.status === 'submitted') {
+      sCount[r.quiz_id] = (sCount[r.quiz_id] || 0) + 1;
+      percentSum[r.quiz_id] = (percentSum[r.quiz_id] || 0) + (Number(r.percent) || 0);
+    }
   });
   const creatorIds = [...new Set((quizzes || []).map(z => z.created_by))];
   const names = await nameMap(creatorIds);
@@ -134,8 +139,35 @@ router.get('/', asyncHandler(async (req, res) => {
     question_count: qCount[z.id] || 0,
     assigned_count: aCount[z.id] || 0,
     submitted_count: sCount[z.id] || 0,
+    avg_percent: sCount[z.id] ? +(percentSum[z.id] / sCount[z.id]).toFixed(1) : null,
   }));
   res.json({ quizzes: decorated });
+}));
+
+// ── manage: cross-quiz leaderboard — top scorers across every quiz this viewer
+// can see (same visibility rule as GET /). Ranks by average %, min 1 submitted
+// quiz; ties broken by attempt count. ────────────────────────────────────────
+router.get('/leaderboard', asyncHandler(async (req, res) => {
+  if (!(await canManageQuizzes(req))) return res.status(403).json({ error: 'Not allowed' });
+  let q = supabaseAdmin.from('quizzes').select('id');
+  if (!(await isSuperAdmin(req.user.id)) && !isCrossCompany(req)) q = q.eq('created_by', req.user.id);
+  const { data: quizzes } = await q;
+  const quizIds = (quizzes || []).map(z => z.id);
+  if (!quizIds.length) return res.json({ leaderboard: [] });
+
+  const { data: attempts } = await supabaseAdmin.from('quiz_attempts')
+    .select('user_id, percent, quiz_id').in('quiz_id', quizIds).eq('status', 'submitted');
+  const byUser = {};
+  (attempts || []).forEach(a => {
+    const u = (byUser[a.user_id] = byUser[a.user_id] || { user_id: a.user_id, count: 0, sum: 0, best: 0 });
+    u.count += 1; u.sum += Number(a.percent) || 0; u.best = Math.max(u.best, Number(a.percent) || 0);
+  });
+  const names = await nameMap(Object.keys(byUser));
+  const leaderboard = Object.values(byUser)
+    .map(u => ({ user_id: u.user_id, user_name: names[u.user_id] || 'Unknown', quizzes_taken: u.count, avg_percent: +(u.sum / u.count).toFixed(1), best_percent: u.best }))
+    .sort((a, b) => b.avg_percent - a.avg_percent || b.quizzes_taken - a.quizzes_taken)
+    .slice(0, 25);
+  res.json({ leaderboard });
 }));
 
 // ── manage: full detail (with correct answers) ───────────────────────────────
@@ -156,6 +188,8 @@ router.put('/:id', asyncHandler(async (req, res) => {
   const patch = { updated_at: new Date().toISOString() };
   if (b.title != null) patch.title = String(b.title).slice(0, 200);
   if (b.description !== undefined) patch.description = b.description || null;
+  if (b.category !== undefined) patch.category = b.category ? String(b.category).slice(0, 60) : null;
+  if (b.pass_threshold !== undefined) patch.pass_threshold = Number.isFinite(+b.pass_threshold) ? Math.min(100, Math.max(0, +b.pass_threshold)) : 70;
   if (b.time_limit_minutes !== undefined) patch.time_limit_minutes = b.time_limit_minutes ? +b.time_limit_minutes : null;
   if (b.is_active !== undefined) patch.is_active = !!b.is_active;
 
@@ -287,23 +321,39 @@ router.get('/:id/results', asyncHandler(async (req, res) => {
     ...a,
     target_team_name: a.target_team_id ? (teamNameOf[a.target_team_id] || 'Unknown team') : null,
     target_user_name: a.target_user_id ? (names[a.target_user_id] || 'Unknown') : null,
-    attempts: (byAssignment[a.id] || []).map(at => ({
-      user_id: at.user_id, user_name: names[at.user_id] || 'Unknown',
-      status: at.status, score: at.score, total_points: at.total_points, percent: at.percent,
-      started_at: at.started_at, submitted_at: at.submitted_at, due_at: at.due_at,
-    })),
+    attempts: (byAssignment[a.id] || [])
+      // submitted first (best score leading), pending trailing — reads as a
+      // leaderboard within each assignment instead of insertion order.
+      .slice()
+      .sort((x, y) => (y.status === 'submitted') - (x.status === 'submitted') || (Number(y.percent) || -1) - (Number(x.percent) || -1))
+      .map(at => ({
+        user_id: at.user_id, user_name: names[at.user_id] || 'Unknown',
+        status: at.status, score: at.score, total_points: at.total_points, percent: at.percent,
+        pass: at.status === 'submitted' ? (Number(at.percent) || 0) >= quiz.pass_threshold : null,
+        started_at: at.started_at, submitted_at: at.submitted_at, due_at: at.due_at,
+      })),
   }));
 
   const allAttempts = attempts || [];
   const submitted = allAttempts.filter(a => a.status === 'submitted');
+  const passed = submitted.filter(a => (Number(a.percent) || 0) >= quiz.pass_threshold);
+  // Top scorers across the whole quiz, independent of which assignment granted
+  // the attempt — the leaderboard view in the results modal.
+  const ranked = submitted.slice()
+    .sort((x, y) => (Number(y.percent) || 0) - (Number(x.percent) || 0))
+    .slice(0, 10)
+    .map(a => ({ user_id: a.user_id, user_name: names[a.user_id] || 'Unknown', percent: a.percent, score: a.score, total_points: a.total_points, submitted_at: a.submitted_at }));
   res.json({
     quiz,
     assignments: decorated,
+    ranked,
     summary: {
       total_assigned: allAttempts.length,
       total_submitted: submitted.length,
       total_pending: allAttempts.length - submitted.length,
       avg_percent: submitted.length ? +(submitted.reduce((s, a) => s + (Number(a.percent) || 0), 0) / submitted.length).toFixed(1) : null,
+      pass_count: passed.length,
+      fail_count: submitted.length - passed.length,
     },
   });
 }));
@@ -344,12 +394,14 @@ router.get('/team/:teamId/progress', asyncHandler(async (req, res) => {
 // ── assignee: my quizzes (pending + submitted) ────────────────────────────────
 router.get('/my/list', asyncHandler(async (req, res) => {
   const { data: attempts } = await supabaseAdmin.from('quiz_attempts')
-    .select('*, quizzes(id, title, description, time_limit_minutes, is_active)')
+    .select('*, quizzes(id, title, description, category, pass_threshold, time_limit_minutes, is_active)')
     .eq('user_id', req.user.id).order('created_at', { ascending: false });
   const rows = (attempts || []).filter(a => a.quizzes).map(a => ({
     attempt_id: a.id, quiz_id: a.quizzes.id, title: a.quizzes.title, description: a.quizzes.description,
+    category: a.quizzes.category, pass_threshold: a.quizzes.pass_threshold,
     time_limit_minutes: a.quizzes.time_limit_minutes, is_active: a.quizzes.is_active,
     status: a.status, due_at: a.due_at, score: a.score, total_points: a.total_points, percent: a.percent,
+    pass: a.status === 'submitted' ? (Number(a.percent) || 0) >= a.quizzes.pass_threshold : null,
     submitted_at: a.submitted_at, is_overdue: !!(a.due_at && a.status === 'pending' && new Date(a.due_at) < new Date()),
   }));
   res.json({ quizzes: rows });

@@ -1,25 +1,19 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   ClipboardList, Plus, Edit2, Trash2, Send, BarChart3, Clock, Users, User, X,
-  CheckCircle2, AlertTriangle, Award, Search, Minus, Save,
+  CheckCircle2, AlertTriangle, Search, Minus, Save, Trophy, Tag, Target, TrendingUp,
 } from 'lucide-react';
 import client from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 import { Button, Alert } from '../UI';
 import ThemedSelect from '../UI/Select';
 import ThemedDate from '../UI/ThemedDate';
-import { Panel, SectionHeader, Loading, EmptyState, KpiTile } from '../UI/kit';
+import { Panel, SectionHeader, Loading, EmptyState, KpiTile, PillTabs } from '../UI/kit';
+import { pct, fmtDue, categoryColor, CategoryBadge, RankBadge, MiniBar } from './quizUtils';
 
 const MIN_OPTIONS = 2;
 const MAX_OPTIONS = 8;
 const blankQuestion = () => ({ question_text: '', options: ['', ''], correct_index: 0, points: 1 });
-
-const pct = (n) => (n == null ? '—' : `${n}%`);
-const fmtDue = (iso) => {
-  if (!iso) return null;
-  const d = new Date(iso);
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-};
 
 // ── Question editor (create/edit) ────────────────────────────────────────────
 function QuestionEditor({ question, index, onChange, onRemove, canRemove }) {
@@ -86,9 +80,11 @@ function QuestionEditor({ question, index, onChange, onRemove, canRemove }) {
 }
 
 // ── Create / edit quiz modal ─────────────────────────────────────────────────
-function QuizEditorModal({ quizId, onClose, onSaved }) {
+function QuizEditorModal({ quizId, existingCategories, onClose, onSaved }) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [category, setCategory] = useState('');
+  const [passThreshold, setPassThreshold] = useState(70);
   const [timeLimit, setTimeLimit] = useState('');
   const [questions, setQuestions] = useState([blankQuestion()]);
   const [loading, setLoading] = useState(!!quizId);
@@ -100,6 +96,8 @@ function QuizEditorModal({ quizId, onClose, onSaved }) {
     client.get(`quiz/${quizId}`).then(r => {
       setTitle(r.data.quiz.title || '');
       setDescription(r.data.quiz.description || '');
+      setCategory(r.data.quiz.category || '');
+      setPassThreshold(r.data.quiz.pass_threshold ?? 70);
       setTimeLimit(r.data.quiz.time_limit_minutes || '');
       setQuestions((r.data.questions || []).map(q => ({ question_text: q.question_text, options: q.options, correct_index: q.correct_index, points: q.points })));
     }).catch(e => setErr(e.response?.data?.error || 'Failed to load quiz')).finally(() => setLoading(false));
@@ -118,7 +116,11 @@ function QuizEditorModal({ quizId, onClose, onSaved }) {
       if (q.options.some(o => !o.trim())) return setErr('Options cannot be blank');
     }
     setSaving(true); setErr('');
-    const payload = { title, description: description || null, time_limit_minutes: timeLimit ? +timeLimit : null, questions };
+    const payload = {
+      title, description: description || null, category: category.trim() || null,
+      pass_threshold: Math.max(0, Math.min(100, +passThreshold || 70)),
+      time_limit_minutes: timeLimit ? +timeLimit : null, questions,
+    };
     try {
       if (quizId) await client.put(`quiz/${quizId}`, payload);
       else await client.post('quiz', payload);
@@ -152,6 +154,19 @@ function QuizEditorModal({ quizId, onClose, onSaved }) {
             <div>
               <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Description</label>
               <input value={description} onChange={e => setDescription(e.target.value)} placeholder="What this quiz covers…" className="input w-full" />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5 flex items-center gap-1.5" style={{ color: 'var(--color-text-secondary)' }}><Tag size={12} /> Category</label>
+                <input list="quiz-categories" value={category} onChange={e => setCategory(e.target.value)} placeholder="e.g. Compliance" className="input w-full" />
+                <datalist id="quiz-categories">
+                  {(existingCategories || []).map(c => <option key={c} value={c} />)}
+                </datalist>
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5 flex items-center gap-1.5" style={{ color: 'var(--color-text-secondary)' }}><Target size={12} /> Pass threshold (%)</label>
+                <input type="number" min={0} max={100} value={passThreshold} onChange={e => setPassThreshold(e.target.value)} className="input w-full" />
+              </div>
             </div>
             <div className="flex items-center gap-2">
               <Clock size={14} style={{ color: 'var(--color-text-tertiary)' }} />
@@ -372,9 +387,26 @@ function ResultsModal({ quizId, onClose }) {
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
                 <KpiTile label="Assigned" value={data.summary.total_assigned} tone="primary" />
                 <KpiTile label="Submitted" value={data.summary.total_submitted} tone="success" />
-                <KpiTile label="Pending" value={data.summary.total_pending} tone="warn" />
+                <KpiTile label="Pass / Fail" value={`${data.summary.pass_count} / ${data.summary.fail_count}`} tone={data.summary.fail_count > data.summary.pass_count ? 'danger' : 'success'} />
                 <KpiTile label="Avg score" value={pct(data.summary.avg_percent)} tone="info" />
               </div>
+
+              {data.ranked?.length > 0 && (
+                <Panel tone="inset" className="space-y-2">
+                  <p className="text-xs font-bold uppercase tracking-wide flex items-center gap-1.5" style={{ color: 'var(--color-text-secondary)' }}>
+                    <Trophy size={13} style={{ color: '#f59e0b' }} /> Top scorers
+                  </p>
+                  <div className="space-y-1.5">
+                    {data.ranked.map((r, i) => (
+                      <div key={r.user_id} className="flex items-center gap-2.5 text-sm">
+                        <RankBadge rank={i + 1} />
+                        <span className="flex-1" style={{ color: 'var(--color-text)' }}>{r.user_name}</span>
+                        <span className="font-semibold" style={{ color: 'var(--color-text)' }}>{pct(r.percent)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </Panel>
+              )}
 
               {data.assignments.length === 0 ? (
                 <EmptyState icon={Send} title="Not assigned yet" hint="Assign this quiz to a team or specific users to see progress here." />
@@ -392,8 +424,8 @@ function ResultsModal({ quizId, onClose }) {
                       <div key={at.user_id} className="flex items-center justify-between gap-2 text-sm py-1" style={{ borderTop: '1px solid var(--color-border)' }}>
                         <span style={{ color: 'var(--color-text)' }}>{at.user_name}</span>
                         {at.status === 'submitted' ? (
-                          <span className="flex items-center gap-1.5 font-semibold" style={{ color: 'var(--color-success-600)' }}>
-                            <Award size={13} /> {pct(at.percent)} ({at.score}/{at.total_points})
+                          <span className="flex items-center gap-1.5 font-semibold" style={{ color: at.pass ? 'var(--color-success-600)' : 'var(--color-error-500)' }}>
+                            {at.pass ? <CheckCircle2 size={13} /> : <AlertTriangle size={13} />} {pct(at.percent)} ({at.score}/{at.total_points})
                           </span>
                         ) : (
                           <span className="flex items-center gap-1.5 text-xs font-semibold" style={{ color: 'var(--color-text-tertiary)' }}>
@@ -409,6 +441,44 @@ function ResultsModal({ quizId, onClose }) {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── Cross-quiz leaderboard ────────────────────────────────────────────────────
+function LeaderboardPanel() {
+  const [rows, setRows] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState('');
+
+  useEffect(() => {
+    client.get('quiz/leaderboard').then(r => setRows(r.data.leaderboard || [])).catch(e => setErr(e.response?.data?.error || 'Failed to load leaderboard')).finally(() => setLoading(false));
+  }, []);
+
+  if (loading) return <Loading />;
+  if (err) return <Alert type="error" message={err} />;
+  if (!rows?.length) {
+    return <EmptyState icon={Trophy} title="No scores yet" hint="Once people start completing your quizzes, the top performers show up here." />;
+  }
+
+  return (
+    <div className="space-y-2">
+      {rows.map((r, i) => (
+        <Panel key={r.user_id} className="flex items-center gap-3">
+          <div className="w-7 flex justify-center flex-shrink-0"><RankBadge rank={i + 1} /></div>
+          <div className="min-w-0 flex-1">
+            <p className="font-semibold truncate" style={{ color: 'var(--color-text)' }}>{r.user_name}</p>
+            <div className="flex items-center gap-2 mt-1">
+              <MiniBar value={r.avg_percent} tone={r.avg_percent >= 70 ? 'var(--color-success-600)' : 'var(--color-warning-600)'} />
+              <span className="text-[11px] flex-shrink-0" style={{ color: 'var(--color-text-tertiary)' }}>{r.quizzes_taken} quiz{r.quizzes_taken === 1 ? '' : 'zes'}</span>
+            </div>
+          </div>
+          <div className="text-right flex-shrink-0">
+            <p className="font-bold text-lg leading-none" style={{ color: 'var(--color-text)' }}>{pct(r.avg_percent)}</p>
+            <p className="text-[10px] mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>best {pct(r.best_percent)}</p>
+          </div>
+        </Panel>
+      ))}
     </div>
   );
 }
@@ -430,6 +500,8 @@ export default function QuizManager() {
   const [assignQuiz, setAssignQuiz] = useState(null);
   const [resultsId, setResultsId] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [view, setView] = useState('quizzes');           // 'quizzes' | 'leaderboard'
+  const [categoryFilter, setCategoryFilter] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true); setErr('');
@@ -451,6 +523,11 @@ export default function QuizManager() {
     assigned: quizzes.reduce((s, q) => s + (q.assigned_count || 0), 0),
     submitted: quizzes.reduce((s, q) => s + (q.submitted_count || 0), 0),
   }), [quizzes]);
+  const categories = useMemo(() => [...new Set(quizzes.map(q => q.category).filter(Boolean))].sort(), [quizzes]);
+  const visibleQuizzes = useMemo(
+    () => categoryFilter ? quizzes.filter(q => q.category === categoryFilter) : quizzes,
+    [quizzes, categoryFilter],
+  );
 
   if (!canManage) {
     return <EmptyState icon={ClipboardList} title="No access" hint="You don't have permission to manage quizzes." />;
@@ -470,37 +547,76 @@ export default function QuizManager() {
         <KpiTile label="Submitted" value={totals.submitted} tone="success" />
       </div>
 
-      {loading ? <Loading /> : quizzes.length === 0 ? (
-        <EmptyState icon={ClipboardList} title="No quizzes yet" hint="Create your first quiz and assign it to a team or specific people."
-          action={<Button variant="primary" onClick={() => setEditorId(null)} className="inline-flex items-center gap-1.5"><Plus size={15} /> New Quiz</Button>} />
-      ) : (
-        <div className="space-y-2.5">
-          {quizzes.map(q => (
-            <Panel key={q.id} className="flex items-center justify-between gap-3 flex-wrap">
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <p className="font-semibold" style={{ color: 'var(--color-text)' }}>{q.title}</p>
-                  {!q.is_active && <span className="text-[10px] px-1.5 py-0.5 rounded font-bold" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>INACTIVE</span>}
-                  {q.time_limit_minutes && <span className="text-[11px] flex items-center gap-1" style={{ color: 'var(--color-text-tertiary)' }}><Clock size={11} /> {q.time_limit_minutes}m</span>}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <PillTabs
+          items={[{ key: 'quizzes', label: 'Quizzes', icon: ClipboardList }, { key: 'leaderboard', label: 'Leaderboard', icon: Trophy }]}
+          value={view} onChange={setView}
+        />
+        {view === 'quizzes' && categories.length > 0 && (
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <button onClick={() => setCategoryFilter('')} className="px-2.5 py-1 rounded-full text-[11px] font-bold transition-colors"
+              style={{ background: !categoryFilter ? 'var(--color-primary-600)' : 'var(--color-bg-secondary)', color: !categoryFilter ? '#fff' : 'var(--color-text-secondary)' }}>
+              All
+            </button>
+            {categories.map(c => {
+              const on = categoryFilter === c;
+              const col = categoryColor(c);
+              return (
+                <button key={c} onClick={() => setCategoryFilter(on ? '' : c)} className="px-2.5 py-1 rounded-full text-[11px] font-bold transition-colors flex items-center gap-1"
+                  style={{ background: on ? col : `color-mix(in srgb, ${col} 12%, transparent)`, color: on ? '#fff' : col }}>
+                  <Tag size={9} /> {c}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {view === 'leaderboard' ? <LeaderboardPanel /> : (
+        loading ? <Loading /> : visibleQuizzes.length === 0 ? (
+          quizzes.length === 0 ? (
+            <EmptyState icon={ClipboardList} title="No quizzes yet" hint="Create your first quiz and assign it to a team or specific people."
+              action={<Button variant="primary" onClick={() => setEditorId(null)} className="inline-flex items-center gap-1.5"><Plus size={15} /> New Quiz</Button>} />
+          ) : (
+            <EmptyState icon={Tag} title="No quizzes in this category" hint="Pick a different category or clear the filter." />
+          )
+        ) : (
+          <div className="space-y-2.5">
+            {visibleQuizzes.map(q => (
+              <Panel key={q.id} className="flex items-center justify-between gap-3 flex-wrap">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="font-semibold" style={{ color: 'var(--color-text)' }}>{q.title}</p>
+                    <CategoryBadge category={q.category} />
+                    {!q.is_active && <span className="text-[10px] px-1.5 py-0.5 rounded font-bold" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>INACTIVE</span>}
+                    {q.time_limit_minutes && <span className="text-[11px] flex items-center gap-1" style={{ color: 'var(--color-text-tertiary)' }}><Clock size={11} /> {q.time_limit_minutes}m</span>}
+                  </div>
+                  {q.description && <p className="text-xs mt-0.5 line-clamp-1" style={{ color: 'var(--color-text-secondary)' }}>{q.description}</p>}
+                  <p className="text-[11px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
+                    {q.question_count} question{q.question_count === 1 ? '' : 's'} · {q.assigned_count} assigned · {q.submitted_count} submitted
+                    {crossCompany && <> · by {q.created_by_name}</>}
+                  </p>
+                  {q.avg_percent != null && (
+                    <div className="flex items-center gap-2 mt-1.5 max-w-[220px]">
+                      <TrendingUp size={11} style={{ color: 'var(--color-text-tertiary)', flexShrink: 0 }} />
+                      <MiniBar value={q.avg_percent} tone={q.avg_percent >= q.pass_threshold ? 'var(--color-success-600)' : 'var(--color-warning-600)'} />
+                      <span className="text-[11px] font-semibold flex-shrink-0" style={{ color: 'var(--color-text-secondary)' }}>{pct(q.avg_percent)} avg</span>
+                    </div>
+                  )}
                 </div>
-                {q.description && <p className="text-xs mt-0.5 line-clamp-1" style={{ color: 'var(--color-text-secondary)' }}>{q.description}</p>}
-                <p className="text-[11px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
-                  {q.question_count} question{q.question_count === 1 ? '' : 's'} · {q.assigned_count} assigned · {q.submitted_count} submitted
-                  {crossCompany && <> · by {q.created_by_name}</>}
-                </p>
-              </div>
-              <div className="flex items-center gap-1 flex-shrink-0">
-                <button onClick={() => setAssignQuiz(q)} title="Assign" className="p-2 rounded-lg hover:bg-bg-secondary"><Send size={15} style={{ color: 'var(--color-primary-500)' }} /></button>
-                <button onClick={() => setResultsId(q.id)} title="Results" className="p-2 rounded-lg hover:bg-bg-secondary"><BarChart3 size={15} style={{ color: 'var(--color-info-500, #0891b2)' }} /></button>
-                <button onClick={() => setEditorId(q.id)} title="Edit" className="p-2 rounded-lg hover:bg-bg-secondary"><Edit2 size={15} style={{ color: 'var(--color-text-secondary)' }} /></button>
-                <button onClick={() => setConfirmDelete(q)} title="Delete" className="p-2 rounded-lg hover:bg-error-50"><Trash2 size={15} style={{ color: 'var(--color-error-500)' }} /></button>
-              </div>
-            </Panel>
-          ))}
-        </div>
+                <div className="flex items-center gap-1 flex-shrink-0">
+                  <button onClick={() => setAssignQuiz(q)} title="Assign" className="p-2 rounded-lg hover:bg-bg-secondary"><Send size={15} style={{ color: 'var(--color-primary-500)' }} /></button>
+                  <button onClick={() => setResultsId(q.id)} title="Results" className="p-2 rounded-lg hover:bg-bg-secondary"><BarChart3 size={15} style={{ color: 'var(--color-info-500, #0891b2)' }} /></button>
+                  <button onClick={() => setEditorId(q.id)} title="Edit" className="p-2 rounded-lg hover:bg-bg-secondary"><Edit2 size={15} style={{ color: 'var(--color-text-secondary)' }} /></button>
+                  <button onClick={() => setConfirmDelete(q)} title="Delete" className="p-2 rounded-lg hover:bg-error-50"><Trash2 size={15} style={{ color: 'var(--color-error-500)' }} /></button>
+                </div>
+              </Panel>
+            ))}
+          </div>
+        )
       )}
 
-      {editorId !== undefined && <QuizEditorModal quizId={editorId} onClose={() => setEditorId(undefined)} onSaved={load} />}
+      {editorId !== undefined && <QuizEditorModal quizId={editorId} existingCategories={categories} onClose={() => setEditorId(undefined)} onSaved={load} />}
       {assignQuiz && <AssignModal quiz={assignQuiz} crossCompany={crossCompany} onClose={() => setAssignQuiz(null)} onAssigned={load} />}
       {resultsId && <ResultsModal quizId={resultsId} onClose={() => setResultsId(null)} />}
 

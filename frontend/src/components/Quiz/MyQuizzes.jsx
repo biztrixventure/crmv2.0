@@ -5,13 +5,7 @@ import {
 import client from '../../api/client';
 import { Button, Alert } from '../UI';
 import { Panel, SectionHeader, Loading, EmptyState, KpiTile } from '../UI/kit';
-
-const pct = (n) => (n == null ? '—' : `${n}%`);
-const fmtDue = (iso) => {
-  if (!iso) return null;
-  const d = new Date(iso);
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-};
+import { pct, fmtDue, CategoryBadge, MiniBar, PassFailBadge } from './quizUtils';
 
 // ── Take a quiz ───────────────────────────────────────────────────────────────
 function TakeQuizModal({ attemptId, onClose, onSubmitted }) {
@@ -79,6 +73,10 @@ function TakeQuizModal({ attemptId, onClose, onSubmitted }) {
         {loading ? <div className="p-8"><Loading /></div> : (
           <div className="p-6 space-y-4">
             {err && <Alert type="error" message={err} dismissible onDismiss={() => setErr('')} />}
+            <div className="flex items-center gap-2">
+              <MiniBar value={data?.questions?.length ? (100 * answeredCount / data.questions.length) : 0} />
+              <span className="text-[11px] font-semibold flex-shrink-0" style={{ color: 'var(--color-text-tertiary)' }}>{answeredCount}/{data?.questions?.length || 0}</span>
+            </div>
             {data?.quiz?.description && <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>{data.quiz.description}</p>}
 
             {(data?.questions || []).map((q, i) => (
@@ -148,10 +146,17 @@ function ResultModal({ attemptId, onClose }) {
           {loading ? <Loading /> : data && (
             <>
               <div className="grid grid-cols-3 gap-2.5">
-                <KpiTile label="Score" value={pct(data.attempt.percent)} tone="primary" />
+                <KpiTile label="Score" value={pct(data.attempt.percent)}
+                  tone={data.quiz?.pass_threshold != null ? ((data.attempt.percent || 0) >= data.quiz.pass_threshold ? 'success' : 'danger') : 'primary'} />
                 <KpiTile label="Points" value={`${data.attempt.score}/${data.attempt.total_points}`} tone="info" />
                 <KpiTile label="Submitted" value={fmtDue(data.attempt.submitted_at) || '—'} tone="success" />
               </div>
+              {data.quiz?.pass_threshold != null && (
+                <div className="flex items-center gap-2">
+                  <PassFailBadge pass={(data.attempt.percent || 0) >= data.quiz.pass_threshold} />
+                  <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>Pass mark: {data.quiz.pass_threshold}%</span>
+                </div>
+              )}
               {data.questions.map((q, i) => {
                 const your = answerOf[q.id];
                 const correct = your === q.correct_index;
@@ -282,12 +287,19 @@ export default function MyQuizzes() {
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2 flex-wrap">
                   <p className="font-semibold" style={{ color: 'var(--color-text)' }}>{q.title}</p>
+                  <CategoryBadge category={q.category} />
                   {q.time_limit_minutes && <span className="text-[11px] flex items-center gap-1" style={{ color: 'var(--color-text-tertiary)' }}><Clock size={11} /> {q.time_limit_minutes}m</span>}
                   {q.is_overdue && <span className="text-[10px] px-1.5 py-0.5 rounded font-bold flex items-center gap-1" style={{ background: 'rgba(239,68,68,0.15)', color: 'var(--color-error-500)' }}><AlertTriangle size={10} /> OVERDUE</span>}
                 </div>
                 {q.description && <p className="text-xs mt-0.5 line-clamp-1" style={{ color: 'var(--color-text-secondary)' }}>{q.description}</p>}
                 {q.due_at && q.status === 'pending' && <p className="text-[11px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>Due {fmtDue(q.due_at)}</p>}
-                {q.status === 'submitted' && <p className="text-[11px] mt-1 font-semibold" style={{ color: 'var(--color-success-600)' }}>Scored {pct(q.percent)} ({q.score}/{q.total_points})</p>}
+                {q.status === 'submitted' && (
+                  <div className="flex items-center gap-2 mt-1.5 max-w-[200px]">
+                    <MiniBar value={q.percent} tone={q.pass ? 'var(--color-success-600)' : 'var(--color-error-500)'} />
+                    <span className="text-[11px] font-semibold flex-shrink-0" style={{ color: 'var(--color-text-secondary)' }}>{pct(q.percent)}</span>
+                    <PassFailBadge pass={q.pass} />
+                  </div>
+                )}
               </div>
               {q.status === 'pending' ? (
                 <Button variant="primary" onClick={() => setTakeId(q.attempt_id)} disabled={!q.is_active}>
