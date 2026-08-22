@@ -372,7 +372,7 @@ router.get('/day-calls', asyncHandler(async (req, res) => {
 
   const callIds = (calls || []).map(c => c.id);
   const { data: assignments } = callIds.length
-    ? await supabaseAdmin.from('qa2_assignment').select('call_id, assigned_to, status').in('call_id', callIds).is('calibration_group_id', null)
+    ? await supabaseAdmin.from('qa2_assignment').select('id, call_id, assigned_to, status').in('call_id', callIds).is('calibration_group_id', null)
     : { data: [] };
   const assignByCall = new Map((assignments || []).map(a => [a.call_id, a]));
 
@@ -386,6 +386,9 @@ router.get('/day-calls', asyncHandler(async (req, res) => {
     return {
       ...c,
       agent_name: names.get(c.agent_user_id) || c.agent_user || null,
+      // The row carries its assignment id so a manager can take the work back
+      // off an agent from the same table they handed it out in.
+      assignment_id: a?.id || null,
       assignment_status: a ? a.status : 'unassigned',
       assigned_to: a?.assigned_to || null,
       assigned_to_name: a?.assigned_to ? (names.get(a.assigned_to) || 'Unknown') : null,

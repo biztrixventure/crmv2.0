@@ -41,6 +41,7 @@ const express = require('express');
 const axios = require('axios');
 const { readTicket } = require('../utils/mediaTicket');
 const { locationForRecording } = require('../utils/dialerBoxes');
+const { supabaseAdmin } = require('../config/database');
 const logger = require('../utils/logger');
 
 const router = express.Router();
@@ -120,7 +121,34 @@ router.get('/stream', async (req, res) => {
 
   const ref = { box_id: claims.b, lead_id: claims.l, recording_id: claims.r };
   let url = null;
-  try { url = await locationForRecording(ref); } catch { /* fall through to 404 */ }
+  try { url = await locationForRecording(ref); } catch { /* fall through */ }
+
+  // Fall back to the location we already recorded. locationForRecording asks
+  // the box named on the ticket to re-resolve the clip by lead id, and a box
+  // can write its clips to a SECOND recording host: 5026480949's closer leg is
+  // filed under box wavetechpk but served from 95.216.29.176, while the box's
+  // own API answers on 95.216.23.22. The re-resolve found nothing and the
+  // route returned "Recording not found" for a clip that exists and plays.
+  //
+  // This is not client input — it is the URL the poller stored on the row when
+  // it found the clip, read back server-side by the ticket's own box and
+  // recording id. Re-resolution stays FIRST so a moved or re-encoded clip still
+  // wins; this only catches the case where the box cannot account for its own
+  // recording.
+  if (!url) {
+    try {
+      let q = supabaseAdmin.from('qa2_call')
+        .select('recording_location')
+        .eq('recording_id', String(claims.r))
+        .not('recording_location', 'is', null);
+      if (claims.b) q = q.eq('box_id', claims.b);
+      const { data } = await q.limit(1).maybeSingle();
+      if (data?.recording_location && /^https?:\/\//i.test(data.recording_location)) {
+        url = data.recording_location;
+        logger.info('QA_MEDIA', `re-resolve missed ${claims.b}/${claims.r} — serving the stored location`);
+      }
+    } catch (e) { logger.warn('QA_MEDIA', `stored-location fallback: ${e.message}`); }
+  }
   if (!url) return res.status(404).json({ error: 'Recording not found' });
 
   const key = `${claims.b}|${claims.r}`;

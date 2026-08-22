@@ -21,7 +21,7 @@
 // ============================================================================
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { CalendarClock, Download, Users2, Wrench, Grid3x3, ListChecks, Info, Undo2 } from 'lucide-react';
+import { CalendarClock, Download, Users2, Wrench, Grid3x3, ListChecks, Info, Undo2, UserMinus } from 'lucide-react';
 import { toast } from 'sonner';
 import client from '../../api/client';
 import ThemedSelect from '../UI/Select';
@@ -285,6 +285,37 @@ export default function LoadDayTab({ scope }) {
     finally { setAssigning(false); }
   };
 
+  // Taking work BACK. A manager hands out a day and then someone calls in sick,
+  // or the wrong person got it — so the same table that gave it out takes it
+  // back. Only un-started work: a review already in progress keeps its owner,
+  // which the server enforces too.
+  const unassignOne = async (row) => {
+    if (!row.assignment_id) return;
+    if (row.assignment_status && row.assignment_status !== 'pending'
+        && !window.confirm(`${row.assigned_to_name} has already started this one. Take it back anyway?`)) return;
+    try {
+      await client.post(`qa2/assignments/${row.assignment_id}/unassign`);
+      toast.success(`Taken back from ${row.assigned_to_name || 'the reviewer'}`);
+      fetchCalls();
+    } catch (e) { toast.error(e.response?.data?.error || 'Could not take it back'); }
+  };
+
+  const unassignSelected = async () => {
+    const rows = visibleCalls.filter(c => selected.has(c.id) && c.assignment_id);
+    if (!rows.length) return toast.error('None of the ticked rows are assigned to anyone');
+    if (!window.confirm(`Take ${rows.length} review(s) back off their reviewers?`)) return;
+    setAssigning(true);
+    let ok = 0, failed = 0;
+    for (const r of rows) {
+      try { await client.post(`qa2/assignments/${r.assignment_id}/unassign`); ok++; }
+      catch { failed++; }
+    }
+    setAssigning(false);
+    if (ok) toast.success(`Took back ${ok} review(s)${failed ? `, ${failed} could not be taken back` : ''}`);
+    else toast.error('Could not take any of them back');
+    fetchCalls();
+  };
+
   const returnWork = async (agentId, agentName) => {
     if (!window.confirm(`Send ${agentName}'s un-started work back to the pool? Anything already in review stays with them.`)) return;
     try {
@@ -527,6 +558,16 @@ export default function LoadDayTab({ scope }) {
         </div>
       )}
 
+      {!loadError && calls && calls.length > 0 && selected.size > 0 && (
+        <div className="flex items-center gap-2 flex-wrap text-sm">
+          <span style={{ color: 'var(--color-text-secondary)' }}>{selected.size} ticked</span>
+          <button onClick={unassignSelected} disabled={assigning}
+            className="btn text-xs flex items-center gap-1.5" style={{ border: '1px solid var(--color-border)' }}>
+            <UserMinus size={12} /> Take the assigned ones back
+          </button>
+        </div>
+      )}
+
       {!loadError && calls && calls.length > 0 && (
         <Panel pad="none">
           <TableScroll>
@@ -552,9 +593,20 @@ export default function LoadDayTab({ scope }) {
                     <td className="px-3 py-2">{c.recording_state || '—'}</td>
                     <td className="px-3 py-2">{c.call_at ? new Date(c.call_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}</td>
                     <td className="px-3 py-2">
-                      {c.assignment_status === 'unassigned'
-                        ? <span style={{ color: 'var(--color-text-tertiary)' }}>Unassigned</span>
-                        : <span>{c.assigned_to_name || '—'} <span style={{ color: 'var(--color-text-tertiary)' }}>({c.assignment_status})</span></span>}
+                      {c.assignment_status === 'unassigned' ? (
+                        <span style={{ color: 'var(--color-text-tertiary)' }}>Unassigned</span>
+                      ) : (
+                        <span className="inline-flex items-center gap-2">
+                          <span>{c.assigned_to_name || '—'} <span style={{ color: 'var(--color-text-tertiary)' }}>({c.assignment_status})</span></span>
+                          {c.assignment_id && (
+                            <button onClick={() => unassignOne(c)} title={`Take this back off ${c.assigned_to_name || 'the reviewer'}`}
+                              className="inline-flex items-center gap-1 text-xs hover:underline"
+                              style={{ color: 'var(--color-text-tertiary)' }}>
+                              <UserMinus size={12} /> take back
+                            </button>
+                          )}
+                        </span>
+                      )}
                     </td>
                   </tr>
                 ))}
