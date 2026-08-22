@@ -393,14 +393,24 @@ ingest.all('/fronter-xfer', requireToken, asyncHandler(async (req, res) => {
   // transfer they never made. 3,077 stale cards across four companies, every
   // single one carrying a non-transfer dispo (N, A, NI, WN, DNC, DAIR...).
   //
-  // No list configured → accept any (back-compat). A configured list requires
-  // the dispo to be present AND listed: a blank dispo must not slip through.
+  // A configured list requires the dispo to be present AND listed: a blank dispo
+  // must not slip through.
+  //
+  // NO list configured falls back to ['XFER'], it does NOT accept anything. The
+  // old accept-any back-compat was the second half of this bug: 1-Vertex has no
+  // vicidial_config row, so every dispo it ever fired passed the gate and armed a
+  // card — 2,010 of them, N 915, WN 175, A 174, DEADA 142, NI 87. XFER is the
+  // transfer dispo on every company that IS configured, so it is the honest
+  // default for one that is not. A company that transfers on some other code
+  // needs a config row; that is a one-field setting, not a reason to let every
+  // disposition through.
   const dispo = String(p.dispo || '').trim().toUpperCase();
   const { data: cfg } = await supabaseAdmin
     .from('vicidial_config').select('field_map').eq('company_id', companyId).maybeSingle();
-  const xferDispos = Array.isArray(cfg?.field_map?.xfer_dispos)
+  const configured = Array.isArray(cfg?.field_map?.xfer_dispos)
     ? cfg.field_map.xfer_dispos.map(s => String(s).trim().toUpperCase()).filter(Boolean) : [];
-  if (xferDispos.length && !xferDispos.includes(dispo)) {
+  const xferDispos = configured.length ? configured : ['XFER'];
+  if (!xferDispos.includes(dispo)) {
     xdbg.outcome = `NO TRANSFER — "${dispo || '(none)'}" not in xfer_dispos [${xferDispos.join(',')}]`;
     return res.json({ ok: false, reason: 'non-transfer disposition', dispo });   // 200 → no dialer retry
   }
