@@ -356,8 +356,22 @@ app.use(express.static(frontendDistPath, {
 // HEALTH CHECK (no auth required)
 // ============================================================================
 
+// started_at is the question this endpoint kept failing to answer. The backend
+// has no hot reload, so a push that is not followed by a restart leaves the old
+// code serving — and from the outside that is indistinguishable from a fix that
+// did not work. Comparing started_at against the time of a commit settles it in
+// one request instead of a round of re-diagnosis.
+const STARTED_AT = new Date().toISOString();
+
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    started_at: STARTED_AT,
+    uptime_seconds: Math.round(process.uptime()),
+    // Set by the deploy if it can; absent is fine, started_at is the useful bit.
+    commit: process.env.GIT_COMMIT || process.env.SOURCE_COMMIT || null,
+  });
 });
 
 // ============================================================================
