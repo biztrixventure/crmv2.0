@@ -178,6 +178,24 @@ router.post('/team-members', asyncHandler(async (req, res) => {
   const { agent_id, manager_id } = req.body || {};
   if (!agent_id || !manager_id) return res.status(400).json({ error: 'agent_id and manager_id required' });
 
+  // Only a QA agent can be put on a QA team. The picker used to list every user
+  // in the business — 96 fronters and 25 closers ahead of the 5 QA agents — and
+  // nothing stopped one being assigned. A fronter on a QA team gets a reviewer's
+  // queue over their own colleagues' calls, so this is the guard that matters;
+  // the filtered picker is only the convenience.
+  const { data: agentRoles } = await supabaseAdmin
+    .from('user_company_roles')
+    .select('custom_roles(level)')
+    .eq('user_id', agent_id).eq('is_active', true);
+  const levels = (agentRoles || []).map(r => r.custom_roles?.level).filter(Boolean);
+  if (!levels.includes('qa_agent')) {
+    return res.status(400).json({
+      error: levels.length
+        ? `That user is a ${levels.join('/')}, not a QA agent — give them the QA agent role first`
+        : 'That user has no active role — give them the QA agent role first',
+    });
+  }
+
   const { data: existing } = await supabaseAdmin.from('qa2_team_member').select('manager_id').eq('agent_id', agent_id).maybeSingle();
   const isReassignment = !!existing && existing.manager_id !== manager_id;
 

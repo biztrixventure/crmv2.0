@@ -28,13 +28,76 @@ function useLookups() {
   return { users, companies };
 }
 
-function UserPicker({ value, onChange, users, filterLevel }) {
-  const list = filterLevel ? users.filter(u => u.role_level === filterLevel) : users;
+// A picker you can actually type into, over a list that only contains people
+// who belong in the slot.
+//
+// It used to be a bare <select> of EVERY user — 96 fronters and 25 closers
+// ahead of the 5 QA agents — with no way to search, so finding the person you
+// wanted meant scrolling past everyone who could never be a valid answer.
+// filterLevel existed but was only passed on one of the four pickers.
+//
+// `levels` narrows to roles; `only` narrows to an explicit set of user ids (the
+// QA-manager slots use it, because a QA manager here is a compliance manager
+// holding a live access grant, not a role you can filter on).
+function UserPicker({ value, onChange, users, levels, only, placeholder = 'Search a person…', emptyHint }) {
+  const [q, setQ] = useState('');
+  const [openList, setOpenList] = useState(false);
+
+  // levels and only are alternatives, not both-must-match. A QA manager is
+  // either someone holding the qa_manager role (nobody does today) or a
+  // compliance manager carrying a live access grant — requiring both would
+  // match nobody and leave the slot permanently empty.
+  const pool = users.filter(u => {
+    const byLevel = levels ? levels.includes(u.role_level) : false;
+    const byId = only ? only.includes(u.user_id) : false;
+    if (levels && only) return byLevel || byId;
+    if (levels) return byLevel;
+    if (only) return byId;
+    return true;
+  });
+  const needle = q.trim().toLowerCase();
+  const list = needle
+    ? pool.filter(u => `${u.full_name || ''} ${u.email || ''}`.toLowerCase().includes(needle))
+    : pool;
+
+  const selected = users.find(u => u.user_id === value);
+
+  if (!pool.length) {
+    return (
+      <div className="text-xs px-3 py-2 rounded-lg" style={{ border: '1px dashed var(--color-border)', color: 'var(--color-text-tertiary)' }}>
+        {emptyHint || 'Nobody is eligible yet'}
+      </div>
+    );
+  }
+
   return (
-    <ThemedSelect value={value} onChange={e => onChange(e.target.value)}>
-      <option value="">Pick a user…</option>
-      {list.map(u => <option key={u.user_id} value={u.user_id}>{u.full_name} ({u.role_level})</option>)}
-    </ThemedSelect>
+    <div className="relative">
+      <input
+        value={openList ? q : (selected ? selected.full_name : '')}
+        onChange={e => { setQ(e.target.value); setOpenList(true); }}
+        onFocus={() => { setQ(''); setOpenList(true); }}
+        onBlur={() => setTimeout(() => setOpenList(false), 150)}
+        placeholder={placeholder}
+        className="w-full rounded-lg px-3 py-2 text-sm"
+        style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}
+      />
+      {openList && (
+        <div className="absolute z-20 mt-1 w-full rounded-lg overflow-auto"
+          style={{ maxHeight: 240, background: 'var(--color-surface)', border: '1px solid var(--color-border)', boxShadow: '0 8px 24px rgba(0,0,0,.18)' }}>
+          {!list.length ? (
+            <div className="px-3 py-2 text-sm" style={{ color: 'var(--color-text-tertiary)' }}>Nobody matches "{q}"</div>
+          ) : list.map(u => (
+            <button key={u.user_id} type="button"
+              onMouseDown={() => { onChange(u.user_id); setQ(''); setOpenList(false); }}
+              className="w-full text-left px-3 py-2 text-sm hover:opacity-80"
+              style={{ color: 'var(--color-text)' }}>
+              {u.full_name}
+              <span className="text-xs ml-2" style={{ color: 'var(--color-text-tertiary)' }}>{u.role_level}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -82,6 +145,11 @@ export default function OrgTab({ scope }) {
     catch (e) { toast.error(e.response?.data?.error || 'Could not clear the cutover date'); }
   };
 
+  // A "QA manager" is not a role anybody actually holds — there are zero
+  // qa_manager users. Every one of them is a compliance manager carrying a live
+  // qa2_manager_access grant, which is granted on this very tab. So the manager
+  // slots below are filled from the grant list, not from a role filter.
+  const qaManagerIds = (access || []).map(g => g.user_id);
   const nameFor = (userId) => users.find(u => u.user_id === userId)?.full_name || userId;
 
   const grantAccess = async () => {
@@ -146,7 +214,8 @@ export default function OrgTab({ scope }) {
             </div>
           )}
         <div className="flex items-center gap-2 pt-2" style={{ borderTop: '1px solid var(--color-border)' }}>
-          <div className="flex-1"><UserPicker value={grantUser} onChange={setGrantUser} users={users} filterLevel="compliance_manager" /></div>
+          <div className="flex-1"><UserPicker value={grantUser} onChange={setGrantUser} users={users} levels={['compliance_manager']}
+              placeholder="Search a compliance manager…" emptyHint="No compliance managers exist yet" /></div>
           <button className="btn btn-primary text-sm" onClick={grantAccess}>Grant</button>
         </div>
       </Panel>
@@ -172,7 +241,8 @@ export default function OrgTab({ scope }) {
               {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </ThemedSelect>
           </div>
-          <div className="flex-1 min-w-[160px]"><UserPicker value={assignManager} onChange={setAssignManager} users={users} /></div>
+          <div className="flex-1 min-w-[160px]"><UserPicker value={assignManager} onChange={setAssignManager} users={users} levels={['qa_manager']} only={qaManagerIds.length ? qaManagerIds : undefined}
+            placeholder="Search a QA manager…" emptyHint="Grant QA access to a compliance manager first (above)" /></div>
           <button className="btn btn-primary text-sm" onClick={assignCompanyToManager}>Assign</button>
         </div>
       </Panel>
@@ -192,8 +262,10 @@ export default function OrgTab({ scope }) {
             </div>
           )}
         <div className="flex flex-wrap items-center gap-2 pt-2" style={{ borderTop: '1px solid var(--color-border)' }}>
-          <div className="flex-1 min-w-[160px]"><UserPicker value={assignAgent} onChange={setAssignAgent} users={users} /></div>
-          <div className="flex-1 min-w-[160px]"><UserPicker value={assignAgentManager} onChange={setAssignAgentManager} users={users} /></div>
+          <div className="flex-1 min-w-[160px]"><UserPicker value={assignAgent} onChange={setAssignAgent} users={users} levels={['qa_agent']}
+            placeholder="Search a QA agent…" emptyHint="No users have the QA agent role yet" /></div>
+          <div className="flex-1 min-w-[160px]"><UserPicker value={assignAgentManager} onChange={setAssignAgentManager} users={users} levels={['qa_manager']} only={qaManagerIds.length ? qaManagerIds : undefined}
+            placeholder="Search a QA manager…" emptyHint="Grant QA access to a compliance manager first (above)" /></div>
           <button className="btn btn-primary text-sm" onClick={assignAgentToManager}>Assign</button>
         </div>
       </Panel>
