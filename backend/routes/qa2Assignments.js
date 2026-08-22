@@ -106,6 +106,11 @@ router.get('/queue', asyncHandler(async (req, res) => {
   res.json({ assignments, columns: access.catalog, counts: { pending, in_review, scored } });
 }));
 
+// How many days of work the Pool offers. Anything older stays in the database
+// and stays assignable BY A MANAGER from Load Day — this only bounds what an
+// agent is shown to self-claim.
+const POOL_WINDOW_DAYS = 7;
+
 // ── /qa2/pool — self-claimable within my grants ────────────────────────────
 
 router.get('/pool', asyncHandler(async (req, res) => {
@@ -132,6 +137,19 @@ router.get('/pool', asyncHandler(async (req, res) => {
     .not('qa2_call.method_id', 'is', null);
   if (scope.operationalCompanyIds !== 'all') query = query.in('qa2_call.company_id', scope.operationalCompanyIds);
   if (scope.operationalMethodIds !== 'all') query = query.in('qa2_call.method_id', scope.operationalMethodIds);
+  // ── how far back the Pool reaches ────────────────────────────────────────
+  // It reached back forever, so an agent opening the Pool met months of stale
+  // work ahead of this week's calls. Reviewing a call from six weeks ago tells
+  // nobody anything useful now, and it buries the work that matters.
+  //
+  // Seven days, matched on the call's OWN time first: recorded_at is the
+  // dialer's stamp (mig 275) and call_at is when the CRM heard about it, which
+  // can be days out. Either being inside the window keeps the row — a call with
+  // no audio yet has no recorded_at, and dropping those would quietly hide
+  // exactly the rows someone still needs to chase.
+  const cutoff = new Date(Date.now() - POOL_WINDOW_DAYS * 86400000).toISOString();
+  query = query.or(`recorded_at.gte.${cutoff},call_at.gte.${cutoff}`, { foreignTable: 'qa2_call' });
+
   query = applyQa2Filters(query, filters, QA2_CALL_COLUMNS, access.blocked, 'qa2_call');
   query = applyQa2Sort(query, sort_by, sort_dir, access.sortMap, 'qa2_call', 'created_at', true);
   query = query.limit(200);
