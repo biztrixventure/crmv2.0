@@ -200,12 +200,17 @@ function AssignModal({ quiz, crossCompany, onClose, onAssigned }) {
 
   useEffect(() => {
     if (!crossCompany) return;
-    client.get('companies').then(r => {
+    // GET /companies only special-cases superadmin (everyone else gets just
+    // their own companies) — compliance_manager needs the compliance-scoped
+    // endpoint, which is what the rest of the Compliance shell already uses
+    // to see every company.
+    const endpoint = user?.role === 'compliance_manager' ? 'compliance/companies' : 'companies';
+    client.get(endpoint).then(r => {
       const cos = (Array.isArray(r.data) ? r.data : r.data?.companies || []).map(c => ({ id: c.id, name: c.name })).filter(c => c.id);
       setCompanies(cos);
       setCompanyId(prev => prev || user?.company_id || cos[0]?.id || '');
     }).catch(() => {});
-  }, [crossCompany, user?.company_id]);
+  }, [crossCompany, user?.company_id, user?.role]);
 
   const load = useCallback(async () => {
     if (!companyId) return;

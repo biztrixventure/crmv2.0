@@ -44,7 +44,10 @@ async function nameMap(ids) {
 router.get('/company-members', asyncHandler(async (req, res) => {
   const companyId = req.query.company_id;
   if (!companyId) return res.status(400).json({ error: 'company_id required' });
-  if (!(await isSuperAdmin(req.user.id)) && !(await isCompanyMember(req.user.id, companyId))) {
+  // compliance_manager reads every company read-only (same rule as the rest of
+  // the Compliance shell) — needed so it can pick a roster to assign a quiz to
+  // outside its own home company.
+  if (!(await isSuperAdmin(req.user.id)) && req.user.role !== 'compliance_manager' && !(await isCompanyMember(req.user.id, companyId))) {
     return res.status(403).json({ error: 'Not a member of this company' });
   }
   const { data: ucr } = await supabaseAdmin.from('user_company_roles')
@@ -65,7 +68,8 @@ router.get('/company-members', asyncHandler(async (req, res) => {
 router.get('/', asyncHandler(async (req, res) => {
   const companyId = req.query.company_id;
   if (!companyId) return res.status(400).json({ error: 'company_id required' });
-  if (!(await isSuperAdmin(req.user.id)) && !(await isCompanyMember(req.user.id, companyId))) {
+  // Same compliance_manager cross-company read exception as /company-members above.
+  if (!(await isSuperAdmin(req.user.id)) && req.user.role !== 'compliance_manager' && !(await isCompanyMember(req.user.id, companyId))) {
     return res.status(403).json({ error: 'Not a member of this company' });
   }
   const { data: teams } = await supabaseAdmin.from('teams').select('*')
