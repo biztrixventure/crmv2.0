@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useHistoryTab } from '../hooks/useHistoryTab';
 import { useShellLayout } from '../hooks/useShellLayout';
-import { Shield, Building2, Clock, FileText, ArrowRight, PhoneCall, Star, Hash, CalendarDays, Info, ListChecks, ScrollText, HelpCircle, ClipboardCheck, CreditCard, Headphones } from 'lucide-react';
+import { Shield, Building2, Clock, FileText, ArrowRight, PhoneCall, Star, Hash, CalendarDays, Info, ListChecks, ScrollText, HelpCircle, ClipboardCheck, CreditCard, Headphones, ClipboardList } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useVersionCheck } from '../hooks/useVersionCheck';
 import UpdateBanner from '../components/UI/UpdateBanner';
@@ -40,6 +40,8 @@ import RecordingReviewTab  from '../components/Compliance/RecordingReviewTab';
 import QaAdminTab          from '../components/Compliance/QaAdminTab';
 import DoubleSoldTab       from '../components/Compliance/DoubleSoldTab';
 import BatchInbox          from '../components/Distribution/BatchInbox';
+import QuizManager         from '../components/Quiz/QuizManager';
+import MyQuizzes           from '../components/Quiz/MyQuizzes';
 
 const CODE_TABS = [
   { key: 'companies',   label: 'Companies',          icon: Building2 },
@@ -61,6 +63,8 @@ const CODE_TABS = [
   { key: 'dnc',         label: 'DNC Check',          icon: Shield, flag: 'tool_blacklist_lookup' },
   { key: 'card_validator', label: 'Card Validator',  icon: CreditCard, flag: 'tool_card_validator' },
   { key: 'qa_admin',    label: 'QA Department',      icon: ClipboardCheck, perm: 'manage_qa_department' },
+  { key: 'quizzes',     label: 'Quizzes',            icon: ClipboardList },
+  { key: 'my_quizzes',  label: 'My Quizzes',         icon: ClipboardList },
 ];
 
 // ── Two-tier navigation (UX cleanup) ─────────────────────────────────────────
@@ -76,7 +80,7 @@ const TAB_GROUPS = [
   // Batches owns upload → assign → dispositions; Assigned Numbers / Number
   // Assignment are retired from the nav (their keys still render if deep-linked).
   { id: 'numbers',  label: 'Numbers',         icon: Hash,           keys: ['batches', 'numbers'] },
-  { id: 'quality',  label: 'Quality',         icon: Star,           keys: ['reviews', 'qa_admin', 'questions', 'scripts', 'faqs'] },
+  { id: 'quality',  label: 'Quality',         icon: Star,           keys: ['reviews', 'qa_admin', 'questions', 'scripts', 'faqs', 'quizzes', 'my_quizzes'] },
   { id: 'tools',    label: 'Tools',           icon: Shield,         keys: ['dnc', 'card_validator'] },
 ];
 
@@ -325,6 +329,8 @@ const ComplianceShell = () => {
         {activeTab === 'scripts' && <ScriptManager />}
         {activeTab === 'faqs'    && <FAQManager />}
         {activeTab === 'questions' && <CallQuestionsManager />}
+        {activeTab === 'quizzes'    && <QuizManager />}
+        {activeTab === 'my_quizzes' && <MyQuizzes />}
         <DevCredit />
       </main>
     </div>

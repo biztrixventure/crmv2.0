@@ -58,6 +58,9 @@ export const ADMIN_TAB_CATALOG = [
   // Content
   { id: 'faqs',             label: 'FAQs',                 group: 'content',       roEligible: true,  defaultForRo: false, gate: 'manage_faqs' },
   { id: 'scripts',          label: 'Scripts',              group: 'content',       roEligible: true,  defaultForRo: false, gate: 'manage_faqs' },
+  // Superadmin-only here (never a readonly_admin) — quiz creation/assignment is
+  // a management action, not a read surface.
+  { id: 'quizzes',          label: 'Quizzes',              group: 'content',       roEligible: false, defaultForRo: false, gate: null },
 
   // Engagement
   { id: 'announcements',    label: 'Announcements',        group: 'engagement',    roEligible: true,  defaultForRo: false, gate: null },

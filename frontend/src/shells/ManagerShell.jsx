@@ -20,7 +20,7 @@ import {
   Search, Star, Shield, FileText, RefreshCw, AlertCircle, Plus,
   MessageSquare, Trash2, Activity, ChevronLeft, ChevronRight, CalendarDays, HelpCircle, FileSpreadsheet, Trophy, Copy,
   UserCircle, Database, Settings2, Zap, Building2, CreditCard,
-  LayoutGrid, ChevronUp, ChevronDown, ChevronsUpDown, Target,
+  LayoutGrid, ChevronUp, ChevronDown, ChevronsUpDown, Target, ClipboardList,
 } from "lucide-react";
 import { Badge, Alert } from "../components/UI";
 import { Panel, TableScroll, Loading, EmptyState, SectionHeader } from "../components/UI/kit";
@@ -264,6 +264,11 @@ const ManagerShell = ({ workspaceMode = false }) => {
     // Monthly-payment reminders — team view of due policies.
     ...((hasPermission('view_team_sales') || hasPermission('view_all_company_sales'))
       ? [{ key: 'payments', label: 'Payments', icon: DollarSign }] : []),
+    // Quiz system (mig 273): manage tab for quiz.manage holders (compliance_manager /
+    // qa_manager / company_admin / superadmin); My Quizzes is unconditional — anyone
+    // can be an assignee, and a team lead sees their team's progress inside it.
+    ...(hasPermission('quiz.manage') ? [{ key: 'quizzes', label: 'Quizzes', icon: ClipboardList }] : []),
+    { key: 'my_quizzes', label: 'My Quizzes', icon: ClipboardList },
   ];
 
   // ── Tab logic ─────────────────────────────────────────────────────────────

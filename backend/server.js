@@ -73,6 +73,7 @@ const qa2Routes                 = require('./routes/qa2');
 const { qa2IngestHook }         = require('./middleware/qa2VicidialIngestHook');
 const qa1ReadonlyGate           = require('./middleware/qa1ReadonlyGate');
 const kanbanRoutes              = require('./routes/kanban');
+const quizRoutes                = require('./routes/quiz');
 const { egressAudit }           = require('./middleware/egressAudit');
 const { requireFeature }        = require('./utils/featureGate');
 const { startCallbackScheduler } = require('./utils/callbackScheduler');
@@ -405,6 +406,7 @@ app.use('/api/users', authMiddleware, readonlyGuard, egressAudit, usersRoutes);
 // caller trying to PUT/POST/DELETE here anyway.
 app.use('/api/readonly-admins', authMiddleware, readonlyGuard, readonlyAdminsRoutes);
 app.use('/api/teams', authMiddleware, readonlyGuard, teamsRoutes);
+app.use('/api/quiz',  authMiddleware, readonlyGuard, quizRoutes);
 // Two-tier team quotas (mig 216) — admin sets the team target, the lead splits it.
 app.use('/api/quotas', authMiddleware, readonlyGuard, quotasRoutes);
 // RO self-reported navigation telemetry. readonlyGuard allowlists /activity/beacon

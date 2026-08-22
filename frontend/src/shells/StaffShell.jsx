@@ -25,7 +25,7 @@ import {
   CheckCircle, XCircle, Plus, User, Car, Star, MessageSquare,
   Users, Shield, FileText, BarChart3, AlertTriangle, RefreshCw, CalendarPlus, Pencil, Trash2, Download,
   ChevronLeft, ChevronRight, HelpCircle, CalendarDays, Copy, UserCircle, Database, CreditCard, Award,
-  LayoutGrid, List as ListIcon,
+  LayoutGrid, List as ListIcon, ClipboardList,
 } from "lucide-react";
 
 const PAGE_SIZE = 25;
@@ -269,6 +269,9 @@ const StaffShell = () => {
     ...(isEnabledStrict('tool_chat_control')      ? [{ key: 'tool_chat_control',      label: 'Chat Control',      icon: MessageSquare }] : []),
     ...(isEnabledStrict('tool_blacklist_lookup')  ? [{ key: 'dnc',                    label: 'DNC Check',         icon: Shield        }] : []),
     ...(isEnabledStrict('tool_card_validator')    ? [{ key: 'card_validator',         label: 'Card Validator',    icon: CreditCard    }] : []),
+    // Quiz system (mig 273) — anyone can be assigned a quiz; a team lead also
+    // sees their team's progress inline here.
+    { key: 'my_quizzes', label: 'My Quizzes', icon: ClipboardList },
   ];
 
   // Sale modal
