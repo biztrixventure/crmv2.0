@@ -48,7 +48,18 @@ BEGIN
    WHERE a.company_id = t.company_id
      AND t.vicidial_pending = true
      AND t.vicidial_dispo IS NOT NULL
-     AND upper(t.vicidial_dispo) <> ALL (a.dispos);
+     AND upper(t.vicidial_dispo) <> ALL (a.dispos)
+     -- NARROWED after review. "Dialer dispo is not XFER" does NOT prove the row
+     -- was never a transfer: the dispo is overwritten by the fronter's later
+     -- calls on a recycled lead and by the closer's own outcome. 9,331 rows
+     -- matched the loose shape and 8,492 of them had been worked by a human in
+     -- the CRM — the loose rule would have called those non-transfers.
+     -- A card is only bogus when nothing at all supports it: no closer took it,
+     -- no sale came from it, and no human ever dispositioned it here.
+     AND t.assigned_closer_id IS NULL
+     AND NOT EXISTS (SELECT 1 FROM sales s WHERE s.transfer_id = t.id)
+     AND NOT EXISTS (SELECT 1 FROM disposition_actions d
+                      WHERE d.transfer_id = t.id AND d.user_id IS NOT NULL);
   GET DIAGNOSTICS n = ROW_COUNT;
   RETURN n;
 END $$;
