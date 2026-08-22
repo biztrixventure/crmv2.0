@@ -69,6 +69,7 @@ export default function LoadDayTab({ scope }) {
   const [pickedAgents, setPickedAgents] = useState([]);
   const [counts, setCounts] = useState({});            // `${agentId}|${methodId}` -> number
   const [result, setResult] = useState(null);
+  const [boardError, setBoardError] = useState(null);
 
   const tq = useTableQuery({ scope: 'qa2:loadday', columns, defaultSort: { by: 'call_at', dir: 'desc' } });
 
@@ -100,9 +101,19 @@ export default function LoadDayTab({ scope }) {
   // what is on screen, so the number on a column is the number an assign uses.
   const loadBoard = useCallback(() => {
     if (!companyId || !date) { setBoard(null); return; }
+    setBoardError(null);
     client.get('qa2/assign/workbench', {
       params: { company_ids: companyId, date_from: date, date_to: date },
-    }).then(r => setBoard(r.data)).catch(() => setBoard(null));
+    })
+      .then(r => setBoard(r.data))
+      // Swallowing this was a trap of my own making: a failed board left the
+      // panel showing "No agents on your team yet", which is a different
+      // problem with a different fix, and every control below it then looked
+      // broken rather than un-loaded.
+      .catch(e => {
+        setBoard(null);
+        setBoardError(e.response?.data?.error || 'Could not load your reviewers');
+      });
   }, [companyId, date]);
 
   const fetchCalls = useCallback(() => {
@@ -113,7 +124,10 @@ export default function LoadDayTab({ scope }) {
       .catch(e => { if (!isCanceled(e)) setLoadError(e.response?.data?.error || 'Could not load this day'); });
     loadBoard();
   }, [companyId, date, tq.params, abortable, loadBoard]);
-  useEffect(() => { fetchCalls(); }, [tq.version]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Picking a company and a date IS the request — the old flow made you press
+  // Browse afterwards, so choosing both and seeing an empty screen looked like
+  // a bug rather than a step you had not taken yet.
+  useEffect(() => { fetchCalls(); }, [tq.version, companyId, date]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadDay = async () => {
     if (!companyId || !date) return toast.error('Pick a company and a date');
@@ -181,20 +195,59 @@ export default function LoadDayTab({ scope }) {
 
   const totalRequested = allocations.reduce((n, a) => n + a.count, 0);
 
+  // Both fills CAP at what the day actually holds. Filling "50 each" from a
+  // method with 12 left used to write 50 into every box and then come back
+  // having assigned 12 — the button looked broken when the shortfall was real.
+  // They also say why nothing happened rather than silently doing nothing,
+  // which is what made these read as dead buttons.
   const fillEach = (n) => {
+    if (!pickedAgents.length) return toast.error('Pick a reviewer first');
     const next = { ...counts };
-    pickedAgents.forEach(a => gridMethods.forEach(m => { if (isGranted(a, m.id)) next[key(a, m.id)] = n; }));
-    setCounts(next); setResult(null);
-  };
-  const fillSplit = () => {
-    const next = { ...counts };
+    let filled = 0;
     gridMethods.forEach(m => {
       const eligible = pickedAgents.filter(a => isGranted(a, m.id));
       if (!eligible.length) return;
-      const each = Math.floor((m.available || 0) / eligible.length);
-      eligible.forEach(a => { next[key(a, m.id)] = each; });
+      let left = m.available || 0;
+      eligible.forEach(a => {
+        const give = Math.min(n, left);
+        left -= give;
+        next[key(a, m.id)] = give;
+        filled += give;
+      });
     });
     setCounts(next); setResult(null);
+    if (!filled) {
+      toast.error(gridMethods.some(m => pickedAgents.some(a => isGranted(a, m.id)))
+        ? 'Nothing left to hand out for this day'
+        : 'Nobody picked is granted these methods — grant them on the Team tab');
+    }
+  };
+
+  const fillSplit = () => {
+    if (!pickedAgents.length) return toast.error('Pick a reviewer first');
+    const next = { ...counts };
+    let filled = 0;
+    gridMethods.forEach(m => {
+      const eligible = pickedAgents.filter(a => isGranted(a, m.id));
+      if (!eligible.length) return;
+      const avail = m.available || 0;
+      const each = Math.floor(avail / eligible.length);
+      // The remainder goes to the first few rather than being thrown away —
+      // 7 calls across 2 reviewers is 4 and 3, not 3 and 3.
+      let extra = avail - each * eligible.length;
+      eligible.forEach(a => {
+        const give = each + (extra > 0 ? 1 : 0);
+        if (extra > 0) extra -= 1;
+        next[key(a, m.id)] = give;
+        filled += give;
+      });
+    });
+    setCounts(next); setResult(null);
+    if (!filled) {
+      toast.error(gridMethods.some(m => pickedAgents.some(a => isGranted(a, m.id)))
+        ? 'Nothing left to hand out for this day'
+        : 'Nobody picked is granted these methods — grant them on the Team tab');
+    }
   };
 
   const assignGrid = async () => {
@@ -252,22 +305,43 @@ export default function LoadDayTab({ scope }) {
       <SectionHeader level="page" icon={CalendarClock} title="Load a day"
         subtitle="Pull any past date's transfers and sales into QA, see what landed, and hand it out to your reviewers." />
 
-      <Panel className="flex flex-wrap items-end gap-2">
-        <div className="min-w-[200px]">
-          <ThemedSelect value={companyId} onChange={e => setCompanyId(e.target.value)}>
-            <option value="">Pick a company…</option>
-            {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </ThemedSelect>
+      <Panel>
+        {/* Labelled fields on their own line, actions on theirs. The old row put
+            a select, a date and three buttons of different heights in one
+            flex-end line, so nothing lined up and "Browse" sat between two
+            actions that do something much bigger. */}
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="text-sm">
+            <span className="block mb-1 font-medium" style={{ color: 'var(--color-text-secondary)' }}>Company</span>
+            <div className="min-w-[220px]">
+              <ThemedSelect value={companyId} onChange={e => setCompanyId(e.target.value)}>
+                <option value="">Pick a company…</option>
+                {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </ThemedSelect>
+            </div>
+          </label>
+          <label className="text-sm">
+            <span className="block mb-1 font-medium" style={{ color: 'var(--color-text-secondary)' }}>Day</span>
+            <ThemedDate value={date} onChange={e => setDate(e.target.value)} />
+          </label>
+          <div className="flex items-center gap-2">
+            <button className="btn btn-primary text-sm flex items-center gap-1.5 whitespace-nowrap"
+              disabled={loading || !companyId || !date} onClick={loadDay}>
+              <Download size={14} />{loading ? 'Pulling…' : 'Pull this day from the CRM'}
+            </button>
+            <button className="btn text-sm flex items-center gap-1.5 whitespace-nowrap"
+              style={{ border: '1px solid var(--color-border)' }}
+              disabled={repairing || !companyId || !date} onClick={repairDay}
+              title="Some closer-leg calls arrive without a dialer code and never get a recording lookup. This finds them and re-arms the search.">
+              <Wrench size={14} />{repairing ? 'Repairing…' : 'Retry missing recordings'}
+            </button>
+          </div>
         </div>
-        <ThemedDate value={date} onChange={e => setDate(e.target.value)} />
-        <button className="btn text-sm" style={{ border: '1px solid var(--color-border)' }} disabled={!companyId || !date} onClick={fetchCalls}>Browse</button>
-        <button className="btn btn-primary text-sm flex items-center gap-1.5" disabled={loading || !companyId || !date} onClick={loadDay}>
-          <Download size={14} />{loading ? 'Pulling…' : 'Pull this day from the CRM'}
-        </button>
-        <button className="btn text-sm flex items-center gap-1.5" style={{ border: '1px solid var(--color-border)' }}
-          disabled={repairing || !companyId || !date} onClick={repairDay} title="Fixes closer-leg calls that never got a recording lookup because they were missing a dialer code">
-          <Wrench size={14} />{repairing ? 'Repairing…' : 'Repair missing recordings'}
-        </button>
+        <p className="text-xs mt-2" style={{ color: 'var(--color-text-tertiary)' }}>
+          {!companyId || !date
+            ? 'Pick a company and a day — the calls load on their own.'
+            : 'Already-pulled calls show below. "Pull this day" fetches anything new from the CRM.'}
+        </p>
       </Panel>
 
       {loadError && <Panel tone="inset"><p className="text-sm" style={{ color: 'var(--color-error-600)' }}>{loadError}</p></Panel>}
@@ -282,7 +356,9 @@ export default function LoadDayTab({ scope }) {
           <SectionHeader level="section" icon={Users2} title="Hand this day out"
             subtitle="Pick your reviewers, then choose how much each one gets." />
 
-          {agents.length === 0 ? (
+          {boardError ? (
+            <p className="text-sm" style={{ color: 'var(--color-error-600)' }}>{boardError}</p>
+          ) : agents.length === 0 ? (
             <p className="text-sm" style={{ color: 'var(--color-text-tertiary)' }}>
               No agents on your team yet — compliance assigns agents to a manager on the Org tab.
             </p>
@@ -352,6 +428,9 @@ export default function LoadDayTab({ scope }) {
                     ))}
                     <button onClick={fillSplit} className="btn text-xs" style={{ border: '1px solid var(--color-border)' }}>Split the day evenly</button>
                     <button onClick={() => { setCounts({}); setResult(null); }} className="btn text-xs" style={{ border: '1px solid var(--color-border)' }}>Clear</button>
+                    <span className="text-xs self-center" style={{ color: 'var(--color-text-tertiary)' }}>
+                      {totalRequested} of {gridMethods.reduce((n, m) => n + (m.available || 0), 0)} left today allocated
+                    </span>
                   </div>
 
                   <TableScroll>

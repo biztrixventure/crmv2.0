@@ -70,10 +70,27 @@ async function nameMap(userIds) {
 // companies they are granted, and what they are already carrying. The grants
 // are what the UI uses to grey out an impossible pairing, and what /bulk
 // re-checks before writing anything.
-async function loadTeam(managerId) {
+async function loadTeam(managerId, scope) {
   const { data: team } = await supabaseAdmin
     .from('qa2_team_member').select('agent_id, assigned_at').eq('manager_id', managerId);
-  const agentIds = (team || []).map(t => t.agent_id);
+  let rows = team || [];
+
+  // A SUPERADMIN has no team of their own — nobody is wired to them in
+  // qa2_team_member, because that table records which QA manager owns an agent.
+  // Reading that literally handed a superadmin an empty reviewer list, and an
+  // empty list makes every control below look broken: no chips to pick, no
+  // columns to fill, so "50 each" fills nothing and reads as a dead button.
+  // Global authority means every QA agent, so fall back to the whole roster.
+  // NOT extended to a compliance manager with the QA toggle: that role is
+  // defined as "identical authority to a real qa_manager, no more", and a real
+  // manager with no team correctly sees nobody.
+  if (!rows.length && scope?.superadmin) {
+    const { data: all } = await supabaseAdmin
+      .from('qa2_team_member').select('agent_id, assigned_at');
+    rows = all || [];
+  }
+
+  const agentIds = [...new Set(rows.map(t => t.agent_id))];
   if (!agentIds.length) return [];
 
   const [{ data: methods }, { data: companies }, { data: load }, names] = await Promise.all([
@@ -103,7 +120,7 @@ async function loadTeam(managerId) {
     loadBy.set(a.assigned_to, cur);
   }
 
-  return (team || []).map(t => ({
+  return rows.map(t => ({
     agent_id: t.agent_id,
     name: names.get(t.agent_id) || 'Unknown',
     method_ids: methodsBy.get(t.agent_id) || [],
@@ -145,7 +162,7 @@ router.get('/workbench', asyncHandler(async (req, res) => {
       p_require_recording: requireRecording,
       p_min_talk: minTalk,
     }),
-    loadTeam(req.user.id),
+    loadTeam(req.user.id, scope),
     supabaseAdmin.from('companies').select('id, name').order('name'),
   ]);
   if (poolErr) return res.status(500).json({ error: poolErr.message });
@@ -207,7 +224,7 @@ router.post('/bulk', asyncHandler(async (req, res) => {
     ? (mine ? askedCompanies.filter(id => mine.includes(id)) : askedCompanies)
     : mine;
 
-  const team = await loadTeam(req.user.id);
+  const team = await loadTeam(req.user.id, scope);
   const teamBy = new Map(team.map(a => [a.agent_id, a]));
   const { data: methodRows } = await supabaseAdmin.from('qa2_method').select('id, code, name');
   const methodBy = new Map((methodRows || []).map(m => [m.id, m]));
@@ -335,7 +352,7 @@ router.post('/return', asyncHandler(async (req, res) => {
   const { agent_id, method_id, limit } = req.body || {};
   if (!agent_id) return res.status(400).json({ error: 'agent_id required' });
 
-  const team = await loadTeam(req.user.id);
+  const team = await loadTeam(req.user.id, scope);
   if (!team.some(a => a.agent_id === agent_id)) return res.status(403).json({ error: 'Not on your team' });
 
   let q = supabaseAdmin
