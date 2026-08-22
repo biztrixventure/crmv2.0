@@ -153,7 +153,7 @@ router.get('/workbench', asyncHandler(async (req, res) => {
   const to   = req.query.date_to   ? `${req.query.date_to}T23:59:59.999Z`   : null;
 
   const [{ data: methods }, { data: pool, error: poolErr }, agents, { data: companies }] = await Promise.all([
-    supabaseAdmin.from('qa2_method').select('id, code, name, is_active').eq('is_active', true).order('name'),
+    supabaseAdmin.from('qa2_method').select('id, code, label, is_active').eq('is_active', true).order('label'),
     supabaseAdmin.rpc('app_qa2_assign_pool', {
       p_company_ids: companyIds && companyIds.length ? companyIds : null,
       p_method_ids: null,
@@ -182,7 +182,7 @@ router.get('/workbench', asyncHandler(async (req, res) => {
     methods: (methods || []).map(m => {
       const p = poolBy.get(m.id) || {};
       return {
-        id: m.id, code: m.code, name: m.name,
+        id: m.id, code: m.code, name: m.label,
         available: Number(p.available || 0),
         with_recording: Number(p.with_recording || 0),
         awaiting_audio: Number(p.awaiting_audio || 0),
@@ -226,7 +226,7 @@ router.post('/bulk', asyncHandler(async (req, res) => {
 
   const team = await loadTeam(req.user.id, scope);
   const teamBy = new Map(team.map(a => [a.agent_id, a]));
-  const { data: methodRows } = await supabaseAdmin.from('qa2_method').select('id, code, name');
+  const { data: methodRows } = await supabaseAdmin.from('qa2_method').select('id, code, label');
   const methodBy = new Map((methodRows || []).map(m => [m.id, m]));
 
   const now = new Date().toISOString();

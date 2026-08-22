@@ -13,7 +13,7 @@ import {
   LineElement, ArcElement, Tooltip, Legend, Filler,
 } from 'chart.js';
 import { Bar } from 'react-chartjs-2';
-import { BarChart3, Users, ListChecks, Gavel, ShieldAlert, Scale as ScaleIcon, Layers, Download } from 'lucide-react';
+import { BarChart3, Users, ListChecks, Gavel, ShieldAlert, Scale as ScaleIcon, Layers, Download, Activity } from 'lucide-react';
 import client from '../../api/client';
 import ThemedSelect from '../UI/Select';
 import ThemedDate from '../UI/ThemedDate';
@@ -46,6 +46,9 @@ function useThemeColors() {
 }
 
 const SECTIONS = [
+  // Overview first: it is the only section with anything to show before scoring
+  // has volume behind it, and it is what a manager checks daily.
+  { key: 'overview', label: 'Overview', icon: Activity },
   { key: 'agent', label: 'Agents', icon: Users },
   { key: 'parameters', label: 'Parameters', icon: ListChecks },
   { key: 'reviewers', label: 'Reviewers', icon: Gavel },
@@ -61,6 +64,161 @@ function ExportButton({ rows, headers, filename, mapRow }) {
       onClick={() => downloadCSV(rows.map(mapRow), headers, filename)}>
       <Download size={12} />Export CSV
     </button>
+  );
+}
+
+const NUM = (n) => (n == null ? '—' : Number(n).toLocaleString());
+const pct = (part, whole) => (whole ? Math.round((part / whole) * 100) : 0);
+
+// The pipeline, in the order work actually moves through it. Every other
+// section on this tab reads qa2_evaluation, which stays empty until reviewers
+// start submitting — this one reads the calls and assignments that exist from
+// the day the department is switched on, so the tab is never a wall of blank
+// charts waiting on scoring that has not happened yet.
+function OverviewSection({ params }) {
+  const c = useThemeColors();
+  const [data, setData] = useState(null);
+  useEffect(() => {
+    setData(null);
+    client.get('qa2/reports/overview', { params })
+      .then(r => setData(r.data))
+      .catch(() => setData({ pipeline: {}, by_method: [], by_company: [], daily: [], team: [] }));
+  }, [params]);
+
+  const daily = data?.daily || [];
+  const chartData = useMemo(() => ({
+    labels: daily.map(d => d.date.slice(5)),
+    datasets: [
+      { label: 'Captured', data: daily.map(d => d.captured), backgroundColor: c.grid, borderRadius: 3, maxBarThickness: 22 },
+      { label: 'Audio ready', data: daily.map(d => d.audio_ready), backgroundColor: c.primary, borderRadius: 3, maxBarThickness: 22 },
+      { label: 'Handed out', data: daily.map(d => d.assigned), backgroundColor: c.warn, borderRadius: 3, maxBarThickness: 22 },
+    ],
+  }), [daily, c]);
+  const chartOptions = useMemo(() => ({
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { display: true, labels: { color: c.muted, boxWidth: 10, font: { size: 10 } } } },
+    scales: {
+      x: { grid: { display: false }, ticks: { color: c.muted, font: { size: 10 } } },
+      y: { beginAtZero: true, grid: { color: c.grid }, ticks: { color: c.muted, font: { size: 10 } } },
+    },
+  }), [c]);
+
+  if (!data) return <Loading variant="cards" />;
+  const p = data.pipeline || {};
+  const th2 = 'text-left font-semibold px-3 py-2';
+
+  return (
+    <div className="space-y-3">
+      <div className="grid gap-3 grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
+        <KpiTile label="Calls captured" value={NUM(p.captured)} />
+        <KpiTile label="Audio ready" value={NUM(p.audio_ready)} hint={pct(p.audio_ready, p.captured) + '% of captured'} />
+        <KpiTile label="Both legs paired" value={NUM(p.both_legs)} hint={pct(p.both_legs, p.captured) + '% have the other side'} />
+        <KpiTile label="Waiting to hand out" value={NUM(p.unassigned)} />
+        <KpiTile label="With a reviewer" value={NUM((p.with_reviewer || 0) + (p.in_review || 0))} hint={NUM(p.in_review) + ' opened'} />
+      </div>
+
+      {(p.audio_waiting > 0 || p.audio_missing > 0) && (
+        <Panel tone="inset">
+          <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+            <strong>{NUM(p.audio_waiting)}</strong> still fetching audio · <strong>{NUM(p.audio_missing)}</strong> with no recording found.
+            Calls with no audio are never handed out, so they sit outside the waiting-to-hand-out number.
+          </p>
+        </Panel>
+      )}
+
+      {daily.length > 0 && (
+        <Panel>
+          <SectionHeader level="section" title="Day by day" subtitle="What was captured, how much of it had audio, and how much was handed out." />
+          <div className="h-56"><Bar data={chartData} options={chartOptions} /></div>
+        </Panel>
+      )}
+
+      <Panel pad="none">
+        <div className="flex items-center justify-between" style={{ padding: '12px 16px 0' }}>
+          <SectionHeader level="section" title="By method" />
+          <ExportButton rows={data.by_method} headers={['Method', 'Captured', 'Audio ready', 'Waiting audio', 'No audio', 'Unassigned', 'With reviewer', 'Completed']}
+            filename="qa2-overview-methods.csv"
+            mapRow={m => [m.name, m.captured, m.audio_ready, m.audio_waiting, m.audio_missing, m.unassigned, m.in_flight, m.completed]} />
+        </div>
+        {!data.by_method.length ? <EmptyState compact title="No calls in this range" /> : (
+          <TableScroll>
+            <table className="w-full text-sm">
+              <thead><tr style={{ color: 'var(--color-text-secondary)' }}>
+                <th className={th2}>Method</th><th className={th2}>Captured</th><th className={th2}>Audio ready</th>
+                <th className={th2}>No audio</th><th className={th2}>Waiting to hand out</th>
+                <th className={th2}>With a reviewer</th><th className={th2}>Completed</th>
+              </tr></thead>
+              <tbody>{data.by_method.map(m => (
+                <tr key={m.method_id} style={{ borderTop: '1px solid var(--color-border)' }}>
+                  <td className="px-3 py-2 font-semibold">{m.name}</td>
+                  <td className="px-3 py-2">{NUM(m.captured)}</td>
+                  <td className="px-3 py-2"><strong>{NUM(m.audio_ready)}</strong> <span style={{ color: 'var(--color-text-tertiary)' }}>({pct(m.audio_ready, m.captured)}%)</span></td>
+                  <td className="px-3 py-2">{NUM(m.audio_missing)}</td>
+                  <td className="px-3 py-2">{NUM(m.unassigned)}</td>
+                  <td className="px-3 py-2">{NUM(m.in_flight)}</td>
+                  <td className="px-3 py-2">{NUM(m.completed)}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </TableScroll>
+        )}
+      </Panel>
+
+      <Panel pad="none">
+        <div className="flex items-center justify-between" style={{ padding: '12px 16px 0' }}>
+          <SectionHeader level="section" title="By company" />
+          <ExportButton rows={data.by_company} headers={['Company', 'Captured', 'Audio ready', 'Unassigned', 'With reviewer', 'Completed']}
+            filename="qa2-overview-companies.csv"
+            mapRow={r => [r.name, r.captured, r.audio_ready, r.unassigned, r.in_flight, r.completed]} />
+        </div>
+        {!data.by_company.length ? <EmptyState compact title="No calls in this range" /> : (
+          <TableScroll>
+            <table className="w-full text-sm">
+              <thead><tr style={{ color: 'var(--color-text-secondary)' }}>
+                <th className={th2}>Company</th><th className={th2}>Captured</th><th className={th2}>Audio ready</th>
+                <th className={th2}>Waiting to hand out</th><th className={th2}>With a reviewer</th><th className={th2}>Completed</th>
+              </tr></thead>
+              <tbody>{data.by_company.map(r => (
+                <tr key={r.company_id} style={{ borderTop: '1px solid var(--color-border)' }}>
+                  <td className="px-3 py-2">{r.name}</td>
+                  <td className="px-3 py-2">{NUM(r.captured)}</td>
+                  <td className="px-3 py-2">{NUM(r.audio_ready)}</td>
+                  <td className="px-3 py-2">{NUM(r.unassigned)}</td>
+                  <td className="px-3 py-2">{NUM(r.in_flight)}</td>
+                  <td className="px-3 py-2">{NUM(r.completed)}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </TableScroll>
+        )}
+      </Panel>
+
+      <Panel pad="none">
+        <div style={{ padding: '12px 16px 0' }}><SectionHeader level="section" title="Who is holding what" /></div>
+        {!data.team.length ? (
+          <EmptyState compact title="Nothing is with a reviewer right now"
+            hint="Hand a day out from Load Day and it appears here." />
+        ) : (
+          <TableScroll>
+            <table className="w-full text-sm">
+              <thead><tr style={{ color: 'var(--color-text-secondary)' }}>
+                <th className={th2}>Reviewer</th><th className={th2}>Waiting</th><th className={th2}>Opened</th>
+                <th className={th2}>Completed</th><th className={th2}>Skipped</th>
+              </tr></thead>
+              <tbody>{data.team.map(t => (
+                <tr key={t.agent_id} style={{ borderTop: '1px solid var(--color-border)' }}>
+                  <td className="px-3 py-2 font-semibold">{t.name}</td>
+                  <td className="px-3 py-2">{NUM(t.waiting)}</td>
+                  <td className="px-3 py-2">{NUM(t.in_review)}</td>
+                  <td className="px-3 py-2">{NUM(t.completed)}</td>
+                  <td className="px-3 py-2">{NUM(t.skipped)}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </TableScroll>
+        )}
+      </Panel>
+    </div>
   );
 }
 
@@ -350,7 +508,7 @@ function CoverageSection({ params }) {
 }
 
 export default function ReportsTab({ scope }) {
-  const [section, setSection] = useState('agent');
+  const [section, setSection] = useState('overview');
   const [companies, setCompanies] = useState([]);
   const [companyId, setCompanyId] = useState('');
   const [from, setFrom] = useState('');
@@ -374,7 +532,7 @@ export default function ReportsTab({ scope }) {
 
   return (
     <div className="max-w-6xl mx-auto space-y-4">
-      <SectionHeader level="page" icon={BarChart3} title="Reports" subtitle="QA v2 scoring reports — filter by company and date range." />
+      <SectionHeader level="page" icon={BarChart3} title="Reports" subtitle="Overview is the work itself — captured, recorded, handed out. The rest are scoring reports and fill in as reviewers submit." />
 
       <Panel className="flex flex-wrap items-end gap-2">
         <div className="min-w-[180px]">
@@ -392,6 +550,7 @@ export default function ReportsTab({ scope }) {
 
       <PillTabs items={SECTIONS} value={section} onChange={setSection} />
 
+      {section === 'overview' && <OverviewSection params={params} />}
       {section === 'agent' && <AgentSection params={params} />}
       {section === 'parameters' && <ParametersSection params={params} />}
       {section === 'reviewers' && <ReviewersSection params={params} />}

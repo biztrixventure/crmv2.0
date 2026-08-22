@@ -56,6 +56,53 @@ async function nameMap(userIds) {
   return new Map((data || []).map(p => [p.user_id, `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'Unknown']));
 }
 
+// ── GET /qa2/reports/overview — the department as it stands today ─────────
+// Every other section here is computed from qa2_evaluation, and a department
+// that has just started scoring has almost nothing in that table: 11,234
+// reviewable calls, 3,399 assignments, 2 scored evaluations. So every chart a
+// manager opened was honestly empty, and an empty chart reads as a broken one.
+//
+// This answers the questions that DO have answers on day one — what was
+// captured, does it have audio, is both legs of it there, who is holding it,
+// and what is still waiting to be handed out. One RPC (mig 276) rather than a
+// dozen counts, and the same scoping every other section uses.
+router.get('/reports/overview', asyncHandler(async (req, res) => {
+  const scope = await requireViewer(req, res);
+  if (!scope) return;
+
+  const companyIds = scopedCompanyIds(scope);
+  const methodIds = scopedMethodIds(scope);
+  // An empty (not null) scope array means "restricted to nothing" — return the
+  // empty shape rather than passing NULL, which the RPC reads as "no filter"
+  // and would show this caller the whole department.
+  const restrictedToNothing = (companyIds && !companyIds.length) || (methodIds && !methodIds.length);
+
+  // Same query contract as every other section here — company_id / from / to —
+  // so the one filter bar drives all of them.
+  const { company_id, from, to } = req.query;
+  const asked = company_id ? [company_id] : [];
+  const effectiveCompanies = asked.length
+    ? (companyIds ? asked.filter(id => companyIds.includes(id)) : asked)
+    : companyIds;
+
+  const empty = { pipeline: {}, by_method: [], by_company: [], daily: [], team: [] };
+  if (restrictedToNothing) return res.json({ ...empty, range: { from: from || null, to: to || null } });
+
+  const { data, error } = await supabaseAdmin.rpc('app_qa2_overview', {
+    p_company_ids: effectiveCompanies && effectiveCompanies.length ? effectiveCompanies : null,
+    p_method_ids: methodIds && methodIds.length ? methodIds : null,
+    p_from: from ? `${from}T00:00:00.000Z` : null,
+    p_to: to ? `${to}T23:59:59.999Z` : null,
+  });
+  if (error) return res.status(500).json({ error: error.message });
+
+  const out = data || empty;
+  const names = await nameMap((out.team || []).map(t => t.agent_id));
+  out.team = (out.team || []).map(t => ({ ...t, name: names.get(t.agent_id) || 'Unknown' }));
+  out.range = { from: from || null, to: to || null };
+  res.json(out);
+}));
+
 // ── GET /qa2/reports/agent — per subject (the person being scored) ─────────
 
 router.get('/reports/agent', asyncHandler(async (req, res) => {
