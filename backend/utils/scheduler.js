@@ -44,6 +44,10 @@ const QA2_AUTOASSIGN_MS   = 5 * 60 * 1000;
 const QA2_AUTOASSIGN_INIT = 90 * 1000;
 // QA v2 retention purge — matches v1's mig 177 cadence (hourly) exactly.
 const QA2_RETENTION_MS   = 60 * 60 * 1000;
+// Bogus "complete the transfer" cards (mig 270). Every 10 min: fast enough that
+// a fronter does not stare at a card for an hour, cheap enough to ignore.
+const PENDING_SWEEP_MS   = 10 * 60 * 1000;
+const PENDING_SWEEP_INIT = 45 * 1000;
 const QA2_RETENTION_INIT = 3 * 60 * 1000;
 // QA v2 day-1 CRM population (qa2CrmDay.js). No wall-clock cron in this
 // scheduler — everything runs on a fixed interval since boot — so this ticks
@@ -111,6 +115,24 @@ function startBackgroundJobs() {
   const rec2 = () => pollPendingRecordings().catch(e => logger.warn('JOBS', `qa2 recording poll error: ${e.message}`));
   _timers.push(setTimeout(rec2, QA2_REC_POLL_INIT));
   _timers.push(setInterval(rec2, QA2_REC_POLL_MS));
+
+  // Clear confirm cards armed by a NON-transfer disposition. routes/vicidial.js
+  // no longer arms them (the xfer_dispos gate runs before the existing-transfer
+  // branch), but that only holds once this build is deployed, and the old order
+  // keeps producing them until then — 34 reappeared within hours of the one-off
+  // cleanup. A trigger cannot catch it: the buggy path clears vicidial_dispo in
+  // the same write that sets the flag, so nothing at commit time distinguishes a
+  // bogus re-arm from a genuine one. It only becomes visible once the dialer's
+  // real dispo lands, which is what this sweep waits for. Post-deploy it finds
+  // nothing, which is the intended end state.
+  const cards = () => supabaseAdmin.rpc('app_clear_bogus_pending_cards')
+    .then(({ data, error }) => {
+      if (error) return logger.warn('JOBS', `pending-card sweep: ${error.message}`);
+      if (Number(data || 0) > 0) logger.info('JOBS', `pending-card sweep cleared ${data} non-transfer confirm card(s)`);
+    })
+    .catch(e => logger.warn('JOBS', `pending-card sweep error: ${e.message}`));
+  _timers.push(setTimeout(cards, PENDING_SWEEP_INIT));
+  _timers.push(setInterval(cards, PENDING_SWEEP_MS));
 
   // QA v2 sampling-driven pool fill + ageing purge (Phase 8). No-op unless a
   // company has active qa2_sampling_rule rows — same "off by default until
