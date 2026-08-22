@@ -542,6 +542,15 @@ export default function LoadDayTab({ scope }) {
         </Panel>
       )}
 
+      {!loadError && calls && calls.length > 0 && methodTab.toUpperCase().includes('TRA') && (
+        <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
+          TRA is every transfer, so membership comes from the transfer existing — not from what the
+          dispo says now. The column shows the LATEST disposition: the dialer overwrites the original
+          XFER as soon as the lead is worked again, and the closer's own outcome lands there too, so
+          most rows read "Not Interested", "Callback" or a short dialer code rather than XFER.
+        </p>
+      )}
+
       {!loadError && calls && calls.length > 0 && methodTabs.length > 2 && (
         <div className="flex items-center gap-1 flex-wrap">
           {methodTabs.map(t => (
@@ -577,7 +586,7 @@ export default function LoadDayTab({ scope }) {
                 <ColumnHeader tq={tq} colKey="method" label="Method" options={methodOptions} className={th} />
                 <ColumnHeader tq={tq} colKey="leg" label="Leg" options={LEG_OPTIONS} className={th} />
                 <th className={th}>Agent</th>
-                <th className={th}>Dispo</th>
+                <th className={th}>Latest dispo</th>
                 <ColumnHeader tq={tq} colKey="recording_state" label="Recording" options={REC_OPTIONS} className={th} />
                 <ColumnHeader tq={tq} colKey="call_at" label="Time" className={th} />
                 <th className={th}>Assignment</th>

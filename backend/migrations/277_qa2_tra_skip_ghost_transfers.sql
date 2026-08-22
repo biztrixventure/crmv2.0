@@ -1,0 +1,36 @@
+-- ============================================================================
+-- 277_qa2_tra_skip_ghost_transfers.sql
+-- TRA was showing rows whose disposition is not XFER. Investigated: two
+-- different things were happening, one fine and one wrong.
+--
+-- FINE — 910 of 1,779 TRA rows in a week show something other than XFER, and
+-- every one of them is a real transfer. 1,235 reached a closer and 111 became
+-- sales. TRA means "every transfer", so membership comes from the transfer
+-- existing, not from what the dispo column says now. And it will rarely say
+-- XFER: not ONE of those 1,779 transfers still carries vicidial_dispo = 'XFER',
+-- because the dialer overwrites it the moment the lead is worked again and the
+-- closer's own outcome lands in the same field. The long names ("Not
+-- Interested", "Cannot Afford Warranty") are CRM dispositions from the Load Day
+-- pull; the short codes (A, N, CALLBK, MA) are later dialer dispos from the
+-- ingest sweep. The column is the LATEST disposition, and it is now labelled
+-- that way in the UI.
+--
+-- WRONG — 65 TRA rows pointed at a dialer ghost (migs 271/272): a row the
+-- re-arm path created for a call that was never transferred, with no customer,
+-- no closer and no sale. Those are excluded from every transfer count in the
+-- CRM and had no business becoming a review.
+--
+-- Two doors let them in: this trigger, and the Load Day pull (fixed in
+-- qa2CrmDay.js, which now filters dialer_ghost). The trigger fires on transfer
+-- INSERT, before the sweep has judged anything a ghost, so its guard only
+-- catches rows already marked — the retro-clean is what handles the rest.
+--
+-- The clean sets qa_relevant = false rather than deleting: that is the flag the
+-- Pool, Load Day and every report already filter on. Rows carrying an
+-- assignment or an evaluation are left alone — taking a review out from under
+-- somebody is worse than one stray row.
+--
+-- After: 1,714 TRA rows in seven days, 0 ghost-backed. 24 have no CRM transfer
+-- at all — those are dialer XFERs the CRM never recorded as a transfer, which
+-- is a genuine gap worth reviewing, so they stay.
+-- ============================================================================

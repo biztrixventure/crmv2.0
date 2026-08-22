@@ -161,9 +161,15 @@ async function populateCrmDay(companyId, date) {
   const end = etDateToUtcEnd(date);
   if (!start || !end) return { created: 0, error: 'invalid date' };
 
+  // Dialer ghosts (migs 271/272) are rows the re-arm path created for calls that
+  // were never transferred — no customer, no closer, no sale. They are excluded
+  // from every transfer count in the CRM, and they have no business becoming a
+  // TRA review either: TRA is "every transfer", and a ghost is not one. 65 of
+  // them had already been pulled in as TRA rows before this filter existed.
   const { data: transfers } = await supabaseAdmin.from('transfers')
     .select('id, vicidial_vendor_code, vicidial_agent, normalized_phone, created_at, created_by, assigned_closer_id, latest_disposition')
-    .eq('company_id', companyId).gte('created_at', start).lte('created_at', end);
+    .eq('company_id', companyId).eq('dialer_ghost', false)
+    .gte('created_at', start).lte('created_at', end);
   const tids = (transfers || []).map(t => t.id);
 
   const salesByTransfer = new Map();
