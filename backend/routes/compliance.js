@@ -1331,6 +1331,11 @@ router.get('/transfers', asyncHandler(async (req, res) => {
     // errors on the missing column and falls back to the bare table (which has
     // it), so unconfirmed rows are hidden either way.
     q = q.neq('vicidial_pending', true);
+    // Dialer ghosts too (mig 271/272): rows the recycled-lead re-arm path
+    // created with no customer, no closer and a non-transfer dispo. Clearing
+    // vicidial_pending to kill the bogus confirm card had made them look like
+    // ordinary transfers here — 8 rows listed for an agent who made 4.
+    q = q.eq('dialer_ghost', false);
     return q.range(offset, offset + parseInt(limit) - 1);
   };
 
@@ -1347,7 +1352,8 @@ router.get('/transfers', asyncHandler(async (req, res) => {
     if (date_to)   q = q.lte('created_at', etDateToUtcEnd(date_to));
     q = applyTransferSearch(q);
     q = applyColumnFilters(q, filters, TRANSFER_COLUMNS, access.blocked);
-    return q.neq('vicidial_pending', true);   // exclude unconfirmed pending-from-dialer
+    return q.neq('vicidial_pending', true)     // unconfirmed pending-from-dialer
+             .eq('dialer_ghost', false);      // and rows that were never transfers (mig 271)
   };
 
   let data, error, count;

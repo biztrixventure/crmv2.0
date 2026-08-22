@@ -119,6 +119,9 @@ router.get('/', asyncHandler(async (req, res) => {
   // at all: 2,798 transfers were in that state, 197 of them in the last week.
   // Once someone has worked it, it is a real transfer and must be listed.
   query = query.or('vicidial_pending.is.null,vicidial_pending.eq.false,assigned_closer_id.not.is.null,vicidial_dispo.not.is.null');
+  // Dialer ghosts never belong in a transfer list — no customer, no closer, and
+  // the dialer itself reported a non-transfer dispo (mig 271).
+  query = query.eq('dialer_ghost', false);
 
   // Transfers are stored under the fronter's company_id.
   // Closer-side roles are in a different (closer) company — don't filter by company_id for them.

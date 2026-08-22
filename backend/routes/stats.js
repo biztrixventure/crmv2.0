@@ -45,6 +45,12 @@ router.get(
       const scopeTransfers = (q) => {
         // VICIdial pending-from-dialer rows aren't real transfers yet — never count them.
         q = q.neq('vicidial_pending', true);
+        // Nor are dialer ghosts (mig 271): rows the recycled-lead re-arm path
+        // created with no customer, no closer and a non-transfer dispo. They
+        // used to be excluded only because they carried vicidial_pending; once
+        // that flag was cleared to stop the bogus confirm card, they started
+        // counting as real transfers. The two questions are now separate flags.
+        q = q.eq('dialer_ghost', false);
         if (isCloserSide && companyId) {
           if (userRole === 'closer') return q.eq('assigned_closer_id', userId);
           if (coUserIds.length) return q.in('assigned_closer_id', coUserIds);
