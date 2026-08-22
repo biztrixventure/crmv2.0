@@ -15,6 +15,7 @@ const { asyncHandler } = require('../middleware/errorHandler');
 const { requireToolAccess } = require('../utils/featureGate');
 const notifications = require('../utils/notificationService');
 const { getBatchRules, isDialerRecipient, ruleExclusions, summarize } = require('../utils/batchRules');
+const { etDateToUtcStart, etDateToUtcEnd } = require('../utils/etUtils');
 
 // Roles allowed to distribute a result set as a batch (analyzer access already
 // gates the router; readonly_admin can view but not send).
@@ -55,6 +56,28 @@ const DATASETS = {
 };
 
 const ALLOWED_OPS = new Set(['eq', 'neq', 'in', 'gte', 'lte', 'between', 'ilike', 'is_null', 'not_is_null']);
+
+// Timestamptz columns the UI filters with a bare calendar date. The picker
+// sends 'YYYY-MM-DD' and PostgREST compares that against a timestamptz as UTC
+// midnight, which is a DIFFERENT DAY from the one every other surface reports.
+// That is most of the "same thing, three numbers" problem: for Wavetech on
+// 21 Aug the analyzer said 136 while compliance said 102, because compliance
+// cuts the day in Eastern Time (etDateToUtcStart/End) and the analyzer cut it
+// in UTC. Same rows, different five-hour window. Everything date-filtered now
+// cuts the day in ET.
+const TS_COLUMNS = new Set([
+  'created_at', 'updated_at', 'submitted_for_review_at', 'compliance_reviewed_at', 'rejected_at',
+]);
+const isBareDate = v => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
+const dayStart = (col, v) => (TS_COLUMNS.has(col) && isBareDate(v) ? etDateToUtcStart(v) : v);
+const dayEnd   = (col, v) => (TS_COLUMNS.has(col) && isBareDate(v) ? etDateToUtcEnd(v)   : v);
+
+// Rows the dialer armed that were never transfers (migrations 271/272) are not
+// part of any dataset — they are excluded here for the same reason they are
+// excluded from the transfers list, compliance and the KPI tiles.
+function applyBase(query, cfg) {
+  return cfg.table === 'transfers' ? query.eq('dialer_ghost', false) : query;
+}
 
 function applyFilter(query, f, cfg) {
   if (!f || !f.field || !ALLOWED_OPS.has(f.op)) return query;
@@ -147,13 +170,13 @@ function applyFilter(query, f, cfg) {
       const quoted = arr.map(s => `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`).join(',');
       return query.filter(col, 'in', `(${quoted})`);
     }
-    case 'gte':         return v == null || v === '' ? query : query.filter(col, 'gte', v);
-    case 'lte':         return v == null || v === '' ? query : query.filter(col, 'lte', v);
+    case 'gte':         return v == null || v === '' ? query : query.filter(col, 'gte', dayStart(field, v));
+    case 'lte':         return v == null || v === '' ? query : query.filter(col, 'lte', dayEnd(field, v));
     case 'between': {
       const [lo, hi] = Array.isArray(v) ? v : [];
       let q = query;
-      if (lo !== '' && lo != null) q = q.filter(col, 'gte', lo);
-      if (hi !== '' && hi != null) q = q.filter(col, 'lte', hi);
+      if (lo !== '' && lo != null) q = q.filter(col, 'gte', dayStart(field, lo));
+      if (hi !== '' && hi != null) q = q.filter(col, 'lte', dayEnd(field, hi));
       return q;
     }
     case 'is_null':     return query.filter(col, 'is', 'null');
@@ -180,7 +203,7 @@ async function fetchAll(dataset, filters, { columns = '*', cap = 1_000_000 } = {
   const cfg = pickDataset(dataset);
   const all = [];
   for (let from = 0; from < cap; from += 1000) {
-    let q = supabaseAdmin.from(cfg.table).select(columns).order('created_at', { ascending: false });
+    let q = applyBase(supabaseAdmin.from(cfg.table).select(columns).order('created_at', { ascending: false }), cfg);
     for (const f of filters) q = applyFilter(q, f, cfg);
     const { data, error } = await q.range(from, from + 999);
     if (error) throw new Error(error.message);
@@ -382,7 +405,7 @@ router.post('/query', asyncHandler(async (req, res) => {
   // ordering directly made the planner sort the whole filtered set of wide JSONB
   // rows into temp files (hundreds of MB spilled to disk per call). We page the
   // ids here, then fetch the wide rows for just this page.
-  let idQuery = supabaseAdmin.from(cfg.table).select('id', { count: 'exact' }).order('created_at', { ascending: false });
+  let idQuery = applyBase(supabaseAdmin.from(cfg.table).select('id', { count: 'exact' }).order('created_at', { ascending: false }), cfg);
   for (const f of rest) idQuery = applyFilter(idQuery, f, cfg);
   idQuery = idQuery.range(offset, offset + limit - 1);
 

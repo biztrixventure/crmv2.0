@@ -1,12 +1,25 @@
 const express = require('express');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
-const { etDateToUtcStart, etDateToUtcEnd, todayEt } = require('../utils/etUtils');
+const { etDateToUtcStart, etDateToUtcEnd, todayEt, utcToEtDate } = require('../utils/etUtils');
 const { getConfig } = require('../utils/businessConfig');
 const { isCloserSideScope, getCompanyType } = require('../models/helpers');
 const { safeUuid } = require('../utils/searchSanitize');
 const { excludePostDate } = require('../utils/postDate');
 const logger = require('../utils/logger');
+
+// Every window in this file is cut in Eastern Time (etDateToUtcStart/End), but
+// the day BUCKETS were built by slicing the UTC string. Those disagree for the
+// five hours between 00:00 and 05:00 ET: a transfer at 01:00 ET on the 21st is
+// 05:00Z on the 21st and buckets correctly, one at 21:00 ET on the 21st is
+// 01:00Z on the 22nd and landed on the wrong bar. The headline and its own
+// chart could not add up. A bare 'YYYY-MM-DD' (sale_date) has no timezone and
+// is taken as written; a timestamp is converted to its ET calendar day.
+const etDayOf = (v) => {
+  const str = String(v || '');
+  if (!str) return '';
+  return str.length <= 10 ? str.slice(0, 10) : utcToEtDate(str);
+};
 
 const router = express.Router();
 
@@ -439,6 +452,7 @@ router.get('/team-trends', asyncHandler(async (req, res) => {
 
   const scopeT = (q) => {
     q = q.neq('vicidial_pending', true);
+    q = q.eq('dialer_ghost', false);
     if (isGlobal) return q;
     if (isCloserSide) return coUserIds.length ? q.in('assigned_closer_id', coUserIds) : q.eq('id', ZERO);
     return companyId ? q.eq('company_id', companyId) : q;
@@ -486,7 +500,7 @@ router.get('/team-trends', asyncHandler(async (req, res) => {
       .gte('created_at', windowStart).lte('created_at', windowEnd)).order('created_at', { ascending: true })),
   ]);
 
-  const dayOf = (d) => String(d || '').slice(0, 10);
+  const dayOf = etDayOf;
   // One bucket per date in the SAME window the rows were fetched from, so the
   // bars always add up to the headline.
   const buckets = {};
@@ -576,8 +590,8 @@ router.get('/user-performance/:userId', asyncHandler(async (req, res) => {
   const [{ data: closerSales }, { data: fronterSales }, { data: xCreated }, { data: xAssigned }] = await Promise.all([
     supabaseAdmin.from('sales').select('sale_date, created_at, status, cancellation_date').eq('closer_id', targetId).gte('created_at', sinceUtc).limit(8000),
     supabaseAdmin.from('sales').select('sale_date, created_at, status, cancellation_date').eq('fronter_id', targetId).gte('created_at', sinceUtc).limit(8000),
-    supabaseAdmin.from('transfers').select('created_at').eq('created_by', targetId).neq('vicidial_pending', true).gte('created_at', sinceUtc).limit(8000),
-    supabaseAdmin.from('transfers').select('created_at').eq('assigned_closer_id', targetId).neq('vicidial_pending', true).gte('created_at', sinceUtc).limit(8000),
+    supabaseAdmin.from('transfers').select('created_at').eq('created_by', targetId).neq('vicidial_pending', true).eq('dialer_ghost', false).gte('created_at', sinceUtc).limit(8000),
+    supabaseAdmin.from('transfers').select('created_at').eq('assigned_closer_id', targetId).neq('vicidial_pending', true).eq('dialer_ghost', false).gte('created_at', sinceUtc).limit(8000),
   ]);
 
   const isFronterRole = !!(level && level.includes('fronter'));
@@ -587,10 +601,10 @@ router.get('/user-performance/:userId', asyncHandler(async (req, res) => {
   const won = sales.filter(s => s.status === 'closed_won').length;
   const cancellations = sales.filter(s => s.cancellation_date || TERMINAL.includes(s.status)).length;
 
-  const dayOf = (d) => String(d || '').slice(0, 10);
+  const dayOf = etDayOf;
   const buckets = {};
   for (let i = days - 1; i >= 0; i--) {
-    const d = new Date(Date.now() - i * 86400000).toISOString().slice(0, 10);
+    const d = new Date(Date.parse(`${todayEt()}T00:00:00Z`) - i * 86400000).toISOString().slice(0, 10);
     buckets[d] = { date: d, transfers: 0, sales: 0 };
   }
   xfers.forEach(t => { const d = dayOf(t.created_at); if (buckets[d]) buckets[d].transfers++; });
@@ -674,6 +688,7 @@ router.get('/agent-performance', asyncHandler(async (req, res) => {
     let q = supabaseAdmin.from('transfers')
       .select('created_by, assigned_closer_id, created_at')
       .neq('vicidial_pending', true)
+      .eq('dialer_ghost', false)
       .order('created_at', { ascending: true });
     if (closerSide) q = q.in('assigned_closer_id', memberIds);
     else if (companyId) q = q.eq('company_id', companyId);
@@ -764,7 +779,7 @@ router.get('/agent-performance', asyncHandler(async (req, res) => {
   // making the line look continuous. Capped so a year-long range can't return
   // 365 buckets to a phone.
   const MAX_DAYS = 120;
-  const dayOf = (v) => String(v || '').slice(0, 10);
+  const dayOf = etDayOf;
   const allDates = [
     ...transfers.map(t => dayOf(t.created_at)),
     ...sales.map(s => dayOf(s.sale_date || s.created_at)),
