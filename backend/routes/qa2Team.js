@@ -412,15 +412,39 @@ router.post('/bulk-assign', asyncHandler(async (req, res) => {
   const validCalls = (calls || []).filter(c => companyInScope(scope, c.company_id) && (!c.method_id || methodInScope(scope, c.method_id)));
   if (!validCalls.length) return res.status(403).json({ error: 'None of the selected calls are within your scope' });
 
-  // Round-robin across the chosen agents — distributes the selected calls,
-  // does NOT send every call to every agent (that's calibration, a separate
-  // opt-in feature with its own explicit action). Already-assigned calls are
-  // skipped, never silently reassigned out from under whoever has them.
+  // An agent only ever receives a method they are GRANTED. Round-robin used to
+  // walk the picked agents blindly, so selecting a mixed day and two agents
+  // handed TRA calls to whoever came next in the rotation — including an agent
+  // granted only Unclosed, who would then be holding work the Pool and Queue
+  // refuse to open. The rotation now skips past anyone not granted THAT call's
+  // method, and a call no picked agent can take is reported rather than
+  // dropped in silence.
+  const { data: grants } = await supabaseAdmin
+    .from('qa2_agent_method').select('agent_id, method_id').in('agent_id', agent_ids);
+  const grantedBy = new Map();
+  for (const g of (grants || [])) {
+    if (!grantedBy.has(g.agent_id)) grantedBy.set(g.agent_id, new Set());
+    grantedBy.get(g.agent_id).add(g.method_id);
+  }
+  const eligibleFor = (methodId) => (methodId
+    ? agent_ids.filter(a => grantedBy.get(a)?.has(methodId))
+    : agent_ids);
+
+  // Rotation is per method, so each method's work is still spread evenly across
+  // the agents who can take it — one shared counter would bunch a method onto
+  // whichever agent happened to be next.
+  const turn = new Map();
+
   const now = new Date().toISOString();
-  let assigned = 0, skipped = 0;
+  let assigned = 0, skipped = 0, skippedNotGranted = 0;
   for (let i = 0; i < validCalls.length; i++) {
     const call = validCalls[i];
-    const agentId = agent_ids[i % agent_ids.length];
+    const pool = eligibleFor(call.method_id);
+    if (!pool.length) { skippedNotGranted++; continue; }
+    const k = call.method_id || 'none';
+    const t = turn.get(k) || 0;
+    turn.set(k, t + 1);
+    const agentId = pool[t % pool.length];
     const { data: existing } = await supabaseAdmin
       .from('qa2_assignment').select('id, assigned_to').eq('call_id', call.id).is('calibration_group_id', null).maybeSingle();
     if (existing?.assigned_to) { skipped++; continue; }
@@ -434,7 +458,7 @@ router.post('/bulk-assign', asyncHandler(async (req, res) => {
     }
     assigned++;
   }
-  res.json({ assigned, skipped, total: validCalls.length });
+  res.json({ assigned, skipped, skipped_not_granted: skippedNotGranted, total: validCalls.length });
 }));
 
 module.exports = router;
