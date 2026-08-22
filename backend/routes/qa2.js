@@ -11,6 +11,7 @@ const router = express.Router();
 
 router.use('/org', require('./qa2Org'));
 router.use('/team', require('./qa2Team'));
+router.use('/assign', require('./qa2Assign'));
 router.use('/', require('./qa2Methods'));
 router.use('/', require('./qa2Forms'));
 router.use('/', require('./qa2Assignments'));

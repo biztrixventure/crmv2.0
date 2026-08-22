@@ -136,8 +136,14 @@ async function insertCrmDayCall({ companyId, leg, transferId, saleId, vendorCode
     // That distinction is the whole difference between one found recording and
     // forty-seven on a day where the CRM transfers carried no vendor code.
     // Only a row with neither a lead code NOR an agent+phone is truly hopeless.
+    // Requiring an AGENT as well as a phone buried 99 of TRA's 123 misses. The
+    // fallback's second route asks the DIALER who called this number — it needs
+    // the number, not our guess at who dialled it, and every one of those rows
+    // had a phone. Rows born 'missing' are never polled at all, so that one
+    // extra condition was the difference between "no recording" and "never
+    // looked". A phone alone is now enough to queue.
     recording_state: rec ? 'found'
-      : ((parsedLeadId || (agentUserId && phone)) ? 'pending' : 'missing'),
+      : ((parsedLeadId || phone) ? 'pending' : 'missing'),
     qa_relevant: true,
     source: 'crm_day',
   };

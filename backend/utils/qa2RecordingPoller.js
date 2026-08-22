@@ -211,6 +211,27 @@ async function pollOne(row) {
     return;
   }
 
+  // Last resort for a row that HAS a lead id: everything above searches by that
+  // id, so a clip filed under a different lead (a recycled lead, a re-dial, a
+  // leg the other box logged) is invisible to it however many times we retry.
+  // 1-Vertex's closer leg sits at 71% found on a box where every other method
+  // is above 99%, and 306 of its 307 misses had already burned all ten
+  // attempts — retrying the same doomed query. The agent-and-day / call-log
+  // route is a genuinely different question, so ask it once before writing the
+  // row off rather than never.
+  if (attempts >= MAX_ATTEMPTS) {
+    const late = await pollByAgentDay(row);
+    if (late) {
+      const updates = {
+        box_id: late.box, recording_id: String(late.recording_id), recording_location: late.location,
+        recording_state: 'found', recording_attempts: attempts,
+      };
+      if (Number.isFinite(late.duration)) updates.talk_sec = late.duration;
+      const { error: lateErr } = await supabaseAdmin.from('qa2_call').update(updates).eq('id', row.id);
+      if (!lateErr) return;
+    }
+  }
+
   const state = attempts >= MAX_ATTEMPTS ? 'missing' : 'pending';
   await supabaseAdmin.from('qa2_call').update({ recording_attempts: attempts, recording_state: state }).eq('id', row.id);
 }

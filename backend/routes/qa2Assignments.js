@@ -196,6 +196,27 @@ router.post('/assignments', asyncHandler(async (req, res) => {
   if (!call) return res.status(404).json({ error: 'Call not found' });
   if (!companyInScope(scope, call.company_id)) return res.status(403).json({ error: 'Call is outside your companies' });
 
+  // The same rule /qa2/assign/bulk enforces, applied to the one-at-a-time push
+  // this route has always been. It used to check the CALL and never the AGENT,
+  // so a TRA call could be pushed to an agent granted only RCM — they would
+  // then be holding work the Pool and Queue will not let them open. A
+  // superadmin scope has no team of its own, so the team check only applies to
+  // a real manager handing work to their own people.
+  const [{ data: onTeam }, { data: granted }] = await Promise.all([
+    supabaseAdmin.from('qa2_team_member').select('agent_id')
+      .eq('agent_id', assigned_to).eq('manager_id', req.user.id).maybeSingle(),
+    call.method_id
+      ? supabaseAdmin.from('qa2_agent_method').select('method_id')
+          .eq('agent_id', assigned_to).eq('method_id', call.method_id).maybeSingle()
+      : Promise.resolve({ data: null }),
+  ]);
+  if (!scope.superadmin && !onTeam) {
+    return res.status(403).json({ error: 'That reviewer is not on your team' });
+  }
+  if (call.method_id && !granted) {
+    return res.status(403).json({ error: "That reviewer is not granted this call's method — grant it on the Team tab first" });
+  }
+
   const { data: existing } = await supabaseAdmin
     .from('qa2_assignment').select('id').eq('call_id', call_id).is('calibration_group_id', null).maybeSingle();
   const now = new Date().toISOString();

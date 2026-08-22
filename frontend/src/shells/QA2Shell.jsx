@@ -14,7 +14,7 @@
 // ============================================================================
 
 import { useState, useEffect } from 'react';
-import { LogOut, Building2, Users, ListChecks, Inbox, FileSpreadsheet, ShieldCheck, ListTodo, Scale, BarChart3, CalendarClock } from 'lucide-react';
+import { LogOut, Building2, Users, ListChecks, Inbox, FileSpreadsheet, ShieldCheck, ListTodo, Scale, BarChart3, CalendarClock, Send } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useHistoryTab } from '../hooks/useHistoryTab';
@@ -23,6 +23,7 @@ import DotGridBg from '../components/UI/DotGridBg';
 import { PillTabs, Loading } from '../components/UI/kit';
 import OrgTab from '../components/QA2/OrgTab';
 import TeamTab from '../components/QA2/TeamTab';
+import AssignTab from '../components/QA2/AssignTab';
 import MethodsTab from '../components/QA2/MethodsTab';
 import UnclassifiedTab from '../components/QA2/UnclassifiedTab';
 import FormsTab from '../components/QA2/FormsTab';
@@ -59,6 +60,7 @@ export default function QA2Shell() {
     { key: 'methods',      label: 'Methods',        icon: ListChecks,      show: managerAccess || isCompliance },
     { key: 'unclassified', label: 'Unclassified',   icon: Inbox,           show: managerAccess },
     { key: 'loadday',      label: 'Load Day',       icon: CalendarClock,   show: managerAccess },
+    { key: 'assign',       label: 'Assign Work',    icon: Send,            show: managerAccess },
     { key: 'team',         label: 'Team',           icon: Users,           show: managerAccess },
     { key: 'calibration',  label: 'Calibration',    icon: Scale,           show: managerAccess || isCompliance },
     { key: 'reports',      label: 'Reports',        icon: BarChart3,       show: canViewReports },
@@ -107,6 +109,7 @@ export default function QA2Shell() {
         {activeTab === 'methods' && <MethodsTab scope={scope} />}
         {activeTab === 'unclassified' && <UnclassifiedTab scope={scope} />}
         {activeTab === 'loadday' && <LoadDayTab scope={scope} />}
+        {activeTab === 'assign' && <AssignTab />}
         {activeTab === 'team' && <TeamTab scope={scope} />}
         {activeTab === 'calibration' && <CalibrationTab scope={scope} />}
         {activeTab === 'reports' && <ReportsTab scope={scope} />}
