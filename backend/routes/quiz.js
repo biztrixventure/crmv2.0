@@ -401,11 +401,14 @@ router.get('/team/:teamId/progress', asyncHandler(async (req, res) => {
 }));
 
 // ── assignee: my quizzes (pending + submitted) ────────────────────────────────
+// A quiz the creator hid (is_active=false) disappears from here entirely for
+// anyone who hasn't taken it yet — but a PAST submission stays visible, since
+// hiding a quiz is about stopping new attempts, not erasing someone's record.
 router.get('/my/list', asyncHandler(async (req, res) => {
   const { data: attempts } = await supabaseAdmin.from('quiz_attempts')
     .select('*, quizzes(id, title, description, category, pass_threshold, time_limit_minutes, is_active)')
     .eq('user_id', req.user.id).order('created_at', { ascending: false });
-  const rows = (attempts || []).filter(a => a.quizzes).map(a => ({
+  const rows = (attempts || []).filter(a => a.quizzes && (a.quizzes.is_active || a.status === 'submitted')).map(a => ({
     attempt_id: a.id, quiz_id: a.quizzes.id, title: a.quizzes.title, description: a.quizzes.description,
     category: a.quizzes.category, pass_threshold: a.quizzes.pass_threshold,
     time_limit_minutes: a.quizzes.time_limit_minutes, is_active: a.quizzes.is_active,
@@ -417,17 +420,36 @@ router.get('/my/list', asyncHandler(async (req, res) => {
 }));
 
 // ── assignee: take a quiz (questions only, no correct answers) ───────────────
+// The clock starts the FIRST time this is hit and never resets — reopening the
+// same attempt (tab switch, refresh, coming back later) resumes the same
+// countdown rather than granting a fresh one. `seconds_remaining` is computed
+// here, server-side, so the frontend never has to re-derive it from a raw
+// started_at + trust its own clock; `resuming` tells it whether this is a
+// fresh start or a reopen, so it can explain a near-zero timer instead of
+// just letting the modal go silent.
 router.get('/my/:attemptId/take', asyncHandler(async (req, res) => {
   const { data: attempt } = await supabaseAdmin.from('quiz_attempts').select('*').eq('id', req.params.attemptId).maybeSingle();
   if (!attempt || attempt.user_id !== req.user.id) return res.status(404).json({ error: 'Assignment not found' });
   if (attempt.status === 'submitted') return res.status(400).json({ error: 'You already submitted this quiz' });
   const quiz = await quizById(attempt.quiz_id);
   if (!quiz || !quiz.is_active) return res.status(400).json({ error: 'This quiz is no longer available' });
-  if (!attempt.started_at) {
-    await supabaseAdmin.from('quiz_attempts').update({ started_at: new Date().toISOString() }).eq('id', attempt.id);
+
+  const resuming = !!attempt.started_at;
+  let startedAt = attempt.started_at;
+  if (!startedAt) {
+    startedAt = new Date().toISOString();
+    await supabaseAdmin.from('quiz_attempts').update({ started_at: startedAt }).eq('id', attempt.id);
   }
+
   const { data: questions } = await supabaseAdmin.from('quiz_questions').select('id, question_text, options, display_type, points, order_index').eq('quiz_id', quiz.id).order('order_index', { ascending: true });
-  res.json({ quiz, questions: questions || [], started_at: attempt.started_at || new Date().toISOString() });
+
+  let secondsRemaining = null;
+  if (quiz.time_limit_minutes) {
+    const elapsedSeconds = (Date.now() - new Date(startedAt).getTime()) / 1000;
+    secondsRemaining = Math.max(0, Math.round(quiz.time_limit_minutes * 60 - elapsedSeconds));
+  }
+
+  res.json({ quiz, questions: questions || [], started_at: startedAt, resuming, seconds_remaining: secondsRemaining });
 }));
 
 // ── assignee: submit (one-time, auto-graded) ──────────────────────────────────

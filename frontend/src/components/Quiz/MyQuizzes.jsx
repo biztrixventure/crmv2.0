@@ -16,16 +16,19 @@ function TakeQuizModal({ attemptId, onClose, onSubmitted }) {
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState('');
   const [secondsLeft, setSecondsLeft] = useState(null);
+  const [result, setResult] = useState(null);   // set on successful submit — shown instead of closing instantly
   const submittedRef = useRef(false);
+  // Mirrors `answers` synchronously, so submit() always reads the latest pick
+  // even if it's invoked from a closure captured a render or two ago (the
+  // countdown effect, for one). Cheap insurance against a changed answer ever
+  // failing to make it into what gets submitted.
+  const answersRef = useRef({});
+  useEffect(() => { answersRef.current = answers; }, [answers]);
 
   useEffect(() => {
     client.get(`quiz/my/${attemptId}/take`).then(r => {
       setData(r.data);
-      if (r.data.quiz.time_limit_minutes) {
-        const startedAt = new Date(r.data.started_at).getTime();
-        const deadline = startedAt + r.data.quiz.time_limit_minutes * 60_000;
-        setSecondsLeft(Math.max(0, Math.round((deadline - Date.now()) / 1000)));
-      }
+      if (r.data.seconds_remaining != null) setSecondsLeft(r.data.seconds_remaining);
     }).catch(e => setErr(e.response?.data?.error || 'Failed to load quiz')).finally(() => setLoading(false));
   }, [attemptId]);
 
@@ -34,24 +37,33 @@ function TakeQuizModal({ attemptId, onClose, onSubmitted }) {
     submittedRef.current = true;
     setSubmitting(true); setErr('');
     try {
-      const payload = { answers: Object.entries(answers).map(([question_id, selected_index]) => ({ question_id, selected_index })) };
+      const payload = { answers: Object.entries(answersRef.current).map(([question_id, selected_index]) => ({ question_id, selected_index })) };
       const r = await client.post(`quiz/my/${attemptId}/submit`, payload);
       onSubmitted(r.data.attempt);
-      onClose();
+      // Show what happened instead of the modal just disappearing — that
+      // silent close is exactly what made a timed-out attempt look like a
+      // bug ("I clicked start and it ended a second later").
+      setResult(r.data.attempt);
     } catch (e) { setErr(e.response?.data?.error || 'Failed to submit'); submittedRef.current = false; }
     finally { setSubmitting(false); }
-  }, [answers, attemptId, onClose, onSubmitted]);
+  }, [attemptId, onSubmitted]);
 
   // Countdown — auto-submits whatever is answered when time runs out.
   useEffect(() => {
-    if (secondsLeft == null) return;
+    if (secondsLeft == null || result) return;
     if (secondsLeft <= 0) { submit(); return; }
     const t = setTimeout(() => setSecondsLeft(s => s - 1), 1000);
     return () => clearTimeout(t);
-  }, [secondsLeft, submit]);
+  }, [secondsLeft, submit, result]);
 
   const mmss = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
   const answeredCount = Object.keys(answers).length;
+  // Reopened an attempt that was already started earlier and either has
+  // little time left or none at all — the person needs to know WHY, not just
+  // watch a near-zero countdown (or, worse, an instant auto-submit) with no
+  // explanation.
+  const resumedWithTimeLeft = data?.resuming && secondsLeft != null && secondsLeft > 0;
+  const resumedExpired = data?.resuming && data.seconds_remaining === 0;
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center p-4 overflow-y-auto"
@@ -63,7 +75,7 @@ function TakeQuizModal({ attemptId, onClose, onSubmitted }) {
             <ClipboardList size={20} className="text-white flex-shrink-0" />
             <h3 className="text-lg font-bold text-white truncate">{data?.quiz?.title || 'Quiz'}</h3>
           </div>
-          {secondsLeft != null && (
+          {secondsLeft != null && !result && (
             <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-sm font-bold flex-shrink-0"
               style={{ background: secondsLeft < 60 ? 'rgba(239,68,68,0.25)' : 'rgba(255,255,255,0.2)', color: '#fff' }}>
               <Clock size={13} /> {mmss(secondsLeft)}
@@ -71,9 +83,36 @@ function TakeQuizModal({ attemptId, onClose, onSubmitted }) {
           )}
         </div>
 
-        {loading ? <div className="p-8"><Loading /></div> : (
+        {loading ? <div className="p-8"><Loading /></div> : result ? (
+          <div className="p-6 space-y-4 text-center">
+            <div className="w-14 h-14 rounded-full mx-auto flex items-center justify-center"
+              style={{ background: 'color-mix(in srgb, var(--color-success-600) 14%, transparent)' }}>
+              <CheckCircle2 size={28} style={{ color: 'var(--color-success-600)' }} />
+            </div>
+            <div>
+              <p className="text-lg font-bold" style={{ color: 'var(--color-text)' }}>Quiz submitted</p>
+              <p className="text-sm mt-1" style={{ color: 'var(--color-text-secondary)' }}>
+                You scored <span className="font-bold">{pct(result.percent)}</span> ({result.score}/{result.total_points})
+              </p>
+              {data?.quiz?.pass_threshold != null && (
+                <div className="flex items-center justify-center gap-2 mt-2">
+                  <PassFailBadge pass={(result.percent || 0) >= data.quiz.pass_threshold} />
+                </div>
+              )}
+            </div>
+            <Button variant="primary" onClick={onClose} className="mx-auto">Close</Button>
+          </div>
+        ) : (
           <div className="p-6 space-y-4">
             {err && <Alert type="error" message={err} dismissible onDismiss={() => setErr('')} />}
+            {resumedExpired && (
+              <Alert type="warning"
+                message="This quiz's time limit started when you first opened it and has now run out — submitting whatever was answered." />
+            )}
+            {resumedWithTimeLeft && (
+              <Alert type="warning"
+                message={`You started this quiz earlier — ${mmss(secondsLeft)} left on the clock.`} />
+            )}
             <div className="flex items-center gap-2">
               <MiniBar value={data?.questions?.length ? (100 * answeredCount / data.questions.length) : 0} />
               <span className="text-[11px] font-semibold flex-shrink-0" style={{ color: 'var(--color-text-tertiary)' }}>{answeredCount}/{data?.questions?.length || 0}</span>

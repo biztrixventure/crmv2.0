@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   ClipboardList, Plus, Edit2, Trash2, Send, BarChart3, Clock, Users, User, X,
-  CheckCircle2, AlertTriangle, Search, Minus, Save, Trophy, Tag, Target, TrendingUp, Copy,
+  CheckCircle2, AlertTriangle, Search, Minus, Save, Trophy, Tag, Target, TrendingUp, Copy, Eye, EyeOff,
 } from 'lucide-react';
 import client from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
@@ -580,6 +580,14 @@ export default function QuizManager() {
     catch (e) { setErr(e.response?.data?.error || 'Failed to delete quiz'); }
   };
 
+  // Hiding a quiz stops it from ever showing up for anyone who hasn't taken it
+  // yet (GET /quiz/my/list drops pending attempts of an inactive quiz) — past
+  // submissions stay visible. It does not unassign or delete anything.
+  const toggleVisibility = async (quiz) => {
+    try { await client.put(`quiz/${quiz.id}`, { is_active: !quiz.is_active }); load(); }
+    catch (e) { setErr(e.response?.data?.error || 'Failed to update visibility'); }
+  };
+
   const totals = useMemo(() => ({
     quizzes: quizzes.length,
     assigned: quizzes.reduce((s, q) => s + (q.assigned_count || 0), 0),
@@ -650,7 +658,7 @@ export default function QuizManager() {
                   <div className="flex items-center gap-2 flex-wrap">
                     <p className="font-semibold" style={{ color: 'var(--color-text)' }}>{q.title}</p>
                     <CategoryBadge category={q.category} />
-                    {!q.is_active && <span className="text-[10px] px-1.5 py-0.5 rounded font-bold" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>INACTIVE</span>}
+                    {!q.is_active && <span className="text-[10px] px-1.5 py-0.5 rounded font-bold flex items-center gap-1" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}><EyeOff size={9} /> HIDDEN</span>}
                     {q.time_limit_minutes && <span className="text-[11px] flex items-center gap-1" style={{ color: 'var(--color-text-tertiary)' }}><Clock size={11} /> {q.time_limit_minutes}m</span>}
                   </div>
                   {q.description && <p className="text-xs mt-0.5 line-clamp-1" style={{ color: 'var(--color-text-secondary)' }}>{q.description}</p>}
@@ -667,6 +675,9 @@ export default function QuizManager() {
                   )}
                 </div>
                 <div className="flex items-center gap-1 flex-shrink-0">
+                  <button onClick={() => toggleVisibility(q)} title={q.is_active ? 'Hide from assignees' : 'Show to assignees'} className="p-2 rounded-lg hover:bg-bg-secondary">
+                    {q.is_active ? <Eye size={15} style={{ color: 'var(--color-text-secondary)' }} /> : <EyeOff size={15} style={{ color: 'var(--color-warning-600)' }} />}
+                  </button>
                   <button onClick={() => setAssignQuiz(q)} title="Assign" className="p-2 rounded-lg hover:bg-bg-secondary"><Send size={15} style={{ color: 'var(--color-primary-500)' }} /></button>
                   <button onClick={() => setResultsId(q.id)} title="Results" className="p-2 rounded-lg hover:bg-bg-secondary"><BarChart3 size={15} style={{ color: 'var(--color-info-500, #0891b2)' }} /></button>
                   <button onClick={() => setEditorId(q.id)} title="Edit" className="p-2 rounded-lg hover:bg-bg-secondary"><Edit2 size={15} style={{ color: 'var(--color-text-secondary)' }} /></button>
