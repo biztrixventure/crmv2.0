@@ -37,6 +37,13 @@ const QA_MATERIALIZE_INIT = 2 * 60 * 1000;
 // scoring possible (v1's equivalent only ran hourly).
 const QA2_REC_POLL_MS   = 60 * 1000;
 const QA2_REC_POLL_INIT = 30 * 1000;
+// TRA vendor-code backfill (mig 281). fn_qa2_materialize_transfer stamps a
+// TRA row's vendor_code only once, at transfer-creation time — the dialer
+// often reports it onto the transfer LATER, and without this the row is
+// stuck on the weak agent+day fallback instead of an exact lead-id lookup.
+// 5 min: matches how often a transfer's vendor code actually changes.
+const QA2_TRA_VENDOR_MS   = 5 * 60 * 1000;
+const QA2_TRA_VENDOR_INIT = 45 * 1000;
 // QA v2 sampling-rule pool fill (build brief Phase 8). 5 min — frequent
 // enough that a newly-classified call reaches the pool same-shift, cheap
 // enough not to matter at ~80 calls/day scale.
@@ -116,6 +123,15 @@ function startBackgroundJobs() {
   _timers.push(setTimeout(rec2, QA2_REC_POLL_INIT));
   _timers.push(setInterval(rec2, QA2_REC_POLL_MS));
 
+  const traVendor = () => supabaseAdmin.rpc('app_qa2_attach_tra_vendor_codes')
+    .then(({ data, error }) => {
+      if (error) return logger.warn('JOBS', `qa2 TRA vendor-code backfill: ${error.message}`);
+      if (Number(data || 0) > 0) logger.info('JOBS', `qa2 TRA vendor-code backfill attached ${data} row(s)`);
+    })
+    .catch(e => logger.warn('JOBS', `qa2 TRA vendor-code backfill error: ${e.message}`));
+  _timers.push(setTimeout(traVendor, QA2_TRA_VENDOR_INIT));
+  _timers.push(setInterval(traVendor, QA2_TRA_VENDOR_MS));
+
   // Clear confirm cards armed by a NON-transfer disposition. routes/vicidial.js
   // no longer arms them (the xfer_dispos gate runs before the existing-transfer
   // branch), but that only holds once this build is deployed, and the old order
@@ -155,7 +171,7 @@ function startBackgroundJobs() {
   _timers.push(setTimeout(crmDay2, QA2_CRMDAY_INIT));
   _timers.push(setInterval(crmDay2, QA2_CRMDAY_MS));
 
-  logger.info('JOBS', `background jobs started — segments refresh ${REFRESH_SEGMENTS_MS / 60000}m, cache sweep ${CACHE_SWEEP_MS / 60000}m, payment scan ${PAYMENT_SCAN_MS / 3600000}h, qa materialize ${QA_MATERIALIZE_MS / 60000}m, milestone sweep ${MILESTONE_SWEEP_MS / 60000}m, qa2 recording poll ${QA2_REC_POLL_MS / 1000}s, qa2 auto-assign ${QA2_AUTOASSIGN_MS / 60000}m, qa2 retention ${QA2_RETENTION_MS / 3600000}h, qa2 crm-day ${QA2_CRMDAY_MS / 3600000}h`);
+  logger.info('JOBS', `background jobs started — segments refresh ${REFRESH_SEGMENTS_MS / 60000}m, cache sweep ${CACHE_SWEEP_MS / 60000}m, payment scan ${PAYMENT_SCAN_MS / 3600000}h, qa materialize ${QA_MATERIALIZE_MS / 60000}m, milestone sweep ${MILESTONE_SWEEP_MS / 60000}m, qa2 recording poll ${QA2_REC_POLL_MS / 1000}s, qa2 TRA vendor-code backfill ${QA2_TRA_VENDOR_MS / 60000}m, qa2 auto-assign ${QA2_AUTOASSIGN_MS / 60000}m, qa2 retention ${QA2_RETENTION_MS / 3600000}h, qa2 crm-day ${QA2_CRMDAY_MS / 3600000}h`);
 }
 
 function stopBackgroundJobs() {
