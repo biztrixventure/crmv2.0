@@ -25,7 +25,7 @@ const { normPhone } = require('../utils/uploadService');
 const { titleCaseFormData } = require('../utils/titleCase');
 const { expandStateInFormData } = require('../utils/stateMap');
 const { isSuperAdmin, getCounterpartCompanyIds, activeUserNames } = require('../models/helpers');
-const { latestDisposition, leadStatusByCode, leadAgentByCode, boxPrefixes, refreshBoxes, resolveLeadIdByAgentDate, fetchAgentRoster, getBoxes, lookupCallsByPhone, lookupCallsByPhoneDiag, normalizeLeadCode } = require('../utils/dialerBoxes');
+const { latestDisposition, leadStatusByCode, leadAgentByCode, boxPrefixes, refreshBoxes, resolveLeadIdByAgentDate, fetchAgentRoster, getBoxes, lookupCallsByPhone, lookupCallsByPhoneDiag, normalizeLeadCode, leadFieldCustomer, parseVendorCode } = require('../utils/dialerBoxes');
 const notifications = require('../utils/notificationService');
 const { getConfig } = require('../utils/businessConfig');
 
@@ -339,6 +339,61 @@ const stripBlank = (obj) => Object.fromEntries(
   Object.entries(obj).filter(([, v]) => v !== null && v !== undefined && String(v).trim() !== '')
 );
 
+// ASK THE DIALER FOR THE CUSTOMER WHEN THE WEBHOOK DIDN'T CARRY THEM.
+//
+// Roughly one XFER in six arrives with empty first/last tokens, and the fronter
+// dashboard then renders the literal word "Lead" with no other detail. Filling
+// from another CRM row only works when this customer has been transferred
+// before — measured on the live data, most of these have NEVER been seen here
+// (the three numbers reported had zero sibling rows in any company), so there is
+// nothing in the CRM to copy from. VICIdial itself always holds the lead: the
+// webhook simply didn't send it.
+//
+// So go and get it. lead_field_info by lead_id is the authoritative source and
+// dialerBoxes.leadFieldCustomer already wraps it (parallel per-field, cached,
+// falls back across boxes, returns null for a down box rather than throwing).
+//
+// Best-effort by construction: only ever FILLS blanks, never overwrites, and any
+// failure leaves the transfer exactly as it was.
+const DIALER_FIELD_MAP = {
+  customer_name:    'customer_name',
+  customer_address: 'Address',
+  customer_state:   'State',
+  customer_zip:     'Zip',
+};
+async function enrichFromDialer(transferId, code) {
+  const parsed = parseVendorCode(code);
+  // `exact` false means the prefix named no box — a bare lead_id is unique only
+  // per box, so looking it up could name a different customer entirely.
+  if (!parsed || !parsed.exact || !parsed.leadId) return false;
+  const cust = await leadFieldCustomer(parsed.boxes[0], parsed.leadId);
+  if (!cust || !cust.customer_name) return false;
+
+  const { data: tr } = await supabaseAdmin
+    .from('transfers').select('form_data').eq('id', transferId).maybeSingle();
+  if (!tr) return false;
+  const fd = tr.form_data || {};
+  const blank = (k) => String(fd[k] ?? '').trim() === '';
+
+  const patch = {};
+  for (const [from, to] of Object.entries(DIALER_FIELD_MAP)) {
+    if (cust[from] && blank(to)) patch[to] = cust[from];
+  }
+  // The dashboard reads FirstName before customer_name, so split the name across
+  // both — otherwise the card still falls through to "Lead".
+  if (cust.customer_name && blank('FirstName')) {
+    const [f, ...rest] = String(cust.customer_name).trim().split(/\s+/);
+    patch.FirstName = f;
+    if (rest.length && blank('LastName')) patch.LastName = rest.join(' ');
+  }
+  if (!Object.keys(patch).length) return false;
+
+  await supabaseAdmin.from('transfers')
+    .update({ form_data: { ...fd, ...patch } }).eq('id', transferId);
+  logger.success('VICIDIAL_XFER', `Filled ${Object.keys(patch).join('/')} on transfer ${transferId} from dialer lead ${parsed.leadId}`);
+  return true;
+}
+
 // Ring buffer of recent fronter-xfer hits — the symmetric diagnostic to
 // dispo-debug, so we can SEE which fronter transfers did/didn't create a CRM
 // transfer (agent not mapped / non-transfer dispo / created). In-memory only.
@@ -594,6 +649,15 @@ ingest.all('/fronter-xfer', requireToken, asyncHandler(async (req, res) => {
   logger.success('VICIDIAL_XFER', `Pending transfer ${data.id} for agent ${agent} (code ${code}${nextSeq > 1 ? ` #${nextSeq} — recycled lead, earlier transfer left intact` : ''})`);
   await reconcileQueuedDispoForTransfer({ id: data.id }, norm);
   xdbg.outcome = `created transfer ${data.id}`;
+
+  // Still nameless after the CRM-history seed? Ask the dialer directly. NOT
+  // awaited: this is up to six HTTP calls to a box that may be slow or down, and
+  // the webhook must return promptly or VICIdial retries it. The fronter opens
+  // the card seconds-to-minutes later, by which time this has long finished.
+  if (!seededForm.FirstName && !seededForm.customer_name) {
+    enrichFromDialer(data.id, code).catch(e =>
+      logger.warn('VICIDIAL_XFER', `dialer name lookup failed for ${data.id}: ${e.message}`));
+  }
 
   // Ping the fronter instantly (notification row → Supabase realtime + web push)
   // so they know a dialer transfer is waiting to be completed.
@@ -1526,6 +1590,49 @@ api.post('/backfill/coded', superOnly, asyncHandler(async (req, res) => {
     .select('*', { count: 'exact', head: true })
     .is('vicidial_dispo', null).not('vicidial_vendor_code', 'is', null);
   res.json({ ok: true, processed: rows?.length || 0, found, cursor: lastCursor, remaining: remaining || 0, done: (rows?.length || 0) < batch });
+}));
+
+// BACKFILL THE CUSTOMERS THAT ONLY THE DIALER KNOWS.
+//
+// Migration 292 repairs the transfers whose customer can be recovered from
+// another CRM row. It cannot help the ones that have never been transferred
+// before — and measured on the live data those are the majority: of the blank
+// rows in 90 days only 926 have a sibling to copy from. For the rest the name
+// exists solely in VICIdial, so it has to be fetched one lead at a time. That is
+// HTTP, so it belongs here rather than in a SQL migration.
+//
+// Same shape as /backfill/coded: bounded batch, created_at cursor to page
+// backwards, throttled so a run cannot hammer the boxes. Idempotent — a row that
+// gains a name drops out of the selection, and enrichFromDialer only fills
+// blanks, so re-running is always safe.
+api.post('/backfill/names', superOnly, asyncHandler(async (req, res) => {
+  const batch  = Math.min(parseInt(req.body.batch, 10) || 25, 50);
+  const before = req.body.before || null;   // created_at cursor — process OLDER than this
+  let q = supabaseAdmin.from('transfers')
+    .select('id, vicidial_vendor_code, created_at')
+    .not('vicidial_vendor_code', 'is', null)
+    .is('form_data->>FirstName', null)
+    .order('created_at', { ascending: false }).limit(batch);
+  if (before) q = q.lt('created_at', before);
+  const { data: rows, error } = await q;
+  if (error) return res.status(500).json({ error: error.message });
+
+  let filled = 0, lastCursor = before;
+  for (const tr of (rows || [])) {
+    lastCursor = tr.created_at;
+    try {
+      if (await enrichFromDialer(tr.id, tr.vicidial_vendor_code)) filled++;
+    } catch { /* purged lead / box down — keep going */ }
+    await new Promise(r => setTimeout(r, 250));   // gentle on the dialer
+  }
+  const { count: remaining } = await supabaseAdmin.from('transfers')
+    .select('*', { count: 'exact', head: true })
+    .not('vicidial_vendor_code', 'is', null)
+    .is('form_data->>FirstName', null);
+  res.json({
+    ok: true, processed: rows?.length || 0, filled, cursor: lastCursor,
+    remaining: remaining || 0, done: (rows?.length || 0) < batch,
+  });
 }));
 
 // Agent-id map — list users (search) with their current mapping.
