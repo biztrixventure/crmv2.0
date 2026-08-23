@@ -266,9 +266,14 @@ async function applyCloserDispo({ transfer, dispoCompanyId, closerUserId, dispoN
       // NEVER send a null color (column is NOT NULL → silent insert failure = the
       // dispo "fetched" but never shows). Default to grey. user_id falls back to
       // the transfer's closer; genuinely-unknown setter needs migration 119.
+      // Same guard as assigned_closer_id above (closerOk), not just the raw
+      // resolved agent — a fronter re-dialling her own recycled lead must never
+      // be recorded here either. Before this, assigned_closer_id stayed correctly
+      // protected (null) while THIS row silently took the fronter's id anyway —
+      // her own re-dial ended up in the CRM as if a closer had worked the call.
       const { error: insErr } = await supabaseAdmin.from('disposition_actions').insert({
         transfer_id: transfer.id, company_id: dispoCompanyId,
-        user_id: closerUserId || transfer.assigned_closer_id || null,
+        user_id: (closerOk ? closerUserId : null) || transfer.assigned_closer_id || null,
         disposition_config_id: cfg?.id || null, disposition_name: dispoName,
         color: cfg?.color || '#6b7280', note: `From dialer (${rawDispo})`, setter_role: 'closer',
       });
