@@ -1,8 +1,8 @@
-// ============================================================================
-// UserControlCenter — SuperAdmin 360° control panel for ONE user at a time.
+﻿// ============================================================================
+// UserControlCenter â€” SuperAdmin 360Â° control panel for ONE user at a time.
 //
-// Pick any CRM user (reuses Distribution/UserPicker → /distribution-batches/
-// recipients) → a full-page detail with Chrome-style top tabs, each surfacing
+// Pick any CRM user (reuses Distribution/UserPicker â†’ /distribution-batches/
+// recipients) â†’ a full-page detail with Chrome-style top tabs, each surfacing
 // one family of per-user controls. Every control reuses an EXISTING audited
 // endpoint (see backend/routes/users.js GET /users/full/:userId for the loader);
 // nothing here bypasses validation. Superadmin-only (gated in AdminPanel too).
@@ -14,13 +14,14 @@
 //
 // UI: composed from components/UI/kit (see docs/ui-design-system.md) so this tab
 // looks like the Compliance shell and like every other admin tab. No local
-// padding/max-width — the AdminPanel wrapper owns page padding.
+// padding/max-width â€” the AdminPanel wrapper owns page padding.
 // ============================================================================
 import { useState, useEffect, useCallback } from 'react';
 import {
   UserCog, ShieldCheck, Building2, Users2, Headphones, LayoutTemplate,
   Lock, Activity, Download, RefreshCw, Mail, Clock, Circle, ClipboardCheck, ArrowLeft, Briefcase,
-  Smartphone,
+  Smartphone, Layers,
+
 } from 'lucide-react';
 import client from '../../../api/client';
 import { useAuth } from '../../../contexts/AuthContext';
@@ -42,6 +43,7 @@ import ActivitySection from './ActivitySection';
 import QaSection from './QaSection';
 import ClientAccessSection from './ClientAccessSection';
 import PwaSection from './PwaSection';
+import ModulesSection from './ModulesSection';
 
 // compliance_manager is here so the QA tab shows for them: they are the users a
 // superadmin designates as quality managers (mig 227), and in practice nobody
@@ -55,7 +57,7 @@ const LEVEL_COLOR = {
   fronter_manager: '#10b981', closer: '#6b7280', fronter: '#6b7280',
 };
 const prettyRole = (lvl) => (lvl || '').replace(/_/g, ' ');
-const fmtDate = (iso) => iso ? new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '—';
+const fmtDate = (iso) => iso ? new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : 'â€”';
 const fmtDateTime = (iso) => iso ? new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'never';
 
 // Chrome-style tab catalog. `scope:'company'` tabs act on the active assignment;
@@ -69,9 +71,12 @@ const TABS = [
   { id: 'vicidial',     label: 'VICIdial',       icon: Headphones,     scope: 'user' },
   { id: 'record_views', label: 'Record Views',   icon: LayoutTemplate, scope: 'company' },
   { id: 'qa',           label: 'QA',             icon: ClipboardCheck, scope: 'company', qaOnly: true },
-  // Notification + install overrides. `scope:'user'` — these follow the person
+  // Notification + install overrides. `scope:'user'` â€” these follow the person
   // across companies, exactly like their push subscriptions do.
   { id: 'pwa',          label: 'Notifications',  icon: Smartphone,     scope: 'user' },
+  // Accounting / HR designations (mig 290). scope:'user' -- a designation
+  // follows the person across every company, exactly like the QA one.
+  { id: 'modules',      label: 'Modules',        icon: Layers,        scope: 'user' },
   { id: 'governance',   label: 'Governance',     icon: Lock,           scope: 'user' },
   { id: 'egress',       label: 'Data Egress',    icon: Download,       scope: 'user' },
   { id: 'activity',     label: 'Activity',       icon: Activity,       scope: 'user' },
@@ -121,7 +126,7 @@ export default function UserControlCenter() {
         level="page"
         icon={UserCog}
         title="User Control Center"
-        subtitle="Every control for one user — account, role, permissions, teams, dialer, governance, egress, activity."
+        subtitle="Every control for one user â€” account, role, permissions, teams, dialer, governance, egress, activity."
         actions={account && (
           <>
             <button onClick={() => { setPicked(null); setData(null); }} className={btn} style={btnStyle}>
@@ -134,7 +139,7 @@ export default function UserControlCenter() {
         )}
       />
 
-      {/* ── Step 1: pick a user (company → role → user directory) ──────────── */}
+      {/* â”€â”€ Step 1: pick a user (company â†’ role â†’ user directory) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       {!account && !loading && (
         <>
           {/* Estate-wide verification controls live here, not inside one user's
@@ -148,9 +153,9 @@ export default function UserControlCenter() {
 
       {error && <div className="mb-4"><Alert type="error" onDismiss={() => setError(null)}>{error}</Alert></div>}
 
-      {loading && !data && <Loading variant="rows" rows={5} label="Loading user…" />}
+      {loading && !data && <Loading variant="rows" rows={5} label="Loading userâ€¦" />}
 
-      {/* ── Step 2: detail ────────────────────────────────────────────────── */}
+      {/* â”€â”€ Step 2: detail â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       {account && (
         <>
           {/* Sticky zone: identity header + tab bar stay pinned while the tab
@@ -180,12 +185,12 @@ export default function UserControlCenter() {
                   </div>
                 </div>
 
-                {/* Company-context switcher — drives the company-scoped tabs */}
+                {/* Company-context switcher â€” drives the company-scoped tabs */}
                 {assignments.length > 1 && (
                   <Field label="Company context" className="flex-shrink-0">
                     <ThemedSelect value={activeId || ''} onChange={e => setActiveId(e.target.value)} className="input min-w-[200px]">
                       {assignments.map(a => (
-                        <option key={a.id} value={a.id}>{a.company_name || '—'} · {prettyRole(a.role_level)}{a.is_active ? '' : ' (inactive)'}</option>
+                        <option key={a.id} value={a.id}>{a.company_name || 'â€”'} Â· {prettyRole(a.role_level)}{a.is_active ? '' : ' (inactive)'}</option>
                       ))}
                     </ThemedSelect>
                   </Field>
@@ -203,13 +208,13 @@ export default function UserControlCenter() {
                       border: `1px solid ${a.id === activeId ? (LEVEL_COLOR[a.role_level] || '#6b7280') : 'transparent'}`,
                       opacity: a.is_active ? 1 : 0.5,
                     }}>
-                    {prettyRole(a.role_level)} · {a.company_name || '—'}{a.is_active ? '' : ' (inactive)'}
+                    {prettyRole(a.role_level)} Â· {a.company_name || 'â€”'}{a.is_active ? '' : ' (inactive)'}
                   </button>
                 ))}
               </div>
             </Panel>
 
-            {/* Sub-nav — the one pill tab bar (matches the Compliance sub-nav) */}
+            {/* Sub-nav â€” the one pill tab bar (matches the Compliance sub-nav) */}
             <PillTabs
               value={tab}
               onChange={setTab}
@@ -217,13 +222,13 @@ export default function UserControlCenter() {
             />
           </div>
 
-          {/* Tab body — one standalone page card */}
+          {/* Tab body â€” one standalone page card */}
           <Panel pad="lg" className="min-h-[300px] mt-3">
             {tab === 'account'      && <AccountSection account={account} assignment={activeAssignment} onChanged={reload} />}
             {tab === 'companies'    && <CompaniesRoleSection account={account} assignments={assignments} onChanged={reload} onPick={setActiveId} />}
             {tab === 'permissions'  && (activeAssignment
               ? <UserPermissionsPanel user={activeAssignment} />
-              : <NoAssignment hint="Permissions are scoped to a company — assign this user to one on the Companies & Role tab first." />)}
+              : <NoAssignment hint="Permissions are scoped to a company â€” assign this user to one on the Companies & Role tab first." />)}
             {tab === 'teams'        && (activeAssignment
               ? <TeamSection account={account} assignment={activeAssignment} />
               : <NoAssignment />)}
@@ -231,7 +236,7 @@ export default function UserControlCenter() {
               <div className="space-y-6">
                 <VicidialSection account={account} onChanged={reload} />
                 {/* Asking the user themselves is the reliable way to fix a wrong
-                    dialer id — they know their own login. Lives here rather than
+                    dialer id â€” they know their own login. Lives here rather than
                     in a new tab so stored readonly-admin tab governance stays valid. */}
                 <div className="pt-5" style={{ borderTop: '1px solid var(--color-border)' }}>
                   <ProfileVerifySection account={account} onChanged={reload} />
@@ -248,6 +253,7 @@ export default function UserControlCenter() {
               ? <QaSection account={account} assignment={activeAssignment} />
               : <NoAssignment />)}
             {tab === 'pwa'          && <PwaSection account={account} />}
+            {tab === 'modules'      && <ModulesSection account={account} />}
             {tab === 'governance'   && <GovernanceSection account={account} isReadonlyAdmin={isReadonlyAdmin} />}
             {tab === 'egress'       && <EgressSection account={account} assignment={activeAssignment} />}
             {tab === 'activity'     && <ActivitySection account={account} />}

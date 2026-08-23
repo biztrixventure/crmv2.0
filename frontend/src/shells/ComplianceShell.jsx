@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+﻿import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useHistoryTab } from '../hooks/useHistoryTab';
 import { useShellLayout } from '../hooks/useShellLayout';
 import { Shield, Building2, Clock, FileText, ArrowRight, PhoneCall, Star, Hash, CalendarDays, Info, ListChecks, ScrollText, HelpCircle, ClipboardCheck, CreditCard, Headphones, ClipboardList } from 'lucide-react';
@@ -11,6 +11,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { AppHeader } from '../components/Layout';
 import EngagementBanners from '../components/Engagement/EngagementBanners';
+import ModuleNavLinks from '../components/Modules/ModuleNavLinks';
 import { useNotifications } from '../hooks/useNotifications';
 import { useFormFields } from '../hooks/useFormFields';
 import { useNavFocus } from '../contexts/FocusContext';
@@ -67,8 +68,8 @@ const CODE_TABS = [
   { key: 'my_quizzes',  label: 'My Quizzes',         icon: ClipboardList },
 ];
 
-// ── Two-tier navigation (UX cleanup) ─────────────────────────────────────────
-// 18 flat tabs were unusable — group them into 6 task-shaped clusters. This is
+// â”€â”€ Two-tier navigation (UX cleanup) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// 18 flat tabs were unusable â€” group them into 6 task-shaped clusters. This is
 // pure chrome: tab KEYS, content rendering, admin layout (useShellLayout),
 // deep-links and persistence are untouched. Tabs the admin layout hides simply
 // drop out of their group; a key we don't recognize (future tabs) lands in
@@ -77,7 +78,7 @@ const TAB_GROUPS = [
   { id: 'overview', label: 'Overview',        icon: Building2,      keys: ['companies', 'calendar'] },
   { id: 'review',   label: 'Compliance Work', icon: Clock,          keys: ['queue', 'rec_review', 'payments', 'double_sold', 'bulk_status'] },
   { id: 'records',  label: 'Records',         icon: FileText,       keys: ['sales', 'transfers', 'callbacks'] },
-  // Batches owns upload → assign → dispositions; Assigned Numbers / Number
+  // Batches owns upload â†’ assign â†’ dispositions; Assigned Numbers / Number
   // Assignment are retired from the nav (their keys still render if deep-linked).
   { id: 'numbers',  label: 'Numbers',         icon: Hash,           keys: ['batches', 'numbers'] },
   { id: 'quality',  label: 'Quality',         icon: Star,           keys: ['reviews', 'qa_admin', 'questions', 'scripts', 'faqs', 'quizzes', 'my_quizzes'] },
@@ -93,7 +94,7 @@ const ComplianceShell = () => {
   const { isEnabledStrict } = useFeatureFlags();
 
   // Layer admin override onto the code-defined catalog. Feature-gated tabs
-  // (e.g. DNC) drop out unless their flag is on for this company — but superadmin
+  // (e.g. DNC) drop out unless their flag is on for this company â€” but superadmin
   // always sees them (superadmin bypasses feature gating everywhere).
   const isSuperadmin = user?.role === 'superadmin';
   const { applyTabs: applyComplianceLayout, defaultTab: complianceDefaultTab } = useShellLayout('compliance');
@@ -104,7 +105,7 @@ const ComplianceShell = () => {
     [applyComplianceLayout, isEnabledStrict, isSuperadmin, hasPermission],
   );
 
-  // Dynamic disposition tabs (e.g. "Post Date") — one per non-"sale" disposition
+  // Dynamic disposition tabs (e.g. "Post Date") â€” one per non-"sale" disposition
   // the admin configured on the sale-disposition form field. Renaming a
   // disposition in Form Builder retitles the tab automatically.
   const { fields: dispoFields, fetchFields } = useFormFields();
@@ -127,7 +128,7 @@ const ComplianceShell = () => {
   const [activeTab, setActiveTab]   = useHistoryTab(null, initialTab, { persist: false });
 
   // Reconcile activeTab when admin layout hides the persisted tab key.
-  // Dynamic disposition tabs (dispo:*) are exempt — they aren't in TABS.
+  // Dynamic disposition tabs (dispo:*) are exempt â€” they aren't in TABS.
   useEffect(() => {
     if (activeTab.startsWith('dispo:')) return;
     if (TABS.length && !TABS.some(t => t.key === activeTab)) {
@@ -141,7 +142,7 @@ const ComplianceShell = () => {
   const [infoOpen, setInfoOpen]     = useState(false);
 
   // Group the (admin-filtered, admin-ordered) TABS into the fixed clusters,
-  // preserving the layout's order inside each group. Unknown keys → "More".
+  // preserving the layout's order inside each group. Unknown keys â†’ "More".
   const groups = useMemo(() => {
     const groupOf = new Map();
     TAB_GROUPS.forEach(g => g.keys.forEach(k => groupOf.set(k, g.id)));
@@ -168,7 +169,7 @@ const ComplianceShell = () => {
   useEffect(() => { window.crmAssistant?.setSection?.(activeTab); }, [activeTab]);
 
   // Notification deep-link: a clicked notification (bell or OS push) sets a
-  // focus target → jump to the matching tab so the record is in view + the row
+  // focus target â†’ jump to the matching tab so the record is in view + the row
   // self-highlights (useFocusHighlight) for ~5s.
   const focus = useNavFocus();
   useEffect(() => {
@@ -192,7 +193,7 @@ const ComplianceShell = () => {
 
   useEffect(() => { loadCompanies(); }, [loadCompanies]);
 
-  // Cross-tab navigation: CompaniesTab "View Sales" → SalesTab pre-filtered
+  // Cross-tab navigation: CompaniesTab "View Sales" â†’ SalesTab pre-filtered
   const navigateTo = useCallback((tab, init = {}) => {
     setTabInit(init);
     setActiveTab(tab);
@@ -227,13 +228,21 @@ const ComplianceShell = () => {
         onBrandClick={() => isSuperadmin ? navigate('/admin') : setActiveTab(complianceDefaultTab(TABS) || TABS[0]?.key || 'companies')}
       />
 
+      {/* Accounting / People. Renders nothing unless the server says this
+
+          person can reach one -- a designation (mig 290) is invisible to a
+
+          client-side permission check, so the link has to be asked for. */}
+
+      <ModuleNavLinks className="px-4 sm:px-6 lg:px-8 pt-3 relative z-10" />
+
       <EngagementBanners />
       <main className="w-full px-4 sm:px-6 lg:px-8 xl:px-10 py-6 sm:py-8 relative z-10">
 
         {/* Two-tier nav: 6 task groups on top, the active group's tabs below.
             Clicking a group jumps straight to its first tab (no dead clicks). */}
         {/* `basis-full` below `sm` pushes "Numbers info" onto its own line
-            instead of letting it eat ~140px out of the tab strip on a phone —
+            instead of letting it eat ~140px out of the tab strip on a phone â€”
             with flex-1 the tabs shrank rather than the button wrapping. */}
         <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
           <ChromeTabs variant="chrome" className="basis-full sm:basis-0 sm:flex-1 min-w-0"
@@ -252,7 +261,7 @@ const ComplianceShell = () => {
           )}
         </div>
 
-        {/* Second tier — the active group's tabs (+ dispo tabs beside All Sales). */}
+        {/* Second tier â€” the active group's tabs (+ dispo tabs beside All Sales). */}
         {activeGroup && (activeGroup.tabs.length > 1 || (activeGroupId === dispoHostId && dispoTabs.length > 0)) && (
           <ChromeTabs variant="pill" size="sm" className="mt-4 mb-6"
             items={[
@@ -290,7 +299,7 @@ const ComplianceShell = () => {
             initStatus={tabInit.status || ''}
           />
         )}
-        {/* Disposition tab content — same SalesTab, scoped to one disposition. */}
+        {/* Disposition tab content â€” same SalesTab, scoped to one disposition. */}
         {activeTab.startsWith('dispo:') && (
           <SalesTab
             key={activeTab}
@@ -324,7 +333,7 @@ const ComplianceShell = () => {
         {activeTab === 'numbers' && (
           <CallbackNumbersTab companyList={companyList} />
         )}
-        {/* Full knowledge-base CRUD — compliance manages scripts/rebuttals + FAQs
+        {/* Full knowledge-base CRUD â€” compliance manages scripts/rebuttals + FAQs
             for every audience (fronter + closer + both), same as the superadmin. */}
         {activeTab === 'scripts' && <ScriptManager />}
         {activeTab === 'faqs'    && <FAQManager />}

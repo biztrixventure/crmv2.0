@@ -1,4 +1,4 @@
-const express = require('express');
+﻿const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
@@ -74,6 +74,12 @@ const { qa2IngestHook }         = require('./middleware/qa2VicidialIngestHook');
 const qa1ReadonlyGate           = require('./middleware/qa1ReadonlyGate');
 const kanbanRoutes              = require('./routes/kanban');
 const quizRoutes                = require('./routes/quiz');
+// Accounting + HR (migs 283-290). Each is a MODULE router: the sub-routers
+// (accounts/journal/invoices/expenses/reports, employees/attendance/leave/
+// payroll/reviews) hang off it, so the module mounts in one line instead of ten.
+const accountingRoutes          = require('./routes/accounting');
+const hrRoutes                  = require('./routes/hr');
+const moduleDesignationsRoutes  = require('./routes/moduleDesignations');
 const { egressAudit }           = require('./middleware/egressAudit');
 const { requireFeature }        = require('./utils/featureGate');
 const { startCallbackScheduler } = require('./utils/callbackScheduler');
@@ -82,19 +88,19 @@ const { startAutoFetchDispo } = require('./utils/autoFetchDispo');
 const { supabaseAdmin: _saForSync } = require('./config/database');
 
 // On startup: RECONCILE app_metadata.role='superadmin' against SUPERADMIN_EMAIL.
-// Once set, the Supabase JWT carries it — no env-var dependency per-request.
+// Once set, the Supabase JWT carries it â€” no env-var dependency per-request.
 //
 // This is a two-way sync (add AND remove). Stamping alone (the old behavior)
 // left a demoted account stuck as superadmin forever: removing its email from
 // the env never cleared the baked-in stamp, and syncReadonlyAdminMetadata
-// refuses to downgrade a superadmin-stamped user — so the account could never
+// refuses to downgrade a superadmin-stamped user â€” so the account could never
 // become readonly_admin. Now: emails in the list get stamped; any account that
-// STILL carries a superadmin stamp but is no longer in the list is demoted —
+// STILL carries a superadmin stamp but is no longer in the list is demoted â€”
 // straight to readonly_admin if it's in READONLY_ADMIN_EMAIL, else cleared so
 // its role re-derives from user_company_roles.
 //
 // Safety: if SUPERADMIN_EMAIL is empty (missing/misconfigured deploy) we do
-// nothing — never mass-clear superadmins on an accidental env drop.
+// nothing â€” never mass-clear superadmins on an accidental env drop.
 async function syncSuperadminMetadata() {
   const emails = (process.env.SUPERADMIN_EMAIL || '')
     .split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
@@ -115,12 +121,12 @@ async function syncSuperadminMetadata() {
           console.log(`[SUPERADMIN] Stamped app_metadata.role=superadmin for ${u.email}`);
         }
       } else if (stamped === 'superadmin') {
-        // Stale superadmin — no longer in the env roster. Demote.
+        // Stale superadmin â€” no longer in the env roster. Demote.
         const newRole = roEmails.has(e) ? 'readonly_admin' : null;
         await _saForSync.auth.admin.updateUserById(u.id, {
           app_metadata: { ...u.app_metadata, role: newRole },
         });
-        console.log(`[SUPERADMIN] Cleared stale superadmin stamp for ${u.email} → ${newRole || 'none'}`);
+        console.log(`[SUPERADMIN] Cleared stale superadmin stamp for ${u.email} â†’ ${newRole || 'none'}`);
       }
     }
   } catch (err) {
@@ -128,7 +134,7 @@ async function syncSuperadminMetadata() {
   }
 }
 
-// Mirror sync for READONLY_ADMIN_EMAIL. Same JWT-stamp pattern — listed
+// Mirror sync for READONLY_ADMIN_EMAIL. Same JWT-stamp pattern â€” listed
 // users get app_metadata.role='readonly_admin' so the auth middleware can
 // recognize them without DB lookup. Existing superadmins are NEVER
 // downgraded by this sync; if an email is in BOTH lists, superadmin wins.
@@ -167,18 +173,18 @@ function nameFromEmail(email) {
 }
 
 // Env-bootstrapped superadmins are created by stamping app_metadata and NOTHING
-// else — they never got a user_profiles row. That row, not a blank name field,
+// else â€” they never got a user_profiles row. That row, not a blank name field,
 // is why they render as 'Unknown' / '(unnamed)' / a raw email everywhere: some
 // ~200 read sites across the backend resolve a display name by joining
 // user_profiles and falling back. Two of them fail outright rather than
-// cosmetically — POST /emails/send rejects a recipient with no profile row
+// cosmetically â€” POST /emails/send rejects a recipient with no profile row
 // ("Unknown recipient(s)"), and chatService.searchDirectory scans that table,
 // so a superadmin was neither mailable nor findable in chat.
 //
 // Runs AFTER both metadata syncs (chained below, not fire-and-forget) so an
 // account stamped on this very boot is already visible to the role filter here.
 // Migration 220 does the same backfill in SQL for the existing rows; this hook
-// is the durable half — it covers a fresh project and any email ADDED to
+// is the durable half â€” it covers a fresh project and any email ADDED to
 // SUPERADMIN_EMAIL later, which a one-time migration cannot.
 //
 // portal_client accounts are excluded deliberately. Those are external
@@ -193,7 +199,7 @@ async function ensureAdminProfiles() {
   try {
     const { data } = await _saForSync.auth.admin.listUsers({ perPage: 1000 });
     const admins = (data?.users || []).filter(u => {
-      if (u.app_metadata?.portal_client) return false;         // external client — never
+      if (u.app_metadata?.portal_client) return false;         // external client â€” never
       const role = u.app_metadata?.role;
       return role === 'superadmin' || role === 'readonly_admin' || envAdmins.has((u.email || '').toLowerCase());
     });
@@ -248,20 +254,20 @@ app.use(helmet({
   },
 }));
 
-// Chat attachment uploads carry a base64-encoded file (≤10MB binary ≈ 13.3MB
-// encoded) — give this one route a larger JSON limit before the global parser
+// Chat attachment uploads carry a base64-encoded file (â‰¤10MB binary â‰ˆ 13.3MB
+// encoded) â€” give this one route a larger JSON limit before the global parser
 // below claims the body. Registered first so it wins for this path.
 app.use('/api/chat/upload', express.json({ limit: '16mb' }));
-// Email attachments use the same base64 upload flow — same raised limit.
+// Email attachments use the same base64 upload flow â€” same raised limit.
 app.use('/api/emails/upload', express.json({ limit: '16mb' }));
-// Kanban image attachments (+ annotations) are base64 data URLs — raised limit.
+// Kanban image attachments (+ annotations) are base64 data URLs â€” raised limit.
 app.use('/api/kanban', express.json({ limit: '14mb' }));
 // Batch uploads post parsed spreadsheet rows (the browser does the parsing).
-// The client chunks them so no single request is large, but a wide file — 40
-// columns kept verbatim per row — still outgrows the global limit.
+// The client chunks them so no single request is large, but a wide file â€” 40
+// columns kept verbatim per row â€” still outgrows the global limit.
 app.use('/api/distribution-batches', express.json({ limit: '16mb' }));
 
-// Body parser — raised from the 100kb default so announcements (and other
+// Body parser â€” raised from the 100kb default so announcements (and other
 // payloads) can carry embedded base64 images.
 app.use(express.json({ limit: '8mb' }));
 app.use(express.urlencoded({ extended: true, limit: '8mb' }));
@@ -287,7 +293,7 @@ app.use('/api/auth/forgot-password', rateLimit({ windowMs: 60 * 60 * 1000, max: 
 // Raised to 200/hr: admins may batch-invite many users during onboarding.
 app.use('/api/auth/invite',          rateLimit({ windowMs: 60 * 60 * 1000, max: 200, message: { error: 'Too many invite requests' } }));
 
-// General API limiter — keyed by user ID extracted from the Bearer JWT payload
+// General API limiter â€” keyed by user ID extracted from the Bearer JWT payload
 // (no signature verification needed here; actual auth still runs on all routes).
 // This gives each authenticated user their own per-user bucket instead of
 // sharing one IP-based bucket across all users behind a corporate NAT/proxy.
@@ -295,7 +301,7 @@ app.use('/api/auth/invite',          rateLimit({ windowMs: 60 * 60 * 1000, max: 
 // stats) + chat (list/message polls, presence, read receipts, conversation
 // switches) added up and 429'd real users mid-chat. 4000/15min (~4.4 req/s
 // sustained, per authenticated user) gives comfortable headroom while still
-// bounding abuse — auth is still required on every route.
+// bounding abuse â€” auth is still required on every route.
 const userIdFromToken = (req) => {
   const auth = req.headers.authorization;
   if (auth && auth.startsWith('Bearer ')) {
@@ -308,7 +314,7 @@ const userIdFromToken = (req) => {
 };
 // Machine-to-machine VICIdial ingest (fronter-xfer / closer-dispo / dispo-debug)
 // has no JWT, so it would all collapse into one IP bucket and 429 real
-// dispositions at dialer volume. They're already guarded by the ingest token —
+// dispositions at dialer volume. They're already guarded by the ingest token â€”
 // give them their own generous limiter and exempt them from the per-user one.
 const isVicidialIngest = (req) =>
   /\/api\/vicidial\/(fronter-xfer|closer-dispo|dispo-debug)\b/.test(req.originalUrl || req.url || '');
@@ -358,7 +364,7 @@ app.use(express.static(frontendDistPath, {
 
 // started_at is the question this endpoint kept failing to answer. The backend
 // has no hot reload, so a push that is not followed by a restart leaves the old
-// code serving — and from the outside that is indistinguishable from a fix that
+// code serving â€” and from the outside that is indistinguishable from a fix that
 // did not work. Comparing started_at against the time of a commit settles it in
 // one request instead of a round of re-diagnosis.
 const STARTED_AT = new Date().toISOString();
@@ -385,22 +391,22 @@ app.get('/health', (req, res) => {
 app.use(geoGate);
 
 app.use('/api/auth', authRoutes);
-// QA v2's ingest hook (build brief 7.1) — observes fronter-xfer/closer-dispo
+// QA v2's ingest hook (build brief 7.1) â€” observes fronter-xfer/closer-dispo
 // traffic without touching vicidial.js. Mounted BEFORE the real ingest
 // router so it sees every request, but it only wraps res.json and always
-// calls next() synchronously — the real handler still runs immediately
+// calls next() synchronously â€” the real handler still runs immediately
 // after, completely unaffected. See middleware/qa2VicidialIngestHook.js.
 app.use('/api/vicidial/fronter-xfer', qa2IngestHook('ingest_fronter'));
 app.use('/api/vicidial/closer-dispo', qa2IngestHook('ingest_closer'));
-// VICIdial ingest — fired by the VICIdial SERVER (no CRM session); guarded by a
+// VICIdial ingest â€” fired by the VICIdial SERVER (no CRM session); guarded by a
 // shared token in the URL. Mounted before the authed groups so it isn't gated.
 app.use('/api/vicidial', vicidialIngest);
-// Guest (outsider) chat — PUBLIC, the token in the URL is the credential. Mounted
+// Guest (outsider) chat â€” PUBLIC, the token in the URL is the credential. Mounted
 // before the authed groups so it isn't gated; rate-limited since it's open.
 app.use('/api/guest',
   rateLimit({ windowMs: 60 * 1000, max: 120, message: { error: 'Too many requests' } }),
   guestChatRoutes);
-// Kanban task boards — PUBLIC board access via share_token in the URL (admin
+// Kanban task boards â€” PUBLIC board access via share_token in the URL (admin
 // board-CRUD routes carry authMiddleware per-route inside). Mounted before the
 // authed groups so the public routes aren't gated; rate-limited since it's open.
 app.use('/api/kanban',
@@ -415,13 +421,13 @@ app.use('/api/kanban',
 // every other export. It no-ops on any request without the __egress marker, so
 // ordinary user-list browsing is untouched.
 app.use('/api/users', authMiddleware, readonlyGuard, egressAudit, usersRoutes);
-// SuperAdmin tool — readonly_admin management. The route file itself gates
+// SuperAdmin tool â€” readonly_admin management. The route file itself gates
 // on req.user.role === 'superadmin', and readonlyGuard would 403 any RO
 // caller trying to PUT/POST/DELETE here anyway.
 app.use('/api/readonly-admins', authMiddleware, readonlyGuard, readonlyAdminsRoutes);
 app.use('/api/teams', authMiddleware, readonlyGuard, teamsRoutes);
 app.use('/api/quiz',  authMiddleware, readonlyGuard, quizRoutes);
-// Two-tier team quotas (mig 216) — admin sets the team target, the lead splits it.
+// Two-tier team quotas (mig 216) â€” admin sets the team target, the lead splits it.
 app.use('/api/quotas', authMiddleware, readonlyGuard, quotasRoutes);
 // RO self-reported navigation telemetry. readonlyGuard allowlists /activity/beacon
 // so the read-only account's POST passes; the handler ignores non-RO callers.
@@ -430,10 +436,10 @@ app.use('/api/companies', authMiddleware, readonlyGuard, companiesRoutes);
 app.use('/api/roles', authMiddleware, readonlyGuard, rolesRoutes);
 app.use('/api/forms', authMiddleware, readonlyGuard, formsRoutes);
 app.use('/api/transfers', authMiddleware, readonlyGuard, egressAudit, readonlyDataGuard, transfersRoutes);
-// VICIdial fronter app routes (pending-from-dialer list + confirm) — authed.
+// VICIdial fronter app routes (pending-from-dialer list + confirm) â€” authed.
 app.use('/api/vicidial', authMiddleware, vicidialApi);
 app.use('/api/sales', authMiddleware, readonlyGuard, egressAudit, readonlyDataGuard, salesRoutes);
-// Payouts — superadmin only (enforced inside the router); readonlyGuard still
+// Payouts â€” superadmin only (enforced inside the router); readonlyGuard still
 // blocks the PATCH for a readonly_admin, matching every other admin surface.
 app.use('/api/payouts', authMiddleware, readonlyGuard, payoutsRoutes);
 app.use('/api/sale-configs', authMiddleware, readonlyGuard, saleConfigsRoutes);
@@ -446,6 +452,15 @@ app.use('/api/reviews',      authMiddleware, readonlyGuard, egressAudit, reviews
 app.use('/api/callback-numbers',  authMiddleware, readonlyGuard, callbackNumbersRoutes);
 app.use('/api/feature-flags',     authMiddleware, readonlyGuard, featureFlagsRoutes);
 app.use('/api/business-config',   authMiddleware, readonlyGuard, businessConfigRoutes);
+
+// Accounting + HR. egressAudit because both surfaces export real financial and
+// personal data; readonlyGuard because a read-only admin must never write here.
+// Every handler additionally gates itself on its own permission string and
+// scopes by the caller company -- see backend/utils/moduleAccess.js.
+app.use('/api/accounting',        authMiddleware, readonlyGuard, egressAudit, accountingRoutes);
+app.use('/api/hr',                authMiddleware, readonlyGuard, egressAudit, hrRoutes);
+// Superadmin-only: who ALSO acts as an accountant or HR manager (mig 290).
+app.use('/api/module-designations', authMiddleware, readonlyGuard, moduleDesignationsRoutes);
 // Branding/SEO/social-preview: GET is PUBLIC (the frontend meta-injection server
 // + crawlers read it tokenless); PUT/upload are superadmin behind auth.
 const branding = require('./routes/branding');
@@ -462,7 +477,7 @@ app.get('/api/pwa/public', pwa.publicFlags);
 app.use('/api/pwa', authMiddleware, readonlyGuard, pwa.adminRouter);
 app.use('/api/compliance',        authMiddleware, readonlyGuard, egressAudit, complianceRoutes);
 app.use('/api/egress',            authMiddleware, readonlyGuard, egressRoutes);
-// QA Department — recording review + scoring. egressAudit so QA recording plays
+// QA Department â€” recording review + scoring. egressAudit so QA recording plays
 // are governed like the rest; each route guards itself by qa_* permission.
 // Ticket-authenticated audio. Mounted BEFORE authMiddleware on purpose: an
 // <audio> element cannot send an Authorization header, so the player would
@@ -470,10 +485,10 @@ app.use('/api/egress',            authMiddleware, readonlyGuard, egressRoutes);
 // The ticket is signed by the authenticated /api/qa/recordings/ticket, which
 // is where the permission checks and the egress audit happen.
 app.use('/api/qa-media',          qaMediaRoutes);
-// qa1ReadonlyGate: off until a superadmin sets a cutover date (qa2/org/v1-freeze) —
+// qa1ReadonlyGate: off until a superadmin sets a cutover date (qa2/org/v1-freeze) â€”
 // see the middleware's own header for why the clock can't start on deploy.
 app.use('/api/qa',                authMiddleware, readonlyGuard, egressAudit, qa1ReadonlyGate, qaRoutes);
-// QA v2 — new, parallel to v1 above.
+// QA v2 â€” new, parallel to v1 above.
 app.use('/api/qa2',               authMiddleware, readonlyGuard, egressAudit, qa2Routes);
 app.use('/api/audit',             authMiddleware, readonlyGuard, auditRoutes);
 app.use('/api/user-preferences',  authMiddleware, userPreferencesRoutes);
@@ -496,25 +511,25 @@ app.use('/api/distribution-batches', authMiddleware, distributionBatchesRoutes);
 app.use('/api/note-shortcodes',    authMiddleware, noteShortcodesRoutes);
 app.use('/api/data-cleanup',       authMiddleware, readonlyGuard, dataCleanupRoutes);
 app.use('/api/vehicles',           authMiddleware, readonlyGuard, vehiclesRoutes);
-// Chat — admin routes mounted first (superadmin-gated, no feature gate so
+// Chat â€” admin routes mounted first (superadmin-gated, no feature gate so
 // moderation always works); user routes behind the per-company 'chat' flag.
 app.use('/api/chat/admin',         authMiddleware, readonlyGuard, chatAdminRoutes);
 app.use('/api/chat',               authMiddleware, readonlyGuard, requireFeature('chat'), chatRoutes);
-// Internal email — same gating pattern as chat (per-company 'internal_email' flag).
+// Internal email â€” same gating pattern as chat (per-company 'internal_email' flag).
 app.use('/api/emails',             authMiddleware, readonlyGuard, requireFeature('internal_email'), emailRoutes);
-// Client recording portal — admin (superadmin) + the isolated client login.
+// Client recording portal â€” admin (superadmin) + the isolated client login.
 // Each route guards itself (authMiddleware inside); no readonlyGuard so the
 // client GET stream is reachable, and audit writes aren't blocked.
 app.use('/api/portal',             portalRoutes);
-// Events calendar — reads open to all authenticated users, writes SuperAdmin-only (enforced in-route)
+// Events calendar â€” reads open to all authenticated users, writes SuperAdmin-only (enforced in-route)
 app.use('/api/events',             authMiddleware, readonlyGuard, eventsRoutes);
-// FAQ/Script search tools — synonyms (all) + analytics (log all, report SuperAdmin)
+// FAQ/Script search tools â€” synonyms (all) + analytics (log all, report SuperAdmin)
 app.use('/api/search',             authMiddleware, readonlyGuard, searchRoutes);
-// Customer profile (OOP domain layer) — Superadmin panel unified view. The
+// Customer profile (OOP domain layer) â€” Superadmin panel unified view. The
 // route guards itself (superadmin / readonly_admin); no readonlyGuard so the
 // readonly admin can still GET the profile.
 app.use('/api/customer-profile', authMiddleware, customerProfileRoutes);
-// Presence / last-seen / activity. Intentionally NO readonlyGuard — the
+// Presence / last-seen / activity. Intentionally NO readonlyGuard â€” the
 // heartbeat is telemetry, not a business write, and readonly admins must be
 // able to register presence; the admin endpoint guards itself in-route.
 app.use('/api/presence',           authMiddleware, presenceRoutes);
@@ -533,7 +548,7 @@ app.get('*', (req, res, next) => {
   }
 
   // Crawlers (WhatsApp/FB/Twitter/iMessage) send Accept: */* not text/html, and
-  // they're exactly who needs the OG tags — so serve HTML for a bare '/' too.
+  // they're exactly who needs the OG tags â€” so serve HTML for a bare '/' too.
   const acceptsHtml = (req.headers.accept || '').includes('text/html');
   if (!acceptsHtml && req.path !== '/' && path.extname(req.path)) {
     return next();
@@ -545,7 +560,7 @@ app.get('*', (req, res, next) => {
   res.set('Expires', '0');
 
   // Inject branding/SEO/OG meta from the DB into index.html. On any failure fall
-  // back to the raw file — serving must never break because of branding.
+  // back to the raw file â€” serving must never break because of branding.
   (async () => {
     try {
       const branding = await loadBranding();
@@ -587,15 +602,15 @@ app.listen(PORT, () => {
   // Chained, not fire-and-forget: ensureAdminProfiles filters on the stamp both
   // syncs write, so it must not race them or it misses an account stamped on
   // this very boot and the profile row waits a whole restart.
-  syncSuperadminMetadata()     // Stamp JWT metadata for superadmins — no-op if already done
+  syncSuperadminMetadata()     // Stamp JWT metadata for superadmins â€” no-op if already done
     .then(syncReadonlyAdminMetadata)  // Same for readonly_admin
     .then(ensureAdminProfiles);       // Then give every admin a user_profiles row (see above)
   warmAuditCols();          // Probe last_modified_by on tracked tables (mig 063)
-  console.log(`\n🚀 Backend server running on http://localhost:${PORT}`);
-  console.log(`📡 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`🔗 Supabase URL: ${process.env.VITE_SUPABASE_URL}`);
-  console.log(`🌐 CORS Origin: ${process.env.CORS_ORIGIN || 'http://localhost:5173'}`);
-  console.log(`💾 Database: Supabase\n`);
+  console.log(`\nðŸš€ Backend server running on http://localhost:${PORT}`);
+  console.log(`ðŸ“¡ Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`ðŸ”— Supabase URL: ${process.env.VITE_SUPABASE_URL}`);
+  console.log(`ðŸŒ CORS Origin: ${process.env.CORS_ORIGIN || 'http://localhost:5173'}`);
+  console.log(`ðŸ’¾ Database: Supabase\n`);
 });
 
 module.exports = app;

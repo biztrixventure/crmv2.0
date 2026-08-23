@@ -1,4 +1,4 @@
-import { lazy, Suspense, useContext, useEffect } from "react";
+﻿import { lazy, Suspense, useContext, useEffect } from "react";
 import { fetchBranding, applyBranding } from "./utils/branding";
 import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
@@ -31,6 +31,11 @@ const QA2Shell        = lazy(() => import("./shells/QA2Shell"));
 const ClientPortal    = lazy(() => import("./pages/ClientPortal"));
 const NotFound        = lazy(() => import("./pages/NotFound"));
 const KanbanBoard     = lazy(() => import("./pages/KanbanBoard"));
+// Accounting + HR modules. Isolated shells like /compliance and /qa2 -- they are
+// a place you go, not a role you have, so access is decided inside the shell
+// from GET /accounting/my-scope and /hr/my-scope rather than by role here.
+const AccountingShell = lazy(() => import("./shells/AccountingShell"));
+const HRShell         = lazy(() => import("./shells/HRShell"));
 const MascotAssistant = lazy(() => import("./components/Assistant/MascotAssistant"));
 
 // Branded loader replaces the old spinner everywhere a route is in flight or
@@ -39,9 +44,9 @@ const MascotAssistant = lazy(() => import("./components/Assistant/MascotAssistan
 // strand a white-on-white mark.
 const PageSpinner = () => <BrandedLoader />;
 
-// Protected Route — checks auth + role access (or a feature-flag grant).
+// Protected Route â€” checks auth + role access (or a feature-flag grant).
 // requireFlag: access is granted purely by a strict feature flag, regardless of
-// role — used by the opt-in Custom Access workspace.
+// role â€” used by the opt-in Custom Access workspace.
 const ProtectedRoute = ({ children, requiredRole = null, requireFlag = null }) => {
   const { user, isAuthenticated } = useAuth();
   const { isEnabledStrict, loading: flagsLoading } = useFeatureFlags();
@@ -57,7 +62,7 @@ const ProtectedRoute = ({ children, requiredRole = null, requireFlag = null }) =
   return children;
 };
 
-// Smart redirect — waits for /auth/me AND feature flags before routing, so a
+// Smart redirect â€” waits for /auth/me AND feature flags before routing, so a
 // Custom Access user lands in /workspace instead of their role shell.
 const DashboardRedirect = () => {
   const { user, isRefreshing } = useAuth();
@@ -76,7 +81,7 @@ const AppContent = () => {
 
   // Branding (name / logo / tab title / favicon / meta) comes from
   // BrandingProvider, mounted below, so the configured name reaches the UI and
-  // not just the browser tab. Public endpoint — it runs on the login page too.
+  // not just the browser tab. Public endpoint â€” it runs on the login page too.
   // Server-side injection still handles the very first paint + crawlers.
   return (
     <Router>
@@ -107,41 +112,51 @@ const AppContent = () => {
             <ProtectedRoute requiredRole="compliance_manager"><ComplianceShell /></ProtectedRoute>
           } />
 
-          {/* QA Department — isolated shell for qa_manager + qa_agent */}
+          {/* QA Department â€” isolated shell for qa_manager + qa_agent */}
           <Route path="/qa/*" element={
             <ProtectedRoute requiredRole="qa_agent"><QAShell /></ProtectedRoute>
           } />
 
-          {/* QA v2 — new, parallel to v1 above during the build-out. Same
+          {/* QA v2 â€” new, parallel to v1 above during the build-out. Same
               access rule as /qa (hasRoleAccess already treats qa_agent,
               qa_manager, and compliance_manager identically for this pair). */}
           <Route path="/qa2/*" element={
             <ProtectedRoute requiredRole="qa_agent"><QA2Shell /></ProtectedRoute>
           } />
 
-          {/* Staff Shell — closer / fronter */}
+          {/* Staff Shell â€” closer / fronter */}
           <Route path="/closer/*"  element={<ProtectedRoute requiredRole="closer"><StaffShell /></ProtectedRoute>} />
           <Route path="/fronter/*" element={<ProtectedRoute requiredRole="fronter"><StaffShell /></ProtectedRoute>} />
           <Route path="/staff/*"   element={<ProtectedRoute requiredRole="closer"><StaffShell /></ProtectedRoute>} />
 
-          {/* Custom Access workspace — opt-in unified shell, granted by flag (any
+          {/* Custom Access workspace â€” opt-in unified shell, granted by flag (any
               base role). Reuses ManagerShell; every tab/tool is permission-gated. */}
           <Route path="/workspace/*" element={<ProtectedRoute requireFlag="custom_workspace"><ManagerShell workspaceMode /></ProtectedRoute>} />
 
-          {/* Manager Shell — all manager roles + company_admin */}
+          {/* Manager Shell â€” all manager roles + company_admin */}
           <Route path="/manager/*"         element={<ProtectedRoute requiredRole="closer_manager"><ManagerShell /></ProtectedRoute>} />
           <Route path="/closer-manager/*"  element={<ProtectedRoute requiredRole="closer_manager"><ManagerShell /></ProtectedRoute>} />
           <Route path="/fronter-manager/*" element={<ProtectedRoute requiredRole="fronter_manager"><ManagerShell /></ProtectedRoute>} />
           <Route path="/operations/*"      element={<ProtectedRoute requiredRole="operations_manager"><ManagerShell /></ProtectedRoute>} />
 
-          {/* Client recording portal — isolated external login (no CRM chrome) */}
+          {/* Accounting + HR. Deliberately NOT role-guarded: reach is granted by
+              a permission OR by a superadmin designation (mig 290,
+              module_designations), and a designation is invisible to the role
+              hierarchy. The shell asks the server what this person may see and
+              renders an explicit "no access" state when the answer is nothing;
+              every endpoint behind it re-checks. Guarding on a role here would
+              lock out exactly the people the designation exists for. */}
+          <Route path="/accounting/*" element={<ProtectedRoute><AccountingShell /></ProtectedRoute>} />
+          <Route path="/hr/*"         element={<ProtectedRoute><HRShell /></ProtectedRoute>} />
+
+          {/* Client recording portal â€” isolated external login (no CRM chrome) */}
           <Route path="/portal/*" element={<ProtectedRoute requiredRole="portal_client"><ClientPortal /></ProtectedRoute>} />
 
           <Route path="/" element={<Navigate to={isAuthenticated ? "/dashboard" : "/login"} />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </Suspense>
-      {/* Floating CRM assistant mascot — signed in + enabled by superadmin (Features → crm_assistant) */}
+      {/* Floating CRM assistant mascot â€” signed in + enabled by superadmin (Features â†’ crm_assistant) */}
       {isAuthenticated && assistantOn && (
         <Suspense fallback={null}><MascotAssistant /></Suspense>
       )}
@@ -189,7 +204,7 @@ function App() {
       <BrandingProvider>
       <AuthProvider>
         <FeatureFlagsProvider>
-          {/* App-wide realtime presence — online from login to logout, every
+          {/* App-wide realtime presence â€” online from login to logout, every
               shell. Chat dots, last-seen, and the admin activity panel all
               read from this one channel. */}
           <PresenceProvider>
