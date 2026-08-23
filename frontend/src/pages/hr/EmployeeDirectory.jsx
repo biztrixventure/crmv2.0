@@ -18,6 +18,7 @@ import {
 import { Panel, SectionHeader, Loading, EmptyState, Field, KpiTile, TableScroll, PillTabs } from '../../components/UI/kit';
 import { Alert } from '../../components/UI';
 import ThemedSelect from '../../components/UI/Select';
+import SearchSelect from '../../components/UI/SearchSelect';
 import { Btn, StatusPill, ModuleModal } from '../../components/Modules/ModuleUI';
 import { useEmployees } from '../../hooks/useEmployees';
 import { fmtMoney, fmtDate } from '../../utils/money';
@@ -332,13 +333,17 @@ function EmployeeEditor({ employee, departments, positions, colleagues, linkable
     <ModuleModal wide title={isNew ? 'New employee' : `Edit ${fullName(employee)}`} onClose={onClose}
       footer={<><Btn onClick={onClose}>Cancel</Btn><Btn variant="primary" busy={saving} onClick={submit}>Save</Btn></>}>
       <form onSubmit={submit} className="space-y-4">
+        {/* Searchable, not a native select: this list is one row per unlinked
+            colleague, so it runs to dozens and typing a name has to filter. */}
         {isNew && linkable.length > 0 && (
-          <Field label="Link to a CRM user"
+          <Field as="div" label="Link to a CRM user"
             hint="Optional, but this is what lets them see their own attendance, leave, payslips and review.">
-            <ThemedSelect value={form.user_id} onChange={e => onPickUser(e.target.value)}>
-              <option value="">No CRM login (record only)</option>
-              {linkable.map(u => <option key={u.user_id} value={u.user_id}>{u.name}{u.role ? ` -- ${u.role}` : ''}</option>)}
-            </ThemedSelect>
+            <SearchSelect
+              value={form.user_id}
+              onChange={onPickUser}
+              options={linkable.map(u => ({ value: u.user_id, label: u.name, hint: u.role || '' }))}
+              placeholder="Search by name or role..."
+              emptyLabel="No CRM login (record only)" />
           </Field>
         )}
 
@@ -373,13 +378,14 @@ function EmployeeEditor({ employee, departments, positions, colleagues, linkable
               {positions.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
             </ThemedSelect>
           </Field>
-          <Field label="Reports to" hint="Their reviewer by default when a cycle launches.">
-            <ThemedSelect value={form.manager_employee_id} onChange={e => set('manager_employee_id', e.target.value)}>
-              <option value="">Nobody</option>
-              {colleagues.filter(c => c.id !== employee.id).map(c => (
-                <option key={c.id} value={c.id}>{fullName(c)}</option>
-              ))}
-            </ThemedSelect>
+          <Field as="div" label="Reports to" hint="Their reviewer by default when a cycle launches.">
+            <SearchSelect
+              value={form.manager_employee_id}
+              onChange={v => set('manager_employee_id', v)}
+              options={colleagues.filter(c => c.id !== employee.id)
+                .map(c => ({ value: c.id, label: fullName(c), hint: c.employee_no || '' }))}
+              placeholder="Search by name or employee no..."
+              emptyLabel="Nobody" />
           </Field>
         </div>
 

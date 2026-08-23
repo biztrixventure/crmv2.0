@@ -15,6 +15,7 @@ import { CalendarCheck, Plus, Check, X, Ban, Settings2, Users, User } from 'luci
 import { Panel, SectionHeader, Loading, EmptyState, Field, KpiTile, TableScroll, PillTabs } from '../../components/UI/kit';
 import { Alert } from '../../components/UI';
 import ThemedSelect from '../../components/UI/Select';
+import SearchSelect from '../../components/UI/SearchSelect';
 import { Btn, StatusPill, ModuleModal } from '../../components/Modules/ModuleUI';
 import { useLeaveRequests } from '../../hooks/useLeaveRequests';
 import { useEmployees } from '../../hooks/useEmployees';
@@ -341,11 +342,15 @@ function LeaveConfig({ types, employees, year, onClose, onSaveType, onSetEntitle
           <SectionHeader level="sub" title="Set an entitlement"
             subtitle="Days used is never set here -- approvals move it." />
           <div className="space-y-2">
-            <Field label="Employee">
-              <ThemedSelect value={ent.employee_id} onChange={e => setEnt(s => ({ ...s, employee_id: e.target.value }))}>
-                <option value="">Pick someone</option>
-                {employees.map(emp => <option key={emp.id} value={emp.id}>{fullName(emp)}</option>)}
-              </ThemedSelect>
+            {/* One row per employee, so this grows with headcount -- searchable
+                rather than a native select you cannot type into. */}
+            <Field as="div" label="Employee">
+              <SearchSelect
+                value={ent.employee_id}
+                onChange={v => setEnt(s => ({ ...s, employee_id: v }))}
+                options={employees.map(emp => ({ value: emp.id, label: fullName(emp), hint: emp.employee_no || '' }))}
+                placeholder="Search by name or employee no..."
+                emptyLabel="Pick someone" />
             </Field>
             <Field label="Leave type">
               <ThemedSelect value={ent.leave_type_id} onChange={e => setEnt(s => ({ ...s, leave_type_id: e.target.value }))}>

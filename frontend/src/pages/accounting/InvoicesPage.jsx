@@ -16,6 +16,7 @@ import { FileText, Plus, Send, Trash2, Ban, DollarSign, Search, Eye } from 'luci
 import { Panel, SectionHeader, Loading, EmptyState, Field, KpiTile, TableScroll, PillTabs } from '../../components/UI/kit';
 import { Alert } from '../../components/UI';
 import ThemedSelect from '../../components/UI/Select';
+import SearchSelect from '../../components/UI/SearchSelect';
 import { Btn, StatusPill, ModuleModal } from '../../components/Modules/ModuleUI';
 import { useInvoices } from '../../hooks/useInvoices';
 import { useChartOfAccounts } from '../../hooks/useChartOfAccounts';
@@ -296,12 +297,13 @@ function InvoiceEditor({ invoice, accounts, onClose, onSave }) {
                       <td className="td-p"><input className="input w-full" value={l.description} placeholder="What is being charged"
                         onChange={e => setLine(i, 'description', e.target.value)} style={{ minWidth: 180 }} /></td>
                       <td className="td-p">
-                        <ThemedSelect value={l.account_id || ''} onChange={e => setLine(i, 'account_id', e.target.value)}>
-                          <option value="">--</option>
-                          {accounts.filter(a => a.account_type === 'revenue').map(a => (
-                            <option key={a.id} value={a.id}>{a.code} {a.name}</option>
-                          ))}
-                        </ThemedSelect>
+                        <SearchSelect
+                          value={l.account_id || ''}
+                          onChange={v => setLine(i, 'account_id', v)}
+                          options={accounts.filter(a => a.account_type === 'revenue')
+                            .map(a => ({ value: a.id, label: a.name, hint: a.code }))}
+                          placeholder="Search revenue accounts..."
+                          emptyLabel="--" />
                       </td>
                       <td className="td-p"><input className="input" type="number" step="0.001" min="0" value={l.quantity}
                         onChange={e => setLine(i, 'quantity', e.target.value)} style={{ width: 70 }} /></td>

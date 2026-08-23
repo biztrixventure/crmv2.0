@@ -16,6 +16,7 @@ import { BookOpen, Plus, CheckCircle2, Ban, Trash2, Search, ArrowLeftRight } fro
 import { Panel, SectionHeader, Loading, EmptyState, Field, TableScroll, PillTabs } from '../../components/UI/kit';
 import { Alert } from '../../components/UI';
 import ThemedSelect from '../../components/UI/Select';
+import SearchSelect from '../../components/UI/SearchSelect';
 import { Btn, StatusPill, ModuleModal } from '../../components/Modules/ModuleUI';
 import { useJournalEntries } from '../../hooks/useJournalEntries';
 import { useChartOfAccounts } from '../../hooks/useChartOfAccounts';
@@ -87,10 +88,14 @@ export default function JournalPage({ scope }) {
           </>
         ) : (
           <div className="ml-auto" style={{ minWidth: 280 }}>
-            <ThemedSelect value={ledgerAccount} onChange={e => setLedgerAccount(e.target.value)}>
-              <option value="">Pick an account</option>
-              {accounts.map(a => <option key={a.id} value={a.id}>{a.code} -- {a.name}</option>)}
-            </ThemedSelect>
+            {/* A real chart of accounts runs to dozens, so this has to be
+                searchable -- a native select cannot be typed into. */}
+            <SearchSelect
+              value={ledgerAccount}
+              onChange={setLedgerAccount}
+              options={accounts.map(a => ({ value: a.id, label: a.name, hint: a.code }))}
+              placeholder="Search by code or name..."
+              emptyLabel="Pick an account" />
           </div>
         )}
       </div>
@@ -326,10 +331,12 @@ function EntryEditor({ accounts, onClose, onSave }) {
                 {lines.map((l, i) => (
                   <tr key={i}>
                     <td className="td-p" style={{ minWidth: 220 }}>
-                      <ThemedSelect value={l.account_id} onChange={e => setLine(i, 'account_id', e.target.value)}>
-                        <option value="">Pick an account</option>
-                        {accounts.map(a => <option key={a.id} value={a.id}>{a.code} -- {a.name}</option>)}
-                      </ThemedSelect>
+                      <SearchSelect
+                        value={l.account_id}
+                        onChange={v => setLine(i, 'account_id', v)}
+                        options={accounts.map(a => ({ value: a.id, label: a.name, hint: a.code }))}
+                        placeholder="Search by code or name..."
+                        emptyLabel="Pick an account" />
                     </td>
                     <td className="td-p"><input className="input w-full" value={l.description}
                       onChange={e => setLine(i, 'description', e.target.value)} style={{ minWidth: 150 }} /></td>
