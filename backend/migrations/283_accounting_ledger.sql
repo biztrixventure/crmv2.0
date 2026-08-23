@@ -1,4 +1,4 @@
--- ============================================================================
+﻿-- ============================================================================
 -- 283_accounting_ledger.sql
 --
 -- Accounting module, part 1 of 3: chart of accounts + double-entry journal.
@@ -107,6 +107,7 @@ COMMENT ON TABLE journal_entry_lines IS
 CREATE OR REPLACE FUNCTION fn_journal_entry_balance_guard()
 RETURNS trigger
 LANGUAGE plpgsql
+SET search_path = public, pg_temp
 AS $fn$
 DECLARE
   v_debit  numeric(14,2);
@@ -143,6 +144,7 @@ CREATE TRIGGER trg_journal_entry_balance_guard
 CREATE OR REPLACE FUNCTION fn_journal_lines_locked_when_posted()
 RETURNS trigger
 LANGUAGE plpgsql
+SET search_path = public, pg_temp
 AS $fn$
 DECLARE v_status text;
 BEGIN

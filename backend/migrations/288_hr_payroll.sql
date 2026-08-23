@@ -118,6 +118,7 @@ CREATE INDEX IF NOT EXISTS idx_hrpd_company ON hr_payroll_deductions (company_id
 CREATE OR REPLACE FUNCTION fn_hr_entry_recalc_deductions()
 RETURNS trigger
 LANGUAGE plpgsql
+SET search_path = public, pg_temp
 AS $fn$
 BEGIN
   UPDATE hr_payroll_entries e
@@ -157,6 +158,7 @@ CREATE TRIGGER trg_hrpd_recalc_del
 CREATE OR REPLACE FUNCTION fn_hr_run_recalc_totals()
 RETURNS trigger
 LANGUAGE plpgsql
+SET search_path = public, pg_temp
 AS $fn$
 BEGIN
   UPDATE hr_payroll_runs r
@@ -202,6 +204,7 @@ CREATE TRIGGER trg_hrpe_recalc_del
 CREATE OR REPLACE FUNCTION fn_hr_run_locked_when_final()
 RETURNS trigger
 LANGUAGE plpgsql
+SET search_path = public, pg_temp
 AS $fn$
 DECLARE v_status text;
 BEGIN

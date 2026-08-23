@@ -115,6 +115,7 @@ CREATE INDEX IF NOT EXISTS idx_hrlr_employee       ON hr_leave_requests (employe
 CREATE OR REPLACE FUNCTION fn_hr_leave_apply_balance()
 RETURNS trigger
 LANGUAGE plpgsql
+SET search_path = public, pg_temp
 AS $fn$
 DECLARE
   v_year  integer := EXTRACT(YEAR FROM NEW.start_date)::integer;

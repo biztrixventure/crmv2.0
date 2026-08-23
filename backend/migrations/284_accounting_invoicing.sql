@@ -115,6 +115,7 @@ CREATE INDEX IF NOT EXISTS idx_ipay_company ON invoice_payments (company_id, pai
 CREATE OR REPLACE FUNCTION fn_invoice_recalc_totals()
 RETURNS trigger
 LANGUAGE plpgsql
+SET search_path = public, pg_temp
 AS $fn$
 BEGIN
   UPDATE invoices i
@@ -166,6 +167,7 @@ CREATE TRIGGER trg_ili_recalc_del
 CREATE OR REPLACE FUNCTION fn_invoice_recalc_paid()
 RETURNS trigger
 LANGUAGE plpgsql
+SET search_path = public, pg_temp
 AS $fn$
 BEGIN
   UPDATE invoices i
@@ -215,6 +217,7 @@ CREATE TRIGGER trg_ipay_recalc_del
 CREATE OR REPLACE FUNCTION fn_invoice_restatus_after_totals()
 RETURNS trigger
 LANGUAGE plpgsql
+SET search_path = public, pg_temp
 AS $fn$
 BEGIN
   UPDATE invoices i
