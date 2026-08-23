@@ -5,6 +5,18 @@
 // list; duplicating the scope-loading, the company picker and the empty states
 // is how they drift apart.
 //
+// The header is the REAL AppHeader, the same one StaffShell / ManagerShell /
+// ComplianceShell / QAShell use. That is deliberate: it is what carries mail,
+// chat, the notification bell (with push enrolment), the theme toggle, the
+// profile card and logout. These modules first shipped with a hand-rolled strip
+// that had only a theme link and an email address, so someone working in
+// Accounting lost their inbox and their notifications -- a shell that drops the
+// app's own furniture reads as a different, lesser app.
+//
+// Module-specific controls (company picker, tab strip, the way back) sit in a
+// sub-bar UNDER the header rather than inside it, so AppHeader stays untouched
+// and every other shell is unaffected.
+//
 // Two states this has to tell apart, and the reason it exists:
 //
 //   has_any === false    -> genuinely no access. Say so.
@@ -21,14 +33,18 @@
 // non-member falls back to their own company rather than 403-ing).
 // ============================================================================
 import { useState, useEffect, useCallback } from 'react';
-import { LogOut, ArrowLeft, Building2 } from 'lucide-react';
+import { ArrowLeft, Building2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useHistoryTab } from '../../hooks/useHistoryTab';
+import { useNotifications } from '../../hooks/useNotifications';
+import { useVersionCheck } from '../../hooks/useVersionCheck';
 import { getRoleRoute } from '../../utils/roleRouting';
 import client from '../../api/client';
+import { AppHeader } from '../Layout';
 import DotGridBg from '../UI/DotGridBg';
+import UpdateBanner from '../UI/UpdateBanner';
 import ThemedSelect from '../UI/Select';
 import { PillTabs, Loading, EmptyState } from '../UI/kit';
 
@@ -41,9 +57,11 @@ export default function ModuleShell({
   banner,             // optional (scope) => node, drawn above the content
   defaultTab,
 }) {
-  const { user, logout } = useAuth();
+  const { user, logout, updateUser } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
+  const notifHook = useNotifications();
+  const updateAvailable = useVersionCheck();
 
   const storageKey = `module.${moduleKey}.company`;
   const [companyId, setCompanyId] = useState(() => {
@@ -74,6 +92,8 @@ export default function ModuleShell({
     setScope(null);   // force the loading state rather than showing the old company's numbers
   };
 
+  const handleLogout = () => { logout(); navigate('/login'); };
+
   const tabs = (scope ? buildTabs(scope.permissions || {}, scope) : []).filter(t => t.show);
   const [tab, setTab] = useHistoryTab(null, defaultTab, { persist: false });
   const activeTab = tabs.some(t => t.key === tab) ? tab : (tabs[0]?.key || null);
@@ -82,14 +102,37 @@ export default function ModuleShell({
   const blockedOnCompany = !!scope?.needs_company;
 
   return (
-    <div className="min-h-screen flex flex-col relative" style={{ background: 'var(--color-bg)' }}>
+    <div className="min-h-screen relative" style={{ backgroundColor: 'var(--color-bg)' }}>
       <DotGridBg />
-      <header className="flex items-center gap-4 px-5 py-3 border-b relative z-10 flex-wrap"
-        style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface)' }}>
-        <div className="flex items-center gap-2 font-extrabold" style={{ color: 'var(--color-text)' }}>
-          <Icon size={20} style={{ color: 'var(--color-primary-600)' }} /> {title}
-        </div>
+      {updateAvailable && <UpdateBanner />}
 
+      <AppHeader
+        title={title}
+        logo={
+          <div className="w-10 h-10 rounded-lg flex items-center justify-center"
+            style={{ background: 'var(--gradient-sidebar)' }}>
+            <Icon className="text-white" size={22} />
+          </div>
+        }
+        companyLogoUrl={user?.company_logo_url}
+        theme={theme} onThemeToggle={toggleTheme}
+        userEmail={user?.email}
+        userRole={user?.role_name || user?.role}
+        onLogout={handleLogout}
+        user={user} onUpdateUser={updateUser}
+        notifications={notifHook.notifications}
+        unreadCount={notifHook.unreadCount}
+        onMarkRead={notifHook.markRead}
+        onMarkAllRead={notifHook.markAllRead}
+        onDeleteNotification={notifHook.deleteNotification}
+        onClearNotifications={notifHook.clearAll}
+        onBrandClick={() => navigate(getRoleRoute(user?.role))}
+      />
+
+      {/* Module sub-bar: the controls that belong to THIS module only. Kept out
+          of AppHeader so the shared header stays identical everywhere. */}
+      <div className="flex items-center gap-3 px-4 sm:px-6 lg:px-8 py-2.5 border-b relative z-10 flex-wrap"
+        style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface)' }}>
         {showPicker && (
           <div className="flex items-center gap-2" style={{ minWidth: 210 }}>
             <Building2 size={14} style={{ color: 'var(--color-text-tertiary)' }} />
@@ -106,24 +149,16 @@ export default function ModuleShell({
           <PillTabs items={tabs} value={activeTab} onChange={setTab} />
         )}
 
-        <div className="ml-auto flex items-center gap-3">
-          {/* This is a module, not a home. Someone who reached it from their own
-              shell needs the way back without hunting for it. */}
-          <button onClick={() => navigate(getRoleRoute(user?.role))}
-            className="flex items-center gap-1 text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
-            <ArrowLeft size={14} />My dashboard
-          </button>
-          <button onClick={toggleTheme} className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
-            {theme === 'dark' ? 'Light' : 'Dark'}
-          </button>
-          <span className="text-xs font-semibold hidden sm:inline" style={{ color: 'var(--color-text-secondary)' }}>{user?.email}</span>
-          <button onClick={logout} className="flex items-center gap-1 text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
-            <LogOut size={14} />Logout
-          </button>
-        </div>
-      </header>
+        {/* This is a module, not a home. Someone who reached it from their own
+            shell needs the way back without hunting for it. */}
+        <button onClick={() => navigate(getRoleRoute(user?.role))}
+          className="ml-auto flex items-center gap-1 text-xs font-semibold"
+          style={{ color: 'var(--color-text-secondary)' }}>
+          <ArrowLeft size={14} />My dashboard
+        </button>
+      </div>
 
-      <main className="flex-1 p-2 sm:p-5 overflow-auto relative z-10">
+      <main className="w-full px-4 sm:px-6 lg:px-8 xl:px-10 py-6 sm:py-8 relative z-10">
         {!scope && !loadError && <Loading variant="cards" />}
 
         {scope && !scope.has_any && (

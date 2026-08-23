@@ -1,8 +1,16 @@
-// ============================================================================
-// QA2Shell.jsx — QA v2's isolated shell (build brief section 9). Kept thin
-// on purpose — v1's QAShell.jsx grew to 5,039 lines by putting every tab's
+﻿// ============================================================================
+// QA2Shell.jsx -- QA v2's isolated shell (build brief section 9). Kept thin
+// on purpose: v1's QAShell.jsx grew to 5,039 lines by putting every tab's
 // content directly in the shell; every tab here is its own file under
 // components/QA2/ instead.
+//
+// The header is the REAL AppHeader, the same one every other shell uses -- it
+// is what carries mail, chat, the notification bell (with push enrolment), the
+// theme toggle, the profile card and logout. This shell originally hand-rolled
+// a thin strip with just a theme link and an email address, which quietly cost
+// a QA agent their inbox and their notifications for as long as they were in
+// here. QA-specific controls (the tab strip) sit in a sub-bar under it, so
+// AppHeader itself is untouched and no other shell is affected.
 //
 // Tab visibility mixes two sources deliberately:
 //   - hasPermission('qa2.*') for anything the STATIC role_permissions grant
@@ -14,12 +22,18 @@
 // ============================================================================
 
 import { useState, useEffect } from 'react';
-import { LogOut, Building2, Users, ListChecks, Inbox, FileSpreadsheet, ShieldCheck, ListTodo, Scale, BarChart3, CalendarClock } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Building2, Users, ListChecks, Inbox, FileSpreadsheet, ShieldCheck, ListTodo, Scale, BarChart3, CalendarClock } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useHistoryTab } from '../hooks/useHistoryTab';
+import { useNotifications } from '../hooks/useNotifications';
+import { useVersionCheck } from '../hooks/useVersionCheck';
+import { getRoleRoute } from '../utils/roleRouting';
 import client from '../api/client';
+import { AppHeader } from '../components/Layout';
 import DotGridBg from '../components/UI/DotGridBg';
+import UpdateBanner from '../components/UI/UpdateBanner';
 import { PillTabs, Loading } from '../components/UI/kit';
 import OrgTab from '../components/QA2/OrgTab';
 import TeamTab from '../components/QA2/TeamTab';
@@ -33,8 +47,11 @@ import ReportsTab from '../components/QA2/ReportsTab';
 import LoadDayTab from '../components/QA2/LoadDayTab';
 
 export default function QA2Shell() {
-  const { user, hasPermission, logout } = useAuth();
+  const { user, hasPermission, logout, updateUser } = useAuth();
   const { theme, toggleTheme } = useTheme();
+  const navigate = useNavigate();
+  const notifHook = useNotifications();
+  const updateAvailable = useVersionCheck();
   const [scope, setScope] = useState(null);
   const [loadError, setLoadError] = useState(null);
 
@@ -68,33 +85,46 @@ export default function QA2Shell() {
   const [tab, setTab] = useHistoryTab(null, 'forms', { persist: false });
   const activeTab = tabs.some(t => t.key === tab) ? tab : (tabs[0]?.key || null);
 
+  const handleLogout = () => { logout(); navigate('/login'); };
+
   return (
-    <div className="min-h-screen flex flex-col relative" style={{ background: 'var(--color-bg)' }}>
+    <div className="min-h-screen relative" style={{ backgroundColor: 'var(--color-bg)' }}>
       <DotGridBg />
-      <header className="flex items-center gap-4 px-5 py-3 border-b relative z-10 flex-wrap"
+      {updateAvailable && <UpdateBanner />}
+
+      <AppHeader
+        title="QA v2"
+        logo={
+          <div className="w-10 h-10 rounded-lg flex items-center justify-center"
+            style={{ background: 'var(--gradient-sidebar)' }}>
+            <Building2 className="text-white" size={22} />
+          </div>
+        }
+        companyLogoUrl={user?.company_logo_url}
+        theme={theme} onThemeToggle={toggleTheme}
+        userEmail={user?.email}
+        userRole={user?.role_name || user?.role}
+        onLogout={handleLogout}
+        user={user} onUpdateUser={updateUser}
+        notifications={notifHook.notifications}
+        unreadCount={notifHook.unreadCount}
+        onMarkRead={notifHook.markRead}
+        onMarkAllRead={notifHook.markAllRead}
+        onDeleteNotification={notifHook.deleteNotification}
+        onClearNotifications={notifHook.clearAll}
+        onBrandClick={() => navigate(getRoleRoute(user?.role))}
+      />
+
+      {/* QA v2 sub-bar. Kept out of AppHeader so the shared header stays
+          identical across every shell. */}
+      <div className="flex items-center gap-3 px-4 sm:px-6 lg:px-8 py-2.5 border-b relative z-10 flex-wrap"
         style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface)' }}>
-        <div className="flex items-center gap-2 font-extrabold" style={{ color: 'var(--color-text)' }}>
-          <Building2 size={20} style={{ color: 'var(--color-primary-600)' }} /> QA v2
-        </div>
         {!scope && !loadError && <Loading variant="inline" size={16} />}
         {loadError && <span className="text-xs" style={{ color: 'var(--color-error-600)' }}>{loadError}</span>}
-        {scope && tabs.length > 0 && (
-          <PillTabs items={tabs} value={activeTab} onChange={setTab} />
-        )}
-        <div className="ml-auto flex items-center gap-3">
-          <button onClick={toggleTheme} className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
-            {theme === 'dark' ? 'Light' : 'Dark'}
-          </button>
-          <span className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
-            {user?.email}
-          </span>
-          <button onClick={logout} className="flex items-center gap-1 text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
-            <LogOut size={14} />Logout
-          </button>
-        </div>
-      </header>
+        {scope && tabs.length > 0 && <PillTabs items={tabs} value={activeTab} onChange={setTab} />}
+      </div>
 
-      <main className="flex-1 p-2 sm:p-5 overflow-auto relative z-10">
+      <main className="w-full px-4 sm:px-6 lg:px-8 xl:px-10 py-6 sm:py-8 relative z-10">
         {!scope && !loadError && <Loading variant="cards" />}
         {scope && tabs.length === 0 && (
           <div className="text-center py-16 text-sm" style={{ color: 'var(--color-text-secondary)' }}>
