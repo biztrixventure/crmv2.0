@@ -23,7 +23,7 @@
 //   writeCompanyId -- NEVER takes a company from a normal user's payload
 // ============================================================================
 const { supabaseAdmin } = require('../config/database');
-const { hasPermission, isSuperAdmin, resolveScopedCompanyId } = require('../models/helpers');
+const { hasPermission, isSuperAdmin, resolveScopedCompanyId, isCompanyMember } = require('../models/helpers');
 const cache = require('./cache');
 
 const MODULES = ['accounting', 'hr'];
@@ -79,19 +79,31 @@ const deny = async (req, res, companyId, permission) => {
 // of 403-ing -- the behaviour /sales and /transfers already have.
 const readCompanyId = (req) => resolveScopedCompanyId(req);
 
-// Which company a WRITE lands in. A normal user's company comes from their
-// active user_company_roles row (authMiddleware resolved it); a company_id in
-// the body is ignored outright.
+// Which company a WRITE lands in.
 //
-// Superadmin is the one exception and has to be: they have no company of their
-// own (authMiddleware sets company_id = null), so without honouring an explicit
-// company they could not write anywhere at all. Same bypass they already have
-// on every other resource.
+// The rule is MEMBERSHIP, not trust. An explicit company_id is honoured only
+// when the caller can actually write there:
+//
+//   superadmin / readonly_admin -> any company. They have none of their own
+//                                  (authMiddleware sets company_id = null), so
+//                                  without this they could not write anywhere.
+//                                  Same bypass they have on every resource.
+//   everyone else               -> only a company they are an ACTIVE member of.
+//
+// The membership check is what makes the module's company picker safe for
+// multi-company users. Falling back to req.user.company_id unconditionally
+// would be worse than refusing: someone who picked company B would watch their
+// invoice silently land in company A, which is a cross-tenant data error that
+// looks like a success.
 const writeCompanyId = async (req) => {
-  if (await isSuperAdmin(req.user.id)) {
-    return req.body?.company_id || req.query?.company_id || req.user.company_id || null;
+  const asked = req.body?.company_id || req.query?.company_id || null;
+  const own   = req.user.company_id || null;
+
+  if (await isSuperAdmin(req.user.id) || req.user.role === 'readonly_admin') {
+    return asked || own || null;
   }
-  return req.user.company_id || null;
+  if (!asked || asked === own) return own;
+  return (await isCompanyMember(req.user.id, asked)) ? asked : own;
 };
 
 // The caller's OWN employee record in a company, or null. This is how

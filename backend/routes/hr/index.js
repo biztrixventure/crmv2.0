@@ -7,14 +7,32 @@
 // it. It also reports whether the caller has an hr_employees record, because
 // every self-service tab is dead without one and the UI should say so plainly
 // rather than render four empty panels.
+//
+// And it answers the CROSS-COMPANY case: a superadmin has no company of their
+// own (authMiddleware sets company_id = null), so without an explicit company
+// every list is correctly but uselessly empty. my-scope hands them the company
+// list; the shell picks one and passes ?company_id= from then on.
 // ============================================================================
 const express = require('express');
 const { supabaseAdmin } = require('../../config/database');
 const { asyncHandler } = require('../../middleware/errorHandler');
-const { isSuperAdmin } = require('../../models/helpers');
+const { isSuperAdmin, getUserCompanies } = require('../../models/helpers');
 const { can, isDesignated, readCompanyId, selfEmployee } = require('../../utils/moduleAccess');
 
 const router = express.Router();
+
+// Same rule as the accounting module -- see routes/accounting/index.js.
+async function selectableCompanies(req) {
+  const crossCompany = ['superadmin', 'readonly_admin'].includes(req.user?.role)
+    || await isSuperAdmin(req.user.id);
+  if (crossCompany) {
+    const { data } = await supabaseAdmin
+      .from('companies').select('id, name').eq('is_active', true).order('name');
+    return { companies: data || [], cross_company: true };
+  }
+  const mine = (await getUserCompanies(req.user.id)).filter(c => c.is_active !== false);
+  return { companies: mine.length > 1 ? mine.map(c => ({ id: c.id, name: c.name })) : [], cross_company: false };
+}
 
 router.get('/my-scope', asyncHandler(async (req, res) => {
   const companyId = await readCompanyId(req);
@@ -38,6 +56,7 @@ router.get('/my-scope', asyncHandler(async (req, res) => {
   const perms = Object.fromEntries(entries);
 
   const employee = await selfEmployee(companyId, req.user.id);
+  const { companies, cross_company } = await selectableCompanies(req);
 
   res.json({
     company_id: companyId,
@@ -45,7 +64,10 @@ router.get('/my-scope', asyncHandler(async (req, res) => {
     superadmin,
     designated,
     permissions: perms,
-    employee,                                   // null = no HR record yet
+    employee,                                   // null = no HR record here
+    companies,
+    cross_company,
+    needs_company: !companyId && companies.length > 0,
     has_any: Object.values(perms).some(Boolean),
   });
 }));
