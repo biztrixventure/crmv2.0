@@ -16,24 +16,28 @@
 const express = require('express');
 const { supabaseAdmin } = require('../../config/database');
 const { asyncHandler } = require('../../middleware/errorHandler');
-const { isSuperAdmin, getUserCompanies } = require('../../models/helpers');
-const { can, isDesignated, readCompanyId, selfEmployee } = require('../../utils/moduleAccess');
+const { isSuperAdmin } = require('../../models/helpers');
+const { can, isDesignated, readCompanyId, selfEmployee, moduleCompanies } = require('../../utils/moduleAccess');
 
 const router = express.Router();
 
+// Stamp the module on every request into it. utils/moduleAccess.js reads
+// this to resolve a designation's COMPANY SCOPE (mig 293) without 119 call
+// sites having to thread an extra argument through.
+router.use((req, _res, next) => { req.moduleKey = 'hr'; next(); });
+
 // Same rule as the accounting module -- see routes/accounting/index.js.
 async function selectableCompanies(req) {
-  const crossCompany = ['superadmin', 'readonly_admin'].includes(req.user?.role)
-    || await isSuperAdmin(req.user.id);
-  if (crossCompany) {
+  if (['superadmin', 'readonly_admin'].includes(req.user?.role) || await isSuperAdmin(req.user.id)) {
     const { data } = await supabaseAdmin
       .from('companies').select('id, name').eq('is_active', true).order('name');
     return { companies: data || [], cross_company: true };
   }
-  const mine = (await getUserCompanies(req.user.id)).filter(c => c.is_active !== false);
-  return { companies: mine.length > 1 ? mine.map(c => ({ id: c.id, name: c.name })) : [], cross_company: false };
+  // Member companies PLUS any a designation named (mig 293). Only worth a
+  // picker when there is more than one to choose between.
+  const reachable = await moduleCompanies(req);
+  return { companies: reachable.length > 1 ? reachable : [], cross_company: false };
 }
-
 router.get('/my-scope', asyncHandler(async (req, res) => {
   const companyId = await readCompanyId(req);
   const superadmin = await isSuperAdmin(req.user.id);
