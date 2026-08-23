@@ -288,22 +288,22 @@ async function applyCloserDispo({ transfer, dispoCompanyId, closerUserId, dispoN
 // vicidial_agent/normalized_phone — assigned_closer_id/status/vicidial_dispo stayed
 // frozen from the FIRST time it was ever transferred, so a stale (possibly
 // off-shift) closer's name kept showing on the fronter dashboard forever, no
-// matter who actually worked today's call. Reset the row to a fresh, unassigned
-// transfer once it's gone quiet for a while — UNLESS it already produced a real
-// sale, which must never be touched.
-// WHO is re-touching the lead decides how much may be reset:
+// matter who actually worked today's call.
 //
-//   fronter XFER  → the fronter really did transfer this customer again, so it
-//                   IS a new transfer: re-arm the "confirm to send" card.
-//   closer dispo  → the CLOSER dialled an existing lead again. The fronter did
-//                   NOT create anything, so re-arming `vicidial_pending` here
-//                   would pop "complete the transfer" back onto their dashboard
-//                   for a transfer they never made. Only the stale closer
-//                   attribution is cleared so the disposition re-attributes to
-//                   whoever actually took THIS call; pending/status are left
-//                   exactly as they are.
+// This is now the CLOSER path only. A fronter XFER on a recycled lead no longer
+// comes through here at all: since migration 291 it inserts its own transfer
+// (xfer_seq + 1) and leaves the earlier row completely untouched, which is the
+// only way the fronter gets credit for a call they really made and the only way
+// the earlier call's history survives. What remains here is the case where the
+// CLOSER dialled an existing lead again: the fronter created nothing, so only
+// the stale closer attribution is cleared — the disposition re-attributes to
+// whoever actually took THIS call — and status/vicidial_pending are left exactly
+// as they are. Re-arming the confirm card here would pop "complete the transfer"
+// onto a fronter's dashboard for a transfer they never made (migrations 267/272).
+//
+// Never touches a lead that already produced a real sale.
 const STALE_HOURS = 20;   // dialer-day boundary — matches fetchAndApplyDispo's "oldish" cutoff
-async function resetIfStale(tr, { rearmPending = false } = {}) {
+async function resetIfStale(tr) {
   const last = tr.vicidial_dispo_at || tr.created_at;
   if (!last) return tr;
   const ageHours = (Date.now() - new Date(last).getTime()) / 3600000;
@@ -316,17 +316,28 @@ async function resetIfStale(tr, { rearmPending = false } = {}) {
     assigned_closer_id: null, assigned_to: null,
     vicidial_dispo: null, vicidial_dispo_at: null, vicidial_talk_time: null,
   };
-  // Only a genuine new fronter transfer re-opens the confirm flow.
-  if (rearmPending) {
-    Object.assign(resetFields, {
-      status: 'pending', vicidial_pending: true,
-      rejected_by: null, rejection_reason: null, rejected_at: null,
-    });
-  }
   await supabaseAdmin.from('transfers').update(resetFields).eq('id', tr.id);
-  logger.info('VICIDIAL_XFER', `Recycled lead — cleared stale closer on transfer ${tr.id} (${ageHours.toFixed(0)}h idle)${rearmPending ? ' + re-armed pending (new fronter XFER)' : ' (closer re-call — pending untouched)'}`);
+  logger.info('VICIDIAL_XFER', `Recycled lead — cleared stale closer on transfer ${tr.id} (${ageHours.toFixed(0)}h idle) (closer re-call — pending untouched)`);
   return { ...tr, ...resetFields };
 }
+
+// How close together two XFER webhooks for the same (code, fronter) must land to
+// be the SAME transfer event fired twice rather than a genuine re-transfer of a
+// recycled lead. The dialer retries within seconds; a fronter re-transferring a
+// customer takes a full call cycle at minimum. Two minutes sits well clear of
+// both. This is the ONLY thing that collapses two XFERs onto one row now — see
+// the long note in /fronter-xfer.
+const XFER_DEDUP_MS = 2 * 60 * 1000;
+
+// Drop null/undefined/blank values from a patch. The dialer sends every token in
+// the Dispo Call URL whether or not the lead has it, so roughly one XFER in six
+// arrives with empty first/last/car fields. Spreading those straight over an
+// existing row ERASES real customer data — the reported "the info disappeared
+// and it just says Lead". A blank from the dialer means "no news", never "clear
+// this field", so it must not survive into an UPDATE.
+const stripBlank = (obj) => Object.fromEntries(
+  Object.entries(obj).filter(([, v]) => v !== null && v !== undefined && String(v).trim() !== '')
+);
 
 // Ring buffer of recent fronter-xfer hits — the symmetric diagnostic to
 // dispo-debug, so we can SEE which fronter transfers did/didn't create a CRM
@@ -420,30 +431,47 @@ ingest.all('/fronter-xfer', requireToken, asyncHandler(async (req, res) => {
     return res.json({ ok: false, reason: 'non-transfer disposition', dispo });   // 200 → no dialer retry
   }
 
-  // Idempotent on (correlation code + this fronter): the same agent re-firing the
-  // same lead still collapses onto one row, a different agent gets their own.
+  // A RE-TRANSFERRED LEAD IS A NEW TRANSFER — IT NEVER EDITS THE OLD ROW.
+  //
+  // A VICIdial lead_id identifies a LEAD, not a transfer EVENT. The dialer
+  // recycles it, so the same fronter transferring the same customer again weeks
+  // later sends the same code. This branch used to UPDATE that earlier transfer:
+  // resetIfStale() wiped its closer/status/dispo and the form_data merge below
+  // could blank customer fields the old row already had (an XFER webhook whose
+  // first/last tokens are empty — about one in six — merged nulls straight over
+  // good data). The fronter's new transfer never appeared at all, and history
+  // that belonged to the earlier call was rewritten in place.
+  //
+  // Now: the earlier row is left EXACTLY as it is and the new XFER inserts its
+  // own transfer, carrying the same code with the next xfer_seq (migration 291).
+  // Every transfer the fronter actually made is kept and countable.
+  //
+  // Idempotency is still real, just narrower — it now keys on TIME rather than
+  // on the code alone, because that is what actually distinguishes the two cases:
+  // a duplicate webhook fire for the SAME event arrives within seconds, while a
+  // genuine re-transfer of a recycled lead is minutes to weeks later. Without
+  // this window a dialer retry would mint a second transfer and inflate counts.
   const { data: existing } = await supabaseAdmin
-    .from('transfers').select('id, created_at, form_data, status, assigned_closer_id, vicidial_dispo, vicidial_dispo_at')
+    .from('transfers').select('id, created_at, form_data, xfer_seq')
     .eq('vicidial_vendor_code', code).eq('created_by', userId)
     .order('created_at', { ascending: false }).limit(1).maybeSingle();
 
-  if (existing) {
-    // A recycled lead re-transferred long after it went quiet is a NEW contact
-    // attempt, not a duplicate webhook fire — clears the stale closer/status/dispo
-    // (see resetIfStale) so it re-appears as a fresh pending card and doesn't keep
-    // crediting whoever worked it last time.
-    // A fronter XFER genuinely re-transfers the customer → re-arm the confirm card.
-    const fresh = await resetIfStale(existing, { rearmPending: true });
-    const wasReset = fresh.status !== existing.status || fresh.assigned_closer_id !== existing.assigned_closer_id;
-    const updates = { vicidial_agent: agent || null, normalized_phone: norm || null };
-    // Only overwrite form_data on a genuine reset — a plain duplicate re-fire for
-    // the SAME event must not clobber fields the fronter may have already edited.
-    if (wasReset) updates.form_data = { ...(fresh.form_data || {}), ...leadFormData };
-    await supabaseAdmin.from('transfers').update(updates).eq('id', existing.id);
+  if (existing && Date.now() - new Date(existing.created_at).getTime() < XFER_DEDUP_MS) {
+    // Same event, fired twice. Touch only the two correlation fields, and only
+    // when the payload actually carries them — never overwrite what is already
+    // there with a blank, and never touch form_data (the fronter may have edited
+    // it in the seconds since the first fire).
+    const updates = stripBlank({ vicidial_agent: agent, normalized_phone: norm });
+    if (Object.keys(updates).length) {
+      await supabaseAdmin.from('transfers').update(updates).eq('id', existing.id);
+    }
     await reconcileQueuedDispoForTransfer({ id: existing.id }, norm);
-    xdbg.outcome = wasReset ? `recycled lead — reset + updated transfer ${existing.id}` : `updated existing transfer ${existing.id}`;
-    return res.json({ ok: true, transfer_id: existing.id, updated: true, reset: wasReset });
+    xdbg.outcome = `duplicate webhook within ${XFER_DEDUP_MS / 1000}s — kept transfer ${existing.id}`;
+    return res.json({ ok: true, transfer_id: existing.id, updated: true, duplicate: true });
   }
+  // Past the window → genuine new transfer. `existing` is deliberately NOT
+  // updated; it only tells us which sequence number this new row takes.
+  const nextSeq = existing ? (existing.xfer_seq || 1) + 1 : 1;
 
   // DEDUP: a fronter who ALSO typed the transfer into the CRM by hand creates a
   // richer, code-less transfer seconds before the dialer's XFER fires here. Those
@@ -482,33 +510,79 @@ ingest.all('/fronter-xfer', requireToken, asyncHandler(async (req, res) => {
     }
   }
 
-  const { data, error } = await supabaseAdmin.from('transfers').insert({
+  // NAME THE CUSTOMER FROM WHAT WE ALREADY KNOW. Roughly one XFER in six arrives
+  // with empty first/last tokens (the lead list simply has no name on it), and
+  // the fronter dashboard then renders the literal word "Lead" instead of a
+  // person — the reported "it is showing as the lead there". We hold the answer
+  // more than half the time: the same customer phone has an earlier transfer that
+  // DID carry a name. Seed the blank fields from it so the card opens with the
+  // real customer. Only ever FILLS blanks — never overrides what this XFER sent.
+  let seededForm = leadFormData;
+  if (norm && !first && !last) {
+    const { data: known } = await supabaseAdmin
+      .from('transfers').select('form_data')
+      .eq('normalized_phone', norm)
+      // Same company only. The identical phone can sit in another tenant's leads,
+      // and copying a customer name across that boundary would leak one company's
+      // data into another's dashboard. Measured cost of the scope: 547 of the 586
+      // recoverable rows still recover (93%) — cheap for a tenancy guarantee.
+      .eq('company_id', companyId)
+      .not('form_data->>FirstName', 'is', null)
+      .order('created_at', { ascending: false }).limit(1).maybeSingle();
+    if (known?.form_data) {
+      // stripBlank on the prior row too: an older transfer can itself hold nulls,
+      // and those must not reintroduce the very blanks we are trying to fill.
+      seededForm = { ...stripBlank(known.form_data), ...stripBlank(leadFormData) };
+      seededForm.customer_name = seededForm.customer_name
+        || [seededForm.FirstName, seededForm.LastName].filter(Boolean).join(' ').trim() || null;
+      xdbg.name_seeded = true;
+    }
+  }
+
+  const row = {
     company_id: companyId,
     created_by: userId,
     status: 'pending',
     vicidial_pending: true,
     vicidial_vendor_code: code,
+    xfer_seq: nextSeq,
     vicidial_agent: agent || null,
     normalized_phone: norm || null,
-    form_data: leadFormData,
-  }).select('id').single();
+    form_data: seededForm,
+  };
+  let { data, error } = await supabaseAdmin.from('transfers').insert(row).select('id').single();
+  // DEPLOY-ORDER SAFETY. xfer_seq arrives with migration 291. This is the live
+  // dialer ingest path — if the backend ships before the migration is applied,
+  // an unknown-column error here would reject EVERY fronter transfer, which is a
+  // far worse outcome than the bug being fixed. Retry once without the column so
+  // the two can be rolled out in either order. Degrades to the old behaviour
+  // (the pre-291 unique index then rejects the second row and the 23505 branch
+  // below dedupes it) rather than dropping the transfer on the floor.
+  if (error && (error.code === '42703' || error.code === 'PGRST204')) {
+    logger.warn('VICIDIAL_XFER', `transfers.xfer_seq missing — migration 291 not applied yet; inserting without it (recycled-lead transfers will still collapse until it is)`);
+    delete row.xfer_seq;
+    ({ data, error } = await supabaseAdmin.from('transfers').insert(row).select('id').single());
+  }
   if (error) {
     // A concurrent XFER webhook for the SAME code raced us: both passed the
-    // existence check above and both inserted → uq_transfers_vicidial_code
-    // (23505). Not an error — re-fetch the row the winner created and treat
-    // this call as the idempotent duplicate (mirrors the `existing` path).
+    // existence check above and both computed the same nextSeq → the unique
+    // index rejects the loser (23505). Not an error — re-fetch the row the winner
+    // created and treat this call as the idempotent duplicate.
     if (error.code === '23505') {
-      // The unique key is (vicidial_vendor_code, created_by) — see migration 250
-      // — so re-fetch on BOTH columns, otherwise a second fronter holding the
-      // same recycled lead code would be mistaken for our own concurrent insert.
+      // The unique key is (vicidial_vendor_code, created_by, xfer_seq) — see
+      // migration 291 — so re-fetch on code + creator, newest first. Scoping to
+      // the creator matters: a second fronter holding the same recycled lead code
+      // must not be mistaken for our own concurrent insert.
       const { data: dup } = await supabaseAdmin
         .from('transfers').select('id')
         .eq('vicidial_vendor_code', code).eq('created_by', userId)
         .order('created_at', { ascending: false }).limit(1).maybeSingle();
       if (dup) {
-        await supabaseAdmin.from('transfers')
-          .update({ vicidial_agent: agent || null, normalized_phone: norm || null })
-          .eq('id', dup.id);
+        // Blank-safe for the same reason as the duplicate-window path above.
+        const updates = stripBlank({ vicidial_agent: agent, normalized_phone: norm });
+        if (Object.keys(updates).length) {
+          await supabaseAdmin.from('transfers').update(updates).eq('id', dup.id);
+        }
         await reconcileQueuedDispoForTransfer({ id: dup.id }, norm);
         xdbg.outcome = `race — deduped into concurrent transfer ${dup.id}`;
         return res.json({ ok: true, transfer_id: dup.id, deduped: true });
@@ -517,7 +591,7 @@ ingest.all('/fronter-xfer', requireToken, asyncHandler(async (req, res) => {
     xdbg.outcome = `DB error: ${error.message}`; return res.status(500).json({ ok: false, error: error.message });
   }
 
-  logger.success('VICIDIAL_XFER', `Pending transfer ${data.id} for agent ${agent} (code ${code})`);
+  logger.success('VICIDIAL_XFER', `Pending transfer ${data.id} for agent ${agent} (code ${code}${nextSeq > 1 ? ` #${nextSeq} — recycled lead, earlier transfer left intact` : ''})`);
   await reconcileQueuedDispoForTransfer({ id: data.id }, norm);
   xdbg.outcome = `created transfer ${data.id}`;
 
@@ -639,10 +713,10 @@ ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
   }
   // Whichever path matched, clear a stale CLOSER before applying today's dispo —
   // a recycled lead's old attribution must never survive into a new contact
-  // attempt. rearmPending stays false: the closer dialling again is NOT a new
-  // fronter transfer, so the fronter's "complete the transfer" card must not
+  // attempt. It clears the stale closer ONLY: the closer dialling again is NOT a
+  // new fronter transfer, so the fronter's "complete the transfer" card must not
   // reappear for something they never created. No-op for an already-fresh match.
-  if (tr) tr = await resetIfStale(tr, { rearmPending: false });
+  if (tr) tr = await resetIfStale(tr);
   // NOTE: a "recency" fallback used to live here — attach the dispo to the most
   // recent in-flight lead from any linked fronter company. REMOVED: that pool is
   // shared across ALL closers, so with concurrent calls one closer's disposition
