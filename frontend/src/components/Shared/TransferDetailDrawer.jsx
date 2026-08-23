@@ -8,6 +8,8 @@ import { useAuth } from '../../contexts/AuthContext';
 import { getTransferDisplayStatus } from '../../utils/transferStatus';
 import { useDrawerLayout } from '../../hooks/useDrawerLayout';
 import client from '../../api/client';
+import CustomerTimeline from './CustomerTimeline';
+import { transferPhone } from '../../utils/phone';
 
 const SALE_STATUS_CONFIG = {
   open:           { label: 'Sale Open',      color: 'var(--color-info-600)', bg: 'color-mix(in srgb, var(--color-info-500) 16%, transparent)',  icon: Clock        },
@@ -364,6 +366,14 @@ export default function TransferDetailDrawer({ transfer, onClose }) {
 
           {/* Sale status — not layout-configurable; shown when a sale is linked. */}
           {transfer.sale_status && saleBlock()}
+
+          {/* Cross-transfer lifetime view — not layout-configurable, same as the
+              sale-status block above. The "Disposition History" section shows
+              THIS transfer row's own dispositions; when the dialer re-arms the
+              same lead across separate transfer rows (recycled-lead re-dial),
+              this is what shows the full picture across all of them, proving
+              nothing from an earlier attempt was silently lost. */}
+          {transferPhone(transfer) && <CustomerTimeline phone={transferPhone(transfer)} currentRef={transfer.id?.slice(0, 8)} />}
 
           {/* Superadmin-only ownership reassignment (renders nothing for others). */}
           <ReassignOwnership kind="transfer" record={transfer} onDone={onClose} />

@@ -1133,11 +1133,14 @@ router.get('/lifetime/by-phone/:phone', asyncHandler(async (req, res) => {
 
 // ============================================================================
 // GET /sales/timeline/by-phone/:phone — UNIFIED customer lifetime timeline.
-// Merges four sources into one chronologically-sorted feed, all keyed on the
+// Merges five sources into one chronologically-sorted feed, all keyed on the
 // deterministic customer_uuid (mig 079 on sales, mig 085 on transfers):
 //   • transfers            → lead_created
 //   • transfer_assignments → lead_assigned / lead_transferred  (mig 086)
 //   • policy_events        → sold/approved/cancelled/superseded/… (mig 087/088)
+//   • disposition_actions  → disposition (every dispo ever punched — the
+//     transfer row only shows the LATEST one; this proves nothing earlier
+//     was silently lost when a later dispo changed it)
 // Role-scoped identically to /lifetime (sales side) and to the transfers list
 // route (lead side), so the response never leaks a row the caller couldn't
 // already reach. Additive endpoint — nothing else depends on it.
@@ -1235,11 +1238,26 @@ router.get('/timeline/by-phone/:phone', asyncHandler(async (req, res) => {
     events = data || [];
   }
 
+  // ── disposition_actions (every dispo ever punched on this lead) ──
+  // The transfer row itself only carries the LATEST disposition — this is
+  // the full history behind that pointer, including dialer-webhook-authored
+  // rows (note starts with 'From dialer'). Nothing here ever gets edited or
+  // deleted once written, so a later dispo changing the transfer's "current"
+  // value never erases what an earlier call actually recorded.
+  let dispositions = [];
+  if (transferIds.length) {
+    const { data } = await supabaseAdmin.from('disposition_actions')
+      .select('transfer_id, user_id, disposition_name, note, created_at, setter_role')
+      .in('transfer_id', transferIds);
+    dispositions = data || [];
+  }
+
   // ── Resolve actor display names (best-effort) ──
   const actorIds = [...new Set([
     ...transfers.map(t => t.created_by),
     ...assignments.flatMap(a => [a.from_closer_id, a.to_closer_id, a.assigned_by]),
     ...events.map(e => e.actor_id),
+    ...dispositions.map(d => d.user_id),
   ].filter(Boolean))];
   const nameMap = {};
   if (actorIds.length) {
@@ -1274,13 +1292,24 @@ router.get('/timeline/by-phone/:phone', asyncHandler(async (req, res) => {
       detail: [s.plan, car].filter(Boolean).join(' · ') || e.note || null,
       actor: nm(e.actor_id), ref: s.reference_no || e.sale_id.slice(0, 8), meta: e.meta || null });
   });
+  dispositions.forEach(d => {
+    // A dialer-webhook row is attributed to whoever the dialer said worked the
+    // call, but it is machine-written — the note ('From dialer (CODE)') is
+    // what makes that provenance visible instead of reading as a person typing.
+    const byDialer = !!(d.note && d.note.startsWith('From dialer'));
+    items.push({ at: d.created_at, kind: 'disposition',
+      title: `Disposition: ${d.disposition_name || 'unknown'}`,
+      detail: d.note || null,
+      actor: byDialer ? `${nm(d.user_id) || d.setter_role || 'system'} (dialer)` : nm(d.user_id),
+      ref: d.transfer_id.slice(0, 8) });
+  });
 
   // Sort by calendar day first, then by lifecycle order within a day. This
   // keeps same-day lead→sold→approved reading logically even though backfilled
   // 'sold' events carry a date-only sale_date (00:00) while leads carry a
   // precise created_at timestamp.
   const KIND_ORDER = {
-    lead_created: 0, lead_assigned: 1, lead_transferred: 1,
+    lead_created: 0, disposition: 1, lead_assigned: 1, lead_transferred: 1,
     sold: 2, renewed: 2, replaced: 2, resold: 2,
     submitted: 3, returned: 4, approved: 5,
     post_dated: 6, charged: 7, reinstated: 7,
@@ -1296,6 +1325,7 @@ router.get('/timeline/by-phone/:phone', asyncHandler(async (req, res) => {
   const TERMINAL = new Set(['cancelled', 'compliance_cancelled', 'closed_lost', 'chargeback']);
   const summary = {
     leads: transfers.length,
+    dispositions: dispositions.length,
     sales: saleRows.length,
     active: saleRows.filter(s => s.status === 'closed_won' && !s.superseded_by).length,
     cancelled: saleRows.filter(s => TERMINAL.has(s.status) || s.cancellation_date).length,

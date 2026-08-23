@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   Phone, ArrowRightLeft, UserCheck, DollarSign, Clock, CheckCircle2,
-  RotateCcw, XCircle, Archive, CalendarClock, AlertTriangle, RefreshCw, Repeat,
+  RotateCcw, XCircle, Archive, CalendarClock, AlertTriangle, RefreshCw, Repeat, MessageSquareText,
 } from 'lucide-react';
 import client from '../../api/client';
 
@@ -12,6 +12,7 @@ import client from '../../api/client';
 
 const KIND_STYLE = {
   lead_created:     { icon: Phone,         color: '#2563eb', bg: '#eff6ff', label: 'Lead' },
+  disposition:      { icon: MessageSquareText, color: '#0891b2', bg: '#ecfeff', label: 'Dispo' },
   lead_assigned:    { icon: UserCheck,     color: '#2563eb', bg: '#eff6ff', label: 'Assigned' },
   lead_transferred: { icon: ArrowRightLeft,color: '#7c3aed', bg: '#f5f3ff', label: 'Transfer' },
   sold:             { icon: DollarSign,    color: '#16a34a', bg: '#f0fdf4', label: 'Sold' },
@@ -95,6 +96,7 @@ export default function CustomerTimeline({ phone, currentRef = null }) {
       {/* Summary chips */}
       <div className="flex flex-wrap gap-2 mb-3">
         <Chip label="Leads"    value={s.leads ?? 0} color="#2563eb" />
+        <Chip label="Dispos"   value={s.dispositions ?? 0} color="#0891b2" />
         <Chip label="Sales"    value={s.sales ?? 0} />
         <Chip label="Active"   value={s.active ?? 0} color="#16a34a" />
         {s.cancelled > 0  && <Chip label="Cancelled"  value={s.cancelled}  color="#dc2626" />}
