@@ -115,9 +115,18 @@ downloadCSV(rows, headers, filename)  // defined inline in compliance/manager sh
 
 ## Database Migrations
 Files in `backend/migrations/` â€” apply in order via Supabase SQL editor.
-Current highest: `223_compliance_manager_qa_scoring.sql` â€” **pending**. 221 and 222 are **applied** (SQL-verified 2026-07-30: post-dates are open 40 / pending_review 0 / cancelled 3). 208 is applied too; the warning that used to sit here was stale.
+Current highest: `223_compliance_manager_qa_scoring.sql` â€” **pending**. 221 and 222 are **applied** (SQL-verified 2026-07-30: post-dates are open 40 / pending_review 0 / cancelled 3). 208 is applied too; the warning that used to sit here was stale.
 
 Accounting + HR (283-290) are **applied** (SQL-verified 2026-08-23: 24 tables, 25 permissions, 365 role grants, 17 triggers, 3 new role_level values). Trigger functions are search_path-pinned.
+
+291 + 292 are **applied** (SQL-verified 2026-08-23). 291 = `transfers.xfer_seq`, uniqueness moved to `(vicidial_vendor_code, created_by, xfer_seq)` so a re-transferred recycled lead creates a NEW transfer instead of overwriting the fronter's earlier one — see "Re-transferred leads" below. 292 = repaired 926 transfers whose customer name had been blanked (originals in `transfers_name_backfill_292`, reversible).
+
+### Re-transferred leads (mig 291)
+A VICIdial `lead_id` names a **LEAD, not a transfer EVENT** — the dialer recycles it, so a fronter transferring the same customer again sends the same `vicidial_vendor_code`. Each XFER must get its **own** transfer row so each keeps its own closer disposition; the earlier row is never edited. `a775261` broke this (it reset the old row and merged the incoming payload over its `form_data`, blanking the customer to the literal word "Lead"); fixed in `9b79a16`.
+- XFER idempotency keys on **TIME** (`XFER_DEDUP_MS`, 2 min), never on the code — a duplicate webhook lands in seconds, a genuine re-transfer is minutes-to-weeks later. Restoring code-only idempotency silently collapses real transfers.
+- A blank from the dialer means "no news", never "clear this field" — `stripBlank()` guards every dialer-sourced patch (~1 XFER in 6 arrives with empty first/last tokens).
+- Multiple rows per code are safe because every code lookup already does `.order('created_at',desc).limit(1)`. Verify that before adding a new one.
+- No name on the XFER → seeded from the same customer's last named transfer **in the same company**, then from the dialer itself via `enrichFromDialer()` (`lead_field_info`, archive-proof). Historical repair: `POST /api/vicidial/backfill/names` (superadmin, batched + cursor).
 
 ### Post-dated sales (mig 083 + 221)
 A post-date is a **reminder, not a sale** â€” the card has not been charged, so it must never be counted as one. Identity is a string match on `closer_disposition` (`/post[\s_-]?date|postdate/i`) defined in **three places that must stay in sync**: `backend/utils/postDate.js`, `frontend/src/utils/dispositions.js`, and `fn_stamp_post_date` in mig 221.
