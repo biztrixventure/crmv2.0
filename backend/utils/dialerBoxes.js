@@ -7,8 +7,17 @@
 // (or if migration 120 isn't applied). The live values are refreshed from the
 // vicidial_boxes table every 60s, so a superadmin can change a dialer's URL /
 // creds / prefix from Settings with no code change.
+//
+// KEEP THESE IN STEP WITH vicidial_boxes. The WTI entry pointed at
+// wavetechnew.i5.tel long after that host stopped existing — it does not resolve
+// at all ("non-existent domain"), so every lookup through the fallback failed
+// silently: axios throws, the catch swallows it, and the caller sees "no data for
+// this lead", which is indistinguishable from a lead that genuinely has no name.
+// The DB row was correct all along, so production was unaffected and the
+// staleness only surfaced off the DB path — which is what makes it dangerous. A
+// wrong URL here stays invisible until the day the DB load fails.
 const FALLBACK_BOXES = [
-  { id: 'wavetech', base: process.env.WAVETECH_DIALER_URL || 'https://wavetechnew.i5.tel', user: process.env.WAVETECH_DIALER_USER || 'apiuser', pass: process.env.WAVETECH_DIALER_PASS || 'apiuser123', prefix: 'WTI' },
+  { id: 'wavetechpk', base: process.env.WAVETECH_DIALER_URL || 'https://wavetechpk.i5.tel', user: process.env.WAVETECH_DIALER_USER || 'apiuser', pass: process.env.WAVETECH_DIALER_PASS || 'apiuser123', prefix: 'WTI' },
   { id: 'etc',      base: process.env.ETC_DIALER_URL      || 'https://wavetech3new.i5.tel', user: process.env.ETC_DIALER_USER      || 'ceo',     pass: process.env.ETC_DIALER_PASS      || 'ceo',        prefix: 'ETC' },
   { id: 'tmc',      base: process.env.TMC_DIALER_URL      || 'https://tmcsolihp.i5.tel',    user: process.env.TMC_DIALER_USER      || '1002',    pass: process.env.TMC_DIALER_PASS      || '1002',       prefix: 'TMC' },
 ];
