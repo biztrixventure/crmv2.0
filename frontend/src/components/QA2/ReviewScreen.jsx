@@ -19,6 +19,40 @@ import ThemedSelect from '../UI/Select';
 import { Panel, SectionHeader, Loading } from '../UI/kit';
 import { getClip, putClip, clipKey } from '../../utils/audioCache';
 
+// Prefetching for "Next" — module-level (not component state) so a value
+// warmed while viewing record A survives the full remount that opening
+// record B causes (ReviewScreen is keyed on assignment.id in QueueTab).
+//
+// Deliberately READ-ONLY only. GET /qa2/calls/:id has no side effect, so it's
+// safe to fetch speculatively before the agent has actually chosen to move
+// on. POST /qa2/evaluations does NOT get this treatment — it marks the
+// assignment "in review" server-side (qa2Evaluations.js), so firing it
+// speculatively would show a record as opened on a manager's live view
+// before the agent ever saw it, and would leave it stuck "in review" forever
+// if the agent never actually goes there. That call only ever fires from the
+// main load effect below, when the record is genuinely being opened.
+const callPrefetchCache = new Map(); // call_id -> Promise<calls/:id response data>
+
+function prefetchCallData(callId) {
+  if (!callId || callPrefetchCache.has(callId)) return;
+  callPrefetchCache.set(callId, client.get(`qa2/calls/${callId}`).then(r => r.data).catch(() => null));
+}
+
+// Same read-only reasoning for audio: a recording ticket is a short-lived
+// signed URL, not a state change on the call/evaluation. Skips anything
+// already in the IndexedDB clip cache.
+async function prefetchAudio(call) {
+  if (!call || call.recording_state !== 'found') return;
+  try {
+    const key = clipKey(call.box_id, call.recording_id);
+    if (await getClip(key)) return;
+    const r = await client.post(`qa2/calls/${call.id}/recording-ticket`);
+    const apiBase = String(client.defaults.baseURL || '').replace(/\/api\/?$/, '');
+    const res = await fetch(apiBase + r.data.url);
+    if (res.ok) await putClip(key, await res.blob());
+  } catch { /* best-effort — Next still works, just not pre-warmed */ }
+}
+
 function AudioPlayer({ call }) {
   const audioRef = useRef(null);
   const urlRef = useRef(null);
@@ -153,7 +187,7 @@ export function ParameterInput({ param, answer, onChange }) {
   );
 }
 
-export default function ReviewScreen({ assignment, onDone, onNext, nextLabel, remaining }) {
+export default function ReviewScreen({ assignment, onDone, onNext, nextLabel, remaining, nextAssignment }) {
   const [call, setCall] = useState(null);
   const [linked, setLinked] = useState(null);
   const [customerContext, setCustomerContext] = useState(null);
@@ -172,12 +206,18 @@ export default function ReviewScreen({ assignment, onDone, onNext, nextLabel, re
     let dead = false;
     (async () => {
       try {
-        const callRes = await client.get(`qa2/calls/${assignment.call_id}`);
+        // A background prefetch from the PREVIOUS record's screen may already
+        // have this in flight (or done) — use it instead of paying for the
+        // round trip again. Consumed once, then dropped from the cache.
+        const pending = callPrefetchCache.get(assignment.call_id);
+        callPrefetchCache.delete(assignment.call_id);
+        const callData = pending ? await pending : (await client.get(`qa2/calls/${assignment.call_id}`)).data;
         if (dead) return;
-        setCall(callRes.data.call);
-        setLinked(callRes.data.linked);
-        setCustomerContext(callRes.data.customer_context || null);
-        setHangup(callRes.data.hangup || null);
+        if (!callData) throw new Error('not found');
+        setCall(callData.call);
+        setLinked(callData.linked);
+        setCustomerContext(callData.customer_context || null);
+        setHangup(callData.hangup || null);
 
         const evalRes = await client.post('qa2/evaluations', { assignment_id: assignment.id });
         if (dead) return;
@@ -191,6 +231,20 @@ export default function ReviewScreen({ assignment, onDone, onNext, nextLabel, re
     })();
     return () => { dead = true; if (saveTimer.current) clearTimeout(saveTimer.current); };
   }, [assignment.id, assignment.call_id]);
+
+  // Warm the NEXT record while this one is still being scored — once this
+  // record's own call has loaded (never competes with it for bandwidth), and
+  // only when the caller (QueueTab) can hand us a concrete next assignment.
+  // Read-only fetches only, see the module-level comment above.
+  useEffect(() => {
+    if (!call || !nextAssignment?.call_id) return;
+    prefetchCallData(nextAssignment.call_id);
+    const entry = callPrefetchCache.get(nextAssignment.call_id);
+    if (entry) entry.then(data => {
+      if (data?.call) prefetchAudio(data.call);
+      if (data?.linked) prefetchAudio(data.linked);
+    });
+  }, [call, nextAssignment?.call_id]);
 
   const setAnswer = (parameterId, patch) => {
     setAnswers(prev => {

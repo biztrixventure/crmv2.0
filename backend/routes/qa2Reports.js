@@ -27,6 +27,15 @@ const { isYes } = require('../utils/qa2Scoring');
 
 const LIVE_STATUSES = ['submitted', 'flagged'];
 
+// Every section below fetches at most this many rows and aggregates in Node —
+// there was no signal at all when a busy company/date-range quietly exceeded
+// the cap, so a manager reading "142 evaluations" had no way to know it might
+// really be 20,142. `truncated` below is cheap (no extra COUNT round trip):
+// hitting the cap exactly is itself the signal, so the frontend can say
+// "showing the most recent N — narrow your range for exact totals" instead of
+// silently presenting a partial number as complete.
+const capInfo = (rows, cap) => ({ truncated: (rows || []).length >= cap });
+
 async function requireViewer(req, res) {
   const scope = await resolveQa2Scope(req);
   if (!scope.managerAccess && !scope.isCompliance) { res.status(403).json({ error: 'Forbidden' }); return null; }
@@ -110,9 +119,10 @@ router.get('/reports/agent', asyncHandler(async (req, res) => {
   if (!scope) return;
   const { company_id, from, to } = req.query;
 
+  const AGENT_CAP = 75000;
   let q = supabaseAdmin.from('qa2_evaluation')
     .select('subject_user_id, company_id, final_score, result, autofail_result, submitted_at')
-    .in('status', LIVE_STATUSES).limit(20000);
+    .in('status', LIVE_STATUSES).order('submitted_at', { ascending: false }).limit(AGENT_CAP);
   const companyIds = scopedCompanyIds(scope);
   if (companyIds !== null) q = q.in('company_id', companyIds);
   if (company_id) q = q.eq('company_id', company_id);
@@ -145,7 +155,7 @@ router.get('/reports/agent', asyncHandler(async (req, res) => {
     .sort((x, y) => y.count - x.count);
   const daily = [...byDay.values()].map(d => ({ date: d.date, count: d.count, avg_score: d.count ? Math.round((d.score_sum / d.count) * 10) / 10 : null })).sort((x, y) => x.date.localeCompare(y.date));
 
-  res.json({ agents, daily });
+  res.json({ agents, daily, ...capInfo(data, AGENT_CAP) });
 }));
 
 // ── GET /qa2/reports/parameters — flag rate per question, across versions ──
@@ -155,9 +165,10 @@ router.get('/reports/parameters', asyncHandler(async (req, res) => {
   if (!scope) return;
   const { company_id, from, to } = req.query;
 
+  const PARAM_CAP = 75000;
   let q = supabaseAdmin.from('qa2_answer')
     .select('parameter_id, value_num, value_text, value_bool, is_na, qa2_parameter!inner(id, key, label, role, lineage_id), qa2_evaluation!inner(id, status, company_id, submitted_at)')
-    .in('qa2_evaluation.status', LIVE_STATUSES).limit(20000);
+    .in('qa2_evaluation.status', LIVE_STATUSES).limit(PARAM_CAP);
   const companyIds = scopedCompanyIds(scope);
   if (companyIds !== null) q = q.in('qa2_evaluation.company_id', companyIds);
   if (company_id) q = q.eq('qa2_evaluation.company_id', company_id);
@@ -185,7 +196,7 @@ router.get('/reports/parameters', asyncHandler(async (req, res) => {
     .map(p => ({ ...p, flag_rate: p.answered ? Math.round((p.flagged / p.answered) * 1000) / 10 : 0 }))
     .sort((x, y) => y.flag_rate - x.flag_rate);
 
-  res.json({ parameters });
+  res.json({ parameters, ...capInfo(data, PARAM_CAP) });
 }));
 
 // ── GET /qa2/reports/reviewers — volume, avg score given, listen time ──────
@@ -195,9 +206,10 @@ router.get('/reports/reviewers', asyncHandler(async (req, res) => {
   if (!scope) return;
   const { company_id, from, to } = req.query;
 
+  const REVIEWER_CAP = 75000;
   let q = supabaseAdmin.from('qa2_evaluation')
     .select('reviewer_id, company_id, final_score, status, active_seconds, superseded_by, submitted_at')
-    .in('status', [...LIVE_STATUSES, 'superseded']).limit(20000);
+    .in('status', [...LIVE_STATUSES, 'superseded']).order('submitted_at', { ascending: false }).limit(REVIEWER_CAP);
   const companyIds = scopedCompanyIds(scope);
   if (companyIds !== null) q = q.in('company_id', companyIds);
   if (company_id) q = q.eq('company_id', company_id);
@@ -217,14 +229,18 @@ router.get('/reports/reviewers', asyncHandler(async (req, res) => {
     byReviewer.set(e.reviewer_id, r);
   }
 
+  // Both depend only on reviewerIds, not on each other — was two sequential
+  // round trips, now one wait.
   const reviewerIds = [...byReviewer.keys()];
-  const { data: listens } = reviewerIds.length
-    ? await supabaseAdmin.from('qa2_listen_log').select('user_id, seconds_played').in('user_id', reviewerIds)
-    : { data: [] };
+  const [{ data: listens }, names] = await Promise.all([
+    reviewerIds.length
+      ? supabaseAdmin.from('qa2_listen_log').select('user_id, seconds_played').in('user_id', reviewerIds)
+      : Promise.resolve({ data: [] }),
+    nameMap(reviewerIds),
+  ]);
   const listenByUser = new Map();
   for (const l of (listens || [])) listenByUser.set(l.user_id, (listenByUser.get(l.user_id) || 0) + (l.seconds_played || 0));
 
-  const names = await nameMap(reviewerIds);
   const reviewers = [...byReviewer.values()]
     .map(r => ({
       reviewer_id: r.reviewer_id, name: names.get(r.reviewer_id) || 'Unknown', count: r.count,
@@ -235,7 +251,7 @@ router.get('/reports/reviewers', asyncHandler(async (req, res) => {
     }))
     .sort((x, y) => y.count - x.count);
 
-  res.json({ reviewers });
+  res.json({ reviewers, ...capInfo(data, REVIEWER_CAP) });
 }));
 
 // ── GET /qa2/reports/autofails ──────────────────────────────────────────────
@@ -245,10 +261,11 @@ router.get('/reports/autofails', asyncHandler(async (req, res) => {
   if (!scope) return;
   const { company_id, from, to } = req.query;
 
+  const AUTOFAIL_CAP = 3000;
   let q = supabaseAdmin.from('qa2_evaluation')
     .select('id, company_id, call_id, reviewer_id, subject_user_id, submitted_at, qa2_call(agent_user, qa2_method(label), companies(name))')
     .in('status', LIVE_STATUSES).eq('autofail_result', 'fail')
-    .order('submitted_at', { ascending: false }).limit(500);
+    .order('submitted_at', { ascending: false }).limit(AUTOFAIL_CAP);
   const companyIds = scopedCompanyIds(scope);
   if (companyIds !== null) q = q.in('company_id', companyIds);
   if (company_id) q = q.eq('company_id', company_id);
@@ -256,32 +273,35 @@ router.get('/reports/autofails', asyncHandler(async (req, res) => {
   const { data: evaluations, error } = await q;
   if (error) return res.status(500).json({ error: error.message });
 
+  // The answers query (needs evalIds) and the name lookup (needs the
+  // reviewer/subject ids already on `evaluations`) don't depend on each
+  // other — was two sequential round trips, now one wait.
   const evalIds = (evaluations || []).map(e => e.id);
-  let byParameter = [];
-  if (evalIds.length) {
-    const { data: answers } = await supabaseAdmin
-      .from('qa2_answer')
-      .select('evaluation_id, is_na, value_num, value_text, value_bool, qa2_parameter!inner(label, role, lineage_id)')
-      .in('evaluation_id', evalIds).eq('qa2_parameter.role', 'autofail');
-    const counts = new Map();
-    for (const a of (answers || [])) {
-      if (a.is_na || !isYes(a)) continue;
-      const key = a.qa2_parameter.lineage_id;
-      const entry = counts.get(key) || { lineage_id: key, label: a.qa2_parameter.label, count: 0 };
-      entry.count += 1;
-      counts.set(key, entry);
-    }
-    byParameter = [...counts.values()].sort((x, y) => y.count - x.count);
+  const [{ data: answers }, names] = await Promise.all([
+    evalIds.length
+      ? supabaseAdmin.from('qa2_answer')
+          .select('evaluation_id, is_na, value_num, value_text, value_bool, qa2_parameter!inner(label, role, lineage_id)')
+          .in('evaluation_id', evalIds).eq('qa2_parameter.role', 'autofail')
+      : Promise.resolve({ data: [] }),
+    nameMap((evaluations || []).flatMap(e => [e.reviewer_id, e.subject_user_id])),
+  ]);
+  const counts = new Map();
+  for (const a of (answers || [])) {
+    if (a.is_na || !isYes(a)) continue;
+    const key = a.qa2_parameter.lineage_id;
+    const entry = counts.get(key) || { lineage_id: key, label: a.qa2_parameter.label, count: 0 };
+    entry.count += 1;
+    counts.set(key, entry);
   }
+  const byParameter = [...counts.values()].sort((x, y) => y.count - x.count);
 
-  const names = await nameMap((evaluations || []).flatMap(e => [e.reviewer_id, e.subject_user_id]));
   const recent = (evaluations || []).slice(0, 50).map(e => ({
     evaluation_id: e.id, submitted_at: e.submitted_at,
     company: e.qa2_call?.companies?.name || '—', method: e.qa2_call?.qa2_method?.label || '—', agent: e.qa2_call?.agent_user || '—',
     reviewer: names.get(e.reviewer_id) || 'Unknown', subject: names.get(e.subject_user_id) || 'Unknown',
   }));
 
-  res.json({ total: (evaluations || []).length, by_parameter: byParameter, recent });
+  res.json({ total: (evaluations || []).length, by_parameter: byParameter, recent, ...capInfo(evaluations, AUTOFAIL_CAP) });
 }));
 
 // ── GET /qa2/reports/calibration — inter-rater variance summary ────────────
@@ -290,32 +310,35 @@ router.get('/reports/calibration', asyncHandler(async (req, res) => {
   const scope = await requireViewer(req, res);
   if (!scope) return;
 
+  // `id` is selected up front now — the old code re-fetched effectively the
+  // same rows a second time (assignmentsFull) just to get each row's id after
+  // already having everything else about it. One query does both jobs.
+  const CALIBRATION_CAP = 8000;
   const { data: assignments, error } = await supabaseAdmin
     .from('qa2_assignment')
-    .select('calibration_group_id, qa2_call(company_id, agent_user, qa2_method(label), companies(name))')
-    .not('calibration_group_id', 'is', null).limit(2000);
+    .select('id, calibration_group_id, qa2_call(company_id, agent_user, qa2_method(label), companies(name))')
+    .not('calibration_group_id', 'is', null).limit(CALIBRATION_CAP);
   if (error) return res.status(500).json({ error: error.message });
 
   const companyIds = scopedCompanyIds(scope);
   const inScope = (row) => companyIds === null || companyIds.includes(row.qa2_call?.company_id);
   const groupMeta = new Map();
+  const scopedAssignments = [];
   for (const row of (assignments || [])) {
     if (!inScope(row)) continue;
     if (!groupMeta.has(row.calibration_group_id)) groupMeta.set(row.calibration_group_id, row.qa2_call);
+    scopedAssignments.push(row);
   }
-  const groupIds = [...groupMeta.keys()];
-  if (!groupIds.length) return res.json({ groups: [], avg_variance: null });
+  if (!groupMeta.size) return res.json({ groups: [], avg_variance: null, ...capInfo(assignments, CALIBRATION_CAP) });
 
-  const { data: assignmentsFull } = await supabaseAdmin
-    .from('qa2_assignment').select('id, calibration_group_id').in('calibration_group_id', groupIds);
-  const assignmentIds = (assignmentsFull || []).map(a => a.id);
+  const assignmentIds = scopedAssignments.map(a => a.id);
   const { data: evaluations } = assignmentIds.length
     ? await supabaseAdmin.from('qa2_evaluation').select('assignment_id, final_score').in('assignment_id', assignmentIds).in('status', LIVE_STATUSES)
     : { data: [] };
   const scoreByAssignment = new Map((evaluations || []).filter(e => e.final_score != null).map(e => [e.assignment_id, Number(e.final_score)]));
 
   const scoresByGroup = new Map();
-  for (const a of (assignmentsFull || [])) {
+  for (const a of scopedAssignments) {
     const score = scoreByAssignment.get(a.id);
     if (score == null) continue;
     const arr = scoresByGroup.get(a.calibration_group_id) || [];
@@ -336,7 +359,7 @@ router.get('/reports/calibration', asyncHandler(async (req, res) => {
   }
   groups.sort((x, y) => (y.variance ?? -1) - (x.variance ?? -1));
 
-  res.json({ groups, avg_variance: varianceN ? Math.round((varianceSum / varianceN) * 10) / 10 : null });
+  res.json({ groups, avg_variance: varianceN ? Math.round((varianceSum / varianceN) * 10) / 10 : null, ...capInfo(assignments, CALIBRATION_CAP) });
 }));
 
 // ── GET /qa2/reports/coverage — how much recorded volume gets reviewed ─────
@@ -346,7 +369,9 @@ router.get('/reports/coverage', asyncHandler(async (req, res) => {
   if (!scope) return;
   const { company_id, from, to } = req.query;
 
-  let q = supabaseAdmin.from('qa2_call').select('id, company_id, method_id, qa_relevant, call_at, companies(name), qa2_method(label)').limit(20000);
+  const COVERAGE_CAP = 75000;
+  let q = supabaseAdmin.from('qa2_call').select('id, company_id, method_id, qa_relevant, call_at, companies(name), qa2_method(label)')
+    .order('call_at', { ascending: false }).limit(COVERAGE_CAP);
   const companyIds = scopedCompanyIds(scope);
   if (companyIds !== null) q = q.in('company_id', companyIds);
   if (company_id) q = q.eq('company_id', company_id);
@@ -354,14 +379,14 @@ router.get('/reports/coverage', asyncHandler(async (req, res) => {
   const { data: calls, error } = await q;
   if (error) return res.status(500).json({ error: error.message });
 
+  // Both only depend on callIds, not on each other — was two sequential
+  // round trips, now one wait.
   const callIds = (calls || []).map(c => c.id);
-  const { data: assignments } = callIds.length
-    ? await supabaseAdmin.from('qa2_assignment').select('call_id').in('call_id', callIds)
-    : { data: [] };
+  const [{ data: assignments }, { data: evaluations }] = await Promise.all([
+    callIds.length ? supabaseAdmin.from('qa2_assignment').select('call_id').in('call_id', callIds) : Promise.resolve({ data: [] }),
+    callIds.length ? supabaseAdmin.from('qa2_evaluation').select('call_id').in('call_id', callIds).in('status', [...LIVE_STATUSES, 'superseded']) : Promise.resolve({ data: [] }),
+  ]);
   const assignedCallIds = new Set((assignments || []).map(a => a.call_id));
-  const { data: evaluations } = callIds.length
-    ? await supabaseAdmin.from('qa2_evaluation').select('call_id').in('call_id', callIds).in('status', [...LIVE_STATUSES, 'superseded'])
-    : { data: [] };
   const scoredCallIds = new Set((evaluations || []).map(e => e.call_id));
 
   const rows = new Map();
@@ -382,7 +407,7 @@ router.get('/reports/coverage', asyncHandler(async (req, res) => {
     .map(r => ({ ...r, coverage_pct: r.total ? Math.round((r.assigned / r.total) * 1000) / 10 : 0 }))
     .sort((x, y) => x.company.localeCompare(y.company) || x.method.localeCompare(y.method));
 
-  res.json({ rows: result });
+  res.json({ rows: result, ...capInfo(calls, COVERAGE_CAP) });
 }));
 
 module.exports = router;

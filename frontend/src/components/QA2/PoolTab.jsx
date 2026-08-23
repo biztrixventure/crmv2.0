@@ -74,7 +74,41 @@ export default function PoolTab() {
     } finally { setClaimingId(null); }
   };
 
-  if (open) return <ReviewScreen assignment={open} onDone={() => { setOpen(null); load(); }} />;
+  // Pool's "next" can't just index into the local list the way Queue's does —
+  // these rows are still unclaimed and shared with every other agent, so the
+  // next one has to be claimed for real (a network round trip), and it may
+  // already be gone by the time we ask. Walk the locally-known rows, claiming
+  // each in turn until one succeeds; a lost race just drops that row and
+  // tries the next without bothering the agent with it. Only surface an error
+  // if the whole local list turns out to be already taken.
+  const claimNext = async () => {
+    for (const candidate of rows) {
+      try {
+        const r = await client.post(`qa2/assignments/${candidate.id}/claim`);
+        setRows(prev => prev.filter(a => a.id !== candidate.id));
+        setOpen(r.data.assignment);
+        return;
+      } catch {
+        setRows(prev => prev.filter(a => a.id !== candidate.id));
+      }
+    }
+    toast.error('Everything in view just got claimed — refreshing the pool');
+    setOpen(null);
+    load();
+  };
+
+  if (open) {
+    return (
+      <ReviewScreen
+        key={open.id}
+        assignment={open}
+        remaining={rows.length}
+        nextLabel={rows.length > 0 ? 'Next record' : null}
+        onNext={rows.length > 0 ? claimNext : null}
+        onDone={() => { setOpen(null); load(); }}
+      />
+    );
+  }
 
   // ACTIVE FILTERS, VISIBLY. Column filters live in the header menus and persist
   // per user, so a filter set yesterday still applies today with nothing on

@@ -13,6 +13,31 @@ import client from '../../api/client';
 import ThemedSelect from '../UI/Select';
 import { Panel, SectionHeader, EmptyState, Loading, IconButton, Toggle } from '../UI/kit';
 
+// Chip-toggle multi-select — replaces a single-value <ThemedSelect> wherever
+// a manager needs to pick several agents/companies/methods at once instead
+// of repeating one grant at a time.
+function ChipMultiSelect({ label, items, selected, onToggle, getId, getLabel }) {
+  return (
+    <div className="flex-1 min-w-[200px]">
+      <p className="text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>{label}</p>
+      <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto p-1 rounded-lg" style={{ border: '1px solid var(--color-border)' }}>
+        {items.length === 0 && <span className="text-xs px-1" style={{ color: 'var(--color-text-tertiary)' }}>None available</span>}
+        {items.map(item => {
+          const id = getId(item);
+          const on = selected.has(id);
+          return (
+            <button key={id} type="button" onClick={() => onToggle(id)}
+              className="px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors"
+              style={{ background: on ? 'var(--color-primary-600)' : 'var(--color-bg-secondary)', color: on ? '#fff' : 'var(--color-text)' }}>
+              {getLabel(item)}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 const SAMPLING_MODES = [
   { value: 'full_coverage', label: 'Full coverage' },
   { value: 'per_agent_per_day', label: 'Per agent, per day' },
@@ -30,10 +55,13 @@ export default function TeamTab({ scope }) {
   const [targets, setTargets] = useState(null);
   const [loadError, setLoadError] = useState(null);
 
-  const [pickAgentCo, setPickAgentCo] = useState('');
-  const [pickCompany, setPickCompany] = useState('');
-  const [pickAgentMethod, setPickAgentMethod] = useState('');
-  const [pickMethod, setPickMethod] = useState('');
+  // Multi-select — a manager can grant one company/method to their whole
+  // team, or several to several agents, in one submit instead of repeating a
+  // single-pair pick every time.
+  const [pickAgentsCo, setPickAgentsCo] = useState(new Set());
+  const [pickCompanies, setPickCompanies] = useState(new Set());
+  const [pickAgentsMethod, setPickAgentsMethod] = useState(new Set());
+  const [pickMethods, setPickMethods] = useState(new Set());
 
   const [ruleCompany, setRuleCompany] = useState('');
   const [ruleMethod, setRuleMethod] = useState('');
@@ -74,11 +102,18 @@ export default function TeamTab({ scope }) {
   const nameForCompany = (id) => companies.find(c => c.id === id)?.name || id;
   const nameForMethod = (id) => methods.find(m => m.id === id)?.label || id;
 
+  const toggleInSet = (setter) => (id) => setter(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+
   const grantCompany = async () => {
-    if (!pickAgentCo || !pickCompany) return toast.error('Pick an agent and a company');
+    if (!pickAgentsCo.size || !pickCompanies.size) return toast.error('Pick at least one agent and one company');
     try {
-      await client.post('qa2/team/agent-companies', { agent_id: pickAgentCo, company_id: pickCompany });
-      toast.success('Company granted'); setPickCompany(''); load();
+      const r = await client.post('qa2/team/agent-companies', { agent_ids: [...pickAgentsCo], company_ids: [...pickCompanies] });
+      toast.success(`Granted ${r.data.granted} of ${r.data.attempted} (rest already existed)`);
+      setPickAgentsCo(new Set()); setPickCompanies(new Set()); load();
     } catch (e) { toast.error(e.response?.data?.error || 'Could not grant company'); }
   };
   const revokeCompany = async (agentId, companyId) => {
@@ -87,10 +122,11 @@ export default function TeamTab({ scope }) {
   };
 
   const grantMethod = async () => {
-    if (!pickAgentMethod || !pickMethod) return toast.error('Pick an agent and a method');
+    if (!pickAgentsMethod.size || !pickMethods.size) return toast.error('Pick at least one agent and one method');
     try {
-      await client.post('qa2/team/agent-methods', { agent_id: pickAgentMethod, method_id: pickMethod });
-      toast.success('Method granted'); setPickMethod(''); load();
+      const r = await client.post('qa2/team/agent-methods', { agent_ids: [...pickAgentsMethod], method_ids: [...pickMethods] });
+      toast.success(`Granted ${r.data.granted} of ${r.data.attempted} (rest already existed)`);
+      setPickAgentsMethod(new Set()); setPickMethods(new Set()); load();
     } catch (e) { toast.error(e.response?.data?.error || 'Could not grant method'); }
   };
   const revokeMethod = async (agentId, methodId) => {
@@ -157,20 +193,14 @@ export default function TeamTab({ scope }) {
             </div>
           )}
         {agents && agents.length > 0 && (
-          <div className="flex flex-wrap items-center gap-2 pt-2" style={{ borderTop: '1px solid var(--color-border)' }}>
-            <div className="flex-1 min-w-[160px]">
-              <ThemedSelect value={pickAgentCo} onChange={e => setPickAgentCo(e.target.value)}>
-                <option value="">Pick an agent…</option>
-                {agents.map(a => <option key={a.agent_id} value={a.agent_id}>{a.name}</option>)}
-              </ThemedSelect>
-            </div>
-            <div className="flex-1 min-w-[160px]">
-              <ThemedSelect value={pickCompany} onChange={e => setPickCompany(e.target.value)}>
-                <option value="">Pick a company…</option>
-                {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </ThemedSelect>
-            </div>
-            <button className="btn btn-primary text-sm" onClick={grantCompany}>Grant</button>
+          <div className="flex flex-wrap items-end gap-3 pt-2" style={{ borderTop: '1px solid var(--color-border)' }}>
+            <ChipMultiSelect label={`Agents${pickAgentsCo.size ? ` (${pickAgentsCo.size})` : ''}`}
+              items={agents} selected={pickAgentsCo} onToggle={toggleInSet(setPickAgentsCo)}
+              getId={a => a.agent_id} getLabel={a => a.name} />
+            <ChipMultiSelect label={`Companies${pickCompanies.size ? ` (${pickCompanies.size})` : ''}`}
+              items={companies} selected={pickCompanies} onToggle={toggleInSet(setPickCompanies)}
+              getId={c => c.id} getLabel={c => c.name} />
+            <button className="btn btn-primary text-sm flex-shrink-0" onClick={grantCompany}>Grant</button>
           </div>
         )}
       </Panel>
@@ -190,20 +220,14 @@ export default function TeamTab({ scope }) {
             </div>
           )}
         {agents && agents.length > 0 && (
-          <div className="flex flex-wrap items-center gap-2 pt-2" style={{ borderTop: '1px solid var(--color-border)' }}>
-            <div className="flex-1 min-w-[160px]">
-              <ThemedSelect value={pickAgentMethod} onChange={e => setPickAgentMethod(e.target.value)}>
-                <option value="">Pick an agent…</option>
-                {agents.map(a => <option key={a.agent_id} value={a.agent_id}>{a.name}</option>)}
-              </ThemedSelect>
-            </div>
-            <div className="flex-1 min-w-[160px]">
-              <ThemedSelect value={pickMethod} onChange={e => setPickMethod(e.target.value)}>
-                <option value="">Pick a method…</option>
-                {methods.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
-              </ThemedSelect>
-            </div>
-            <button className="btn btn-primary text-sm" onClick={grantMethod}>Grant</button>
+          <div className="flex flex-wrap items-end gap-3 pt-2" style={{ borderTop: '1px solid var(--color-border)' }}>
+            <ChipMultiSelect label={`Agents${pickAgentsMethod.size ? ` (${pickAgentsMethod.size})` : ''}`}
+              items={agents} selected={pickAgentsMethod} onToggle={toggleInSet(setPickAgentsMethod)}
+              getId={a => a.agent_id} getLabel={a => a.name} />
+            <ChipMultiSelect label={`Methods${pickMethods.size ? ` (${pickMethods.size})` : ''}`}
+              items={methods} selected={pickMethods} onToggle={toggleInSet(setPickMethods)}
+              getId={m => m.id} getLabel={m => m.label} />
+            <button className="btn btn-primary text-sm flex-shrink-0" onClick={grantMethod}>Grant</button>
           </div>
         )}
       </Panel>

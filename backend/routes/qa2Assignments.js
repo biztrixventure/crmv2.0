@@ -386,8 +386,32 @@ router.get('/calls/:id', asyncHandler(async (req, res) => {
     linked = data || null;
   }
 
-  const names = await nameMap([call.agent_user_id, linked?.agent_user_id]);
-  const closerDispos = await closerDispoMap([call.id, linked?.id]);
+  // None of these four depend on each other's result — was four sequential
+  // round trips stacked in the response the Review screen is waiting on,
+  // now one wait for the slowest of them. Error handling is unchanged: the
+  // two best-effort lookups still swallow their own failure and log it
+  // rather than breaking the screen — only now inline in the Promise.all
+  // instead of a separate try/catch block each.
+  const [names, closerDispos, customerContext, hangup] = await Promise.all([
+    nameMap([call.agent_user_id, linked?.agent_user_id]),
+    closerDispoMap([call.id, linked?.id]),
+    resolveCustomerContext(call).catch(e => {
+      logger.warn('QA2_CALLS', `customer context lookup failed for ${call.id}: ${e.message}`);
+      return null;
+    }),
+    // Who hung up — reuses dialerBoxes.js's own hangup annotator (v1's exact
+    // mechanism: VICIdial's phone_number_log, matched by agent+time window),
+    // never reimplemented.
+    annotateHangups([{ start_time: call.call_at, agent_user: call.agent_user }], call.customer_phone)
+      .then(([row]) => row ? {
+        label: row.hangup_label || null, reason: row.hangup_reason || null,
+        call_status: row.call_status || null, unavailable: !!row.hangup_unavailable,
+      } : null)
+      .catch(e => {
+        logger.warn('QA2_CALLS', `hangup lookup failed for ${call.id}: ${e.message}`);
+        return null;
+      }),
+  ]);
   call.closer_dispo = closerDispos.get(call.id)?.dispo || null;
   call.closer_dispo_source = closerDispos.get(call.id)?.source || null;
   if (linked) linked.closer_dispo = closerDispos.get(linked.id)?.dispo || null;
@@ -397,26 +421,6 @@ router.get('/calls/:id', asyncHandler(async (req, res) => {
     linked.agent_name = names.get(linked.agent_user_id) || linked.agent_user || null;
     linked.company_name = linked.companies?.name || null;
   }
-
-  // Best-effort — a lookup failure or "nothing found" must never break the
-  // Review screen itself, it just means the Customer/Vehicle panel is empty.
-  let customerContext = null;
-  try { customerContext = await resolveCustomerContext(call); }
-  catch (e) { logger.warn('QA2_CALLS', `customer context lookup failed for ${call.id}: ${e.message}`); }
-
-  // Who hung up — reuses dialerBoxes.js's own hangup annotator (v1's exact
-  // mechanism: VICIdial's phone_number_log, matched by agent+time window),
-  // never reimplemented. Best-effort for the same reason as customer_context.
-  let hangup = null;
-  try {
-    const [row] = await annotateHangups([{ start_time: call.call_at, agent_user: call.agent_user }], call.customer_phone);
-    if (row) {
-      hangup = {
-        label: row.hangup_label || null, reason: row.hangup_reason || null,
-        call_status: row.call_status || null, unavailable: !!row.hangup_unavailable,
-      };
-    }
-  } catch (e) { logger.warn('QA2_CALLS', `hangup lookup failed for ${call.id}: ${e.message}`); }
 
   res.json({ call, linked, customer_context: customerContext, hangup });
 }));

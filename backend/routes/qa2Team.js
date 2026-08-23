@@ -83,31 +83,40 @@ router.get('/agent-companies', asyncHandler(async (req, res) => {
   res.json({ grants: data || [] });
 }));
 
+// Accepts either the original single pair ({agent_id, company_id}) or a bulk
+// cross-product ({agent_ids: [...], company_ids: [...]}) — a manager granting
+// one company to their whole team, or several companies to several agents at
+// once, in a single call. Invalid entries (not this manager's agent, or a
+// company outside their own scope) are silently dropped from the batch rather
+// than failing the whole request — a multi-select naturally mixes valid
+// picks, so an all-or-nothing 403 would be the wrong failure mode here.
 router.post('/agent-companies', asyncHandler(async (req, res) => {
   const scope = await requireManager(req, res);
   if (!scope) return;
-  const { agent_id, company_id } = req.body || {};
-  if (!agent_id || !company_id) return res.status(400).json({ error: 'agent_id and company_id required' });
+  const b = req.body || {};
+  const agentIds = [...new Set(Array.isArray(b.agent_ids) ? b.agent_ids.filter(Boolean) : (b.agent_id ? [b.agent_id] : []))];
+  const companyIds = [...new Set(Array.isArray(b.company_ids) ? b.company_ids.filter(Boolean) : (b.company_id ? [b.company_id] : []))];
+  if (!agentIds.length || !companyIds.length) return res.status(400).json({ error: 'Pick at least one agent and one company' });
 
-  if (!(await agentBelongsToManager(agent_id, req.user.id))) {
-    return res.status(403).json({ error: 'This agent is not on your team' });
-  }
-  // Cannot sub-assign a company the manager doesn't themselves have —
-  // qa2Scope's agent-side intersection logic depends on this invariant.
-  if (!companyInScope(scope, company_id)) {
-    return res.status(403).json({ error: 'You are not assigned to this company' });
-  }
+  const { data: team } = await supabaseAdmin.from('qa2_team_member').select('agent_id').eq('manager_id', req.user.id).in('agent_id', agentIds);
+  const validAgentIds = new Set((team || []).map(t => t.agent_id));
+  const validCompanyIds = companyIds.filter(c => companyInScope(scope, c));
 
-  const { data: row, error } = await supabaseAdmin
+  const rows = [];
+  for (const agentId of agentIds) {
+    if (!validAgentIds.has(agentId)) continue;
+    for (const companyId of validCompanyIds) rows.push({ agent_id: agentId, company_id: companyId, assigned_by: req.user.id });
+  }
+  if (!rows.length) return res.status(400).json({ error: 'None of the selected agents/companies are valid for your team' });
+
+  const { data, error } = await supabaseAdmin
     .from('qa2_agent_company')
-    .insert({ agent_id, company_id, assigned_by: req.user.id })
-    .select().single();
-  if (error) {
-    if (/duplicate key|unique/i.test(error.message)) return res.status(409).json({ error: 'Already granted' });
-    return res.status(500).json({ error: error.message });
-  }
-  await logGrant('agent_company', 'grant', agent_id, company_id, req.user.id, null);
-  res.status(201).json({ grant: row });
+    .upsert(rows, { onConflict: 'agent_id,company_id', ignoreDuplicates: true })
+    .select();
+  if (error) return res.status(500).json({ error: error.message });
+
+  await Promise.all((data || []).map(r => logGrant('agent_company', 'grant', r.agent_id, r.company_id, req.user.id, null)));
+  res.status(201).json({ granted: (data || []).length, attempted: rows.length });
 }));
 
 router.delete('/agent-companies/:agentId/:companyId', asyncHandler(async (req, res) => {
@@ -158,28 +167,37 @@ router.get('/agent-methods', asyncHandler(async (req, res) => {
   res.json({ grants: data || [] });
 }));
 
+// Same bulk shape as /agent-companies above — single pair or a full
+// {agent_ids, method_ids} cross-product in one call, so a manager can put
+// one method on their whole team, or several methods on several agents,
+// without repeating the grant one pair at a time.
 router.post('/agent-methods', asyncHandler(async (req, res) => {
   const scope = await requireManager(req, res);
   if (!scope) return;
-  const { agent_id, method_id } = req.body || {};
-  if (!agent_id || !method_id) return res.status(400).json({ error: 'agent_id and method_id required' });
-  if (!(await agentBelongsToManager(agent_id, req.user.id))) {
-    return res.status(403).json({ error: 'This agent is not on your team' });
-  }
-  if (!methodInScope(scope, method_id)) {
-    return res.status(403).json({ error: 'You do not have access to this method' });
-  }
+  const b = req.body || {};
+  const agentIds = [...new Set(Array.isArray(b.agent_ids) ? b.agent_ids.filter(Boolean) : (b.agent_id ? [b.agent_id] : []))];
+  const methodIds = [...new Set(Array.isArray(b.method_ids) ? b.method_ids.filter(Boolean) : (b.method_id ? [b.method_id] : []))];
+  if (!agentIds.length || !methodIds.length) return res.status(400).json({ error: 'Pick at least one agent and one method' });
 
-  const { data: row, error } = await supabaseAdmin
-    .from('qa2_agent_method')
-    .insert({ agent_id, method_id })
-    .select().single();
-  if (error) {
-    if (/duplicate key|unique/i.test(error.message)) return res.status(409).json({ error: 'Already granted' });
-    return res.status(500).json({ error: error.message });
+  const { data: team } = await supabaseAdmin.from('qa2_team_member').select('agent_id').eq('manager_id', req.user.id).in('agent_id', agentIds);
+  const validAgentIds = new Set((team || []).map(t => t.agent_id));
+  const validMethodIds = methodIds.filter(m => methodInScope(scope, m));
+
+  const rows = [];
+  for (const agentId of agentIds) {
+    if (!validAgentIds.has(agentId)) continue;
+    for (const methodId of validMethodIds) rows.push({ agent_id: agentId, method_id: methodId });
   }
-  await logGrant('agent_method', 'grant', agent_id, method_id, req.user.id, null);
-  res.status(201).json({ grant: row });
+  if (!rows.length) return res.status(400).json({ error: 'None of the selected agents/methods are valid for your team' });
+
+  const { data, error } = await supabaseAdmin
+    .from('qa2_agent_method')
+    .upsert(rows, { onConflict: 'agent_id,method_id', ignoreDuplicates: true })
+    .select();
+  if (error) return res.status(500).json({ error: error.message });
+
+  await Promise.all((data || []).map(r => logGrant('agent_method', 'grant', r.agent_id, r.method_id, req.user.id, null)));
+  res.status(201).json({ granted: (data || []).length, attempted: rows.length });
 }));
 
 router.delete('/agent-methods/:agentId/:methodId', asyncHandler(async (req, res) => {
@@ -377,20 +395,22 @@ router.get('/day-calls', asyncHandler(async (req, res) => {
     : { data: [] };
   const assignByCall = new Map((assignments || []).map(a => [a.call_id, a]));
 
-  const names = await nameMap([
-    ...(calls || []).map(c => c.agent_user_id),
-    ...(assignments || []).map(a => a.assigned_to),
+  // Names need assignments (assigned_to) already resolved above, so this can't
+  // start until assignByCall exists — but the closer-dispo RPC only needs
+  // callIds, independent of both. Run the two remaining lookups together.
+  const [names, closerDispos] = await Promise.all([
+    nameMap([
+      ...(calls || []).map(c => c.agent_user_id),
+      ...(assignments || []).map(a => a.assigned_to),
+    ]),
+    // What the CLOSER made of each transfer (mig 277). A TRA row is the fronter's
+    // leg and its own dispo is 'XFER', which tells a reviewer nothing about how
+    // the lead went — this is the column that does. Best-effort: the day list
+    // must still render if the lookup fails.
+    supabaseAdmin.rpc('app_qa2_closer_dispo', { p_call_ids: callIds })
+      .then(({ data: cd }) => new Map((cd || []).map(r => [r.call_id, r.closer_dispo])))
+      .catch(e => { logger.warn('QA2_TEAM', `closer dispo lookup failed: ${e.message}`); return new Map(); }),
   ]);
-
-  // What the CLOSER made of each transfer (mig 277). A TRA row is the fronter's
-  // leg and its own dispo is 'XFER', which tells a reviewer nothing about how
-  // the lead went — this is the column that does. Best-effort: the day list
-  // must still render if the lookup fails.
-  let closerDispos = new Map();
-  try {
-    const { data: cd } = await supabaseAdmin.rpc('app_qa2_closer_dispo', { p_call_ids: callIds });
-    closerDispos = new Map((cd || []).map(r => [r.call_id, r.closer_dispo]));
-  } catch (e) { logger.warn('QA2_TEAM', `closer dispo lookup failed: ${e.message}`); }
 
   const rows = (calls || []).map(c => {
     const a = assignByCall.get(c.id);

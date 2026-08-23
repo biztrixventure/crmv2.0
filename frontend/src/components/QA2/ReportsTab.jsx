@@ -57,6 +57,20 @@ const SECTIONS = [
   { key: 'coverage', label: 'Coverage', icon: Layers },
 ];
 
+// The backend caps every report query and now says so honestly instead of
+// silently dropping rows past the cap — this is the one place that signal
+// surfaces, so a manager never mistakes a partial number for the real one.
+function TruncatedBanner({ truncated }) {
+  if (!truncated) return null;
+  return (
+    <Panel tone="inset">
+      <p className="text-xs" style={{ color: 'var(--color-warning-600)' }}>
+        Showing the most recent rows up to this report's cap — narrow the date range or pick a company for exact totals.
+      </p>
+    </Panel>
+  );
+}
+
 function ExportButton({ rows, headers, filename, mapRow }) {
   if (!rows || !rows.length) return null;
   return (
@@ -248,6 +262,7 @@ function AgentSection({ params }) {
 
   return (
     <div className="space-y-3">
+      <TruncatedBanner truncated={data.truncated} />
       {data.daily.length > 0 && (
         <Panel><SectionHeader level="section" title="Daily average score" /><div className="h-48"><Bar data={chartData} options={chartOptions} /></div></Panel>
       )}
@@ -308,6 +323,7 @@ function ParametersSection({ params }) {
 
   return (
     <div className="space-y-3">
+      <TruncatedBanner truncated={data.truncated} />
       {top.length > 0 && (
         <Panel><SectionHeader level="section" title="Top flagged parameters" subtitle="How often each question was answered negatively (autofail/penalty Yes, or scored No)." />
           <div style={{ height: Math.max(180, top.length * 28) }}><Bar data={chartData} options={chartOptions} /></div>
@@ -351,6 +367,8 @@ function ReviewersSection({ params }) {
   const fmtMin = (s) => `${Math.round(s / 60)}m`;
 
   return (
+    <div className="space-y-3">
+    <TruncatedBanner truncated={data.truncated} />
     <Panel pad="none">
       <div className="flex items-center justify-between" style={{ padding: '12px 16px 0' }}>
         <SectionHeader level="section" title="By reviewer" subtitle="Listen time comes from qa2_listen_log — did they actually listen before scoring." />
@@ -380,6 +398,7 @@ function ReviewersSection({ params }) {
         </TableScroll>
       )}
     </Panel>
+    </div>
   );
 }
 
@@ -390,6 +409,7 @@ function AutofailsSection({ params }) {
 
   return (
     <div className="space-y-3">
+      <TruncatedBanner truncated={data.truncated} />
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
         <KpiTile icon={ShieldAlert} label="Total autofails" value={data.total} tone="danger" />
         <KpiTile icon={ListChecks} label="Distinct triggers" value={data.by_parameter.length} tone="muted" />
@@ -443,6 +463,7 @@ function CalibrationSection({ params }) {
 
   return (
     <div className="space-y-3">
+      <TruncatedBanner truncated={data.truncated} />
       <KpiTile icon={ScaleIcon} label="Average variance" value={data.avg_variance ?? '—'} sub="points, across scored groups" tone="muted" />
       <Panel pad="none">
         <div className="flex items-center justify-between" style={{ padding: '12px 16px 0' }}>
@@ -479,6 +500,8 @@ function CoverageSection({ params }) {
   if (!data) return <Loading variant="cards" />;
 
   return (
+    <div className="space-y-3">
+    <TruncatedBanner truncated={data.truncated} />
     <Panel pad="none">
       <div className="flex items-center justify-between" style={{ padding: '12px 16px 0' }}>
         <SectionHeader level="section" title="Sampling coverage" subtitle="How much of the recorded call volume actually entered the pool." />
@@ -504,6 +527,7 @@ function CoverageSection({ params }) {
         </TableScroll>
       )}
     </Panel>
+    </div>
   );
 }
 

@@ -124,6 +124,7 @@ export default function QueueTab() {
       <ReviewScreen
         key={open.id}
         assignment={open}
+        nextAssignment={next}
         remaining={remaining}
         nextLabel={next ? 'Next record' : null}
         onNext={next ? () => setOpen(next) : null}
