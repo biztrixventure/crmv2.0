@@ -34,7 +34,12 @@ const full = 'id, company_id, user_id, employee_no, first_name, last_name, work_
   + 'phone, date_of_birth, address, emergency_contact, department_id, position_id, manager_employee_id, '
   + 'hire_date, termination_date, employment_type, status, base_salary, pay_frequency, currency, notes, '
   + 'created_at, updated_at, '
-  + 'hr_departments(id, name), hr_positions(id, title)';
+  // hr_departments MUST be disambiguated by constraint name. There are TWO
+  // foreign keys between these tables -- hr_employees.department_id -> department,
+  // and hr_departments.head_employee_id -> employee (the department head) -- so a
+  // bare `hr_departments(...)` embed fails with "more than one relationship was
+  // found". hr_positions needs no hint: it has only the one.
+  + 'hr_departments!hr_employees_department_id_fkey(id, name), hr_positions(id, title)';
 
 async function nextEmployeeNo(companyId) {
   const { data } = await supabaseAdmin
