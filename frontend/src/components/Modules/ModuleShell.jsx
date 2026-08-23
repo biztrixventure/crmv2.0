@@ -136,7 +136,10 @@ export default function ModuleShell({
         {showPicker && (
           <div className="flex items-center gap-2" style={{ minWidth: 210 }}>
             <Building2 size={14} style={{ color: 'var(--color-text-tertiary)' }} />
-            <ThemedSelect value={companyId} onChange={e => pickCompany(e.target.value)}>
+            {/* The server resolves a company when none was asked for -- a
+                designation points somewhere the user is not a member of. Show
+                THAT, not an empty box, or the picker disagrees with the page. */}
+            <ThemedSelect value={companyId || scope?.company_id || ''} onChange={e => pickCompany(e.target.value)}>
               <option value="">Choose a company...</option>
               {scope.companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </ThemedSelect>

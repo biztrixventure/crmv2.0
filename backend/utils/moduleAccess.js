@@ -153,6 +153,28 @@ const moduleCompanies = async (req) => {
   return [...mine, ...(data || [])].sort((a, b) => String(a.name).localeCompare(String(b.name)));
 };
 
+// Where to land when the caller named no company.
+//
+// NOT simply their own company. A designation scoped to Wavetech is the whole
+// reason that person is in the module; defaulting to the 1-Vertex they happen to
+// be a member of drops them into a company where the designation does not apply,
+// so they see only their base role grants and the page tells an HR manager they
+// have no employee record. Measured on live data before this rule: a compliance
+// manager designated for Wavetech landed on 1-Vertex with leave.request and
+// nothing else.
+//
+// So: their own company only if the designation reaches it (or there is no
+// scope at all, the mig 290 meaning). Otherwise the first company the operator
+// actually named. The picker still offers both, and the shell remembers the
+// last choice, so this only decides the FIRST open.
+async function defaultCompanyId(req, own) {
+  const mod = req.moduleKey;
+  const scope = mod ? await designatedCompanies(req.user.id, mod) : [];
+  if (own && (scope.length === 0 || scope.includes(own))) return own;
+  if (scope.length) return scope[0];
+  return own || null;
+}
+
 // Which company a LIST request reads. An unreachable ?company_id degrades to
 // the caller's own company rather than 403-ing -- a stale company_id in a
 // bookmark should degrade, not break, which is what /sales and /transfers do.
@@ -161,12 +183,7 @@ const readCompanyId = async (req) => {
   const own   = req.user?.company_id || null;
 
   if (isCrossCompany(req) || await isSuperAdmin(req.user.id)) return asked || own || null;
-  if (!asked) {
-    if (own) return own;
-    // No company of their own, but a designation may still name one.
-    const scope = req.moduleKey ? await designatedCompanies(req.user.id, req.moduleKey) : [];
-    return scope[0] || null;
-  }
+  if (!asked) return defaultCompanyId(req, own);
   return (await mayUseCompany(req, asked)) ? asked : own;
 };
 
@@ -179,11 +196,8 @@ const writeCompanyId = async (req) => {
   const own   = req.user?.company_id || null;
 
   if (isCrossCompany(req) || await isSuperAdmin(req.user.id)) return asked || own || null;
-  if (!asked || asked === own) {
-    if (own) return own;
-    const scope = req.moduleKey ? await designatedCompanies(req.user.id, req.moduleKey) : [];
-    return scope[0] || null;
-  }
+  if (!asked) return defaultCompanyId(req, own);
+  if (asked === own) return own;
   return (await mayUseCompany(req, asked)) ? asked : own;
 };
 

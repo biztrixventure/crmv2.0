@@ -18,6 +18,7 @@ import ThemedSelect from '../../components/UI/Select';
 import SearchSelect from '../../components/UI/SearchSelect';
 import { Btn, StatusPill, ModuleModal } from '../../components/Modules/ModuleUI';
 import { useLeaveRequests } from '../../hooks/useLeaveRequests';
+import { needsOwnEmployeeRecord } from '../../utils/hrScope';
 import { useEmployees } from '../../hooks/useEmployees';
 import { fmtNumber, fmtDate, todayISO } from '../../utils/money';
 
@@ -95,14 +96,21 @@ export default function LeavePage({ scope }) {
         actions={
           <div className="flex items-center gap-2">
             {canManageTypes && <Btn icon={Settings2} onClick={() => setConfiguring(true)}>Leave types</Btn>}
-            <Btn variant="primary" icon={Plus} onClick={() => setRequesting(true)}>Request leave</Btn>
+            {/* Requesting needs an employee record to attach the request to --
+                unless you can file on someone else's behalf. Offering the button
+                without either only produces a 400 after the form is filled in. */}
+            {(myEmployeeId || canManageTypes) && (
+              <Btn variant="primary" icon={Plus} onClick={() => setRequesting(true)}>Request leave</Btn>
+            )}
           </div>
         } />
 
       {error && <Alert type="error">{error}</Alert>}
       {notice && <Alert type={notice.type} onDismiss={() => setNotice(null)}>{notice.text}</Alert>}
 
-      {!myEmployeeId && (
+      {/* Self-service audience only. An HR manager administering this company
+          has no employee record here and does not need one. */}
+      {needsOwnEmployeeRecord(scope) && (
         <Alert type="info">
           You have no employee record in this company yet, so you cannot request leave.
           Ask HR to create one and link it to your login.

@@ -10,6 +10,7 @@
 import { Users, CalendarDays, CalendarCheck, Banknote, ClipboardList, IdCard } from 'lucide-react';
 import ModuleShell from '../components/Modules/ModuleShell';
 import { Alert } from '../components/UI';
+import { needsOwnEmployeeRecord } from '../utils/hrScope';
 import EmployeeDirectory from '../pages/hr/EmployeeDirectory';
 import AttendancePage from '../pages/hr/AttendancePage';
 import LeavePage from '../pages/hr/LeavePage';
@@ -28,10 +29,10 @@ const buildTabs = (p) => [
 // looking at someone else's company legitimately has no record of their own,
 // so this only fires for people whose access IS the self-service kind.
 const banner = (scope) => {
-  const p = scope.permissions || {};
-  const selfServiceOnly = !scope.employee
-    && !p['hr.employees.manage'] && !p['hr.payroll.manage'] && !p['hr.reviews.manage'];
-  if (!selfServiceOnly) return null;
+  // Only the self-service audience. An HR manager with no employee record is
+  // normal -- especially in a company they were DESIGNATED into rather than
+  // employed by -- and telling them to "ask HR" when they are HR is nonsense.
+  if (!needsOwnEmployeeRecord(scope)) return null;
   return (
     <Alert type="info" dismissible={false} className="mb-4">
       You do not have an employee record in this company yet, so your attendance, leave, payslips and review
