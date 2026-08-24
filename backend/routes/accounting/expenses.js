@@ -173,7 +173,7 @@ router.post('/', asyncHandler(async (req, res) => {
     employee_id:  employee?.id || null,
     expense_date: req.body?.expense_date || new Date().toISOString().slice(0, 10),
     amount,
-    currency:     req.body?.currency || 'USD',
+    currency:     req.body?.currency || 'PKR',
     vendor:       req.body?.vendor || null,
     description:  req.body?.description || null,
     receipt_url:  req.body?.receipt_url || null,

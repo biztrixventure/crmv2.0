@@ -160,11 +160,27 @@ router.post('/runs', asyncHandler(async (req, res) => {
     .from('hr_pay_periods').select('id, name').eq('id', b.pay_period_id).eq('company_id', companyId).maybeSingle();
   if (!period) return res.status(404).json({ error: 'Pay period not found in this company' });
 
+  // Take the currency from the people being paid, not from a constant. A run
+  // created with the old 'USD' default against PKR employees rendered every
+  // salary as dollars -- the run's currency is what the payroll page prints.
+  let currency = b.currency || null;
+  if (!currency) {
+    const { data: paid } = await supabaseAdmin
+      .from('hr_employees').select('currency')
+      .eq('company_id', companyId).eq('status', 'active');
+    const tally = (paid || []).reduce((a, e) => {
+      const c = e.currency || 'PKR';
+      a[c] = (a[c] || 0) + 1;
+      return a;
+    }, {});
+    currency = Object.entries(tally).sort((x, y) => y[1] - x[1])[0]?.[0] || 'PKR';
+  }
+
   const { data: run, error } = await supabaseAdmin.from('hr_payroll_runs').insert({
     company_id: companyId,
     pay_period_id: period.id,
     name: b.name || ('Payroll -- ' + period.name),
-    currency: b.currency || 'USD',
+    currency,
     note: b.note || null,
     created_by: req.user.id,
   }).select(runFull).single();

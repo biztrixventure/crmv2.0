@@ -177,9 +177,14 @@ export const useEmployees = (companyId = null) => {
 
   // CRM users in this company who do not have an HR record yet. This is what
   // makes "create employee from an existing user" possible without typing a uuid.
-  const fetchLinkableUsers = useCallback(async () => {
+  // includeUserId keeps ONE already-linked user in the list -- the employee you
+  // are editing. Without it their own link looks unset, because the endpoint
+  // filters out every user that already has a record.
+  const fetchLinkableUsers = useCallback(async (includeUserId = null) => {
     try {
-      const response = await client.get('hr/employees/linkable-users', { params: { company_id: companyId } });
+      const response = await client.get('hr/employees/linkable-users', {
+        params: { company_id: companyId, include_user_id: includeUserId || undefined },
+      });
       return response.data.users || [];
     } catch {
       return [];

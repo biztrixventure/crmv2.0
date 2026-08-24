@@ -19,7 +19,7 @@ import { Alert } from '../../components/UI';
 import ThemedSelect from '../../components/UI/Select';
 import { Btn, StatusPill, ModuleModal } from '../../components/Modules/ModuleUI';
 import { useExpenses } from '../../hooks/useExpenses';
-import { fmtMoney, fmtMoneyShort, fmtDate, todayISO } from '../../utils/money';
+import { fmtMoney, fmtMoneyShort, fmtDate, todayISO, CURRENCIES } from '../../utils/money';
 
 export default function ExpensesPage({ scope }) {
   const companyId = scope?.company_id || null;
@@ -204,7 +204,7 @@ function ExpenseEditor({ expense, categories, onClose, onSave }) {
   const [form, setForm] = useState({
     expense_date: expense.expense_date || todayISO(),
     amount: expense.amount ?? '',
-    currency: expense.currency || 'USD',
+    currency: expense.currency || 'PKR',
     category_id: expense.category_id || '',
     vendor: expense.vendor || '',
     description: expense.description || '',
@@ -248,7 +248,7 @@ function ExpenseEditor({ expense, categories, onClose, onSave }) {
           </Field>
           <Field label="Currency">
             <ThemedSelect value={form.currency} onChange={e => set('currency', e.target.value)}>
-              {['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'PKR'].map(c => <option key={c} value={c}>{c}</option>)}
+              {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
             </ThemedSelect>
           </Field>
         </div>

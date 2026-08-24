@@ -21,7 +21,7 @@ import ThemedSelect from '../../components/UI/Select';
 import SearchSelect from '../../components/UI/SearchSelect';
 import { Btn, StatusPill, ModuleModal } from '../../components/Modules/ModuleUI';
 import { useEmployees } from '../../hooks/useEmployees';
-import { fmtMoney, fmtDate } from '../../utils/money';
+import { fmtMoney, fmtDate, CURRENCIES } from '../../utils/money';
 
 const fullName = (e) => [e?.first_name, e?.last_name].filter(Boolean).join(' ') || 'Unnamed';
 
@@ -46,7 +46,12 @@ export default function EmployeeDirectory({ scope }) {
   useEffect(() => {
     fetchEmployees({ search: search || undefined, department_id: dept || undefined });
   }, [fetchEmployees, search, dept]);
-  useEffect(() => { if (canManage) fetchLinkableUsers().then(setLinkable); }, [canManage, fetchLinkableUsers]);
+  // Refetched whenever the open editor changes, passing that employee's current
+  // user so their existing link is present in the options.
+  useEffect(() => {
+    if (!canManage) return;
+    fetchLinkableUsers(editing?.user_id || null).then(setLinkable);
+  }, [canManage, fetchLinkableUsers, editing?.id, editing?.user_id]);
 
   const openProfile = async (id) => {
     const d = await fetchEmployee(id);
@@ -294,7 +299,7 @@ function EmployeeEditor({ employee, departments, positions, colleagues, linkable
     status: employee.status || 'active',
     base_salary: employee.base_salary ?? '',
     pay_frequency: employee.pay_frequency || 'monthly',
-    currency: employee.currency || 'USD',
+    currency: employee.currency || 'PKR',
   });
   const [saving, setSaving] = useState(false);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
@@ -333,9 +338,13 @@ function EmployeeEditor({ employee, departments, positions, colleagues, linkable
     <ModuleModal wide title={isNew ? 'New employee' : `Edit ${fullName(employee)}`} onClose={onClose}
       footer={<><Btn onClick={onClose}>Cancel</Btn><Btn variant="primary" busy={saving} onClick={submit}>Save</Btn></>}>
       <form onSubmit={submit} className="space-y-4">
-        {/* Searchable, not a native select: this list is one row per unlinked
-            colleague, so it runs to dozens and typing a name has to filter. */}
-        {isNew && linkable.length > 0 && (
+        {/* Shown when editing as well as when creating. Linking is exactly the
+            thing you come back to fix on a record that already exists -- it is
+            what lets that person see their own attendance, leave, payslips and
+            review, and it was unreachable after the record was made.
+            Searchable, not a native select: one row per unlinked colleague, so
+            it runs to dozens and typing a name has to filter. */}
+        {(linkable.length > 0 || form.user_id) && (
           <Field as="div" label="Link to a CRM user"
             hint="Optional, but this is what lets them see their own attendance, leave, payslips and review.">
             <SearchSelect
@@ -400,12 +409,13 @@ function EmployeeEditor({ employee, departments, positions, colleagues, linkable
           </Field>
           <Field label="Status">
             <ThemedSelect value={form.status} onChange={e => set('status', e.target.value)}>
-              {['active', 'on_leave', 'suspended', 'terminated'].map(s => (
+              {['active', 'on_leave', 'suspended', 'resigned', 'terminated'].map(s => (
                 <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>
               ))}
             </ThemedSelect>
           </Field>
-          <Field label="Termination date" hint={form.status === 'terminated' ? 'Set to today if left blank.' : undefined}>
+          <Field label={['resigned', 'terminated'].includes(form.status) ? 'Last working day' : 'Termination date'}
+            hint={['resigned', 'terminated'].includes(form.status) ? 'Set to today if left blank.' : undefined}>
             <input className="input w-full" type="date" value={form.termination_date} onChange={e => set('termination_date', e.target.value)} />
           </Field>
         </div>
@@ -424,7 +434,7 @@ function EmployeeEditor({ employee, departments, positions, colleagues, linkable
           </Field>
           <Field label="Currency">
             <ThemedSelect value={form.currency} onChange={e => set('currency', e.target.value)}>
-              {['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'PKR'].map(c => <option key={c} value={c}>{c}</option>)}
+              {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
             </ThemedSelect>
           </Field>
           <Field label="Date of birth"><input className="input w-full" type="date" value={form.date_of_birth} onChange={e => set('date_of_birth', e.target.value)} /></Field>

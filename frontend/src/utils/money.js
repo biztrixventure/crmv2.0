@@ -8,9 +8,20 @@
 // not confuse them.
 // ============================================================================
 
+// The house currency. Every money column defaults to PKR in the database
+// (mig 294), so the formatters default to it too -- a mismatch here is what made
+// PKR payroll render as dollars. Callers that KNOW the currency of a record
+// (invoice.currency, run.currency) should always pass it rather than lean on
+// this; the default is only for totals that have no record of their own.
+export const DEFAULT_CURRENCY = 'PKR';
+
+// The order the pickers offer. House currency first, because it is the answer
+// almost every time and a default buried mid-list gets mis-picked.
+export const CURRENCIES = ['PKR', 'USD', 'EUR', 'GBP', 'CAD', 'AUD'];
+
 // Currency, using the browser locale for grouping but an explicit currency code
 // so a US-formatted number never silently claims to be dollars when it is not.
-export const fmtMoney = (value, currency = 'USD') => {
+export const fmtMoney = (value, currency = DEFAULT_CURRENCY) => {
   if (value === null || value === undefined || value === '') return '--';
   const n = Number(value);
   if (!Number.isFinite(n)) return '--';
@@ -25,13 +36,13 @@ export const fmtMoney = (value, currency = 'USD') => {
 };
 
 // Compact form for KPI tiles, where the exact cents are noise: 1.2M, 84.3k.
-export const fmtMoneyShort = (value, currency = 'USD') => {
+export const fmtMoneyShort = (value, currency = DEFAULT_CURRENCY) => {
   if (value === null || value === undefined || value === '') return '--';
   const n = Number(value);
   if (!Number.isFinite(n)) return '--';
   const abs = Math.abs(n);
   if (abs < 10_000) return fmtMoney(n, currency);
-  const sym = { USD: '$', EUR: '\u20AC', GBP: '\u00A3' }[currency] || '';
+  const sym = { PKR: '\u20A8', USD: '$', EUR: '\u20AC', GBP: '\u00A3' }[currency] || '';
   const sign = n < 0 ? '-' : '';
   if (abs >= 1_000_000) return sign + sym + (abs / 1_000_000).toFixed(1) + 'M';
   return sign + sym + Math.round(abs / 1000) + 'k';
@@ -86,7 +97,10 @@ export const STATUS_TONE = {
   pending: 'warning', cancelled: 'muted',
   posted: 'success', processing: 'info', finalized: 'success',
   pending_self: 'warning', pending_manager: 'info', pending_signoff: 'info', completed: 'success',
-  active: 'success', on_leave: 'warning', terminated: 'muted', suspended: 'error',
+  active: 'success', on_leave: 'warning', suspended: 'error',
+  // Both departures, deliberately different colours: resigned is neutral, a
+  // termination is not, and HR reads that distinction at a glance.
+  resigned: 'info', terminated: 'muted',
   present: 'success', absent: 'error', late: 'warning', half_day: 'warning',
   remote: 'info', holiday: 'muted',
 };

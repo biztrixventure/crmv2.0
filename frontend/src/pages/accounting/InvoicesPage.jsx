@@ -20,7 +20,7 @@ import SearchSelect from '../../components/UI/SearchSelect';
 import { Btn, StatusPill, ModuleModal } from '../../components/Modules/ModuleUI';
 import { useInvoices } from '../../hooks/useInvoices';
 import { useChartOfAccounts } from '../../hooks/useChartOfAccounts';
-import { fmtMoney, fmtMoneyShort, fmtDate, todayISO } from '../../utils/money';
+import { fmtMoney, fmtMoneyShort, fmtDate, todayISO, CURRENCIES } from '../../utils/money';
 
 const FILTERS = [
   { key: '',        label: 'All' },
@@ -207,7 +207,7 @@ function InvoiceEditor({ invoice, accounts, onClose, onSave }) {
     customer_phone: invoice.customer_phone || '',
     issue_date: invoice.issue_date || todayISO(),
     due_date: invoice.due_date || '',
-    currency: invoice.currency || 'USD',
+    currency: invoice.currency || 'PKR',
     notes: invoice.notes || '',
     terms: invoice.terms || '',
   });
@@ -268,7 +268,7 @@ function InvoiceEditor({ invoice, accounts, onClose, onSave }) {
           </Field>
           <Field label="Currency">
             <ThemedSelect value={form.currency} onChange={e => set('currency', e.target.value)}>
-              {['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'PKR'].map(c => <option key={c} value={c}>{c}</option>)}
+              {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
             </ThemedSelect>
           </Field>
         </div>

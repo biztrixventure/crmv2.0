@@ -203,7 +203,11 @@ router.get('/linkable-users', asyncHandler(async (req, res) => {
       .eq('company_id', companyId).eq('is_active', true),
     supabaseAdmin.from('hr_employees').select('user_id').eq('company_id', companyId).not('user_id', 'is', null),
   ]);
-  const taken = new Set((emps || []).map(e => e.user_id));
+  // ?include_user_id= keeps ONE already-linked user in the list: the employee
+  // being edited. Without it the edit form shows a blank picker for a record
+  // that is in fact linked, because that user is "taken" -- by this very row.
+  const keep = req.query.include_user_id || null;
+  const taken = new Set((emps || []).map(e => e.user_id).filter(id => id !== keep));
   const freeIds = (ucr || []).map(r => r.user_id).filter(id => !taken.has(id));
   if (!freeIds.length) return res.json({ users: [] });
 
@@ -252,8 +256,11 @@ router.get('/', asyncHandler(async (req, res) => {
     .order('first_name', { ascending: true })
     .range(from, from + limit - 1);
 
-  if (req.query.status)        q = q.eq('status', req.query.status);
-  else if (req.query.include_terminated !== 'true') q = q.neq('status', 'terminated');
+  if (req.query.status) q = q.eq('status', req.query.status);
+  // Departed people are hidden by default. Both departure statuses count --
+  // showing resigned leavers in the live directory while hiding terminated ones
+  // would be an arbitrary split (mig 294).
+  else if (req.query.include_terminated !== 'true') q = q.not('status', 'in', '("terminated","resigned")');
   if (req.query.department_id) q = q.eq('department_id', req.query.department_id);
   if (req.query.position_id)   q = q.eq('position_id', req.query.position_id);
   if (req.query.search) {
@@ -329,7 +336,7 @@ router.post('/', asyncHandler(async (req, res) => {
     status:       b.status || 'active',
     base_salary:  b.base_salary ?? null,
     pay_frequency: b.pay_frequency || null,
-    currency:     b.currency || 'USD',
+    currency:     b.currency || 'PKR',
     notes:        b.notes || null,
     created_by:   req.user.id,
   }).select(full).single();
@@ -368,8 +375,10 @@ router.put('/:id', asyncHandler(async (req, res) => {
                    'base_salary', 'pay_frequency', 'currency', 'notes']) {
     if (b[f] !== undefined) patch[f] = b[f];
   }
-  // Terminating without a date leaves a record that cannot answer "when".
-  if (patch.status === 'terminated' && !patch.termination_date) {
+  // A departure without a date leaves a record that cannot answer "when".
+  // resigned and terminated are both departures -- they differ in WHO ended it,
+  // not in whether the person left (mig 294).
+  if (['terminated', 'resigned'].includes(patch.status) && !patch.termination_date) {
     patch.termination_date = new Date().toISOString().slice(0, 10);
   }
 

@@ -154,7 +154,7 @@ router.post('/', asyncHandler(async (req, res) => {
     sale_id:        b.sale_id || null,
     issue_date:     b.issue_date || new Date().toISOString().slice(0, 10),
     due_date:       b.due_date || null,
-    currency:       b.currency || 'USD',
+    currency:       b.currency || 'PKR',
     status:         b.status === 'sent' ? 'sent' : 'draft',
     notes:          b.notes || null,
     terms:          b.terms || null,
