@@ -290,7 +290,7 @@ export default function LoadDayTab({ scope }) {
   // back. Only un-started work: a review already in progress keeps its owner,
   // which the server enforces too.
   const unassignOne = async (row) => {
-    if (!row.assignment_id) return;
+    if (!row.assignment_id || !row.assigned_to) return;   // in the pool already — nothing to take back
     if (row.assignment_status && row.assignment_status !== 'pending'
         && !window.confirm(`${row.assigned_to_name} has already started this one. Take it back anyway?`)) return;
     try {
@@ -605,6 +605,14 @@ export default function LoadDayTab({ scope }) {
                     <td className="px-3 py-2">
                       {c.assignment_status === 'unassigned' ? (
                         <span style={{ color: 'var(--color-text-tertiary)' }}>Unassigned</span>
+                      ) : !c.assigned_to ? (
+                        // An assignment row EXISTS but nobody holds it — it is in
+                        // the pool waiting to be claimed. This used to fall into
+                        // the branch below and render "— (pending)" with a
+                        // "take back" button; clicking it unassigned a row that
+                        // was already unassigned, so nothing visibly happened.
+                        // There is no one to take it back from.
+                        <span style={{ color: 'var(--color-text-tertiary)' }}>In pool — unclaimed</span>
                       ) : (
                         <span className="inline-flex items-center gap-2">
                           <span>{c.assigned_to_name || '—'} <span style={{ color: 'var(--color-text-tertiary)' }}>({c.assignment_status})</span></span>

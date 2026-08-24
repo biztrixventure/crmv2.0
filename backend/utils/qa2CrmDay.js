@@ -246,9 +246,25 @@ async function populateCrmDay(companyId, date) {
     });
   }
 
+  // Phones that already carry a REAL sale today, from any of the three sale
+  // sources. Used to drop duplicate closer legs below.
+  const salePhones = new Set(
+    [...salesByTransfer.values(), ...(standaloneSales || []), ...agedOnly]
+      .map(s => s.normalized_phone || s.customer_phone).filter(Boolean)
+  );
+
   for (const t of (transfers || [])) {
     const sale = salesByTransfer.get(t.id);
     if (!sale && !t.assigned_closer_id) continue; // nothing on the closer side to review yet
+    // ONE CALL, ONE CLOSER LEG. A recycled lead re-transferred the same day
+    // (mig 291) makes TWO transfer rows for one customer; the sale form lands on
+    // one of them and the other still carries the dialer's "Sale" disposition.
+    // Building a leg from that second, sale-less transfer minted a phantom
+    // "Closed" review — same customer, same closer, no sale record — so the
+    // closer showed 4 sales in QA where the CRM held 3. When this customer's
+    // number already has a real sale today, the sale's own leg covers the call;
+    // a bare transfer for that number adds nothing but a double count.
+    if (!sale && t.normalized_phone && salePhones.has(t.normalized_phone)) continue;
     const key = sale ? `s:${sale.id}:closer` : `t:${t.id}:closer`;
     if (existing.has(key)) continue;
     tasks.push({
