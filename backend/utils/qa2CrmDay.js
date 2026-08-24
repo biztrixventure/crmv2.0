@@ -149,7 +149,33 @@ async function insertCrmDayCall({ companyId, leg, transferId, saleId, vendorCode
   };
   const { error } = await supabaseAdmin.from('qa2_call').insert(row);
   if (error) {
-    if (/duplicate key|unique/i.test(error.message)) return false; // race with another run
+    if (/duplicate key|unique/i.test(error.message)) {
+      // NOT necessarily a race. uq_qa2_call_recording is (box_id, recording_id),
+      // and a CLOSER leg falls back to the TRANSFER's vendor code when the sale
+      // carries none of its own — so its recording search very often resolves
+      // the clip the FRONTER leg already claimed. Treating that as "another run
+      // beat me to it" and returning threw the whole review row away: one
+      // Wavetech day pulled 21 closer legs instead of 100, and every one of the
+      // 21 was a leg that happened to find a DISTINCT recording. That is what
+      // made Unclosed read 20 against ~100 transfers.
+      //
+      // The row still belongs in QA — it just has not found its own audio yet.
+      // Re-insert without the contested recording and let the poller go and find
+      // the closer's own clip, exactly as it does for any other 'pending' row.
+      if (row.recording_id) {
+        const retry = {
+          ...row,
+          box_id: null, recording_id: null, recording_location: null, talk_sec: null,
+          recording_state: (row.dialer_lead_id || row.customer_phone) ? 'pending' : 'missing',
+        };
+        const { error: e2 } = await supabaseAdmin.from('qa2_call').insert(retry);
+        if (!e2) return methodId ? true : 'unclassified';
+        if (!/duplicate key|unique/i.test(e2.message)) {
+          logger.warn('QA2_CRM_DAY', `retry insert failed (transfer ${transferId || '-'} / sale ${saleId || '-'}): ${e2.message}`);
+        }
+      }
+      return false;   // genuine duplicate of this same leg — another run has it
+    }
     logger.warn('QA2_CRM_DAY', `insert failed (transfer ${transferId || '-'} / sale ${saleId || '-'}): ${error.message}`);
     return false;
   }
