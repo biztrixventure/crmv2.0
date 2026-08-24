@@ -60,7 +60,51 @@ async function chooseClip(candidates, row) {
       .select('recording_id').eq('box_id', box).in('recording_id', [...ids]).neq('id', row.id);
     (data || []).forEach(r => taken.add(`${box}|${r.recording_id}`));
   }
-  const free = candidates.filter(c => !taken.has(`${c.box}|${c.recording_id}`));
+  let free = candidates.filter(c => !taken.has(`${c.box}|${c.recording_id}`));
+
+  // RECLAIM FROM AN UNREVIEWED DUPLICATE.
+  //
+  // The same closer call exists twice: once as a live-ingest row filed under the
+  // CLOSER's company, and once as the CRM-day row filed under the FRONTER's
+  // company because it hangs off their transfer. Only one may hold the clip
+  // (uq_qa2_call_recording) and the ingest row usually gets there first — so the
+  // row a manager actually reviews is left with no audio for ever. On one
+  // Wavetech day that was 59 of 63 closer legs, and 58 of those holders had
+  // never been assigned or scored at all.
+  //
+  // The transfer-linked row has the stronger claim: it is the one that shows in
+  // Load Day, gets assigned and gets scored. So it may take the clip from a
+  // holder that is NOT transfer-linked and has never been assigned or scored.
+  //
+  // This cannot ping-pong — the condition is asymmetric. Once the transfer-linked
+  // row owns the clip the ex-holder can never satisfy "I am transfer-linked and
+  // the holder is not", so it will not take it back. The ex-holder is parked at
+  // MAX_ATTEMPTS too, so it stops asking the dialer for audio it will not get.
+  const iAmLinked = !!(row.transfer_id || row.sale_id);
+  if (!free.length && iAmLinked) {
+    for (const c of candidates) {
+      const { data: holder } = await supabaseAdmin.from('qa2_call')
+        .select('id, transfer_id, sale_id')
+        .eq('box_id', c.box).eq('recording_id', String(c.recording_id)).neq('id', row.id)
+        .maybeSingle();
+      if (!holder || holder.transfer_id || holder.sale_id) continue;   // claim is as good or better — leave it
+
+      const [{ count: aCount }, { count: eCount }] = await Promise.all([
+        supabaseAdmin.from('qa2_assignment').select('id', { count: 'exact', head: true }).eq('call_id', holder.id),
+        supabaseAdmin.from('qa2_evaluation').select('id', { count: 'exact', head: true }).eq('call_id', holder.id),
+      ]);
+      if ((aCount || 0) > 0 || (eCount || 0) > 0) continue;            // somebody is reviewing it — never take it
+
+      const { error: relErr } = await supabaseAdmin.from('qa2_call').update({
+        box_id: null, recording_id: null, recording_location: null, talk_sec: null,
+        recording_state: 'missing', recording_attempts: MAX_ATTEMPTS,
+      }).eq('id', holder.id);
+      if (relErr) continue;
+      logger.info('QA2_REC_POLL', `reclaimed clip ${c.box}/${c.recording_id} from unreviewed duplicate ${holder.id} for transfer-linked call ${row.id}`);
+      free = [c];
+      break;
+    }
+  }
   if (!free.length) return null;
 
   const want = String(row.agent_user || '').trim().toUpperCase();
@@ -236,7 +280,10 @@ async function pollOne(row) {
   await supabaseAdmin.from('qa2_call').update({ recording_attempts: attempts, recording_state: state }).eq('id', row.id);
 }
 
-const COLS = 'id, vendor_code, dialer_lead_id, recording_attempts, normalized_phone, customer_phone, agent_user, agent_user_id, call_at, leg';
+// transfer_id/sale_id are read by chooseClip's reclaim rule (a transfer-linked
+// row outranks an unreviewed duplicate) — they MUST be selected here or that
+// rule silently never fires, since row.transfer_id would just be undefined.
+const COLS = 'id, vendor_code, dialer_lead_id, recording_attempts, normalized_phone, customer_phone, agent_user, agent_user_id, call_at, leg, transfer_id, sale_id';
 
 // QA-RELEVANT ROWS GO FIRST, NEWEST FIRST. Every dialed call becomes a qa2_call
 // row, so 'pending' is a quarter of a million deep — at a batch a minute the
