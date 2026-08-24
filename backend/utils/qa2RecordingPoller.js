@@ -38,7 +38,7 @@
 
 const { supabaseAdmin } = require('../config/database');
 const logger = require('../utils/logger');
-const { recordingLookup, parseVendorCode, getBoxes, phoneTail, onlyDigits, lookupCallsByPhone } = require('./dialerBoxes');
+const { recordingLookup, parseVendorCode, getBoxes, phoneTail, onlyDigits, lookupCallsByPhone, findLeadByPhone } = require('./dialerBoxes');
 
 const MAX_ATTEMPTS = 10;
 const BATCH_SIZE = 60; // capped per tick
@@ -197,6 +197,38 @@ async function pollByAgentDay(row) {
 }
 
 async function pollOne(row) {
+  // LEARN THE LEAD ID FROM THE CUSTOMER'S NUMBER.
+  //
+  // A hand-entered transfer never gets a vendor code, so its QA row has no
+  // dialer_lead_id and only three attempts before it is written off as
+  // 'missing' — while the audio sits on the box perfectly intact. Verified on
+  // the reported day: phone 9514811611 is lead 2724512, and recording_lookup on
+  // that lead returns two clips.
+  //
+  // The existing phone route asks phone_number_log, which answers "NO RECORDS
+  // FOUND" for exactly these numbers, so it can never rescue them. Searching for
+  // the LEAD by phone does work, and once the id is known the ordinary
+  // lead-based path takes over.
+  //
+  // Only a CONFIDENT match is written. findLeadByPhone returns 'ambiguous' when
+  // a number matches several leads across the estate, and persisting one of
+  // those would mislink a customer's call history — worse than an empty column.
+  if (!row.dialer_lead_id) {
+    const phone = row.normalized_phone || row.customer_phone || '';
+    if (phone) {
+      try {
+        const logins = await loginsFor(row);
+        const lead = await findLeadByPhone({ phone, agentIds: logins });
+        if (lead && lead.lead_id && lead.confidence !== 'ambiguous') {
+          await supabaseAdmin.from('qa2_call')
+            .update({ dialer_lead_id: String(lead.lead_id) }).eq('id', row.id);
+          row = { ...row, dialer_lead_id: String(lead.lead_id) };
+          logger.info('QA2_REC_POLL', `learned lead ${lead.lead_id} from phone for call ${row.id} (${lead.confidence})`);
+        }
+      } catch { /* best-effort — fall through to the existing routes */ }
+    }
+  }
+
   if (!row.dialer_lead_id) {
     const attempts = (row.recording_attempts || 0) + 1;
     const hit = await pollByAgentDay(row);
