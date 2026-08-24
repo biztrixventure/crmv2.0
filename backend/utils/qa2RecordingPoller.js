@@ -38,7 +38,7 @@
 
 const { supabaseAdmin } = require('../config/database');
 const logger = require('../utils/logger');
-const { recordingLookup, parseVendorCode, getBoxes, phoneTail, onlyDigits, lookupCallsByPhone, findLeadByPhone } = require('./dialerBoxes');
+const { recordingLookup, parseVendorCode, getBoxes, phoneTail, onlyDigits, lookupCallsByPhone, findLeadByPhone, leadsByPhoneOnBox, boxesForPrefix } = require('./dialerBoxes');
 
 const MAX_ATTEMPTS = 10;
 const BATCH_SIZE = 60; // capped per tick
@@ -80,27 +80,44 @@ async function chooseClip(candidates, row) {
   // row owns the clip the ex-holder can never satisfy "I am transfer-linked and
   // the holder is not", so it will not take it back. The ex-holder is parked at
   // MAX_ATTEMPTS too, so it stops asking the dialer for audio it will not get.
+  // Who may take, and from whom:
+  //   requester — transfer/sale-linked AND CRM-driven (ingest/crm_day). These
+  //     are the rows a reviewer actually opens. A 'sweep' row (raw dial-log
+  //     materialization) never steals.
+  //   holder loses the clip when it is (a) unlinked, OR (b) a 'sweep' duplicate
+  //     of the same call — and in either case only if nothing rides on it: no
+  //     evaluation, no review anyone has STARTED (in_review/scored). A pending
+  //     pool assignment nobody claimed does not protect a clip; that was the gap
+  //     that left the second wave of rows starving — their holders were sweep
+  //     rows that happened to be transfer-linked and to hold an untouched pool
+  //     assignment, so the old "linked = protected, any assignment = protected"
+  //     test spared every one of them.
+  //   No ping-pong: a stripped holder is parked at MAX_ATTEMPTS, and sweep rows
+  //     cannot requester their way back.
   const iAmLinked = !!(row.transfer_id || row.sale_id);
-  if (!free.length && iAmLinked) {
+  if (!free.length && iAmLinked && row.source !== 'sweep') {
     for (const c of candidates) {
       const { data: holder } = await supabaseAdmin.from('qa2_call')
-        .select('id, transfer_id, sale_id')
+        .select('id, transfer_id, sale_id, source')
         .eq('box_id', c.box).eq('recording_id', String(c.recording_id)).neq('id', row.id)
         .maybeSingle();
-      if (!holder || holder.transfer_id || holder.sale_id) continue;   // claim is as good or better — leave it
+      if (!holder) continue;
+      const holderProtected = (holder.transfer_id || holder.sale_id) && holder.source !== 'sweep';
+      if (holderProtected) continue;   // a CRM-driven linked row — its claim is as good as ours
 
-      const [{ count: aCount }, { count: eCount }] = await Promise.all([
-        supabaseAdmin.from('qa2_assignment').select('id', { count: 'exact', head: true }).eq('call_id', holder.id),
+      const [{ count: started }, { count: eCount }] = await Promise.all([
+        supabaseAdmin.from('qa2_assignment').select('id', { count: 'exact', head: true })
+          .eq('call_id', holder.id).in('status', ['in_review', 'scored']),
         supabaseAdmin.from('qa2_evaluation').select('id', { count: 'exact', head: true }).eq('call_id', holder.id),
       ]);
-      if ((aCount || 0) > 0 || (eCount || 0) > 0) continue;            // somebody is reviewing it — never take it
+      if ((started || 0) > 0 || (eCount || 0) > 0) continue;   // someone is actually reviewing it — never take it
 
       const { error: relErr } = await supabaseAdmin.from('qa2_call').update({
         box_id: null, recording_id: null, recording_location: null, talk_sec: null,
         recording_state: 'missing', recording_attempts: MAX_ATTEMPTS,
       }).eq('id', holder.id);
       if (relErr) continue;
-      logger.info('QA2_REC_POLL', `reclaimed clip ${c.box}/${c.recording_id} from unreviewed duplicate ${holder.id} for transfer-linked call ${row.id}`);
+      logger.info('QA2_REC_POLL', `reclaimed clip ${c.box}/${c.recording_id} from ${holder.source || 'unlinked'} duplicate ${holder.id} for ${row.source} call ${row.id}`);
       free = [c];
       break;
     }
@@ -127,6 +144,19 @@ async function chooseClip(candidates, row) {
 // (one call per box per agent-day, though the lookup cache absorbs repeats), so
 // it gets a shorter leash than the main path.
 const MAX_ATTEMPTS_NO_LEAD = 3;
+
+// company_id → vicidial_config.prefix, cached for the process lifetime — the
+// mapping changes at most when a company is rewired to a different box.
+const _prefixCache = new Map();
+async function companyPrefix(companyId) {
+  if (!companyId) return null;
+  if (_prefixCache.has(companyId)) return _prefixCache.get(companyId);
+  const { data } = await supabaseAdmin.from('vicidial_config')
+    .select('prefix').eq('company_id', companyId).maybeSingle();
+  const p = (data?.prefix || '').toUpperCase() || null;
+  _prefixCache.set(companyId, p);
+  return p;
+}
 
 async function loginsFor(row) {
   if (row.agent_user) return [String(row.agent_user)];
@@ -217,9 +247,25 @@ async function pollOne(row) {
     const phone = row.normalized_phone || row.customer_phone || '';
     if (phone) {
       try {
-        const logins = await loginsFor(row);
-        const lead = await findLeadByPhone({ phone, agentIds: logins });
-        if (lead && lead.lead_id && lead.confidence !== 'ambiguous') {
+        let lead = null;
+        // THE COMPANY'S OWN BOX FIRST. Estate-wide search almost always comes
+        // back 'ambiguous' — the same customer number sits on several boxes
+        // (dialled by more than one company), and the lead-search response
+        // carries the API user, not the lead's agent, so the agent tiebreak
+        // can never fire. But a company's calls happen on its own box
+        // (vicidial_config.prefix names it), so ONE match there IS the lead.
+        // First live run of the estate-wide version: 0 of 84 rows learned.
+        const prefix = await companyPrefix(row.company_id);
+        for (const box of (prefix ? boxesForPrefix(prefix) : [])) {
+          const hits = await leadsByPhoneOnBox(box, phone);
+          if (hits.length === 1) { lead = { ...hits[0], confidence: 'company_box' }; break; }
+          if (hits.length > 1) break;   // several leads on the company's own box — genuinely ambiguous
+        }
+        if (!lead) {
+          const found = await findLeadByPhone({ phone, agentIds: await loginsFor(row) });
+          if (found && found.confidence !== 'ambiguous') lead = found;
+        }
+        if (lead && lead.lead_id) {
           await supabaseAdmin.from('qa2_call')
             .update({ dialer_lead_id: String(lead.lead_id) }).eq('id', row.id);
           row = { ...row, dialer_lead_id: String(lead.lead_id) };
@@ -315,7 +361,7 @@ async function pollOne(row) {
 // transfer_id/sale_id are read by chooseClip's reclaim rule (a transfer-linked
 // row outranks an unreviewed duplicate) — they MUST be selected here or that
 // rule silently never fires, since row.transfer_id would just be undefined.
-const COLS = 'id, vendor_code, dialer_lead_id, recording_attempts, normalized_phone, customer_phone, agent_user, agent_user_id, call_at, leg, transfer_id, sale_id';
+const COLS = 'id, vendor_code, dialer_lead_id, recording_attempts, normalized_phone, customer_phone, agent_user, agent_user_id, call_at, leg, transfer_id, sale_id, source, company_id';
 
 // QA-RELEVANT ROWS GO FIRST, NEWEST FIRST. Every dialed call becomes a qa2_call
 // row, so 'pending' is a quarter of a million deep — at a batch a minute the

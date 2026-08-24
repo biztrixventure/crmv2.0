@@ -1307,4 +1307,8 @@ module.exports = {
   leadFieldStatus, leadFieldCustomer, fillLeadStatuses, resolveDispos,
   leadCustomFields, listCustomFieldNames, discoverCustomFieldNames, leadFromVendorCode, parseVendorCode, normalizeLeadCode,
   leadsByPhoneOnBox, findLeadByPhone, annotateHangups, resolveDisposition,
+  // For the QA poller's company-scoped lead learn: a company's calls live on
+  // its own box (vicidial_config.prefix), so a phone that is ambiguous across
+  // the estate can still be a single, confident match there.
+  boxesForPrefix,
 };
