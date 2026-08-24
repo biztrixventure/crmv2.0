@@ -4,8 +4,8 @@
 // their own point values, base denominator (auto-computed true max shown
 // beside a manual override), threshold/comparator, auto-fail config, a live
 // preview, and an explicit Publish with a permanence warning. Backend:
-// qa2Forms.js. A published version is READ-ONLY here — "Edit as new version"
-// clones it into a fresh draft (POST .../versions) rather than mutating it.
+// qa2Forms.js. A published version stays editable until a review has been
+// SUBMITTED against it; after that "Edit as new version" clones it to a draft.
 // ============================================================================
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
@@ -182,6 +182,10 @@ export default function FormBuilder({ form, initialVersionId, onBack }) {
   const [loadError, setLoadError] = useState(null);
   const [saving, setSaving] = useState(false);
   const [confirmingPublish, setConfirmingPublish] = useState(false);
+  // Server-decided: a published version stays editable until a review has
+  // actually been SUBMITTED against it (see the PUT guard in qa2Forms.js).
+  const [editable, setEditable] = useState(true);
+  const [submittedCount, setSubmittedCount] = useState(0);
 
   const resolveVersionId = useCallback(async () => {
     if (initialVersionId) return initialVersionId;
@@ -201,11 +205,19 @@ export default function FormBuilder({ form, initialVersionId, onBack }) {
       setSections(r.data.sections || []);
       setParameters((r.data.parameters || []).map(p => ({ ...p, options: p.options || [] })));
       setComputedMax(r.data.computed_max || 0);
+      setEditable(r.data.editable !== false);
+      setSubmittedCount(r.data.submitted_count || 0);
     } catch (e) { setLoadError(e.response?.data?.error || 'Could not load this form version'); }
   }, [form.id, resolveVersionId]);
   useEffect(() => { load(); }, [load]);
 
   const isDraft = version && !version.published_at;
+  // What actually gates the controls. A draft is always editable; a PUBLISHED
+  // version stays editable too until a review has been submitted against it,
+  // because until then there is no score whose meaning an edit could change.
+  // Mirrors the server guard exactly — the server is still the authority.
+  const canEdit = !!version && editable;
+  const lockedByScores = !!version && !editable;
   const bySection = useMemo(() => {
     const map = new Map(sections.map(s => [s.id, []]));
     map.set(null, []);
@@ -314,33 +326,56 @@ export default function FormBuilder({ form, initialVersionId, onBack }) {
       <div className="flex items-center justify-between flex-wrap gap-2">
         <button className="text-sm font-semibold flex items-center gap-1" style={{ color: 'var(--color-text-secondary)' }} onClick={onBack}><ArrowLeft size={14} />Back to forms</button>
         <div className="flex items-center gap-2">
-          {!isDraft && (
+          {/* Cloning is the way out only when this version is genuinely frozen
+              by a submitted score. While it is still editable, offering "Edit as
+              new version" would just fork the form for no reason. */}
+          {lockedByScores && (
             <button className="btn btn-primary text-sm flex items-center gap-1.5" onClick={editAsNewVersion}><Copy size={14} />Edit as new version</button>
           )}
-          {isDraft && (
+          {canEdit && (
             <>
-              <button className="btn text-sm flex items-center gap-1.5" style={{ border: '1px solid var(--color-border)' }} onClick={save} disabled={saving}><Save size={14} />{saving ? 'Saving…' : 'Save draft'}</button>
-              {!confirmingPublish
+              <button className="btn text-sm flex items-center gap-1.5" style={{ border: '1px solid var(--color-border)' }} onClick={save} disabled={saving}>
+                <Save size={14} />{saving ? 'Saving…' : (isDraft ? 'Save draft' : 'Save changes')}
+              </button>
+              {/* Publish only means something for a version that has never been
+                  published. An already-published one is live already. */}
+              {isDraft && (!confirmingPublish
                 ? <button className="btn btn-primary text-sm flex items-center gap-1.5" onClick={() => setConfirmingPublish(true)}><Rocket size={14} />Publish</button>
                 : (
                   <span className="flex items-center gap-2 text-xs font-semibold" style={{ color: 'var(--color-warning-600)' }}>
-                    Published versions are permanent.
+                    Publishing makes this the live scorecard.
                     <button className="btn btn-primary text-xs" onClick={publish} disabled={saving}>Yes, publish</button>
                     <button style={{ color: 'var(--color-text-secondary)' }} onClick={() => setConfirmingPublish(false)}>Cancel</button>
                   </span>
-                )}
+                ))}
             </>
           )}
         </div>
       </div>
 
-      <SectionHeader level="page" title={form.name} subtitle={isDraft ? `Draft — version ${version.version_no}` : `Published — version ${version.version_no} (read-only)`} />
+      <SectionHeader level="page" title={form.name}
+        subtitle={isDraft
+          ? `Draft — version ${version.version_no}`
+          : (canEdit
+            ? `Published — version ${version.version_no} · still editable, nothing scored against it yet`
+            : `Published — version ${version.version_no} · locked by ${submittedCount} submitted review${submittedCount === 1 ? '' : 's'}`)} />
+
+      {lockedByScores && (
+        <Panel tone="inset">
+          <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+            {submittedCount} review{submittedCount === 1 ? ' has' : 's have'} already been scored on this version, so its
+            questions and points are fixed — changing them now would quietly change what those scores mean.
+            <strong style={{ color: 'var(--color-text)' }}> Edit as new version</strong> copies everything into a fresh
+            draft you can change freely; the old scores stay attached to the old version.
+          </p>
+        </Panel>
+      )}
 
       <Panel className="space-y-3">
         <SectionHeader level="section" title="Scoring settings" />
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <Field label="Base denominator">
-            <ThemedSelect value={version.base_denominator_mode} onChange={e => updateVersionField('base_denominator_mode', e.target.value)} disabled={!isDraft}>
+            <ThemedSelect value={version.base_denominator_mode} onChange={e => updateVersionField('base_denominator_mode', e.target.value)} disabled={!canEdit}>
               <option value="auto">Auto (sum of max points)</option>
               <option value="manual">Manual</option>
             </ThemedSelect>
@@ -348,25 +383,25 @@ export default function FormBuilder({ form, initialVersionId, onBack }) {
           <Field label={version.base_denominator_mode === 'manual' ? 'Divisor' : 'True maximum (auto)'}
             hint={version.base_denominator_mode === 'manual' ? `True max is ${trueMax}${usingManualQuirk ? ' — you are deliberately overriding it' : ''}` : undefined}>
             {version.base_denominator_mode === 'manual'
-              ? <input type="number" className="input" value={version.base_denominator ?? ''} onChange={e => updateVersionField('base_denominator', Number(e.target.value))} disabled={!isDraft} />
+              ? <input type="number" className="input" value={version.base_denominator ?? ''} onChange={e => updateVersionField('base_denominator', Number(e.target.value))} disabled={!canEdit} />
               : <input className="input" value={trueMax} disabled />}
           </Field>
           <Field label="Rounding">
-            <ThemedSelect value={version.rounding_mode} onChange={e => updateVersionField('rounding_mode', e.target.value)} disabled={!isDraft}>
+            <ThemedSelect value={version.rounding_mode} onChange={e => updateVersionField('rounding_mode', e.target.value)} disabled={!canEdit}>
               {ROUNDING_MODES.map(r => <option key={r} value={r}>{r}</option>)}
             </ThemedSelect>
           </Field>
           <Field label="Pass threshold" hint="Leave blank for an informational-only card">
-            <input type="number" className="input" value={version.pass_threshold ?? ''} onChange={e => updateVersionField('pass_threshold', e.target.value === '' ? null : Number(e.target.value))} disabled={!isDraft} />
+            <input type="number" className="input" value={version.pass_threshold ?? ''} onChange={e => updateVersionField('pass_threshold', e.target.value === '' ? null : Number(e.target.value))} disabled={!canEdit} />
           </Field>
           <Field label="Comparator">
-            <ThemedSelect value={version.pass_comparator} onChange={e => updateVersionField('pass_comparator', e.target.value)} disabled={!isDraft}>
+            <ThemedSelect value={version.pass_comparator} onChange={e => updateVersionField('pass_comparator', e.target.value)} disabled={!canEdit}>
               <option value="gte">&gt;= (default — v1's off-by-one bug fixed)</option>
               <option value="gt">&gt; (v1's exact legacy behaviour)</option>
             </ThemedSelect>
           </Field>
           <Field label="Auto-fail mode">
-            <ThemedSelect value={version.autofail_mode} onChange={e => updateVersionField('autofail_mode', e.target.value)} disabled={!isDraft}>
+            <ThemedSelect value={version.autofail_mode} onChange={e => updateVersionField('autofail_mode', e.target.value)} disabled={!canEdit}>
               {AUTOFAIL_MODES.map(m => <option key={m} value={m}>{m}</option>)}
             </ThemedSelect>
           </Field>
@@ -376,14 +411,14 @@ export default function FormBuilder({ form, initialVersionId, onBack }) {
             <textarea className="input" rows={3}
               value={JSON.stringify(version.autofail_table || {})}
               onChange={e => { try { updateVersionField('autofail_table', JSON.parse(e.target.value)); } catch { /* keep typing */ } }}
-              disabled={!isDraft} />
+              disabled={!canEdit} />
           </Field>
         )}
       </Panel>
 
       {[...sections.map((s, si) => ({ ...s, _idx: si, _real: true })), { id: null, name: 'Ungrouped', sort: 999, _real: false }].map(s => (
         <Panel key={s.id || 'ungrouped'} className="space-y-3"
-          draggable={isDraft && s._real}
+          draggable={canEdit && s._real}
           onDragStart={() => { if (s._real) dragSection.current = s._idx; }}
           onDragOver={e => { if (s._real) e.preventDefault(); }}
           onDrop={e => {
@@ -392,7 +427,7 @@ export default function FormBuilder({ form, initialVersionId, onBack }) {
             if (dragSection.current != null) moveSection(dragSection.current, s._idx);
             dragSection.current = null;
           }}>
-          <SectionHeader level="section" title={s.name || 'Ungrouped'} actions={isDraft && (
+          <SectionHeader level="section" title={s.name || 'Ungrouped'} actions={canEdit && (
             <div className="flex items-center gap-1">
               {s._real && (
                 <>
@@ -409,7 +444,7 @@ export default function FormBuilder({ form, initialVersionId, onBack }) {
           <div className="space-y-2">
             {(bySection.get(s.id) || []).map((p, pi, arr) => (
               <div key={p.id || p._tempId} className="flex items-start gap-1.5"
-                draggable={isDraft}
+                draggable={canEdit}
                 onDragStart={() => { dragParam.current = { sectionId: s.id, index: pi }; }}
                 onDragOver={e => e.preventDefault()}
                 onDrop={e => {
@@ -418,7 +453,7 @@ export default function FormBuilder({ form, initialVersionId, onBack }) {
                   if (d && d.sectionId === s.id) moveParam(s.id, d.index, pi);
                   dragParam.current = null;
                 }}>
-                {isDraft && (
+                {canEdit && (
                   <div className="flex flex-col items-center gap-0.5 pt-2 flex-shrink-0" style={{ cursor: 'grab' }}>
                     <GripVertical size={14} style={{ color: 'var(--color-text-tertiary)' }} />
                     <IconButton label="Move up" variant="ghost" onClick={() => moveParam(s.id, pi, pi - 1)} disabled={pi === 0}><ChevronUp size={13} /></IconButton>
@@ -437,7 +472,7 @@ export default function FormBuilder({ form, initialVersionId, onBack }) {
         </Panel>
       ))}
 
-      {isDraft && (
+      {canEdit && (
         <button className="text-sm font-semibold flex items-center gap-1.5" style={{ color: 'var(--color-primary-600)' }} onClick={addSection}>
           <Plus size={14} />Add section
         </button>

@@ -229,7 +229,22 @@ async function loadVersionDefinition(vid, formId) {
     .filter(p => p.role === 'score' && p.included_in_base !== false)
     .reduce((sum, p) => sum + maxPoints(p, optMapForMax), 0);
 
-  return { version, sections: sections || [], parameters: paramsHydrated, computed_max };
+  // Whether the builder may still edit this version, and why not if it can't.
+  // Same rule the PUT guard enforces — computed here so the UI disables the
+  // controls up front instead of letting a manager retype a whole scorecard and
+  // only then discover the save is refused.
+  const { count: submittedCount } = await supabaseAdmin
+    .from('qa2_evaluation')
+    .select('id', { count: 'exact', head: true })
+    .eq('form_version_id', vid)
+    .eq('status', 'submitted');
+  const submitted_count = submittedCount || 0;
+
+  return {
+    version, sections: sections || [], parameters: paramsHydrated, computed_max,
+    submitted_count,
+    editable: !version.published_at || submitted_count === 0,
+  };
 }
 
 router.get('/forms/:id/versions/:vid', asyncHandler(async (req, res) => {
@@ -256,8 +271,30 @@ router.put('/versions/:vid', asyncHandler(async (req, res) => {
 
   const { data: version } = await supabaseAdmin.from('qa2_form_version').select('id, published_at').eq('id', vid).maybeSingle();
   if (!version) return res.status(404).json({ error: 'Version not found' });
+
+  // A published version locks so a score already given keeps meaning what it
+  // meant: change the questions or the points under a submitted evaluation and
+  // 87/100 silently becomes a different number. That is the ONLY thing the lock
+  // protects — so it only needs to bite once something has actually been scored.
+  // A manager who publishes a scorecard, spots a typo in a question and has
+  // nobody's review riding on it was being told to abandon the version and clone
+  // a new one for no benefit: there is no history there to preserve.
+  //
+  // DRAFT evaluations deliberately do not count. A draft is an unfinished review
+  // that is re-read against the CURRENT definition when it is reopened, so it
+  // picks the edit up rather than being falsified by it.
   if (version.published_at) {
-    return res.status(409).json({ error: 'Published versions are permanent — create a new version to edit this form' });
+    const { count: scored, error: cErr } = await supabaseAdmin
+      .from('qa2_evaluation')
+      .select('id', { count: 'exact', head: true })
+      .eq('form_version_id', vid)
+      .eq('status', 'submitted');
+    if (cErr) return res.status(500).json({ error: cErr.message });
+    if (scored > 0) {
+      return res.status(409).json({
+        error: `This version has ${scored} submitted review${scored === 1 ? '' : 's'} scored against it, so it can no longer change — use "Edit as new version" to carry it forward.`,
+      });
+    }
   }
 
   const {
