@@ -174,13 +174,23 @@ export function ParameterInput({ param, answer, onChange }) {
     );
   }
 
+  // The comment gets its OWN full-width row under the question rather than a
+  // 220px box competing for space on the same line. A reviewer writes a sentence
+  // or two explaining why they marked something down, and in a single-line input
+  // that narrow the text scrolls sideways after a few words — you cannot read
+  // back what you just typed. Multi-line, full width, and drag-resizable for a
+  // longer note. Still writes the same `comment` string, so nothing downstream
+  // changes.
   return (
-    <div className="flex items-center gap-2 py-1.5 flex-wrap">
-      <span className="text-sm flex-1 min-w-[160px]" style={{ color: 'var(--color-text)' }}>{param.label || param.key}</span>
-      {control}
-      {param.allow_na && naToggle}
+    <div className="py-1.5">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-sm flex-1 min-w-[160px]" style={{ color: 'var(--color-text)' }}>{param.label || param.key}</span>
+        {control}
+        {param.allow_na && naToggle}
+      </div>
       {(param.requires_comment !== 'never') && (
-        <input className="input" placeholder="Comment" style={{ maxWidth: 220 }}
+        <textarea className="input w-full mt-1.5" rows={2} placeholder="Comment…"
+          style={{ resize: 'vertical', minHeight: 60, lineHeight: 1.45 }}
           value={a.comment || ''} onChange={e => onChange({ comment: e.target.value })} />
       )}
     </div>
@@ -458,7 +468,8 @@ export default function ReviewScreen({ assignment, onDone, onNext, nextLabel, re
 
           <Panel>
             <SectionHeader level="section" title="Comments" subtitle="Overall notes on this call — separate from each question's own comment box below." />
-            <textarea className="input w-full" rows={4} placeholder="Additional comments…"
+            <textarea className="input w-full" rows={7} placeholder="Additional comments…"
+              style={{ resize: 'vertical', minHeight: 140, lineHeight: 1.45 }}
               value={notes} onChange={e => setNotesDebounced(e.target.value)} />
           </Panel>
         </div>
