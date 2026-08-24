@@ -189,4 +189,26 @@ async function purgeParkedQa2Calls() {
   return total;
 }
 
-module.exports = { runQa2AutoAssign, purgeStaleQa2Assignments, purgeParkedQa2Calls };
+// ── one call, one review row per leg ────────────────────────────────────────
+// A re-transferred customer (mig 291) or an ingest+sweep double-materialization
+// makes TWO review rows for one dialed call. The dialer holds one clip per leg,
+// so one row gets the audio and its twin sits on 'missing' forever, reading as
+// a recording problem when it is a duplicate. Park the starving twin — the
+// predicate lives in app_qa2_duplicate_starved() (mig 296): same company, same
+// leg, sibling holds the clip, matched by lead id OR phone, and never a row
+// someone has actually started on.
+async function parkDuplicateStarvedCalls() {
+  try {
+    const { data: starved, error: qErr } = await supabaseAdmin.rpc('app_qa2_duplicate_starved');
+    if (qErr) { logger.warn('QA2_AUTOASSIGN', `park duplicates query: ${qErr.message}`); return 0; }
+    const ids = (starved || []).map(r => r.id);
+    if (!ids.length) return 0;
+    await supabaseAdmin.from('qa2_assignment').delete().in('call_id', ids).eq('status', 'pending');
+    const { error } = await supabaseAdmin.from('qa2_call').update({ qa_relevant: false }).in('id', ids);
+    if (error) { logger.warn('QA2_AUTOASSIGN', `park duplicates: ${error.message}`); return 0; }
+    logger.info('QA2_AUTOASSIGN', `parked ${ids.length} duplicate starved review row(s) — their audio lives on a sibling row`);
+    return ids.length;
+  } catch (e) { logger.warn('QA2_AUTOASSIGN', `park duplicates error: ${e.message}`); return 0; }
+}
+
+module.exports = { runQa2AutoAssign, purgeStaleQa2Assignments, purgeParkedQa2Calls, parkDuplicateStarvedCalls };
