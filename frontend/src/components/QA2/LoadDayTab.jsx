@@ -21,7 +21,7 @@
 // ============================================================================
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { CalendarClock, Download, Users2, Wrench, Grid3x3, ListChecks, Info, Undo2, UserMinus } from 'lucide-react';
+import { CalendarClock, Download, Users2, Wrench, Grid3x3, ListChecks, Info, Undo2, UserMinus, X } from 'lucide-react';
 import { toast } from 'sonner';
 import client from '../../api/client';
 import ThemedSelect from '../UI/Select';
@@ -86,6 +86,22 @@ export default function LoadDayTab({ scope }) {
   })();
   const visibleCalls = (calls || []).filter(c => methodTab === 'all' || methodOf(c) === methodTab);
   const abortable = useAbortable();
+
+  // Persisted column filters, made visible — copied from PoolTab, same tq hook.
+  const FILTER_LABELS = { method: 'Method', leg: 'Leg', recording_state: 'Recording', call_at: 'Time' };
+  const OPTION_LOOKUP = { method: methodOptions, leg: LEG_OPTIONS, recording_state: REC_OPTIONS };
+  const filterText = (key, f) => {
+    if (!f) return '';
+    if (f.op === 'empty') return 'is empty';
+    if (f.op === 'notempty') return 'is not empty';
+    const pretty = (v) => (OPTION_LOOKUP[key] || []).find(o => String(o.value) === String(v))?.label ?? v;
+    if (f.op === 'in')      return (Array.isArray(f.v) ? f.v : [f.v]).map(pretty).join(', ');
+    if (f.op === 'between') return `${f.v} → ${f.v2 || '…'}`;
+    if (f.op === 'gte')     return `≥ ${f.v}`;
+    if (f.op === 'lte')     return `≤ ${f.v}`;
+    return String(pretty(f.v));
+  };
+  const activeFilters = Object.entries(tq.filters || {});
 
   const myCompanyIds = scope?.operationalCompanyIds === 'all' ? null : (scope?.operationalCompanyIds || []);
   useEffect(() => {
@@ -375,10 +391,40 @@ export default function LoadDayTab({ scope }) {
         </p>
       </Panel>
 
+      {/* ACTIVE FILTERS, VISIBLY — same treatment PoolTab already has. Column
+          filters persist per user, so one set last week still applies today, in
+          EVERY company: switch company, pull the day, and only the filtered
+          method shows, with nothing on screen saying why and no way back short
+          of reopening each column menu. Each filter is now a removable chip
+          plus one Clear all, shown whether or not any rows survived it. */}
+      {activeFilters.length > 0 && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>Filtered by</span>
+          {activeFilters.map(([key, f]) => (
+            <button key={key} onClick={() => tq.clearFilter(key)} title="Remove this filter"
+              className="text-xs font-semibold px-2 py-1 rounded-full inline-flex items-center gap-1.5"
+              style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}>
+              {FILTER_LABELS[key] || key}: {filterText(key, f)} <X size={11} />
+            </button>
+          ))}
+          <button onClick={tq.clearAll} className="text-xs font-bold px-2.5 py-1 rounded-full"
+            style={{ background: 'var(--color-primary-600)', color: '#fff' }}>
+            Clear all
+          </button>
+        </div>
+      )}
+
       {loadError && <Panel tone="inset"><p className="text-sm" style={{ color: 'var(--color-error-600)' }}>{loadError}</p></Panel>}
       {!loadError && companyId && date && calls === null && <Loading variant="table" rows={4} />}
       {!loadError && calls && calls.length === 0 && (
-        <EmptyState icon={CalendarClock} title="Nothing here yet" hint={`No classified calls for this company on ${date} — try "Pull this day from the CRM", or check your filters.`} />
+        activeFilters.length > 0 ? (
+          <EmptyState icon={CalendarClock} title="No calls match your filters"
+            hint="This day may still have work — the filters above are hiding it."
+            action={<button onClick={tq.clearAll} className="text-sm font-bold px-3 py-2 rounded-lg"
+              style={{ background: 'var(--gradient-sidebar)', color: 'var(--color-text-inverse)' }}>Clear all filters</button>} />
+        ) : (
+          <EmptyState icon={CalendarClock} title="Nothing here yet" hint={`No classified calls for this company on ${date} — try "Pull this day from the CRM".`} />
+        )
       )}
 
       {/* ── HAND IT OUT ───────────────────────────────────────────────── */}
