@@ -213,9 +213,26 @@ async function populateCrmDay(companyId, date) {
     .select('id, customer_phone, normalized_phone, sale_date, created_at, closer_id, status, vicidial_vendor_code, closer_disposition')
     .eq('company_id', companyId).is('transfer_id', null).eq('sale_date', date);
 
+  // SALES CLOSED TODAY ON AN OLDER LEAD.
+  //
+  // Everything above windows on transfers.created_at, so a sale closed today
+  // against a lead transferred days or weeks ago produced NO closer leg at all —
+  // its transfer is not in today's set, and the standalone path above only
+  // catches sales with no transfer_id whatsoever. The sale simply never reached
+  // QA. Measured on Wavetech 22 Aug: a sale closed that day sat on a transfer
+  // from 5 Aug, so Closed showed 3 of the 4 sales and every one of them belonged
+  // to the other closer — one closer's work was invisible for the day.
+  const { data: agedSales } = await supabaseAdmin.from('sales')
+    .select('id, transfer_id, customer_phone, normalized_phone, sale_date, created_at, closer_id, status, vicidial_vendor_code, closer_disposition')
+    .eq('company_id', companyId).not('transfer_id', 'is', null)
+    .gte('created_at', start).lte('created_at', end);
+  // Only the ones today's transfer sweep did not already cover.
+  const agedOnly = (agedSales || []).filter(s => !salesByTransfer.has(s.transfer_id));
+
   const saleIds = [
     ...[...salesByTransfer.values()].map(s => s.id),
     ...(standaloneSales || []).map(s => s.id),
+    ...agedOnly.map(s => s.id),
   ].filter(Boolean);
   const existing = await existingKeys(companyId, tids, saleIds);
   const tasks = [];
@@ -255,6 +272,18 @@ async function populateCrmDay(companyId, date) {
     if (existing.has(`s:${s.id}:closer`)) continue;
     tasks.push({
       companyId, leg: 'closer', transferId: null, saleId: s.id,
+      vendorCode: s.vicidial_vendor_code, phone: s.normalized_phone || s.customer_phone,
+      callAt: s.created_at || s.sale_date, agentUserId: s.closer_id, dispoRaw: s.closer_disposition,
+    });
+  }
+
+  // Closed today, transferred earlier — see agedSales above. The transfer is
+  // still carried on the row so the review links back to the right lead; only
+  // the SALE decides the day, the agent and the disposition.
+  for (const s of agedOnly) {
+    if (existing.has(`s:${s.id}:closer`)) continue;
+    tasks.push({
+      companyId, leg: 'closer', transferId: s.transfer_id, saleId: s.id,
       vendorCode: s.vicidial_vendor_code, phone: s.normalized_phone || s.customer_phone,
       callAt: s.created_at || s.sale_date, agentUserId: s.closer_id, dispoRaw: s.closer_disposition,
     });
