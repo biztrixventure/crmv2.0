@@ -17,6 +17,7 @@ const { supabaseAdmin } = require('../../config/database');
 const { asyncHandler } = require('../../middleware/errorHandler');
 const logger = require('../../utils/logger');
 const { can, deny, readCompanyId, writeCompanyId, selfEmployee } = require('../../utils/moduleAccess');
+const { getCompanyCurrency } = require('../../models/helpers');
 
 const router = express.Router();
 
@@ -336,7 +337,7 @@ router.post('/', asyncHandler(async (req, res) => {
     status:       b.status || 'active',
     base_salary:  b.base_salary ?? null,
     pay_frequency: b.pay_frequency || null,
-    currency:     b.currency || 'PKR',
+    currency:     b.currency || await getCompanyCurrency(companyId),
     notes:        b.notes || null,
     created_by:   req.user.id,
   }).select(full).single();

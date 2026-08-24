@@ -23,6 +23,7 @@ const { asyncHandler } = require('../../middleware/errorHandler');
 const logger = require('../../utils/logger');
 const { can, deny, readCompanyId, writeCompanyId, selfEmployee } = require('../../utils/moduleAccess');
 const { createPostedEntry, accountByCode } = require('../../utils/ledger');
+const { getCompanyCurrency } = require('../../models/helpers');
 
 const router = express.Router();
 
@@ -173,7 +174,7 @@ router.post('/', asyncHandler(async (req, res) => {
     employee_id:  employee?.id || null,
     expense_date: req.body?.expense_date || new Date().toISOString().slice(0, 10),
     amount,
-    currency:     req.body?.currency || 'PKR',
+    currency:     req.body?.currency || await getCompanyCurrency(companyId),
     vendor:       req.body?.vendor || null,
     description:  req.body?.description || null,
     receipt_url:  req.body?.receipt_url || null,

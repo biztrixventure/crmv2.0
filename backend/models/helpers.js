@@ -343,6 +343,20 @@ const getCompanyType = async (companyId) => {
   });
 };
 
+// The currency a company books in (mig 295). Cached like getCompanyType: it
+// never changes in practice, and it is read on every money default and every
+// report heading. Falls back to PKR rather than USD -- the column default and
+// the deployment agree on that, and a wrong fallback here is exactly what put
+// US$ on a rupee balance sheet.
+const getCompanyCurrency = async (companyId) => {
+  if (!companyId) return 'PKR';
+  return cache.remember('companyCurrency', companyId, COMPANY_TYPE_TTL_MS, async () => {
+    const { data } = await supabaseAdmin
+      .from('companies').select('currency').eq('id', companyId).maybeSingle();
+    return data?.currency || 'PKR';
+  });
+};
+
 // Display names for a set of users, but ONLY for those who still hold an ACTIVE
 // company role.
 //
@@ -475,6 +489,7 @@ module.exports = {
   getUserCompanies,
   isCompanyMember,
   getCompanyType,
+  getCompanyCurrency,
   getActiveCompanyIdsByType,
   getCounterpartCompanyIds,
   activeUserNames,

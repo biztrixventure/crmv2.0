@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+﻿import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { toastError } from '../../../utils/toast';
 import { transferPhone } from '../../../utils/phone';
 import { useAuth } from '../../../contexts/AuthContext';
@@ -32,7 +32,7 @@ import { Loading } from '../../UI/kit';
 import { TableScroll } from "../../UI/kit";
 import { PillTabs } from '../../UI/kit';
 
-// ── constants ─────────────────────────────────────────────────────────────────
+// â”€â”€ constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const SALE_BADGE     = { open:'info', sold:'success', cancelled:'error', follow_up:'warning', closed_won:'success', closed_lost:'error', compliance_cancelled:'error', dispute:'warning', chargeback:'error' };
 const TRANSFER_BADGE = { pending:'warning', assigned:'info', completed:'success', cancelled:'error', rejected:'error' };
 const LIMIT = 50;
@@ -47,7 +47,7 @@ const PRIORITY_CFG = {
 };
 
 const PriorityBadge = ({ priority }) => {
-  if (!priority) return <span className="text-xs text-text-secondary">—</span>;
+  if (!priority) return <span className="text-xs text-text-secondary">â€”</span>;
   const cfg = PRIORITY_CFG[priority] || PRIORITY_CFG.Medium;
   return (
     <span className="inline-flex items-center gap-1 px-1.5 py-px rounded text-xs font-semibold border"
@@ -68,7 +68,7 @@ const SortTh = ({ col, sort, onSort, children }) => {
   );
 };
 
-// Extra columns for the expanded (horizontal) view — superadmin + managers only.
+// Extra columns for the expanded (horizontal) view â€” superadmin + managers only.
 const EXPAND_ROLES = ['superadmin', 'readonly_admin', 'company_admin', 'operations_manager', 'fronter_manager', 'closer_manager', 'manager', 'compliance_manager'];
 const ExTh = ({ children }) => (
   <th className="px-3 py-2.5 text-left text-xs font-bold uppercase whitespace-nowrap"
@@ -76,13 +76,13 @@ const ExTh = ({ children }) => (
 );
 const ExTd = ({ value, mono, truncate }) => (
   <td className={`px-3 py-2.5 text-xs text-text-secondary ${mono ? 'font-mono' : ''} ${truncate ? 'max-w-[220px] truncate' : 'whitespace-nowrap'}`}
-    title={truncate && value ? String(value) : undefined}>{(value === 0 || value) ? value : '—'}</td>
+    title={truncate && value ? String(value) : undefined}>{(value === 0 || value) ? value : 'â€”'}</td>
 );
 const dt = (d) => d ? new Date(d).toLocaleString() : null;
 
-// ── RecordsPanel ──────────────────────────────────────────────────────────────
+// â”€â”€ RecordsPanel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const RecordsPanel = ({ companyId, type, companyType, companyName }) => {
-  // null = unconfigured → each record type keeps its own default column set.
+  // null = unconfigured â†’ each record type keeps its own default column set.
   const { allowedFor } = useExportColumns(['sales', 'transfers', 'callbacks']);
   const { user, hasPermission, canExport } = useAuth();
   const canExpand = EXPAND_ROLES.includes(user?.role);
@@ -179,7 +179,7 @@ const RecordsPanel = ({ companyId, type, companyType, companyName }) => {
         <div className="relative flex-1 min-w-48">
           <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
           <input value={search} onChange={e => setSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && load(1)}
-            placeholder="Search…" className="input pl-9 text-sm" />
+            placeholder="Searchâ€¦" className="input pl-9 text-sm" />
         </div>
         <ThemedSelect value={status} onChange={e => setStatus(e.target.value)} className="input text-sm w-40">
           <option value="">All statuses</option>
@@ -188,9 +188,9 @@ const RecordsPanel = ({ companyId, type, companyType, companyName }) => {
         {type === 'callbacks' && <>
           <ThemedSelect value={priority} onChange={e => setPriority(e.target.value)} className="input text-sm w-36">
             <option value="">All priorities</option>
-            <option value="High">🔴 High</option>
-            <option value="Medium">🟡 Medium</option>
-            <option value="Low">🔵 Low</option>
+            <option value="High">ðŸ”´ High</option>
+            <option value="Medium">ðŸŸ¡ Medium</option>
+            <option value="Low">ðŸ”µ Low</option>
           </ThemedSelect>
           <ThemedSelect value={userFilter} onChange={e => setUserFilter(e.target.value)} className="input text-sm w-40">
             <option value="">All agents</option>
@@ -202,14 +202,14 @@ const RecordsPanel = ({ companyId, type, companyType, companyName }) => {
           </ThemedSelect>
         </>}
         <button onClick={() => load(1)} className="px-4 py-2 rounded-xl text-sm font-semibold text-white" style={{ background: 'var(--gradient-sidebar)' }}>
-          Search · {total}
+          Search Â· {total}
         </button>
         {total > 0 && canExport(type) && (
           <button onClick={handleExport} disabled={exportLoading}
             className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-60"
             style={{ background: 'linear-gradient(135deg,#16a34a,#15803d)' }}>
             <Download size={13} />
-            {exportLoading ? 'Exporting…' : 'Export CSV'}
+            {exportLoading ? 'Exportingâ€¦' : 'Export CSV'}
           </button>
         )}
         {canExpand && (
@@ -253,13 +253,13 @@ const RecordsPanel = ({ companyId, type, companyType, companyName }) => {
                     <tr key={r.id} onClick={() => setSelected(r)}
                       className="hover:bg-bg-secondary cursor-pointer transition-colors"
                       style={{ borderBottom: '1px solid var(--color-border)' }}>
-                      <td className="px-3 py-2.5 font-semibold text-text whitespace-nowrap">{r.customer_name||'—'}</td>
-                      <td className="px-3 py-2.5 text-xs text-text-secondary whitespace-nowrap">{r.customer_phone||'—'}</td>
-                      <td className="px-3 py-2.5 font-mono text-xs text-text-secondary">{r.reference_no||'—'}</td>
-                      <td className="px-3 py-2.5 text-xs text-text-secondary whitespace-nowrap">{[r.car_year,r.car_make,r.car_model].filter(Boolean).join(' ')||'—'}</td>
-                      <td className="px-3 py-2.5 text-xs font-semibold text-success-600">{r.monthly_payment?`$${r.monthly_payment}`:'—'}</td>
-                      <td className="px-3 py-2.5 text-xs text-text-secondary whitespace-nowrap">{r.fronter_name||'—'}</td>
-                      <td className="px-3 py-2.5 text-xs text-text-secondary whitespace-nowrap">{r.closer_name||'—'}</td>
+                      <td className="px-3 py-2.5 font-semibold text-text whitespace-nowrap">{r.customer_name||'â€”'}</td>
+                      <td className="px-3 py-2.5 text-xs text-text-secondary whitespace-nowrap">{r.customer_phone||'â€”'}</td>
+                      <td className="px-3 py-2.5 font-mono text-xs text-text-secondary">{r.reference_no||'â€”'}</td>
+                      <td className="px-3 py-2.5 text-xs text-text-secondary whitespace-nowrap">{[r.car_year,r.car_make,r.car_model].filter(Boolean).join(' ')||'â€”'}</td>
+                      <td className="px-3 py-2.5 text-xs font-semibold text-success-600">{r.monthly_payment?`$${r.monthly_payment}`:'â€”'}</td>
+                      <td className="px-3 py-2.5 text-xs text-text-secondary whitespace-nowrap">{r.fronter_name||'â€”'}</td>
+                      <td className="px-3 py-2.5 text-xs text-text-secondary whitespace-nowrap">{r.closer_name||'â€”'}</td>
                       <td className="px-3 py-2.5"><SaleStatusBadge sale={r} size="sm" /></td>
                       <td className="px-3 py-2.5 text-xs text-text-tertiary whitespace-nowrap">{new Date(r.created_at).toLocaleDateString()}</td>
                       {isExpanded && <>
@@ -298,15 +298,15 @@ const RecordsPanel = ({ companyId, type, companyType, companyName }) => {
                       className="hover:bg-bg-secondary cursor-pointer transition-colors"
                       style={{ borderBottom: '1px solid var(--color-border)' }}>
                       <td className="px-3 py-2.5 font-semibold text-text whitespace-nowrap">
-                        {r.form_data?.FirstName ? `${r.form_data.FirstName} ${r.form_data.LastName||''}`.trim() : r.form_data?.customer_name||'—'}
+                        {r.form_data?.FirstName ? `${r.form_data.FirstName} ${r.form_data.LastName||''}`.trim() : r.form_data?.customer_name||'â€”'}
                       </td>
-                      <td className="px-3 py-2.5 text-xs text-text-secondary whitespace-nowrap">{transferPhone(r)||'—'}</td>
-                      <td className="px-3 py-2.5 text-xs text-text-secondary whitespace-nowrap">{r.created_by_name||r.fronter_name||'—'}</td>
+                      <td className="px-3 py-2.5 text-xs text-text-secondary whitespace-nowrap">{transferPhone(r)||'â€”'}</td>
+                      <td className="px-3 py-2.5 text-xs text-text-secondary whitespace-nowrap">{r.created_by_name||r.fronter_name||'â€”'}</td>
                       <td className="px-3 py-2.5 text-xs text-text-secondary whitespace-nowrap">
-                        {r.assigned_closer_name || (r.closer ? `${r.closer.first_name||''} ${r.closer.last_name||''}`.trim() : '') || '—'}
+                        {r.assigned_closer_name || (r.closer ? `${r.closer.first_name||''} ${r.closer.last_name||''}`.trim() : '') || 'â€”'}
                       </td>
                       <td className="px-3 py-2.5"><Badge variant={TRANSFER_BADGE[r.status]||'secondary'} size="sm">{r.status}</Badge></td>
-                      <td className="px-3 py-2.5 text-xs text-text-secondary">{r.rejection_count>0?`${r.rejection_count}×`:'—'}</td>
+                      <td className="px-3 py-2.5 text-xs text-text-secondary">{r.rejection_count>0?`${r.rejection_count}Ã—`:'â€”'}</td>
                       <td className="px-3 py-2.5 text-xs text-text-tertiary whitespace-nowrap">{new Date(r.created_at).toLocaleDateString()}</td>
                       {isExpanded && (() => {
                         const fd = r.form_data || {};
@@ -347,7 +347,7 @@ const RecordsPanel = ({ companyId, type, companyType, companyName }) => {
                         className="hover:bg-bg-secondary cursor-pointer transition-colors"
                         style={{ borderBottom: '1px solid var(--color-border)' }}>
                         <td className="px-3 py-2.5">
-                          <p className="font-semibold text-text text-sm">{r.customer_name||'—'}</p>
+                          <p className="font-semibold text-text text-sm">{r.customer_name||'â€”'}</p>
                           {r.customer_phone ? (
                             <button onClick={e => { e.stopPropagation(); setPhoneDrawer({ phone: r.customer_phone, customerName: r.customer_name }); }}
                               className="text-xs font-mono hover:underline"
@@ -358,10 +358,10 @@ const RecordsPanel = ({ companyId, type, companyType, companyName }) => {
                         </td>
                         <td className="px-3 py-2.5"><PriorityBadge priority={r.priority} /></td>
                         <td className="px-3 py-2.5 text-xs text-text-secondary">
-                          {(r.company_type||companyType) === 'fronter' ? (r.user_name||'—') : '—'}
+                          {(r.company_type||companyType) === 'fronter' ? (r.user_name||'â€”') : 'â€”'}
                         </td>
                         <td className="px-3 py-2.5 text-xs text-text-secondary">
-                          {(r.company_type||companyType) === 'closer' ? (r.user_name||'—') : '—'}
+                          {(r.company_type||companyType) === 'closer' ? (r.user_name||'â€”') : 'â€”'}
                         </td>
                         <td className="px-3 py-2.5 text-xs">
                           <div className="flex items-center gap-1" style={{ color: 'var(--color-text-secondary)' }}>
@@ -392,7 +392,7 @@ const RecordsPanel = ({ companyId, type, companyType, companyName }) => {
           </div>
           {total > LIMIT && (
             <div className="flex items-center justify-between px-4 py-3" style={{ borderTop: '1px solid var(--color-border)' }}>
-              <span className="text-xs text-text-secondary">{(page-1)*LIMIT+1}–{Math.min(page*LIMIT,total)} of {total}</span>
+              <span className="text-xs text-text-secondary">{(page-1)*LIMIT+1}â€“{Math.min(page*LIMIT,total)} of {total}</span>
               <div className="flex gap-2">
                 <button disabled={page===1} onClick={()=>load(page-1)} className="px-3 py-1 rounded text-xs font-semibold disabled:opacity-40" style={{color:'var(--color-text-secondary)'}}>Prev</button>
                 <button disabled={page*LIMIT>=total} onClick={()=>load(page+1)} className="px-3 py-1 rounded text-xs font-semibold disabled:opacity-40" style={{color:'var(--color-text-secondary)'}}>Next</button>
@@ -417,7 +417,7 @@ const RecordsPanel = ({ companyId, type, companyType, companyName }) => {
   );
 };
 
-// ── OverviewPanel ─────────────────────────────────────────────────────────────
+// â”€â”€ OverviewPanel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const OverviewPanel = ({ companyId }) => {
   const [stats, setStats] = useState({});
   const [loading, setLoading] = useState(false);
@@ -452,7 +452,7 @@ const OverviewPanel = ({ companyId }) => {
           <div className="flex items-start justify-between">
             <div>
               <p className="text-xs text-text-secondary mb-1">{c.label}</p>
-              <p className={`text-2xl font-bold text-${c.color}-600`}>{loading ? '—' : (c.value ?? 0)}</p>
+              <p className={`text-2xl font-bold text-${c.color}-600`}>{loading ? 'â€”' : (c.value ?? 0)}</p>
             </div>
             <div className={`p-2 rounded-lg bg-${c.color}-100 dark:bg-${c.color}-900`}>
               <c.icon size={16} className={`text-${c.color}-600`} />
@@ -464,7 +464,7 @@ const OverviewPanel = ({ companyId }) => {
   );
 };
 
-// ── ImpersonateModal ──────────────────────────────────────────────────────────
+// â”€â”€ ImpersonateModal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const ImpersonateModal = ({ data, onClose }) => {
   const [copied, setCopied] = useState(false);
 
@@ -551,9 +551,9 @@ const ImpersonateModal = ({ data, onClose }) => {
   );
 };
 
-// ── MembersPanel ──────────────────────────────────────────────────────────────
+// â”€â”€ MembersPanel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const MembersPanel = ({ companyId, companyName }) => {
-  // null = unconfigured → the members CSV keeps its own default column set.
+  // null = unconfigured â†’ the members CSV keeps its own default column set.
   const { allowedFor } = useExportColumns(['company_members']);
   const { hasPermission, user: authUser, canExport } = useAuth();
   const isSuperAdmin = authUser?.role === 'superadmin';
@@ -569,11 +569,11 @@ const MembersPanel = ({ companyId, companyName }) => {
   const [impersonateData,    setImpersonateData]    = useState(null);
   const [impersonateLoading, setImpersonateLoading] = useState(null);
   const [sort, setSort] = useState({ col: 'name', dir: 'asc' });
-  // Active/Inactive/All — the roster is loaded once with include_inactive:true
+  // Active/Inactive/All â€” the roster is loaded once with include_inactive:true
   // (below), so this is a pure client-side split, not a re-fetch.
   const [statusFilter, setStatusFilter] = useState('active');
 
-  // Click a header to sort; click again to flip direction. Client-side — the
+  // Click a header to sort; click again to flip direction. Client-side â€” the
   // whole member list is already loaded, no pagination.
   const onSort = (col) => setSort(s => s.col === col ? { col, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: 'asc' });
   const sortVal = (u, col) => {
@@ -640,7 +640,7 @@ const MembersPanel = ({ companyId, companyName }) => {
   };
 
   const handleSaveUser = async (formData) => {
-    // Password is NOT handled by PUT /users/:id (it only updates name/role) — it
+    // Password is NOT handled by PUT /users/:id (it only updates name/role) â€” it
     // must go to the dedicated endpoint that calls Supabase auth.admin
     // updateUserById. Sending it in the profile body silently dropped it, so the
     // new password never took effect. Mirror the useUsers hook: split them.
@@ -656,7 +656,7 @@ const MembersPanel = ({ companyId, companyName }) => {
     }
     load();
     if (detailsErr || passwordErr) {
-      throw new Error([detailsErr && `Details: ${detailsErr}`, passwordErr && `Password: ${passwordErr}`].filter(Boolean).join(' · '));
+      throw new Error([detailsErr && `Details: ${detailsErr}`, passwordErr && `Password: ${passwordErr}`].filter(Boolean).join(' Â· '));
     }
   };
 
@@ -676,7 +676,7 @@ const MembersPanel = ({ companyId, companyName }) => {
     setExportLoading(true);
     try {
       // The member rows are already loaded, so there is no list request left for
-      // egressAudit to intercept — this soft log was missing entirely, making
+      // egressAudit to intercept â€” this soft log was missing entirely, making
       // the members CSV the last unlogged export in the admin shell. Exports
       // whatever the Active/Inactive/All tab currently shows, not the full roster.
       if (!await logClientExport('company_members', filtered.length, { company_id: companyId })) {
@@ -701,7 +701,7 @@ const MembersPanel = ({ companyId, companyName }) => {
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-white disabled:opacity-60"
               style={{ background: 'linear-gradient(135deg,#16a34a,#15803d)' }}>
               <Download size={12} />
-              {exportLoading ? 'Exporting…' : 'Export CSV'}
+              {exportLoading ? 'Exportingâ€¦' : 'Export CSV'}
             </button>
           )}
           {hasPermission('create_user') && (
@@ -757,11 +757,11 @@ const MembersPanel = ({ companyId, companyName }) => {
                     className="hover:bg-bg-secondary cursor-pointer transition-colors"
                     style={{ borderBottom: '1px solid var(--color-border)' }}>
                     <td className="px-3 py-2.5 font-semibold text-text">
-                      {[u.first_name, u.last_name].filter(Boolean).join(' ') || '—'}
+                      {[u.first_name, u.last_name].filter(Boolean).join(' ') || 'â€”'}
                     </td>
-                    <td className="px-3 py-2.5 text-xs text-text-secondary">{u.email || '—'}</td>
-                    <td className="px-3 py-2.5 text-xs text-text-secondary">{u.role || '—'}</td>
-                    <td className="px-3 py-2.5 text-xs text-text-secondary capitalize">{u.role_level?.replace(/_/g,' ') || '—'}</td>
+                    <td className="px-3 py-2.5 text-xs text-text-secondary">{u.email || 'â€”'}</td>
+                    <td className="px-3 py-2.5 text-xs text-text-secondary">{u.role || 'â€”'}</td>
+                    <td className="px-3 py-2.5 text-xs text-text-secondary capitalize">{u.role_level?.replace(/_/g,' ') || 'â€”'}</td>
                     <td className="px-3 py-2.5">
                       <Badge variant={u.is_active ? 'success' : 'secondary'} size="sm">
                         {u.is_active ? 'Active' : 'Inactive'}
@@ -864,7 +864,7 @@ const MembersPanel = ({ companyId, companyName }) => {
   );
 };
 
-// ── RolesPanel ─────────────────────────────────────────────────────────────────
+// â”€â”€ RolesPanel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const RolesPanel = ({ companyId }) => {
   const { hasPermission } = useAuth();
   const [roles, setRoles]           = useState([]);
@@ -1000,12 +1000,13 @@ const RolesPanel = ({ companyId }) => {
   );
 };
 
-// ── SettingsPanel ─────────────────────────────────────────────────────────────
+// â”€â”€ SettingsPanel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const SettingsPanel = ({ company, onCompanyUpdated }) => {
   const { hasPermission } = useAuth();
   const [name, setName]               = useState(company.name || '');
   const [companyType, setCompanyType] = useState(company.company_type || 'fronter');
   const [internalTz, setInternalTz]   = useState(company.internal_timezone || 'Asia/Karachi');
+  const [currency, setCurrency]       = useState(company.currency || DEFAULT_CURRENCY);
   const [saving, setSaving]           = useState(false);
   const [saveErr, setSaveErr]         = useState('');
   const [saveOk, setSaveOk]           = useState(false);
@@ -1015,9 +1016,9 @@ const SettingsPanel = ({ company, onCompanyUpdated }) => {
     e.preventDefault();
     setSaving(true); setSaveErr(''); setSaveOk(false);
     try {
-      await client.put(`companies/${company.id}`, { name, company_type: companyType, internal_timezone: internalTz });
+      await client.put(`companies/${company.id}`, { name, company_type: companyType, internal_timezone: internalTz, currency });
       setSaveOk(true);
-      onCompanyUpdated?.({ ...company, name, company_type: companyType, internal_timezone: internalTz });
+      onCompanyUpdated?.({ ...company, name, company_type: companyType, internal_timezone: internalTz, currency });
       setTimeout(() => setSaveOk(false), 3000);
     } catch (err) {
       setSaveErr(err.response?.data?.error || 'Save failed');
@@ -1072,6 +1073,19 @@ const SettingsPanel = ({ company, onCompanyUpdated }) => {
             </ThemedSelect>
           </div>
 
+          {/* Sibling of the timezone: both say how this company's own numbers
+              are read. The accounting reports and every money default derive
+              from this (mig 295) instead of assuming dollars. */}
+          <div>
+            <label className="block text-sm font-medium text-text-secondary mb-1">
+              Currency
+              <span className="ml-1.5 text-xs text-text-tertiary">(accounting, payroll, invoices and expenses use this)</span>
+            </label>
+            <ThemedSelect className="input" value={currency} onChange={e => setCurrency(e.target.value)}>
+              {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+            </ThemedSelect>
+          </div>
+
           {saveErr && <p className="text-sm text-error-600">{saveErr}</p>}
           {saveOk  && <p className="text-sm text-success-600">Settings saved.</p>}
 
@@ -1087,7 +1101,7 @@ const SettingsPanel = ({ company, onCompanyUpdated }) => {
   );
 };
 
-// ── NumbersPanel ──────────────────────────────────────────────────────────────
+// â”€â”€ NumbersPanel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const NUM_STATUS_BADGE = { active: 'success', claimable: 'warning', released: 'secondary' };
 
 const NumbersPanel = ({ companyId }) => {
@@ -1120,14 +1134,14 @@ const NumbersPanel = ({ companyId }) => {
         <div className="relative flex-1 min-w-48">
           <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
           <input value={search} onChange={e => setSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && load(1)}
-            placeholder="Search phone…" className="input pl-9 text-sm" />
+            placeholder="Search phoneâ€¦" className="input pl-9 text-sm" />
         </div>
         <ThemedSelect value={status} onChange={e => setStatus(e.target.value)} className="input text-sm w-40">
           <option value="">All statuses</option>
           {['active','claimable','released'].map(s => <option key={s} value={s}>{s.charAt(0).toUpperCase()+s.slice(1)}</option>)}
         </ThemedSelect>
         <button onClick={() => load(1)} className="px-4 py-2 rounded-xl text-sm font-semibold text-white" style={{ background: 'var(--gradient-sidebar)' }}>
-          Search · {total}
+          Search Â· {total}
         </button>
       </div>
 
@@ -1164,7 +1178,7 @@ const NumbersPanel = ({ companyId }) => {
                       </Badge>
                     </td>
                     <td className="px-3 py-2.5 text-xs text-center text-text-secondary">{r.attempt_count ?? 0}</td>
-                    <td className="px-3 py-2.5 text-xs text-text-secondary capitalize">{r.last_outcome?.replace(/_/g,' ') || '—'}</td>
+                    <td className="px-3 py-2.5 text-xs text-text-secondary capitalize">{r.last_outcome?.replace(/_/g,' ') || 'â€”'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -1172,7 +1186,7 @@ const NumbersPanel = ({ companyId }) => {
           </TableScroll>
           {total > LIMIT && (
             <div className="flex items-center justify-between px-4 py-3" style={{ borderTop: '1px solid var(--color-border)' }}>
-              <span className="text-xs text-text-secondary">{(page-1)*LIMIT+1}–{Math.min(page*LIMIT,total)} of {total}</span>
+              <span className="text-xs text-text-secondary">{(page-1)*LIMIT+1}â€“{Math.min(page*LIMIT,total)} of {total}</span>
               <div className="flex gap-2">
                 <button disabled={page===1} onClick={() => load(page-1)} className="px-3 py-1 rounded text-xs font-semibold disabled:opacity-40" style={{color:'var(--color-text-secondary)'}}>Prev</button>
                 <button disabled={page*LIMIT>=total} onClick={() => load(page+1)} className="px-3 py-1 rounded text-xs font-semibold disabled:opacity-40" style={{color:'var(--color-text-secondary)'}}>Next</button>
@@ -1194,7 +1208,7 @@ const NumbersPanel = ({ companyId }) => {
   );
 };
 
-// ── main CompanyDetail ────────────────────────────────────────────────────────
+// â”€â”€ main CompanyDetail â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const CompanyDetail = ({ company: initialCompany, onBack, onUpdate }) => {
   const { hasPermission } = useAuth();
   const [activeTab, setActiveTab] = useState('overview');
@@ -1230,7 +1244,7 @@ const CompanyDetail = ({ company: initialCompany, onBack, onUpdate }) => {
 
   return (
     <div>
-      {/* ── header ─────────────────────────────────────────────────────── */}
+      {/* â”€â”€ header â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       <div className="flex items-center gap-3 mb-4 pb-4"
         style={{ borderBottom: '1px solid var(--color-border)' }}>
 
@@ -1285,7 +1299,7 @@ const CompanyDetail = ({ company: initialCompany, onBack, onUpdate }) => {
         </div>
       </div>
 
-      {/* ── tabs ───────────────────────────────────────────────────────── */}
+      {/* â”€â”€ tabs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       <div className="flex gap-0.5 mb-5 p-1 rounded-xl overflow-x-auto"
         style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
         {TABS.map(t => (

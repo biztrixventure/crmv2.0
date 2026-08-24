@@ -1,4 +1,4 @@
-const express = require('express');
+﻿const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
@@ -21,7 +21,7 @@ router.get(
       if (req.user.role === "superadmin") {
         const { data, error } = await supabaseAdmin
           .from("companies")
-          .select("id, name, slug, logo_url, logo_light_url, logo_dark_url, is_active, company_type, internal_timezone, created_at")
+          .select("id, name, slug, logo_url, logo_light_url, logo_dark_url, is_active, company_type, internal_timezone, currency, created_at")
           .order("name");
 
         if (error) {
@@ -124,6 +124,7 @@ router.post(
     }).optional(),
     body("company_type").isIn(['fronter', 'closer']).optional(),
     body("internal_timezone").trim().optional(),
+    body("currency").trim().optional(),
   ],
   asyncHandler(async (req, res) => {
     const errors = validationResult(req);
@@ -131,7 +132,7 @@ router.post(
       return res.status(400).json({ error: "Validation failed", details: errors.array() });
     }
 
-    const { name, slug, logo_url, logo_light_url, logo_dark_url, company_type, internal_timezone } = req.body;
+    const { name, slug, logo_url, logo_light_url, logo_dark_url, company_type, internal_timezone, currency } = req.body;
     const userId = req.user.id;
 
     try {
@@ -152,6 +153,7 @@ router.post(
           is_active:         true,
           company_type:      company_type      || 'fronter',
           internal_timezone: internal_timezone || 'Asia/Karachi',
+          currency: currency || 'PKR',
         })
         .select()
         .single();
@@ -182,7 +184,7 @@ router.get(
     try {
       const { data, error } = await supabaseAdmin
         .from("companies")
-        .select("id, name, slug, logo_url, logo_light_url, logo_dark_url, is_active, company_type, internal_timezone, created_at")
+        .select("id, name, slug, logo_url, logo_light_url, logo_dark_url, is_active, company_type, internal_timezone, currency, created_at")
         .eq("id", id)
         .single();
 
@@ -228,6 +230,7 @@ router.put(
     body("is_active").isBoolean().optional(),
     body("company_type").isIn(['fronter', 'closer']).optional(),
     body("internal_timezone").trim().optional(),
+    body("currency").trim().optional(),
   ],
   asyncHandler(async (req, res) => {
     const errors = validationResult(req);
@@ -236,7 +239,7 @@ router.put(
     }
 
     const { id } = req.params;
-    const { name, slug, logo_url, logo_light_url, logo_dark_url, is_active, company_type, internal_timezone } = req.body;
+    const { name, slug, logo_url, logo_light_url, logo_dark_url, is_active, company_type, internal_timezone, currency } = req.body;
     const userId = req.user.id;
 
     try {
@@ -255,6 +258,7 @@ router.put(
       if (is_active !== undefined)       updateData.is_active         = is_active;
       if (company_type !== undefined)    updateData.company_type      = company_type;
       if (internal_timezone !== undefined) updateData.internal_timezone = internal_timezone || 'Asia/Karachi';
+      if (currency !== undefined) updateData.currency = currency || 'PKR';
 
       const { data, error } = await supabaseAdmin
         .from("companies")
@@ -404,7 +408,7 @@ router.get(
       const emailMap = {};
       authUsers?.users?.forEach((u) => { emailMap[u.id] = u.email; });
 
-      // Exclude system superadmins from member lists — they are env-level,
+      // Exclude system superadmins from member lists â€” they are env-level,
       // not real company members even if a stale user_company_roles row exists.
       const saEmails = new Set(
         (process.env.SUPERADMIN_EMAIL || '').split(',').map(e => e.trim().toLowerCase()).filter(Boolean)
@@ -437,7 +441,7 @@ router.get(
 );
 
 // ============================================================================
-// DELETE /companies/:id — Hard delete company (SuperAdmin only)
+// DELETE /companies/:id â€” Hard delete company (SuperAdmin only)
 // - Nullifies company_id on sales + transfers (records preserved, orphaned)
 // - Deletes all user_company_roles for this company
 // - Deletes the company record
@@ -459,11 +463,11 @@ router.delete(
 
     if (fetchErr || !company) return res.status(404).json({ error: "Company not found" });
 
-    // 1. Preserve sales/transfers — unlink company, keep the records
+    // 1. Preserve sales/transfers â€” unlink company, keep the records
     await supabaseAdmin.from("sales").update({ company_id: null }).eq("company_id", id);
     await supabaseAdmin.from("transfers").update({ company_id: null }).eq("company_id", id);
 
-    // 2. Preserve review/dispo records — unlink company
+    // 2. Preserve review/dispo records â€” unlink company
     await supabaseAdmin.from("call_reviews").update({ company_id: null }).eq("company_id", id);
     await supabaseAdmin.from("call_dispositions").update({ company_id: null }).eq("company_id", id);
 
@@ -472,7 +476,7 @@ router.delete(
       .from("custom_roles").select("id").eq("company_id", id);
     const roleIds = (companyRoles || []).map(r => r.id);
 
-    // 4. Delete user_company_roles — by company AND by any of this company's roles
+    // 4. Delete user_company_roles â€” by company AND by any of this company's roles
     await supabaseAdmin.from("user_company_roles").delete().eq("company_id", id);
     if (roleIds.length > 0) {
       await supabaseAdmin.from("user_company_roles").delete().in("role_id", roleIds);

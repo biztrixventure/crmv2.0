@@ -16,7 +16,7 @@
 const express = require('express');
 const { supabaseAdmin } = require('../../config/database');
 const { asyncHandler } = require('../../middleware/errorHandler');
-const { isSuperAdmin } = require('../../models/helpers');
+const { isSuperAdmin, getCompanyCurrency } = require('../../models/helpers');
 const { can, isDesignated, readCompanyId, selfEmployee, moduleCompanies } = require('../../utils/moduleAccess');
 
 const router = express.Router();
@@ -43,10 +43,15 @@ router.get('/my-scope', asyncHandler(async (req, res) => {
   const superadmin = await isSuperAdmin(req.user.id);
   const designated = await isDesignated(req.user.id, 'hr');
 
+  // Name AND currency: every page below formats money, and a page that guesses
+  // the currency is what printed US$ on a rupee balance sheet (mig 295).
   let companyName = null;
+  let currency = 'PKR';
   if (companyId) {
-    const { data } = await supabaseAdmin.from('companies').select('name').eq('id', companyId).maybeSingle();
+    const { data } = await supabaseAdmin
+      .from('companies').select('name, currency').eq('id', companyId).maybeSingle();
     companyName = data?.name || null;
+    currency = data?.currency || 'PKR';
   }
 
   const keys = [
@@ -65,6 +70,7 @@ router.get('/my-scope', asyncHandler(async (req, res) => {
   res.json({
     company_id: companyId,
     company_name: companyName,
+    currency,
     superadmin,
     designated,
     permissions: perms,

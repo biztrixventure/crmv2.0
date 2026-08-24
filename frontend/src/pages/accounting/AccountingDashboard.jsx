@@ -25,11 +25,14 @@ import { Panel, SectionHeader, Loading, EmptyState, KpiTile, TableScroll } from 
 import { Alert } from '../../components/UI';
 import { useAccountingReports } from '../../hooks/useAccountingReports';
 import { useChartOfAccounts } from '../../hooks/useChartOfAccounts';
-import { fmtMoney, fmtMoneyShort, fmtDate, todayISO, monthStartISO } from '../../utils/money';
+import { fmtMoney, fmtMoneyShort, fmtDate, todayISO, monthStartISO, DEFAULT_CURRENCY } from '../../utils/money';
 
 export default function AccountingDashboard({ scope }) {
   const companyId = scope?.company_id || null;
-  const currency = 'USD';
+  // The company's own currency (mig 295), never a constant. This line read
+  // 'USD' and put US$ on every tile, the P&L and the balance sheet of a company
+  // that books in rupees.
+  const currency = scope?.currency || DEFAULT_CURRENCY;
   const { summary, profitLoss, balanceSheet, loading, error, fetchSummary, fetchProfitLoss, fetchBalanceSheet } =
     useAccountingReports(companyId);
   const { seedDefaults } = useChartOfAccounts(companyId);

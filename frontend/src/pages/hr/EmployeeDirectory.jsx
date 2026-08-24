@@ -21,7 +21,7 @@ import ThemedSelect from '../../components/UI/Select';
 import SearchSelect from '../../components/UI/SearchSelect';
 import { Btn, StatusPill, ModuleModal } from '../../components/Modules/ModuleUI';
 import { useEmployees } from '../../hooks/useEmployees';
-import { fmtMoney, fmtDate, CURRENCIES } from '../../utils/money';
+import { fmtMoney, fmtDate, CURRENCIES, DEFAULT_CURRENCY } from '../../utils/money';
 
 const fullName = (e) => [e?.first_name, e?.last_name].filter(Boolean).join(' ') || 'Unnamed';
 
@@ -181,6 +181,7 @@ export default function EmployeeDirectory({ scope }) {
       {editing && (
         <EmployeeEditor employee={editing} departments={departments} positions={positions}
           colleagues={employees} linkable={linkable}
+          defaultCurrency={scope?.currency || DEFAULT_CURRENCY}
           onClose={() => setEditing(null)}
           onSave={async (payload) => {
             setNotice(null);
@@ -278,7 +279,7 @@ const Detail = ({ label, value, mono }) => (
 
 // -- Editor ---------------------------------------------------------------------
 
-function EmployeeEditor({ employee, departments, positions, colleagues, linkable, onClose, onSave }) {
+function EmployeeEditor({ employee, departments, positions, colleagues, linkable, defaultCurrency, onClose, onSave }) {
   const isNew = !employee.id;
   const [form, setForm] = useState({
     user_id: employee.user_id || '',
@@ -299,7 +300,7 @@ function EmployeeEditor({ employee, departments, positions, colleagues, linkable
     status: employee.status || 'active',
     base_salary: employee.base_salary ?? '',
     pay_frequency: employee.pay_frequency || 'monthly',
-    currency: employee.currency || 'PKR',
+    currency: employee.currency || defaultCurrency,
   });
   const [saving, setSaving] = useState(false);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));

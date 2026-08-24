@@ -24,7 +24,7 @@ import ThemedSelect from '../../components/UI/Select';
 import { Btn, StatusPill, ModuleModal } from '../../components/Modules/ModuleUI';
 import { usePayroll } from '../../hooks/usePayroll';
 import { useEmployees } from '../../hooks/useEmployees';
-import { fmtMoney, fmtMoneyShort, fmtDate, todayISO } from '../../utils/money';
+import { fmtMoney, fmtMoneyShort, fmtDate, todayISO, DEFAULT_CURRENCY } from '../../utils/money';
 
 const fullName = (e) => [e?.first_name, e?.last_name].filter(Boolean).join(' ') || 'Unnamed';
 
@@ -530,7 +530,7 @@ function MyPayslips({ companyId }) {
       {data.payslips.map(p => {
         const run = p.hr_payroll_runs;
         const period = run?.hr_pay_periods;
-        const cur = run?.currency || 'USD';
+        const cur = run?.currency || DEFAULT_CURRENCY;
         return (
           <Panel key={p.id}>
             <SectionHeader title={run?.name || 'Payslip'}

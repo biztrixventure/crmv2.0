@@ -20,7 +20,7 @@ import SearchSelect from '../../components/UI/SearchSelect';
 import { Btn, StatusPill, ModuleModal } from '../../components/Modules/ModuleUI';
 import { useInvoices } from '../../hooks/useInvoices';
 import { useChartOfAccounts } from '../../hooks/useChartOfAccounts';
-import { fmtMoney, fmtMoneyShort, fmtDate, todayISO, CURRENCIES } from '../../utils/money';
+import { fmtMoney, fmtMoneyShort, fmtDate, todayISO, CURRENCIES, DEFAULT_CURRENCY } from '../../utils/money';
 
 const FILTERS = [
   { key: '',        label: 'All' },
@@ -159,7 +159,7 @@ export default function InvoicesPage({ scope }) {
       )}
 
       {editing && (
-        <InvoiceEditor invoice={editing} accounts={accounts}
+        <InvoiceEditor invoice={editing} accounts={accounts} defaultCurrency={scope?.currency || DEFAULT_CURRENCY}
           onClose={() => setEditing(null)}
           onSave={async (payload) => {
             setNotice(null);
@@ -199,7 +199,7 @@ export default function InvoicesPage({ scope }) {
 
 const blankLine = () => ({ description: '', quantity: 1, unit_price: 0, tax_rate: 0, discount: 0, account_id: '' });
 
-function InvoiceEditor({ invoice, accounts, onClose, onSave }) {
+function InvoiceEditor({ invoice, accounts, defaultCurrency, onClose, onSave }) {
   const isNew = !invoice.id;
   const [form, setForm] = useState({
     customer_name: invoice.customer_name || '',
@@ -207,7 +207,7 @@ function InvoiceEditor({ invoice, accounts, onClose, onSave }) {
     customer_phone: invoice.customer_phone || '',
     issue_date: invoice.issue_date || todayISO(),
     due_date: invoice.due_date || '',
-    currency: invoice.currency || 'PKR',
+    currency: invoice.currency || defaultCurrency,
     notes: invoice.notes || '',
     terms: invoice.terms || '',
   });

@@ -19,7 +19,7 @@ import { Alert } from '../../components/UI';
 import ThemedSelect from '../../components/UI/Select';
 import { Btn, StatusPill, ModuleModal } from '../../components/Modules/ModuleUI';
 import { useExpenses } from '../../hooks/useExpenses';
-import { fmtMoney, fmtMoneyShort, fmtDate, todayISO, CURRENCIES } from '../../utils/money';
+import { fmtMoney, fmtMoneyShort, fmtDate, todayISO, CURRENCIES, DEFAULT_CURRENCY } from '../../utils/money';
 
 export default function ExpensesPage({ scope }) {
   const companyId = scope?.company_id || null;
@@ -182,7 +182,7 @@ export default function ExpensesPage({ scope }) {
       )}
 
       {editing && (
-        <ExpenseEditor expense={editing} categories={categories}
+        <ExpenseEditor expense={editing} categories={categories} defaultCurrency={scope?.currency || DEFAULT_CURRENCY}
           onClose={() => setEditing(null)}
           onSave={async (payload, submitNow) => {
             setNotice(null);
@@ -200,11 +200,11 @@ export default function ExpensesPage({ scope }) {
   );
 }
 
-function ExpenseEditor({ expense, categories, onClose, onSave }) {
+function ExpenseEditor({ expense, categories, defaultCurrency, onClose, onSave }) {
   const [form, setForm] = useState({
     expense_date: expense.expense_date || todayISO(),
     amount: expense.amount ?? '',
-    currency: expense.currency || 'PKR',
+    currency: expense.currency || defaultCurrency,
     category_id: expense.category_id || '',
     vendor: expense.vendor || '',
     description: expense.description || '',
