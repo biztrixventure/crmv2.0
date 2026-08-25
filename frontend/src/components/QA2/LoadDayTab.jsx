@@ -61,6 +61,7 @@ export default function LoadDayTab({ scope }) {
   const [methodOptions, setMethodOptions] = useState([]);
   const [methodTab, setMethodTab] = useState('all');
   const [crm, setCrm] = useState(null);   // { transfers, sales } — the day's CRM ledger
+  const [reviewerFilter, setReviewerFilter] = useState(null);   // agent_id → show only rows they hold
   const [selected, setSelected] = useState(new Set());
   const [assigning, setAssigning] = useState(false);
 
@@ -85,7 +86,9 @@ export default function LoadDayTab({ scope }) {
     return [{ key: 'all', label: 'All', n: (calls || []).length },
             ...[...seen.entries()].sort((a, b) => b[1] - a[1]).map(([k, n]) => ({ key: k, label: k, n }))];
   })();
-  const visibleCalls = (calls || []).filter(c => methodTab === 'all' || methodOf(c) === methodTab);
+  const visibleCalls = (calls || [])
+    .filter(c => methodTab === 'all' || methodOf(c) === methodTab)
+    .filter(c => !reviewerFilter || c.assigned_to === reviewerFilter);
   const abortable = useAbortable();
 
   // Persisted column filters, made visible — copied from PoolTab, same tq hook.
@@ -453,9 +456,21 @@ export default function LoadDayTab({ scope }) {
                       onKeyDown={(e) => { if (e.key === 'Enter') toggleAgent(a.agent_id); }}
                       className="text-left px-3 py-2 rounded-xl cursor-pointer" style={chip(on)}>
                       <div className="text-sm font-semibold">{a.name}</div>
+                      {/* The three states a manager needs before handing out or
+                          taking back: not started (safe to pull), in review (they
+                          are on it), and done. "show their rows" filters the
+                          table to this reviewer, where take-back is per row. */}
                       <div className="text-xs opacity-80">
-                        {a.workload.open} waiting · {a.workload.in_review} in review
+                        <strong>{a.workload.open}</strong> waiting · <strong>{a.workload.in_review}</strong> in review · <strong>{a.workload.done}</strong> done
                       </div>
+                      {(a.workload.open + a.workload.in_review) > 0 && (
+                        <span role="button" tabIndex={0}
+                          onClick={(e) => { e.stopPropagation(); setReviewerFilter(reviewerFilter === a.agent_id ? null : a.agent_id); }}
+                          onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); setReviewerFilter(reviewerFilter === a.agent_id ? null : a.agent_id); } }}
+                          className="text-xs mt-1 mr-3 inline-flex items-center gap-1 hover:underline">
+                          {reviewerFilter === a.agent_id ? 'showing their rows — clear' : 'show their rows'}
+                        </span>
+                      )}
                       <div className="text-xs opacity-70">
                         {granted.length ? granted.map(m => m.name).join(' · ') : 'no methods granted yet'}
                       </div>

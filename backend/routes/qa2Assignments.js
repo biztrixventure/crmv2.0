@@ -91,7 +91,8 @@ router.get('/queue', asyncHandler(async (req, res) => {
     .select(`id, call_id, assigned_to, assigned_at, opened_at, status, origin, calibration_group_id,
              priority, due_at, period, created_at,
              qa2_call!inner(id, company_id, leg, agent_user, agent_user_id, customer_phone, dispo_raw, call_at,
-                       recording_state, method_id, qa2_method(label), companies(name))`)
+                       recording_state, method_id, talk_sec, hangup_label, hangup_reason,
+                       qa2_method(label), companies(name))`)
     .eq('assigned_to', req.user.id);
   query = status ? query.eq('status', status) : query.in('status', ['pending', 'in_review']);
   query = applyQa2Filters(query, filters, QA2_CALL_COLUMNS, access.blocked, 'qa2_call');
@@ -422,7 +423,21 @@ router.get('/calls/:id', asyncHandler(async (req, res) => {
     linked.company_name = linked.companies?.name || null;
   }
 
-  res.json({ call, linked, customer_context: customerContext, hangup });
+  // PERSIST WHO HUNG UP. Lists (queue, Load Day) cannot afford a dialer round
+  // trip per row, so the answer is stored on the call the first time anyone
+  // learns it — here when a review opens, and in the poller once a clip is
+  // found. Falls back to the stored value when the dialer log has aged out.
+  const live = hangup && hangup.label ? hangup : null;
+  if (live && (call.hangup_label !== live.label || call.hangup_reason !== live.reason)) {
+    supabaseAdmin.from('qa2_call').update({
+      hangup_label: live.label, hangup_reason: live.reason, hangup_status: live.call_status || null,
+    }).eq('id', call.id).then(() => {}, () => {});
+  }
+  const hangupOut = live || (call.hangup_label
+    ? { label: call.hangup_label, reason: call.hangup_reason, call_status: call.hangup_status, unavailable: false }
+    : hangup);
+
+  res.json({ call, linked, customer_context: customerContext, hangup: hangupOut });
 }));
 
 router.post('/calls/:id/recording-ticket', asyncHandler(async (req, res) => {

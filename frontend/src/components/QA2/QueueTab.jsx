@@ -179,6 +179,9 @@ export default function QueueTab() {
                 <ColumnHeader tq={tq} colKey="method" label="Method" options={methodOptions} className={th} />
                 <ColumnHeader tq={tq} colKey="leg" label="Leg" options={LEG_OPTIONS} className={th} />
                 <th className={th}>Agent</th>
+                <th className={th}>Dispo</th>
+                <th className={th}>Closer dispo</th>
+                <th className={th}>Ended by</th>
                 <ColumnHeader tq={tq} colKey="recording_state" label="Recording" options={REC_OPTIONS} className={th} />
                 <ColumnHeader tq={tq} colKey="call_at" label="Date" className={th} />
                 <th className="px-3 py-2" />
@@ -211,6 +214,23 @@ export default function QueueTab() {
                         ) : '—'}
                       </td>
                       <td className="px-3 py-2" style={{ color: 'var(--color-text-secondary)' }}>{c.agent_name || c.agent_user || '—'}</td>
+                      {/* The dialer's own facts about the call — what the reviewer
+                          used to have to open the record to learn. On a TRA the
+                          row is the FRONTER leg (its dispo is just XFER), so the
+                          CLOSER's dispo is the one that says how the lead went. */}
+                      <td className="px-3 py-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{c.dispo_raw || '—'}</td>
+                      <td className="px-3 py-2 text-xs font-semibold" style={{ color: 'var(--color-text)' }}>{c.closer_dispo || '—'}</td>
+                      <td className="px-3 py-2">
+                        {c.hangup_label ? (
+                          <span className="text-[11px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap"
+                            title={c.hangup_reason ? `Dialer: ${c.hangup_reason}` : undefined}
+                            style={/^AGENT/i.test(c.hangup_reason || '')
+                              ? { background: 'rgba(220,38,38,0.14)', color: '#dc2626' }
+                              : { background: 'var(--color-surface-hover)', color: 'var(--color-text-secondary)' }}>
+                            {c.hangup_label}
+                          </span>
+                        ) : <span style={{ color: 'var(--color-text-tertiary)' }}>—</span>}
+                      </td>
                       <td className="px-3 py-2">
                         <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap"
                           style={{ background: rec.color + '1a', color: rec.color }}>

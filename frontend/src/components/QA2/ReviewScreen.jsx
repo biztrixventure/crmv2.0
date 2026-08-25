@@ -411,16 +411,30 @@ export default function ReviewScreen({ assignment, onDone, onNext, nextLabel, re
               <div className="flex items-center gap-2"><User size={13} style={{ color: 'var(--color-text-tertiary)' }} />{call.agent_name || '—'} ({call.leg})</div>
               <div className="flex items-center gap-2"><Phone size={13} style={{ color: 'var(--color-text-tertiary)' }} />{call.customer_phone || '—'}</div>
               <div className="flex items-center gap-2"><Clock size={13} style={{ color: 'var(--color-text-tertiary)' }} />{call.call_at ? new Date(call.call_at).toLocaleString() : '—'}</div>
-              {call.dispo_raw && <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>Dispo: {call.dispo_raw}</div>}
-              {/* On a TRA the row above is the FRONTER's leg, so its dispo is
-                  'XFER' and says nothing about how the lead went. This is what
-                  the closer made of it — the thing you actually need to know to
-                  score the transfer. */}
-              {call.closer_dispo && (
-                <div className="text-xs font-semibold" style={{ color: 'var(--color-text)' }}>
-                  Closer dispo: {call.closer_dispo}
+            </div>
+
+            {/* CALL OUTCOME — the dialer's own verdict on the call, in one strip
+                a reviewer reads before pressing play: what was punched, what the
+                CLOSER made of the lead (on a TRA the row is the fronter's leg and
+                its dispo is just XFER), who ended the call, and how long it ran.
+                These used to be two lines of 11px text and a 9px badge. */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3 pt-3" style={{ borderTop: '1px solid var(--color-border)' }}>
+              {[
+                { k: 'Dispo', v: call.dispo_raw || '—' },
+                { k: 'Closer dispo', v: call.closer_dispo || '—', strong: true },
+                { k: 'Ended by', v: hangup?.label || (hangup?.unavailable ? 'n/a' : '—'),
+                  tone: /^AGENT/i.test(hangup?.reason || '') ? 'agent' : (hangup?.label ? 'customer' : null),
+                  hint: hangup?.reason ? `Dialer: ${hangup.reason}${hangup.call_status ? ` · ${hangup.call_status}` : ''}` : undefined },
+                { k: 'Talk time', v: Number.isFinite(call.talk_sec) ? `${Math.floor(call.talk_sec / 60)}:${String(call.talk_sec % 60).padStart(2, '0')}` : '—' },
+              ].map(f => (
+                <div key={f.k} title={f.hint}>
+                  <div className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-tertiary)' }}>{f.k}</div>
+                  <div className={`text-sm ${f.strong ? 'font-bold' : 'font-semibold'}`}
+                    style={{ color: f.tone === 'agent' ? 'var(--color-error-600)' : f.tone === 'customer' ? 'var(--color-success-600)' : 'var(--color-text)' }}>
+                    {f.v}
+                  </div>
                 </div>
-              )}
+              ))}
             </div>
           </Panel>
 

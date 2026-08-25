@@ -38,7 +38,7 @@
 
 const { supabaseAdmin } = require('../config/database');
 const logger = require('../utils/logger');
-const { recordingLookup, parseVendorCode, getBoxes, phoneTail, onlyDigits, lookupCallsByPhone, findLeadByPhone, leadsByPhoneOnBox, boxesForPrefix } = require('./dialerBoxes');
+const { recordingLookup, parseVendorCode, getBoxes, phoneTail, onlyDigits, lookupCallsByPhone, findLeadByPhone, leadsByPhoneOnBox, boxesForPrefix, annotateHangups } = require('./dialerBoxes');
 
 const MAX_ATTEMPTS = 10;
 const BATCH_SIZE = 60; // capped per tick
@@ -399,4 +399,46 @@ async function pollPendingRecordings() {
   }
 }
 
-module.exports = { pollPendingRecordings };
+// ── who hung up, persisted (mig 300) ────────────────────────────────────────
+// The queue and Load Day show "Ended by" per row; that cannot be a dialer
+// round-trip per row, so the answer is stored once. Each tick takes a bounded
+// batch of FOUND calls that have never been asked (both hangup columns null),
+// reads the dialer's phone log (cached per phone by annotateHangups), and
+// stores the label/reason/status. A call the log no longer holds is stamped
+// 'unavailable' so it is never asked again. Fronter and closer legs alike.
+const HANGUP_BATCH = 40;
+async function pollHangups() {
+  const { data: rows, error } = await supabaseAdmin.from('qa2_call')
+    .select('id, call_at, agent_user, customer_phone, normalized_phone')
+    .eq('recording_state', 'found').is('hangup_label', null).is('hangup_status', null)
+    .not('customer_phone', 'is', null)
+    .gte('call_at', new Date(Date.now() - 7 * 86400000).toISOString())
+    .order('call_at', { ascending: false }).limit(HANGUP_BATCH);
+  if (error || !rows || !rows.length) return 0;
+
+  let stored = 0;
+  for (const r of rows) {
+    try {
+      const [ann] = await annotateHangups([{ start_time: r.call_at, agent_user: r.agent_user }], r.customer_phone || r.normalized_phone);
+      const patch = ann && ann.hangup_label
+        ? { hangup_label: ann.hangup_label, hangup_reason: ann.hangup_reason || null, hangup_status: ann.call_status || null }
+        : { hangup_status: 'unavailable' };
+      const { error: uErr } = await supabaseAdmin.from('qa2_call').update(patch).eq('id', r.id);
+      if (!uErr && patch.hangup_label) stored++;
+    } catch (e) {
+      logger.warn('QA2_REC_POLL', `hangup lookup failed for ${r.id}: ${e.message}`);
+    }
+  }
+  if (stored) logger.info('QA2_REC_POLL', `stored who-hung-up on ${stored} call(s)`);
+  return stored;
+}
+
+// One tick: recordings first (they gate everything), then hangups for calls
+// that now have audio. Same exported name, so the scheduler is unchanged.
+const _pollRecordings = pollPendingRecordings;
+async function pollTick() {
+  await _pollRecordings();
+  try { await pollHangups(); } catch (e) { logger.warn('QA2_REC_POLL', `hangup pass: ${e.message}`); }
+}
+
+module.exports = { pollPendingRecordings: pollTick, pollHangups };
