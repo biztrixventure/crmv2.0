@@ -17,28 +17,75 @@ import client from '../../api/client';
 import { Panel, SectionHeader, TableScroll, EmptyState, Loading } from '../UI/kit';
 import ColumnHeader from '../UI/ColumnHeader';
 import ThemedDate from '../UI/ThemedDate';
+import ThemedSelect from '../UI/Select';
 import { useTableQuery, useAbortable, isCanceled } from '../../hooks/useTableQuery';
 import ReviewScreen from './ReviewScreen';
 
-// One day at a time. The pool holds unassigned calls from every day the
-// manager ever pulled, so without this an agent scrolled two weeks of rows to
-// find today's. Drives the SAME call_at column filter the header menu uses.
-const isoDay = (offset) => { const d = new Date(); d.setDate(d.getDate() - offset); return d.toISOString().slice(0, 10); };
-export function DayPicker({ tq }) {
+// THE WORK BAR — day, company, method. Shared by Pool and My queue.
+//
+// Day is the DIALER's day, i.e. US Eastern (the box runs UTC-4 and Load Day
+// windows the same way). The team's shift is 8 pm – 5 am Pakistan time, which
+// is 11 am – 8 pm Eastern: one whole shift falls inside ONE Eastern date, so
+// "Today" here is "this shift" — never split across two days the way a
+// Pakistan-local or UTC date would split it at midnight.
+//
+// Company and method options come from the ROWS the agent can see (their
+// grants), so the method pills are dynamic: an agent granted only TRA sees only
+// TRA; grant them Closed and a Closed pill appears on their next load.
+const etDay = (offset = 0) => {
+  const d = new Date(); d.setDate(d.getDate() - offset);
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+};
+export function WorkFilters({ tq, companyOptions, methodOptions, methodTab, setMethodTab, counts }) {
   const f = tq.filters?.call_at;
   const day = f && f.op === 'between' && f.v && f.v === f.v2 ? f.v : '';
   const setDay = (d) => (d ? tq.setFilter('call_at', { op: 'between', v: d, v2: d }) : tq.clearFilter('call_at'));
+  const cf = tq.filters?.company;
+  const company = cf && cf.op === 'in' && Array.isArray(cf.v) && cf.v.length === 1 ? String(cf.v[0]) : '';
+  const setCompany = (id) => (id ? tq.setFilter('company', { op: 'in', v: [id] }) : tq.clearFilter('company'));
   const pill = (on) => ({ background: on ? 'var(--color-primary-600)' : 'var(--color-surface)', color: on ? '#fff' : 'var(--color-text)', border: '1px solid var(--color-border)' });
+  const P = ({ on, onClick, children }) => (
+    <button onClick={onClick} className="text-xs font-bold px-2.5 py-1 rounded-full whitespace-nowrap" style={pill(on)}>{children}</button>
+  );
   return (
-    <div className="flex items-center gap-2 flex-wrap">
-      <span className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>Day</span>
-      <ThemedDate value={day} onChange={e => setDay(e.target.value)} />
-      {[['Today', 0], ['Yesterday', 1]].map(([label, off]) => (
-        <button key={label} onClick={() => setDay(isoDay(off))} className="text-xs font-bold px-2.5 py-1 rounded-full" style={pill(day === isoDay(off))}>{label}</button>
-      ))}
-      <button onClick={() => setDay('')} className="text-xs font-bold px-2.5 py-1 rounded-full" style={pill(!day)}>All days</button>
+    <div className="space-y-2">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>Shift day</span>
+        <ThemedDate value={day} onChange={e => setDay(e.target.value)} />
+        <P on={day === etDay(0)} onClick={() => setDay(etDay(0))}>Today</P>
+        <P on={day === etDay(1)} onClick={() => setDay(etDay(1))}>Yesterday</P>
+        <P on={!day} onClick={() => setDay('')}>All days</P>
+        {companyOptions.length > 1 && (
+          <>
+            <span className="text-xs font-semibold ml-2" style={{ color: 'var(--color-text-secondary)' }}>Company</span>
+            <div className="min-w-[180px]">
+              <ThemedSelect value={company} onChange={e => setCompany(e.target.value)}>
+                <option value="">All companies</option>
+                {companyOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </ThemedSelect>
+            </div>
+          </>
+        )}
+      </div>
+      {methodOptions.length > 0 && (
+        <div className="flex items-center gap-1 flex-wrap">
+          <P on={methodTab === 'all'} onClick={() => setMethodTab('all')}>All{counts ? ` ${counts.all}` : ''}</P>
+          {methodOptions.map(m => (
+            <P key={m.value} on={methodTab === m.value} onClick={() => setMethodTab(m.value)}>
+              {m.label}{counts ? ` ${counts[m.value] || 0}` : ''}
+            </P>
+          ))}
+        </div>
+      )}
     </div>
   );
+}
+// Rows narrowed by the method pill, plus per-method counts for the pills.
+export function byMethod(rows, methodTab) {
+  const list = rows || [];
+  const counts = { all: list.length };
+  list.forEach(a => { const m = a.qa2_call?.method_id; if (m) counts[m] = (counts[m] || 0) + 1; });
+  return { visible: methodTab === 'all' ? list : list.filter(a => a.qa2_call?.method_id === methodTab), counts };
 }
 
 const LEG_OPTIONS = [{ value: 'fronter', label: 'Fronter' }, { value: 'closer', label: 'Closer' }];
@@ -54,6 +101,7 @@ export default function PoolTab() {
   const [claimingId, setClaimingId] = useState(null);
   const [open, setOpen] = useState(null);
   const [columns, setColumns] = useState({});
+  const [methodTab, setMethodTab] = useState('all');   // pill: 'all' | method_id
 
   const tq = useTableQuery({ scope: 'qa2:pool', columns, defaultSort: { by: 'call_at', dir: 'desc' } });
   const abortable = useAbortable();
@@ -74,6 +122,7 @@ export default function PoolTab() {
   };
   const companyOptions = optionsFrom(rows, 'company_id', c => c.companies?.name);
   const methodOptions  = optionsFrom(rows, 'method_id',  c => c.qa2_method?.label);
+  const { visible, counts: methodCounts } = byMethod(rows, methodTab);
 
   const load = useCallback(() => {
     setLoadError(null);
@@ -104,7 +153,7 @@ export default function PoolTab() {
   // tries the next without bothering the agent with it. Only surface an error
   // if the whole local list turns out to be already taken.
   const claimNext = async () => {
-    for (const candidate of rows) {
+    for (const candidate of visible) {
       try {
         const r = await client.post(`qa2/assignments/${candidate.id}/claim`);
         setRows(prev => prev.filter(a => a.id !== candidate.id));
@@ -124,9 +173,9 @@ export default function PoolTab() {
       <ReviewScreen
         key={open.id}
         assignment={open}
-        remaining={rows.length}
-        nextLabel={rows.length > 0 ? 'Next record' : null}
-        onNext={rows.length > 0 ? claimNext : null}
+        remaining={visible.length}
+        nextLabel={visible.length > 0 ? 'Next record' : null}
+        onNext={visible.length > 0 ? claimNext : null}
         onDone={() => { setOpen(null); load(); }}
       />
     );
@@ -156,7 +205,8 @@ export default function PoolTab() {
     <div className="max-w-5xl mx-auto space-y-4">
       <SectionHeader level="page" icon={InboxIcon} title="Pool" subtitle="Unassigned calls within your granted companies and methods — claim one to start." />
 
-      <DayPicker tq={tq} />
+      <WorkFilters tq={tq} companyOptions={companyOptions} methodOptions={methodOptions}
+        methodTab={methodTab} setMethodTab={setMethodTab} counts={methodCounts} />
 
       {activeFilters.length > 0 && (
         <div className="flex items-center gap-2 flex-wrap">
@@ -202,7 +252,7 @@ export default function PoolTab() {
                 <th className="px-3 py-2" />
               </tr></thead>
               <tbody>
-                {rows.map(a => (
+                {visible.map(a => (
                   <tr key={a.id} style={{ borderTop: '1px solid var(--color-border)' }}>
                     <td className="px-3 py-2">{a.qa2_call?.companies?.name || '—'}</td>
                     <td className="px-3 py-2">{a.qa2_call?.qa2_method?.label || '—'}</td>

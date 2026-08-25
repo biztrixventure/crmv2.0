@@ -26,7 +26,7 @@ import { Panel, SectionHeader, TableScroll, EmptyState, Loading, KpiTile } from 
 import ColumnHeader from '../UI/ColumnHeader';
 import { useTableQuery, useAbortable, isCanceled } from '../../hooks/useTableQuery';
 import ReviewScreen from './ReviewScreen';
-import { DayPicker } from './PoolTab';
+import { WorkFilters, byMethod } from './PoolTab';
 
 const FILTERS = [
   { key: 'pending', label: 'Not started', icon: Clock },
@@ -78,6 +78,7 @@ export default function QueueTab() {
   const [open, setOpen] = useState(null);
   const [columns, setColumns] = useState({});
   const [counts, setCounts] = useState(null);
+  const [methodTab, setMethodTab] = useState('all');   // pill: 'all' | method_id
 
   const tq = useTableQuery({ scope: 'qa2:queue', columns, defaultSort: { by: 'call_at', dir: 'desc' } });
   const abortable = useAbortable();
@@ -117,10 +118,14 @@ export default function QueueTab() {
   // between every call — the round trip was: back, find your place, click, wait.
   // Rows already scored drop out of the list on the next load, so "next" is
   // taken from the list as it stands when the screen opens.
+  // The method pill narrows what is listed AND what "Next record" walks, so an
+  // agent working TRA only is never handed a Closed call mid-run.
+  const { visible, counts: methodCounts } = byMethod(rows, methodTab);
+
   if (open) {
-    const idx = rows.findIndex(r => r.id === open.id);
-    const next = idx >= 0 ? rows[idx + 1] : null;
-    const remaining = idx >= 0 ? Math.max(0, rows.length - idx - 1) : 0;
+    const idx = visible.findIndex(r => r.id === open.id);
+    const next = idx >= 0 ? visible[idx + 1] : null;
+    const remaining = idx >= 0 ? Math.max(0, visible.length - idx - 1) : 0;
     return (
       <ReviewScreen
         key={open.id}
@@ -140,7 +145,8 @@ export default function QueueTab() {
     <div className="max-w-5xl mx-auto space-y-4">
       <SectionHeader level="page" icon={ListTodo} title="My queue" subtitle="Assignments already yours." />
 
-      <DayPicker tq={tq} />
+      <WorkFilters tq={tq} companyOptions={companyOptions} methodOptions={methodOptions}
+        methodTab={methodTab} setMethodTab={setMethodTab} counts={methodCounts} />
 
       <div className="grid grid-cols-3 gap-3">
         {FILTERS.map(f => (
@@ -190,7 +196,7 @@ export default function QueueTab() {
                 <th className="px-3 py-2" />
               </tr></thead>
               <tbody>
-                {rows.map(a => {
+                {visible.map(a => {
                   const c = a.qa2_call || {};
                   const rec = REC_META[c.recording_state] || REC_META.pending;
                   const legM = LEG_META[c.leg] || {};

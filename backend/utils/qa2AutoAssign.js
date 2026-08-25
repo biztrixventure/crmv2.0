@@ -211,4 +211,18 @@ async function parkDuplicateStarvedCalls() {
   } catch (e) { logger.warn('QA2_AUTOASSIGN', `park duplicates error: ${e.message}`); return 0; }
 }
 
-module.exports = { runQa2AutoAssign, purgeStaleQa2Assignments, purgeParkedQa2Calls, parkDuplicateStarvedCalls };
+// ── keep Unclassified honest (mig 305) ──────────────────────────────────────
+// A transfer-linked fronter call is a TRA whatever dispo came later; a paired
+// but unanchored non-XFER fronter dial is the fronter's redial, not QA work.
+async function tidyUnclassified() {
+  try {
+    const { data, error } = await supabaseAdmin.rpc('app_qa2_tidy_unclassified');
+    if (error) { logger.warn('QA2_AUTOASSIGN', `tidy unclassified: ${error.message}`); return 0; }
+    const r = Array.isArray(data) ? data[0] : data;
+    const c = Number(r?.classified || 0), p = Number(r?.parked || 0);
+    if (c || p) logger.info('QA2_AUTOASSIGN', `unclassified tidy: ${c} classified as TRA, ${p} redials parked`);
+    return c + p;
+  } catch (e) { logger.warn('QA2_AUTOASSIGN', `tidy unclassified error: ${e.message}`); return 0; }
+}
+
+module.exports = { runQa2AutoAssign, purgeStaleQa2Assignments, purgeParkedQa2Calls, parkDuplicateStarvedCalls, tidyUnclassified };
