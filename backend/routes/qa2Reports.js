@@ -158,6 +158,154 @@ router.get('/reports/agent', asyncHandler(async (req, res) => {
   res.json({ agents, daily, ...capInfo(data, AGENT_CAP) });
 }));
 
+// ── GET /qa2/reports/performance — people, ranked, with WHY ────────────────
+// One call answers the coaching questions the agent/parameter reports only hint
+// at: who is scoring well or badly (closers and fronters separately — they are
+// scored on different forms), whether each person is improving (this period vs
+// the equal-length period before it), and WHICH parameter each person fails
+// most — the thing a manager needs to say in the 1:1. role=reviewer turns the
+// same lens on the QA agents: volume, pace, strictness vs the team, and what
+// they flag most. Everything is computed from live evaluations + their answers.
+router.get('/reports/performance', asyncHandler(async (req, res) => {
+  const scope = await requireViewer(req, res);
+  if (!scope) return;
+  const { company_id } = req.query;
+  const role = ['fronter', 'closer', 'reviewer'].includes(req.query.role) ? req.query.role : 'closer';
+
+  // Period: explicit range, else the last 30 days. The previous period is the
+  // same length immediately before it — that is what "improving" is measured on.
+  const DAY = 86400000;
+  const to   = req.query.to   ? new Date(req.query.to)   : new Date();
+  const from = req.query.from ? new Date(req.query.from) : new Date(to.getTime() - 30 * DAY);
+  const span = Math.max(DAY, to.getTime() - from.getTime());
+  const prevTo = new Date(from.getTime() - 1), prevFrom = new Date(from.getTime() - span);
+  const iso = d => d.toISOString();
+
+  const companyIds = scopedCompanyIds(scope);
+  const EVAL_CAP = 20000;
+  const baseEvals = (lo, hi, cols) => {
+    let q = supabaseAdmin.from('qa2_evaluation').select(cols)
+      .in('status', LIVE_STATUSES).gte('submitted_at', iso(lo)).lte('submitted_at', iso(hi))
+      .order('submitted_at', { ascending: false }).limit(EVAL_CAP);
+    if (role !== 'reviewer') q = q.eq('subject_role', role);
+    if (companyIds !== null) q = q.in('company_id', companyIds);
+    if (company_id) q = q.eq('company_id', company_id);
+    return q;
+  };
+
+  const [{ data: cur, error: e1 }, { data: prev, error: e2 }] = await Promise.all([
+    baseEvals(from, to, 'id, subject_user_id, reviewer_id, company_id, final_score, result, autofail_result, submitted_at, active_seconds, qa2_call(qa2_method(label))'),
+    baseEvals(prevFrom, prevTo, 'subject_user_id, reviewer_id, final_score'),
+  ]);
+  if (e1) return res.status(500).json({ error: e1.message });
+  if (e2) return res.status(500).json({ error: e2.message });
+
+  const keyOf = e => (role === 'reviewer' ? e.reviewer_id : e.subject_user_id);
+
+  // Answers for the current period, chunked — the per-person parameter picture.
+  const ids = (cur || []).map(e => e.id);
+  const answers = [];
+  for (let i = 0; i < ids.length; i += 150) {
+    const { data } = await supabaseAdmin.from('qa2_answer')
+      .select('evaluation_id, value_num, value_text, value_bool, is_na, qa2_parameter!inner(lineage_id, label, role)')
+      .in('evaluation_id', ids.slice(i, i + 150));
+    answers.push(...(data || []));
+  }
+  const evalOwner = new Map((cur || []).map(e => [e.id, keyOf(e)]));
+  const isNegative = (row) => {
+    const p = row.qa2_parameter;
+    return ['autofail', 'penalty'].includes(p.role) ? isYes(row) : (row.value_text || '').toUpperCase() === 'N';
+  };
+
+  // team-level parameter picture (the benchmark every person is compared to)
+  const teamParams = new Map();   // lineage → {label, role, answered, flagged}
+  const personParams = new Map(); // person → lineage → {answered, flagged}
+  for (const row of answers) {
+    if (row.is_na) continue;
+    const p = row.qa2_parameter;
+    const owner = evalOwner.get(row.evaluation_id);
+    const neg = isNegative(row);
+    const t = teamParams.get(p.lineage_id) || { lineage_id: p.lineage_id, label: p.label, role: p.role, answered: 0, flagged: 0 };
+    t.label = p.label; t.answered++; if (neg) t.flagged++;
+    teamParams.set(p.lineage_id, t);
+    if (!owner) continue;
+    const pm = personParams.get(owner) || new Map();
+    const pp = pm.get(p.lineage_id) || { answered: 0, flagged: 0 };
+    pp.answered++; if (neg) pp.flagged++;
+    pm.set(p.lineage_id, pp); personParams.set(owner, pm);
+  }
+  const rate = (f, a) => (a ? Math.round((f / a) * 1000) / 10 : null);
+  const parameters = [...teamParams.values()]
+    .map(t => ({ ...t, flag_rate: rate(t.flagged, t.answered) }))
+    .sort((x, y) => (y.flag_rate ?? -1) - (x.flag_rate ?? -1));
+
+  // people
+  const people = new Map();
+  for (const e of (cur || [])) {
+    const k = keyOf(e); if (!k) continue;
+    const p = people.get(k) || { id: k, count: 0, score_sum: 0, scored: 0, pass: 0, autofail: 0, active_sum: 0, active_n: 0, days: new Set(), last_at: null, recent: [] };
+    p.count++;
+    if (e.final_score != null) { p.score_sum += Number(e.final_score); p.scored++; }
+    if (e.result === 'pass') p.pass++;
+    if (e.autofail_result === 'fail') p.autofail++;
+    if (e.active_seconds > 0) { p.active_sum += e.active_seconds; p.active_n++; }
+    if (e.submitted_at) { p.days.add(e.submitted_at.slice(0, 10)); if (!p.last_at || e.submitted_at > p.last_at) p.last_at = e.submitted_at; }
+    if (p.recent.length < 8) p.recent.push({ id: e.id, submitted_at: e.submitted_at, final_score: e.final_score, result: e.result, autofail: e.autofail_result === 'fail', method: e.qa2_call?.qa2_method?.label || null, other_id: role === 'reviewer' ? e.subject_user_id : e.reviewer_id });
+    people.set(k, p);
+  }
+  const prevAgg = new Map();
+  for (const e of (prev || [])) {
+    const k = keyOf(e); if (!k || e.final_score == null) continue;
+    const a = prevAgg.get(k) || { sum: 0, n: 0 }; a.sum += Number(e.final_score); a.n++; prevAgg.set(k, a);
+  }
+
+  const teamScored = (cur || []).filter(e => e.final_score != null);
+  const team = {
+    count: (cur || []).length,
+    people: people.size,
+    avg_score: teamScored.length ? Math.round((teamScored.reduce((s, e) => s + Number(e.final_score), 0) / teamScored.length) * 10) / 10 : null,
+    pass_rate: rate((cur || []).filter(e => e.result === 'pass').length, (cur || []).length),
+    autofail_rate: rate((cur || []).filter(e => e.autofail_result === 'fail').length, (cur || []).length),
+  };
+
+  const names = await nameMap([...people.keys(), ...[...people.values()].flatMap(p => p.recent.map(r => r.other_id))]);
+  const out = [...people.values()].map(p => {
+    const avg = p.scored ? Math.round((p.score_sum / p.scored) * 10) / 10 : null;
+    const pa = prevAgg.get(p.id);
+    const prevAvg = pa && pa.n ? Math.round((pa.sum / pa.n) * 10) / 10 : null;
+    const pm = personParams.get(p.id) || new Map();
+    const params = {};
+    let weakest = null;
+    for (const [lin, v] of pm) {
+      const r = rate(v.flagged, v.answered);
+      params[lin] = { answered: v.answered, flagged: v.flagged, flag_rate: r };
+      // weakest = highest flag rate with at least 2 answers, so one bad call
+      // does not brand someone; ties go to the more-answered parameter
+      if (v.answered >= 2 && r != null && r > 0 && (!weakest || r > weakest.flag_rate || (r === weakest.flag_rate && v.answered > weakest.answered))) {
+        weakest = { lineage_id: lin, label: teamParams.get(lin)?.label || '?', flag_rate: r, answered: v.answered };
+      }
+    }
+    return {
+      id: p.id, name: names.get(p.id) || 'Unknown',
+      count: p.count, avg_score: avg, pass_rate: rate(p.pass, p.count), autofail_rate: rate(p.autofail, p.count),
+      prev_avg_score: prevAvg, delta: avg != null && prevAvg != null ? Math.round((avg - prevAvg) * 10) / 10 : null,
+      last_at: p.last_at, weakest, params,
+      recent: p.recent.map(r => ({ ...r, other_name: names.get(r.other_id) || null })),
+      // reviewer lens
+      ...(role === 'reviewer' ? {
+        per_day: p.days.size ? Math.round((p.count / p.days.size) * 10) / 10 : null,
+        avg_active_min: p.active_n ? Math.round((p.active_sum / p.active_n) / 6) / 10 : null,
+        strictness: avg != null && team.avg_score != null ? Math.round((avg - team.avg_score) * 10) / 10 : null,
+      } : {}),
+    };
+  }).sort((x, y) => (y.avg_score ?? -1) - (x.avg_score ?? -1) || y.count - x.count);
+
+  res.json({
+    role, period: { from: iso(from), to: iso(to), prev_from: iso(prevFrom), prev_to: iso(prevTo) },
+    team, parameters, people: out, ...capInfo(cur, EVAL_CAP),
+  });
+}));
+
 // ── GET /qa2/reports/parameters — flag rate per question, across versions ──
 
 router.get('/reports/parameters', asyncHandler(async (req, res) => {

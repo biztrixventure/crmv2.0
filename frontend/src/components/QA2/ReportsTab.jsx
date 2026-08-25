@@ -49,7 +49,7 @@ const SECTIONS = [
   // Overview first: it is the only section with anything to show before scoring
   // has volume behind it, and it is what a manager checks daily.
   { key: 'overview', label: 'Overview', icon: Activity },
-  { key: 'agent', label: 'Agents', icon: Users },
+  { key: 'agent', label: 'Performance', icon: Users },
   { key: 'parameters', label: 'Parameters', icon: ListChecks },
   { key: 'reviewers', label: 'Reviewers', icon: Gavel },
   { key: 'autofails', label: 'Autofails', icon: ShieldAlert },
@@ -232,6 +232,206 @@ function OverviewSection({ params }) {
           </TableScroll>
         )}
       </Panel>
+    </div>
+  );
+}
+
+// ── Performance: people, ranked, with WHY ──────────────────────────────────
+// Three lenses on one endpoint: Closers and Fronters (scored on different
+// forms, so never mixed) and QA agents (the reviewers themselves). Each person
+// gets a score, a trend against the previous equal-length period, and their
+// single weakest parameter — the line a manager says in the 1:1. Click a row
+// for the full parameter picture against the team, plus their recent reviews.
+// The heat-map at the bottom is the whole team on one screen for coaching.
+const ROLE_TABS = [
+  { key: 'closer',   label: 'Closers' },
+  { key: 'fronter',  label: 'Fronters' },
+  { key: 'reviewer', label: 'QA agents' },
+];
+const heat = (r) => (r == null ? 'transparent' : r >= 50 ? 'rgba(220,38,38,0.28)' : r >= 25 ? 'rgba(217,119,6,0.26)' : r > 0 ? 'rgba(217,119,6,0.12)' : 'rgba(22,163,74,0.16)');
+const Delta = ({ v }) => v == null ? <span style={{ color: 'var(--color-text-tertiary)' }}>—</span>
+  : <span className="font-bold" style={{ color: v > 0 ? 'var(--color-success-600)' : v < 0 ? 'var(--color-error-600)' : 'var(--color-text-tertiary)' }}>{v > 0 ? '▲' : v < 0 ? '▼' : '•'} {Math.abs(v)}</span>;
+const ScoreBar = ({ v }) => (
+  <span className="inline-flex items-center gap-2">
+    <span className="inline-block h-1.5 rounded-full" style={{ width: 70, background: 'var(--color-border)' }}>
+      <span className="block h-full rounded-full" style={{ width: `${Math.max(0, Math.min(100, v || 0))}%`, background: (v ?? 0) >= 90 ? 'var(--color-success-600)' : (v ?? 0) >= 70 ? 'var(--color-warning-600)' : 'var(--color-error-600)' }} />
+    </span>
+    <strong>{v ?? '—'}</strong>
+  </span>
+);
+
+function PerformanceSection({ params }) {
+  const [role, setRole] = useState('closer');
+  const [data, setData] = useState(null);
+  const [selected, setSelected] = useState(null);
+  useEffect(() => {
+    setData(null); setSelected(null);
+    client.get('qa2/reports/performance', { params: { ...params, role } })
+      .then(r => setData(r.data)).catch(() => setData({ team: {}, parameters: [], people: [] }));
+  }, [params, role]);
+
+  if (!data) return <Loading variant="cards" />;
+  const t = data.team || {};
+  const people = data.people || [];
+  const topParams = (data.parameters || []).filter(p => p.answered > 0).slice(0, 8);
+  const person = selected ? people.find(p => p.id === selected) : null;
+  const isRev = role === 'reviewer';
+  const th = 'text-left font-semibold px-3 py-2 whitespace-nowrap';
+  const periodLabel = data.period ? `${data.period.from.slice(0, 10)} → ${data.period.to.slice(0, 10)}` : '';
+
+  return (
+    <div className="space-y-3">
+      <TruncatedBanner truncated={data.truncated} />
+      <PillTabs items={ROLE_TABS} value={role} onChange={setRole} />
+
+      <div className="grid gap-3 grid-cols-2 md:grid-cols-5">
+        <KpiTile label={isRev ? 'Reviews done' : 'Evaluations'} value={t.count ?? 0} hint={periodLabel} />
+        <KpiTile label={isRev ? 'QA agents' : 'People scored'} value={t.people ?? 0} />
+        <KpiTile label={isRev ? 'Avg score given' : 'Team avg score'} value={t.avg_score ?? '—'} />
+        <KpiTile label="Pass rate" value={t.pass_rate != null ? `${t.pass_rate}%` : '—'} />
+        <KpiTile label="Autofail rate" value={t.autofail_rate != null ? `${t.autofail_rate}%` : '—'} />
+      </div>
+
+      {people.length === 0 ? (
+        <EmptyState icon={Users} title={`No scored ${ROLE_TABS.find(r => r.key === role)?.label.toLowerCase()} in this range`}
+          hint="Scores appear here as reviewers submit. Widen the date range, or check the Overview tab for what is waiting to be scored." />
+      ) : (
+        <>
+          <Panel pad="none">
+            <div className="flex items-center justify-between" style={{ padding: '12px 16px 0' }}>
+              <SectionHeader level="section" title="Ranking" subtitle={isRev ? 'Strictness = their average given minus the team average. Pace = reviews per active day.' : 'Trend = this period versus the equal-length period before it. Weakest = the parameter they fail most.'} />
+              <ExportButton rows={people} filename={`qa2-performance-${role}.csv`}
+                headers={isRev ? ['QA agent', 'Reviews', 'Avg given', 'Strictness', 'Per day', 'Min/review', 'Pass % given', 'Flags most']
+                               : ['Name', 'Evaluations', 'Avg score', 'Trend', 'Pass %', 'Autofail %', 'Weakest parameter', 'Weakest fail %']}
+                mapRow={p => isRev ? [p.name, p.count, p.avg_score ?? '', p.strictness ?? '', p.per_day ?? '', p.avg_active_min ?? '', p.pass_rate ?? '', p.weakest?.label ?? '']
+                                   : [p.name, p.count, p.avg_score ?? '', p.delta ?? '', p.pass_rate ?? '', p.autofail_rate ?? '', p.weakest?.label ?? '', p.weakest?.flag_rate ?? '']} />
+            </div>
+            <TableScroll>
+              <table className="w-full text-sm">
+                <thead><tr style={{ color: 'var(--color-text-secondary)' }}>
+                  <th className={th}>#</th><th className={th}>{isRev ? 'QA agent' : 'Name'}</th><th className={th}>{isRev ? 'Reviews' : 'Evals'}</th>
+                  <th className={th}>{isRev ? 'Avg given' : 'Avg score'}</th>
+                  {isRev ? <><th className={th}>Strictness</th><th className={th}>Per day</th><th className={th}>Min / review</th></>
+                         : <><th className={th}>Trend</th><th className={th}>Pass</th><th className={th}>Autofail</th></>}
+                  <th className={th}>{isRev ? 'Flags most' : 'Weakest parameter'}</th>
+                </tr></thead>
+                <tbody>
+                  {people.map((p, i) => (
+                    <tr key={p.id} onClick={() => setSelected(selected === p.id ? null : p.id)} className="cursor-pointer hover:bg-black/[0.02]"
+                      style={{ borderTop: '1px solid var(--color-border)', background: selected === p.id ? 'var(--color-surface-hover)' : undefined }}>
+                      <td className="px-3 py-2" style={{ color: 'var(--color-text-tertiary)' }}>{i + 1}</td>
+                      <td className="px-3 py-2 font-semibold">{p.name}</td>
+                      <td className="px-3 py-2">{p.count}</td>
+                      <td className="px-3 py-2"><ScoreBar v={p.avg_score} /></td>
+                      {isRev ? (<>
+                        <td className="px-3 py-2"><Delta v={p.strictness} /></td>
+                        <td className="px-3 py-2">{p.per_day ?? '—'}</td>
+                        <td className="px-3 py-2">{p.avg_active_min ?? '—'}</td>
+                      </>) : (<>
+                        <td className="px-3 py-2"><Delta v={p.delta} /></td>
+                        <td className="px-3 py-2">{p.pass_rate != null ? `${p.pass_rate}%` : '—'}</td>
+                        <td className="px-3 py-2" style={{ color: p.autofail_rate > 0 ? 'var(--color-error-600)' : undefined }}>{p.autofail_rate != null ? `${p.autofail_rate}%` : '—'}</td>
+                      </>)}
+                      <td className="px-3 py-2">
+                        {p.weakest ? (
+                          <span className="text-[11px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap" style={{ background: heat(p.weakest.flag_rate), color: 'var(--color-text)' }}>
+                            {p.weakest.label} · {p.weakest.flag_rate}%
+                          </span>
+                        ) : <span style={{ color: 'var(--color-text-tertiary)' }}>—</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </TableScroll>
+          </Panel>
+
+          {person && (
+            <Panel>
+              <SectionHeader level="section" title={person.name}
+                subtitle={isRev ? `${person.count} reviews · avg given ${person.avg_score ?? '—'} · last ${person.last_at ? new Date(person.last_at).toLocaleDateString() : '—'}`
+                                : `${person.count} evaluations · avg ${person.avg_score ?? '—'} (was ${person.prev_avg_score ?? '—'} last period) · last scored ${person.last_at ? new Date(person.last_at).toLocaleDateString() : '—'}`}
+                actions={<button className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }} onClick={() => setSelected(null)}>close</button>} />
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div>
+                  <div className="text-[11px] font-bold uppercase tracking-wider mb-2" style={{ color: 'var(--color-text-secondary)' }}>
+                    {isRev ? 'What they flag, vs the team' : 'Where they lose points, vs the team'}
+                  </div>
+                  <div className="space-y-1.5">
+                    {(data.parameters || []).filter(pr => person.params[pr.lineage_id]?.answered > 0)
+                      .sort((a, b) => (person.params[b.lineage_id].flag_rate ?? 0) - (person.params[a.lineage_id].flag_rate ?? 0))
+                      .map(pr => {
+                        const mine = person.params[pr.lineage_id];
+                        return (
+                          <div key={pr.lineage_id} className="text-xs">
+                            <div className="flex justify-between"><span>{pr.label}</span>
+                              <span><strong style={{ color: mine.flag_rate > (pr.flag_rate ?? 0) ? 'var(--color-error-600)' : 'var(--color-success-600)' }}>{mine.flag_rate ?? 0}%</strong>
+                                <span style={{ color: 'var(--color-text-tertiary)' }}> · team {pr.flag_rate ?? 0}% · {mine.answered} answered</span></span></div>
+                            <div className="h-1.5 rounded-full mt-0.5 relative" style={{ background: 'var(--color-border)' }}>
+                              <div className="h-full rounded-full" style={{ width: `${mine.flag_rate ?? 0}%`, background: heat(mine.flag_rate).replace(/0\.\d+\)/, '0.9)') }} />
+                              <div className="absolute top-[-2px] h-[10px] w-[2px]" style={{ left: `${pr.flag_rate ?? 0}%`, background: 'var(--color-text)' }} title="team" />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    {Object.keys(person.params).length === 0 && <div className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>No parameter answers in range.</div>}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[11px] font-bold uppercase tracking-wider mb-2" style={{ color: 'var(--color-text-secondary)' }}>Recent {isRev ? 'reviews' : 'evaluations'}</div>
+                  <table className="w-full text-xs">
+                    <tbody>
+                      {person.recent.map(r => (
+                        <tr key={r.id} style={{ borderTop: '1px solid var(--color-border)' }}>
+                          <td className="py-1.5 pr-2 whitespace-nowrap" style={{ color: 'var(--color-text-tertiary)' }}>{r.submitted_at ? new Date(r.submitted_at).toLocaleDateString() : '—'}</td>
+                          <td className="py-1.5 pr-2">{r.method || '—'}</td>
+                          <td className="py-1.5 pr-2"><strong>{r.final_score ?? '—'}</strong></td>
+                          <td className="py-1.5 pr-2">
+                            <span className="font-bold" style={{ color: r.result === 'pass' ? 'var(--color-success-600)' : 'var(--color-error-600)' }}>{r.result || '—'}</span>
+                            {r.autofail && <span className="ml-1 text-[10px] font-bold" style={{ color: 'var(--color-error-600)' }}>AUTOFAIL</span>}
+                          </td>
+                          <td className="py-1.5" style={{ color: 'var(--color-text-secondary)' }}>{isRev ? 'on ' : 'by '}{r.other_name || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </Panel>
+          )}
+
+          {topParams.length > 0 && (
+            <Panel pad="none">
+              <div style={{ padding: '12px 16px 0' }}>
+                <SectionHeader level="section" title="Team heat-map" subtitle={`Fail rate per person per parameter — the ${topParams.length} parameters the team fails most, worst first. Red is where coaching goes.`} />
+              </div>
+              <TableScroll>
+                <table className="w-full text-xs">
+                  <thead><tr style={{ color: 'var(--color-text-secondary)' }}>
+                    <th className={th}>{isRev ? 'QA agent' : 'Name'}</th>
+                    {topParams.map(pr => <th key={pr.lineage_id} className="text-left font-semibold px-2 py-2" title={`team ${pr.flag_rate}%`}>{pr.label}</th>)}
+                  </tr></thead>
+                  <tbody>
+                    {people.map(p => (
+                      <tr key={p.id} style={{ borderTop: '1px solid var(--color-border)' }}>
+                        <td className="px-3 py-1.5 font-semibold whitespace-nowrap">{p.name}</td>
+                        {topParams.map(pr => {
+                          const m = p.params[pr.lineage_id];
+                          return <td key={pr.lineage_id} className="px-2 py-1.5 text-center font-semibold" style={{ background: heat(m?.flag_rate ?? null) }} title={m ? `${m.flagged} of ${m.answered}` : 'not answered'}>{m ? `${m.flag_rate}%` : ''}</td>;
+                        })}
+                      </tr>
+                    ))}
+                    <tr style={{ borderTop: '2px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>
+                      <td className="px-3 py-1.5 font-bold">Team</td>
+                      {topParams.map(pr => <td key={pr.lineage_id} className="px-2 py-1.5 text-center font-bold">{pr.flag_rate}%</td>)}
+                    </tr>
+                  </tbody>
+                </table>
+              </TableScroll>
+            </Panel>
+          )}
+        </>
+      )}
     </div>
   );
 }
@@ -575,7 +775,7 @@ export default function ReportsTab({ scope }) {
       <PillTabs items={SECTIONS} value={section} onChange={setSection} />
 
       {section === 'overview' && <OverviewSection params={params} />}
-      {section === 'agent' && <AgentSection params={params} />}
+      {section === 'agent' && <PerformanceSection params={params} />}
       {section === 'parameters' && <ParametersSection params={params} />}
       {section === 'reviewers' && <ReviewersSection params={params} />}
       {section === 'autofails' && <AutofailsSection params={params} />}
