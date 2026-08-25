@@ -36,9 +36,17 @@ const { checkUnclassifiedThreshold } = require('../utils/qa2UnclassifiedAlert');
 const DEDUP_WINDOW_MS = 10 * 60 * 1000;
 
 async function findExistingCall({ companyId, agentUserId, leg, code, norm }) {
+  // A lead code names a LEAD, not a call: the dialer recycles it, and the same
+  // fronter dials the same customer again hours or days later. Matching on the
+  // code with no time bound folded every later call into the FIRST row for that
+  // lead, so a genuine redial never got its own QA row (and, before the
+  // downgrade guard below, overwrote the original). Same window as the phone
+  // branch: inside it, it is a retried webhook; outside it, it is a new call.
   if (code) {
+    const since = new Date(Date.now() - DEDUP_WINDOW_MS).toISOString();
     const { data } = await supabaseAdmin
-      .from('qa2_call').select('id').eq('company_id', companyId).eq('leg', leg).eq('vendor_code', code).maybeSingle();
+      .from('qa2_call').select('id').eq('company_id', companyId).eq('leg', leg).eq('vendor_code', code)
+      .gte('created_at', since).order('created_at', { ascending: false }).limit(1).maybeSingle();
     if (data) return data.id;
   }
   if (norm) {
@@ -137,7 +145,28 @@ async function recordCall(source, req, body) {
     // A retried/duplicate webhook for the same event — refresh what may have
     // changed (dispo, talk time, transfer match) rather than duplicate it.
     const { dialer_lead_id, vendor_code, agent_user, agent_user_id, company_id, ...updatable } = row;
-    await supabaseAdmin.from('qa2_call').update(updatable).eq('id', existingId);
+    // NEVER DOWNGRADE A CLASSIFIED CALL. The "duplicate" here is often not a
+    // retry at all but the fronter's LATER dispo on the same lead (they redial
+    // and mark it A / N / CALLBK). Refreshing the row with that payload wiped
+    // dispo_raw (XFER → A), method_id (TRA → null) and transfer_id (→ null) on
+    // calls a QA agent had already been assigned — 61 rows showed up in the
+    // Unclassified tab out of nowhere. A classification, a transfer link and
+    // the XFER dispo are facts about the ORIGINAL event; a later dispo on the
+    // lead does not unmake them. Only fields that can legitimately arrive later
+    // are refreshed.
+    const { data: existing } = await supabaseAdmin.from('qa2_call')
+      .select('method_id, transfer_id, dispo_raw').eq('id', existingId).maybeSingle();
+    if (existing?.method_id) {
+      delete updatable.method_id; delete updatable.classified_at; delete updatable.classified_by;
+      delete updatable.dispo_raw; delete updatable.call_at;
+    } else if (!updatable.method_id) {
+      delete updatable.method_id; delete updatable.classified_at;
+    }
+    if (existing?.transfer_id || !updatable.transfer_id) delete updatable.transfer_id;
+    if (!updatable.hangup_label) { delete updatable.hangup_label; delete updatable.hangup_reason; delete updatable.hangup_status; }
+    if (updatable.talk_sec == null) delete updatable.talk_sec;
+    delete updatable.recording_state;   // the poller owns this once the row exists
+    if (Object.keys(updatable).length) await supabaseAdmin.from('qa2_call').update(updatable).eq('id', existingId);
   } else {
     const { error } = await supabaseAdmin.from('qa2_call').insert(row);
     if (error) { logger.warn('QA2_INGEST', `insert failed: ${error.message}`); return; }
