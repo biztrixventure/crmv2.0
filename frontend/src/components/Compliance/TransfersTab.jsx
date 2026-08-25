@@ -473,10 +473,16 @@ const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
                   <p className="text-xs font-bold uppercase tracking-wide mb-3"
                     style={{ color: 'var(--color-text-secondary)' }}>Form Fields</p>
                   <div className="grid grid-cols-2 gap-3">
-                    {Object.entries(detail.form_data).map(([key, val]) => (
-                      <InfoTile key={key} label={key}
-                        value={val === null || val === undefined || val === '' ? '—'
-                          : typeof val === 'object' ? JSON.stringify(val) : String(val)} />
+                    {Object.entries(detail.form_data).flatMap(([key, val]) => (
+                      // A nested block (form_data.dialer — what the dialer sent
+                      // with the XFER, kept apart from what the fronter typed)
+                      // reads as its own labelled tiles, not a JSON blob.
+                      val && typeof val === 'object' && !Array.isArray(val)
+                        ? Object.entries(val).filter(([, v]) => v !== null && v !== undefined && v !== '')
+                            .map(([k2, v2]) => <InfoTile key={`${key}.${k2}`} label={`${key} · ${k2}`} value={String(v2)} />)
+                        : [<InfoTile key={key} label={key}
+                            value={val === null || val === undefined || val === '' ? '—'
+                              : typeof val === 'object' ? JSON.stringify(val) : String(val)} />]
                     ))}
                   </div>
                 </section>

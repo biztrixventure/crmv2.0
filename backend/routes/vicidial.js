@@ -422,23 +422,27 @@ ingest.all('/fronter-xfer', requireToken, asyncHandler(async (req, res) => {
   const state    = String(p.state || '').trim();
   const zip      = String(p.zip || '').trim();
   const email    = String(p.email || '').trim();
+  // THE PENDING CARD PREFILLS THE PHONE ONLY. The fronter is on the call and
+  // types the customer's details themselves; dialer list data is often stale or
+  // junk ("Hhhh Fghhh") and must not land in the form fields. Everything the
+  // dialer sent is kept verbatim under form_data.dialer — QA's call context and
+  // the closer can read it — and on Confirm any field the fronter left blank is
+  // filled from it (see /pending/:id/confirm). Nothing is thrown away; nothing
+  // is pre-typed into the form except the number.
   const leadFormData = {
     cli_number: norm || null, customer_phone: phone, Phone: phone,
-    FirstName: first || null, LastName: last || null,
-    customer_name: (first || last) ? `${first} ${last}`.trim() : null,
-    CarMake: carMake || null, CarModel: carModel || null, CarYear: carYear || null,
-    Address: address || null, City: city || null, State: state || null, Zip: zip || null,
-    Email: email || null,
-    // Extra dialer context the recommended Dispo Call URL sends (see docs §8).
-    // Kept on the record verbatim; nothing downstream depends on them yet, but
-    // uniqueid is the dialer's own per-call id — the certain way to tell a
-    // duplicate webhook from a real re-transfer — and comments/alt_phone are
-    // what the fronter typed on the dialer, which the closer otherwise never sees.
-    Comments: String(p.comments || '').trim() || null,
-    AltPhone: String(p.alt_phone || '').trim() || null,
-    DialerListId: String(p.list_id || '').trim() || null,
-    DialerCampaign: String(p.campaign || '').trim() || null,
-    DialerUniqueId: String(p.uniqueid || '').trim() || null,
+    dialer: {
+      FirstName: first || null, LastName: last || null,
+      CarMake: carMake || null, CarModel: carModel || null, CarYear: carYear || null,
+      Address: address || null, City: city || null, State: state || null, Zip: zip || null,
+      Email: email || null,
+      Comments: String(p.comments || '').trim() || null,
+      AltPhone: String(p.alt_phone || '').trim() || null,
+      ListId: String(p.list_id || '').trim() || null,
+      Campaign: String(p.campaign || '').trim() || null,
+      UniqueId: String(p.uniqueid || '').trim() || null,   // the dialer's own per-call id
+      Term: String(p.term || p.term_reason || '').trim().toUpperCase() || null,
+    },
   };
   const xdbg = {
     at: new Date().toISOString(), code, phone, normalized: norm || '',
@@ -582,27 +586,10 @@ ingest.all('/fronter-xfer', requireToken, asyncHandler(async (req, res) => {
   // more than half the time: the same customer phone has an earlier transfer that
   // DID carry a name. Seed the blank fields from it so the card opens with the
   // real customer. Only ever FILLS blanks — never overrides what this XFER sent.
-  let seededForm = leadFormData;
-  if (norm && !first && !last) {
-    const { data: known } = await supabaseAdmin
-      .from('transfers').select('form_data')
-      .eq('normalized_phone', norm)
-      // Same company only. The identical phone can sit in another tenant's leads,
-      // and copying a customer name across that boundary would leak one company's
-      // data into another's dashboard. Measured cost of the scope: 547 of the 586
-      // recoverable rows still recover (93%) — cheap for a tenancy guarantee.
-      .eq('company_id', companyId)
-      .not('form_data->>FirstName', 'is', null)
-      .order('created_at', { ascending: false }).limit(1).maybeSingle();
-    if (known?.form_data) {
-      // stripBlank on the prior row too: an older transfer can itself hold nulls,
-      // and those must not reintroduce the very blanks we are trying to fill.
-      seededForm = { ...stripBlank(known.form_data), ...stripBlank(leadFormData) };
-      seededForm.customer_name = seededForm.customer_name
-        || [seededForm.FirstName, seededForm.LastName].filter(Boolean).join(' ').trim() || null;
-      xdbg.name_seeded = true;
-    }
-  }
+  // No name seeding at insert any more — the card must open with the phone only
+  // (user decision 2026-08-25). Blanks are filled AFTER the fronter confirms:
+  // first from form_data.dialer, then from the dialer itself if still empty.
+  const seededForm = leadFormData;
 
   const row = {
     company_id: companyId,
@@ -660,14 +647,8 @@ ingest.all('/fronter-xfer', requireToken, asyncHandler(async (req, res) => {
   await reconcileQueuedDispoForTransfer({ id: data.id }, norm);
   xdbg.outcome = `created transfer ${data.id}`;
 
-  // Still nameless after the CRM-history seed? Ask the dialer directly. NOT
-  // awaited: this is up to six HTTP calls to a box that may be slow or down, and
-  // the webhook must return promptly or VICIdial retries it. The fronter opens
-  // the card seconds-to-minutes later, by which time this has long finished.
-  if (!seededForm.FirstName && !seededForm.customer_name) {
-    enrichFromDialer(data.id, code).catch(e =>
-      logger.warn('VICIDIAL_XFER', `dialer name lookup failed for ${data.id}: ${e.message}`));
-  }
+  // Deliberately NO name lookup here: it would land in the card's form fields
+  // before the fronter has typed anything. It runs on Confirm instead.
 
   // Ping the fronter instantly (notification row → Supabase realtime + web push)
   // so they know a dialer transfer is waiting to be completed.
@@ -1233,6 +1214,28 @@ api.post('/pending/:id/confirm', asyncHandler(async (req, res) => {
 
   const incoming = (req.body.form_data && typeof req.body.form_data === 'object') ? req.body.form_data : {};
   const merged = { ...(tr.form_data || {}), ...titleCaseFormData(expandStateInFormData(incoming)) };
+
+  // FILL THE BLANKS FROM THE DIALER — AFTER the fronter has typed. The card
+  // opened with the phone only (see /fronter-xfer); whatever the fronter entered
+  // wins, and only fields they left empty take the dialer's value from
+  // form_data.dialer. So the record is complete and never shows "Lead", while
+  // the form itself was never pre-typed.
+  const dl = merged.dialer || {};
+  const blank = (k) => String(merged[k] ?? '').trim() === '';
+  for (const k of ['FirstName', 'LastName', 'CarMake', 'CarModel', 'CarYear', 'Address', 'City', 'State', 'Zip', 'Email']) {
+    if (blank(k) && dl[k]) merged[k] = dl[k];
+  }
+  if (blank('customer_name')) {
+    merged.customer_name = [merged.FirstName, merged.LastName].filter(Boolean).join(' ').trim() || null;
+  }
+  // Still nameless (no name typed, none on the dialer webhook)? Ask the dialer
+  // for the lead's own record — a few seconds later, once this update has
+  // committed, so the fill can never be overwritten by it.
+  if (blank('FirstName') && blank('customer_name') && tr.vicidial_vendor_code) {
+    setTimeout(() => enrichFromDialer(tr.id, tr.vicidial_vendor_code).catch(e =>
+      logger.warn('VICIDIAL_XFER', `post-confirm name lookup failed for ${tr.id}: ${e.message}`)), 5000);
+  }
+
   const norm = normPhone(merged.cli_number || merged.Phone || merged.customer_phone || '');
 
   // DEDUP (the "I hand-typed it AND clicked Confirm" double): if a real
@@ -1621,6 +1624,7 @@ api.post('/backfill/names', superOnly, asyncHandler(async (req, res) => {
   let q = supabaseAdmin.from('transfers')
     .select('id, vicidial_vendor_code, created_at')
     .not('vicidial_vendor_code', 'is', null)
+    .eq('vicidial_pending', false)   // never pre-type a card the fronter has not confirmed yet
     .is('form_data->>FirstName', null)
     .order('created_at', { ascending: false }).limit(batch);
   if (before) q = q.lt('created_at', before);
@@ -1638,6 +1642,7 @@ api.post('/backfill/names', superOnly, asyncHandler(async (req, res) => {
   const { count: remaining } = await supabaseAdmin.from('transfers')
     .select('*', { count: 'exact', head: true })
     .not('vicidial_vendor_code', 'is', null)
+    .eq('vicidial_pending', false)   // never pre-type a card the fronter has not confirmed yet
     .is('form_data->>FirstName', null);
   res.json({
     ok: true, processed: rows?.length || 0, filled, cursor: lastCursor,
