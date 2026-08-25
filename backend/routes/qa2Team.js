@@ -427,7 +427,26 @@ router.get('/day-calls', asyncHandler(async (req, res) => {
     };
   });
 
-  res.json({ calls: rows, columns: access.catalog });
+  // THE CRM LEDGER FOR THE DAY — the numbers a manager reconciles against.
+  // "TRA − Closed = Unclosed" is a TRANSFER identity and it only holds on the
+  // CRM's own tables: call rows can never satisfy it (a closer dials a lead
+  // twice, a re-transferred customer shares one call, some transfers never
+  // reach a closer at all). Serving both side by side is the fix — the pills
+  // count playable calls, this ledger counts CRM records, and the identity is
+  // exact on the ledger by construction.
+  const [{ count: crmTransfers }, { count: crmSales }] = await Promise.all([
+    supabaseAdmin.from('transfers').select('id', { count: 'exact', head: true })
+      .eq('company_id', company_id).eq('dialer_ghost', false)
+      .gte('created_at', start).lte('created_at', end),
+    supabaseAdmin.from('sales').select('id', { count: 'exact', head: true })
+      .eq('company_id', company_id)
+      .gte('created_at', start).lte('created_at', end),
+  ]);
+
+  res.json({
+    calls: rows, columns: access.catalog,
+    crm: { transfers: crmTransfers || 0, sales: crmSales || 0 },
+  });
 }));
 
 router.post('/bulk-assign', asyncHandler(async (req, res) => {

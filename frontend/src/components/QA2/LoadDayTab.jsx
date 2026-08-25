@@ -60,6 +60,7 @@ export default function LoadDayTab({ scope }) {
   const [columns, setColumns] = useState({});
   const [methodOptions, setMethodOptions] = useState([]);
   const [methodTab, setMethodTab] = useState('all');
+  const [crm, setCrm] = useState(null);   // { transfers, sales } — the day's CRM ledger
   const [selected, setSelected] = useState(new Set());
   const [assigning, setAssigning] = useState(false);
 
@@ -136,7 +137,7 @@ export default function LoadDayTab({ scope }) {
     if (!companyId || !date) return;
     setLoadError(null);
     client.get('qa2/team/day-calls', { params: { company_id: companyId, date, ...tq.params }, signal: abortable() })
-      .then(r => { setCalls(r.data.calls || []); if (r.data.columns) setColumns(r.data.columns); setSelected(new Set()); })
+      .then(r => { setCalls(r.data.calls || []); if (r.data.columns) setColumns(r.data.columns); setCrm(r.data.crm || null); setSelected(new Set()); })
       .catch(e => { if (!isCanceled(e)) setLoadError(e.response?.data?.error || 'Could not load this day'); });
     loadBoard();
   }, [companyId, date, tq.params, abortable, loadBoard]);
@@ -594,6 +595,26 @@ export default function LoadDayTab({ scope }) {
           dispo says. "Latest dispo" is whatever last touched the record; "Closer dispo" is what the
           closer actually made of the lead, which is the one worth reading when you score a fronter.
         </p>
+      )}
+
+      {/* THE CRM LEDGER — the identity a manager reconciles against. It holds
+          exactly here by construction (Unclosed is literally TRA − Closed on
+          the CRM's own records). The pills below count PLAYABLE CALLS instead,
+          which is a different number on purpose: a closer dials a lead twice,
+          a re-transferred customer shares one recording, and some transfers
+          never reach a closer — so calls can never equal transfers. */}
+      {!loadError && crm && calls && calls.length > 0 && (
+        <Panel tone="inset">
+          <div className="flex items-center gap-4 flex-wrap text-sm">
+            <span className="font-bold" style={{ color: 'var(--color-text)' }}>CRM day</span>
+            <span>TRA (transfers) <strong>{crm.transfers}</strong></span>
+            <span>− Closed (sales) <strong>{crm.sales}</strong></span>
+            <span>= Unclosed <strong>{Math.max(0, crm.transfers - crm.sales)}</strong></span>
+            <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
+              The tabs below count playable calls — re-transferred customers share one recording, so calls can be fewer than transfers.
+            </span>
+          </div>
+        </Panel>
       )}
 
       {!loadError && calls && calls.length > 0 && methodTabs.length > 2 && (
