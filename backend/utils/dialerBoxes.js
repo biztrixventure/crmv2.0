@@ -907,7 +907,13 @@ const HANGUP_LABELS = {
   AFTERHOURS: 'After hours',
   TIMEOUT: 'Timed out',
 };
-const hangupLabel = (r) => (r ? (HANGUP_LABELS[String(r).toUpperCase()] || String(r)) : null);
+// NONE is the dialer's word for "the call never connected, nobody hung up" —
+// an absence, not a label. Everything else unrecognised passes through verbatim.
+const hangupLabel = (r) => {
+  const k = String(r || '').trim().toUpperCase();
+  if (!k || k === 'NONE') return null;
+  return HANGUP_LABELS[k] || String(r);
+};
 
 const _hangupCache = new Map();            // phone tail → { at, rows }
 const HANGUP_TTL = 10 * 60 * 1000;
