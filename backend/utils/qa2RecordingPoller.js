@@ -407,28 +407,69 @@ async function pollPendingRecordings() {
 // stores the label/reason/status. A call the log no longer holds is stamped
 // 'unavailable' so it is never asked again. Fronter and closer legs alike.
 const HANGUP_BATCH = 40;
+const HANGUP_LIVE_HOURS = 20;   // the box archives its call log nightly — older than this, the log is gone
 async function pollHangups() {
+  let stored = 0;
+
+  // PASS 1 — COPY FROM A TWIN. The live-ingest row captured the answer seconds
+  // after the call (ingest hook); the crm_day row for the same call is built
+  // the next morning, when the box's log is already archived. Same lead + leg
+  // (or same phone + same leg within the same day) is the same call: copy it.
+  // This also rescues rows stamped 'unavailable' by the old day-late lookup.
+  const { data: want } = await supabaseAdmin.from('qa2_call')
+    .select('id, leg, dialer_lead_id, customer_phone, call_at, hangup_status')
+    .is('hangup_label', null).eq('qa_relevant', true).not('method_id', 'is', null)
+    .gte('call_at', new Date(Date.now() - 14 * 86400000).toISOString())
+    .order('call_at', { ascending: false }).limit(HANGUP_BATCH * 3);
+  for (const r of (want || [])) {
+    try {
+      let q = supabaseAdmin.from('qa2_call').select('hangup_label, hangup_reason, hangup_status')
+        .not('hangup_label', 'is', null).eq('leg', r.leg).neq('id', r.id).limit(1);
+      if (r.dialer_lead_id) q = q.eq('dialer_lead_id', r.dialer_lead_id);
+      else if (r.customer_phone && r.call_at) {
+        const d = new Date(r.call_at);
+        q = q.eq('customer_phone', r.customer_phone)
+          .gte('call_at', new Date(d.getTime() - 12 * 3600000).toISOString())
+          .lte('call_at', new Date(d.getTime() + 12 * 3600000).toISOString());
+      } else continue;
+      const { data: twin } = await q.maybeSingle();
+      if (twin) {
+        const { error: uErr } = await supabaseAdmin.from('qa2_call')
+          .update({ hangup_label: twin.hangup_label, hangup_reason: twin.hangup_reason, hangup_status: twin.hangup_status }).eq('id', r.id);
+        if (!uErr) stored++;
+      }
+    } catch { /* next row */ }
+  }
+
+  // PASS 2 — ASK THE DIALER, but only while the log can still answer.
   const { data: rows, error } = await supabaseAdmin.from('qa2_call')
     .select('id, call_at, agent_user, customer_phone, normalized_phone')
-    .eq('recording_state', 'found').is('hangup_label', null).is('hangup_status', null)
+    .is('hangup_label', null).is('hangup_status', null)
     .not('customer_phone', 'is', null)
-    .gte('call_at', new Date(Date.now() - 7 * 86400000).toISOString())
+    .gte('call_at', new Date(Date.now() - HANGUP_LIVE_HOURS * 3600000).toISOString())
     .order('call_at', { ascending: false }).limit(HANGUP_BATCH);
-  if (error || !rows || !rows.length) return 0;
-
-  let stored = 0;
-  for (const r of rows) {
-    try {
-      const [ann] = await annotateHangups([{ start_time: r.call_at, agent_user: r.agent_user }], r.customer_phone || r.normalized_phone);
-      const patch = ann && ann.hangup_label
-        ? { hangup_label: ann.hangup_label, hangup_reason: ann.hangup_reason || null, hangup_status: ann.call_status || null }
-        : { hangup_status: 'unavailable' };
-      const { error: uErr } = await supabaseAdmin.from('qa2_call').update(patch).eq('id', r.id);
-      if (!uErr && patch.hangup_label) stored++;
-    } catch (e) {
-      logger.warn('QA2_REC_POLL', `hangup lookup failed for ${r.id}: ${e.message}`);
+  if (!error) {
+    for (const r of (rows || [])) {
+      try {
+        const [ann] = await annotateHangups([{ start_time: r.call_at, agent_user: r.agent_user }], r.customer_phone || r.normalized_phone);
+        if (ann && ann.hangup_label) {
+          const { error: uErr } = await supabaseAdmin.from('qa2_call')
+            .update({ hangup_label: ann.hangup_label, hangup_reason: ann.hangup_reason || null, hangup_status: ann.call_status || null }).eq('id', r.id);
+          if (!uErr) stored++;
+        }
+        // No stamp on a miss: a fresh call may simply not be in the log yet, and
+        // pass 1 may still copy it from a twin later.
+      } catch (e) { logger.warn('QA2_REC_POLL', `hangup lookup failed for ${r.id}: ${e.message}`); }
     }
   }
+
+  // Anything older than the live window with no twin is genuinely gone — stamp
+  // it so the two passes stop re-scanning it every minute.
+  await supabaseAdmin.from('qa2_call').update({ hangup_status: 'unavailable' })
+    .is('hangup_label', null).is('hangup_status', null)
+    .lt('call_at', new Date(Date.now() - 2 * 86400000).toISOString())
+    .gte('call_at', new Date(Date.now() - 14 * 86400000).toISOString());
+
   if (stored) logger.info('QA2_REC_POLL', `stored who-hung-up on ${stored} call(s)`);
   return stored;
 }

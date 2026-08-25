@@ -223,8 +223,13 @@ http://{CLOSER_HOST}/vicidial/non_agent_api.php?source=crm&user=apiuser&pass=***
   &phone=--A--phone_number--B--&first=--A--first_name--B--&last=--A--last_name--B--
   &car_make=--A--address2--B--&car_model=--A--address3--B--&car_year=--A--province--B--
   &address=--A--address1--B--&city=--A--city--B--&state=--A--state--B--
-  &zip=--A--postal_code--B--&email=--A--email--B--
+  &zip=--A--postal_code--B--&email=--A--email--B--&term=--A--term_reason--B--
 ```
+
+> `term` = who ended the call (`AGENT` / `CALLER` / `QUEUETIMEOUT` …). The CRM
+> stores it on the QA row as "Ended by" the instant the webhook lands. Without
+> it the CRM falls back to `phone_number_log`, which the box archives nightly —
+> so add it to the FRONTER campaign's URL too (the closer template below has it).
 
 **Same-box-native variant** — replace the webform `add_lead` with:
 ```

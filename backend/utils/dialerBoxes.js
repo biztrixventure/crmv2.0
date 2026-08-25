@@ -1311,4 +1311,8 @@ module.exports = {
   // its own box (vicidial_config.prefix), so a phone that is ambiguous across
   // the estate can still be a single, confident match there.
   boxesForPrefix,
+  // AGENT/CALLER/QUEUETIMEOUT… → the label the UI shows. Exported so the ingest
+  // hook can label a term_reason the dialer sends WITH the dispo webhook —
+  // no lookup needed when the box already told us.
+  hangupLabel,
 };

@@ -21,7 +21,7 @@
 const { supabaseAdmin } = require('../config/database');
 const logger = require('../utils/logger');
 const { normPhone } = require('../utils/uploadService');
-const { parseVendorCode, normalizeLeadCode } = require('../utils/dialerBoxes');
+const { parseVendorCode, normalizeLeadCode, hangupLabel, annotateHangups } = require('../utils/dialerBoxes');
 const { classifyCall } = require('../utils/qa2ClassifyResolver');
 const { checkUnclassifiedThreshold } = require('../utils/qa2UnclassifiedAlert');
 
@@ -71,6 +71,23 @@ async function recordCall(source, req, body) {
   const talkParsed = parseInt(p.talk_time, 10);
   const talkSec = Number.isFinite(talkParsed) ? talkParsed : null;
 
+  // WHO HUNG UP — captured NOW, not later. The box archives its call log every
+  // night, so phone_number_log answers for a call that ended minutes ago and
+  // "NO RECORDS" for the same call the next morning; 10,253 rows had been
+  // stamped unavailable by a poller asking a day late. Two sources, in order:
+  //   1. the dispo webhook itself — the closer campaign's Dispo Call URL already
+  //      sends &term=--A--term_reason--B-- (AGENT / CALLER / QUEUETIMEOUT…),
+  //      which IS the answer with no lookup at all;
+  //   2. otherwise one immediate phone-log lookup while the call is seconds old.
+  const term = String(p.term || p.term_reason || '').trim().toUpperCase() || null;
+  let hangup = term ? { label: hangupLabel(term), reason: term, status: dispoRaw || null } : null;
+  if (!hangup && (phone || norm)) {
+    try {
+      const [ann] = await annotateHangups([{ start_time: new Date().toISOString(), agent_user: agent }], phone || norm);
+      if (ann && ann.hangup_label) hangup = { label: ann.hangup_label, reason: ann.hangup_reason || null, status: ann.call_status || null };
+    } catch { /* best-effort — the poller's sibling-copy pass is the fallback */ }
+  }
+
   // Recover the box prefix on a bare numeric lead_id before anything derives
   // from it. Without this the box could never be resolved for those calls:
   // parseVendorCode(...).exact is false for a bare code, so box_id stayed null
@@ -108,6 +125,9 @@ async function recordCall(source, req, body) {
     dispo_raw: dispoRaw,
     call_at: now,
     talk_sec: talkSec,
+    hangup_label: hangup?.label || null,
+    hangup_reason: hangup?.reason || null,
+    hangup_status: hangup?.status || null,
     recording_state: 'pending',
     source: 'ingest',
   };
