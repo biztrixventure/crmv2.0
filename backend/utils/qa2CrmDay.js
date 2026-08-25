@@ -106,7 +106,7 @@ async function insertCrmDayCall({ companyId, leg, transferId, saleId, vendorCode
 
   // Classify against the LIVE-ingest rule sets — see file header.
   const classifySource = leg === 'fronter' ? 'ingest_fronter' : 'ingest_closer';
-  const methodId = await classifyCall({ source: classifySource, dispo: dispoRaw, leg });
+  const methodId = await classifyCall({ source: classifySource, dispo: dispoRaw, leg, hasTransfer: !!transferId });
 
   const now = new Date().toISOString();
   const row = {

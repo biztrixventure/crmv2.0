@@ -88,7 +88,7 @@ async function recordCall(source, req, body) {
   const leg = source === 'ingest_fronter' ? 'fronter' : 'closer';
   const transferId = leg === 'fronter' && body && body.transfer_id ? body.transfer_id : null;
 
-  const method_id = await classifyCall({ source, dispo: dispoRaw, leg });
+  const method_id = await classifyCall({ source, dispo: dispoRaw, leg, hasTransfer: !!transferId });
   const now = new Date().toISOString();
 
   const row = {
