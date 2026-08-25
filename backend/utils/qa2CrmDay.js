@@ -106,7 +106,7 @@ async function insertCrmDayCall({ companyId, leg, transferId, saleId, vendorCode
 
   // Classify against the LIVE-ingest rule sets — see file header.
   const classifySource = leg === 'fronter' ? 'ingest_fronter' : 'ingest_closer';
-  const methodId = await classifyCall({ source: classifySource, dispo: dispoRaw, leg, hasTransfer: !!transferId });
+  const methodId = await classifyCall({ source: classifySource, dispo: dispoRaw, leg, hasTransfer: !!transferId, hasSale: !!saleId });
 
   const now = new Date().toISOString();
   const row = {
@@ -255,7 +255,14 @@ async function populateCrmDay(companyId, date) {
 
   for (const t of (transfers || [])) {
     const sale = salesByTransfer.get(t.id);
-    if (!sale && !t.assigned_closer_id) continue; // nothing on the closer side to review yet
+    // EVERY transfer gets its closer leg — not only the ones the CRM already
+    // knows a closer for. A transfer whose closer-dispo webhook never matched
+    // (or whose closer dialled manually later) used to produce a TRA row and
+    // NO Unclosed row, which is exactly why TRA − Closed did not equal Unclosed.
+    // With no known closer the recording poller still finds the closer's clip
+    // on the lead (the leg the fronter row does not own) and stamps the agent
+    // from it; a transfer the closer truly never called ends 'missing', which
+    // is the honest state for an Unclosed with no closer call.
     // ONE CALL, ONE CLOSER LEG. A recycled lead re-transferred the same day
     // (mig 291) makes TWO transfer rows for one customer; the sale form lands on
     // one of them and the other still carries the dialer's "Sale" disposition.

@@ -17,7 +17,7 @@ const { classifyAgainstRules } = require('./qa2Classify');
 // source value covering BOTH legs in the same pool, so without this filter
 // a fronter-leg and a closer-leg call could match the same rule regardless
 // of which leg either one is actually on.
-async function classifyCall({ source, dispo, leg, hasTransfer }) {
+async function classifyCall({ source, dispo, leg, hasTransfer, hasSale }) {
   let query = supabaseAdmin
     .from('qa2_method_rule')
     .select('method_id, match_type, dispo_match, priority, qa2_method!inner(is_active, leg)')
@@ -36,22 +36,34 @@ async function classifyCall({ source, dispo, leg, hasTransfer }) {
   // above only read the dispo, so a fronter call that IS a transfer but carries
   // an odd dispo string fell to the Unclassified tab for a human to hand-sort:
   // 524 of them in 30 days, 96% with audio, every one answerable by the system.
-  if (hasTransfer && leg === 'fronter') return traMethodId();
+  // THE CRM IDENTITY, ENFORCED AT CLASSIFICATION:  TRA − Closed = Unclosed.
+  //   every transfer   → one fronter row  = TRA
+  //   every transfer   → one closer row   = Closed if a sale exists, else Unclosed
+  // The dispo rules above still run first (a manager's own mapping wins); these
+  // fallbacks only decide what the rules could not, using the CRM facts the row
+  // carries. Without the closer fallbacks a transfer whose closer never got a
+  // matched dispo produced TRA with no Unclosed at all — the whole reason the
+  // manager's arithmetic did not add up.
+  if (hasTransfer && leg === 'fronter') return methodByLabel('tra', 'fronter');
+  if (hasSale && leg === 'closer')      return methodByLabel('closed', 'closer');
+  if (hasTransfer && leg === 'closer')  return methodByLabel('unclosed', 'closer');
   return null;
 }
 
-// The active fronter-leg method labelled TRA, cached briefly — it changes only
-// when a manager renames/archives the method, and a miss (no such method) just
-// leaves the call unclassified exactly as before.
-let _traCache = { at: 0, id: null };
-async function traMethodId() {
-  if (Date.now() - _traCache.at < 10 * 60 * 1000) return _traCache.id;
+// Active method id by label + leg, cached briefly — it changes only when a
+// manager renames/archives a method, and a miss (no such method) just leaves
+// the call unclassified exactly as before.
+const _labelCache = new Map();   // `${label}|${leg}` → { at, id }
+async function methodByLabel(label, leg) {
+  const key = `${label}|${leg}`;
+  const hit = _labelCache.get(key);
+  if (hit && Date.now() - hit.at < 10 * 60 * 1000) return hit.id;
   const { data } = await supabaseAdmin
     .from('qa2_method').select('id')
-    .ilike('label', 'tra').eq('is_active', true).in('leg', ['fronter', 'both'])
+    .ilike('label', label).eq('is_active', true).in('leg', [leg, 'both'])
     .limit(1).maybeSingle();
-  _traCache = { at: Date.now(), id: data?.id || null };
-  return _traCache.id;
+  _labelCache.set(key, { at: Date.now(), id: data?.id || null });
+  return data?.id || null;
 }
 
 module.exports = { classifyCall };

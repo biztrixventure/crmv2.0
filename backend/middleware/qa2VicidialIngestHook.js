@@ -111,7 +111,23 @@ async function recordCall(source, req, body) {
   const dialerLeadId = parsed ? parsed.leadId : null;
 
   const leg = source === 'ingest_fronter' ? 'fronter' : 'closer';
-  const transferId = leg === 'fronter' && body && body.transfer_id ? body.transfer_id : null;
+  let transferId = leg === 'fronter' && body && body.transfer_id ? body.transfer_id : null;
+
+  // A CLOSER'S OWN DIAL BELONGS TO THE TRANSFER IT CAME FROM. Closers call
+  // customers back themselves (manual dial, callback) — no fronter XFER fires,
+  // so this row had no transfer and was filed under the closer's grouping
+  // company, invisible to the QA team that reviews the fronter company. The
+  // customer's number names the transfer: adopt the latest one (30 days, any
+  // fronter company) so the call lands beside the original as another closer
+  // leg — Unclosed or Closed by its dispo — for QA to listen to.
+  let ownerCompanyId = companyId;
+  if (leg === 'closer' && !transferId && norm) {
+    const { data: tr } = await supabaseAdmin.from('transfers')
+      .select('id, company_id').eq('normalized_phone', norm).eq('dialer_ghost', false)
+      .gte('created_at', new Date(Date.now() - 30 * 86400000).toISOString())
+      .order('created_at', { ascending: false }).limit(1).maybeSingle();
+    if (tr) { transferId = tr.id; ownerCompanyId = tr.company_id; }
+  }
 
   const method_id = await classifyCall({ source, dispo: dispoRaw, leg, hasTransfer: !!transferId });
   const now = new Date().toISOString();
@@ -126,7 +142,7 @@ async function recordCall(source, req, body) {
     leg,
     agent_user: agent,
     agent_user_id: userId,
-    company_id: companyId,
+    company_id: ownerCompanyId,
     transfer_id: transferId,
     customer_phone: phone || null,
     normalized_phone: norm,
@@ -140,7 +156,7 @@ async function recordCall(source, req, body) {
     source: 'ingest',
   };
 
-  const existingId = await findExistingCall({ companyId, agentUserId: userId, leg, code, norm });
+  const existingId = await findExistingCall({ companyId: ownerCompanyId, agentUserId: userId, leg, code, norm });
   if (existingId) {
     // A retried/duplicate webhook for the same event — refresh what may have
     // changed (dispo, talk time, transfer match) rather than duplicate it.
