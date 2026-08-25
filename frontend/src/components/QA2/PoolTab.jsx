@@ -16,8 +16,30 @@ import { toast } from 'sonner';
 import client from '../../api/client';
 import { Panel, SectionHeader, TableScroll, EmptyState, Loading } from '../UI/kit';
 import ColumnHeader from '../UI/ColumnHeader';
+import ThemedDate from '../UI/ThemedDate';
 import { useTableQuery, useAbortable, isCanceled } from '../../hooks/useTableQuery';
 import ReviewScreen from './ReviewScreen';
+
+// One day at a time. The pool holds unassigned calls from every day the
+// manager ever pulled, so without this an agent scrolled two weeks of rows to
+// find today's. Drives the SAME call_at column filter the header menu uses.
+const isoDay = (offset) => { const d = new Date(); d.setDate(d.getDate() - offset); return d.toISOString().slice(0, 10); };
+export function DayPicker({ tq }) {
+  const f = tq.filters?.call_at;
+  const day = f && f.op === 'between' && f.v && f.v === f.v2 ? f.v : '';
+  const setDay = (d) => (d ? tq.setFilter('call_at', { op: 'between', v: d, v2: d }) : tq.clearFilter('call_at'));
+  const pill = (on) => ({ background: on ? 'var(--color-primary-600)' : 'var(--color-surface)', color: on ? '#fff' : 'var(--color-text)', border: '1px solid var(--color-border)' });
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      <span className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>Day</span>
+      <ThemedDate value={day} onChange={e => setDay(e.target.value)} />
+      {[['Today', 0], ['Yesterday', 1]].map(([label, off]) => (
+        <button key={label} onClick={() => setDay(isoDay(off))} className="text-xs font-bold px-2.5 py-1 rounded-full" style={pill(day === isoDay(off))}>{label}</button>
+      ))}
+      <button onClick={() => setDay('')} className="text-xs font-bold px-2.5 py-1 rounded-full" style={pill(!day)}>All days</button>
+    </div>
+  );
+}
 
 const LEG_OPTIONS = [{ value: 'fronter', label: 'Fronter' }, { value: 'closer', label: 'Closer' }];
 const REC_OPTIONS = [
@@ -133,6 +155,8 @@ export default function PoolTab() {
   return (
     <div className="max-w-5xl mx-auto space-y-4">
       <SectionHeader level="page" icon={InboxIcon} title="Pool" subtitle="Unassigned calls within your granted companies and methods — claim one to start." />
+
+      <DayPicker tq={tq} />
 
       {activeFilters.length > 0 && (
         <div className="flex items-center gap-2 flex-wrap">

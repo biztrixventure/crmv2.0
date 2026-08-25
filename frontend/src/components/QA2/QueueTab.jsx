@@ -26,6 +26,7 @@ import { Panel, SectionHeader, TableScroll, EmptyState, Loading, KpiTile } from 
 import ColumnHeader from '../UI/ColumnHeader';
 import { useTableQuery, useAbortable, isCanceled } from '../../hooks/useTableQuery';
 import ReviewScreen from './ReviewScreen';
+import { DayPicker } from './PoolTab';
 
 const FILTERS = [
   { key: 'pending', label: 'Not started', icon: Clock },
@@ -138,6 +139,8 @@ export default function QueueTab() {
   return (
     <div className="max-w-5xl mx-auto space-y-4">
       <SectionHeader level="page" icon={ListTodo} title="My queue" subtitle="Assignments already yours." />
+
+      <DayPicker tq={tq} />
 
       <div className="grid grid-cols-3 gap-3">
         {FILTERS.map(f => (

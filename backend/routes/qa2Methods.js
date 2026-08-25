@@ -213,7 +213,12 @@ router.get('/unclassified', asyncHandler(async (req, res) => {
     .from('qa2_call')
     .select('id, box_id, company_id, leg, agent_user, customer_phone, dispo_raw, call_at, source, created_at, recording_state, transfer_id, companies(name)')
     .is('method_id', null).eq('qa_relevant', true)
-    .or('dispo_raw.ilike.xfer,transfer_id.not.is.null,sale_id.not.is.null,linked_call_id.not.is.null')
+    // A CRM anchor (transfer / sale) or an XFER dispo makes a call reviewable.
+    // Being PAIRED to a closer leg does not: the recording-pairer links every
+    // dial on a recycled lead to that lead's closer call, so the fronter's
+    // A / N / CALLBK redials were flooding this tab (207 in a week) as if they
+    // were transfers waiting for a method. The closer leg is the review there.
+    .or('dispo_raw.ilike.xfer,transfer_id.not.is.null,sale_id.not.is.null')
     .gte('call_at', new Date(Date.now() - days * 86400000).toISOString())
     .order('call_at', { ascending: false })
     .limit(200);
