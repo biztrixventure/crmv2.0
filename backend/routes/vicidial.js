@@ -429,6 +429,16 @@ ingest.all('/fronter-xfer', requireToken, asyncHandler(async (req, res) => {
     CarMake: carMake || null, CarModel: carModel || null, CarYear: carYear || null,
     Address: address || null, City: city || null, State: state || null, Zip: zip || null,
     Email: email || null,
+    // Extra dialer context the recommended Dispo Call URL sends (see docs §8).
+    // Kept on the record verbatim; nothing downstream depends on them yet, but
+    // uniqueid is the dialer's own per-call id — the certain way to tell a
+    // duplicate webhook from a real re-transfer — and comments/alt_phone are
+    // what the fronter typed on the dialer, which the closer otherwise never sees.
+    Comments: String(p.comments || '').trim() || null,
+    AltPhone: String(p.alt_phone || '').trim() || null,
+    DialerListId: String(p.list_id || '').trim() || null,
+    DialerCampaign: String(p.campaign || '').trim() || null,
+    DialerUniqueId: String(p.uniqueid || '').trim() || null,
   };
   const xdbg = {
     at: new Date().toISOString(), code, phone, normalized: norm || '',
