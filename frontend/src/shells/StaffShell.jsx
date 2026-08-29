@@ -36,7 +36,7 @@ const Pagination = ({ page, total, pageSize, onChange }) => {
   return (
     <div className="flex items-center justify-between pt-4 border-t" style={{ borderColor: 'var(--color-border)' }}>
       <span className="text-xs text-text-secondary">
-        {Math.min((page - 1) * pageSize + 1, total)}â€“{Math.min(page * pageSize, total)} of {total}
+        {Math.min((page - 1) * pageSize + 1, total)}–{Math.min(page * pageSize, total)} of {total}
       </span>
       <div className="flex items-center gap-2">
         <button onClick={() => onChange(page - 1)} disabled={page <= 1}
@@ -108,17 +108,17 @@ import BatchInbox from "../components/Distribution/BatchInbox";
 
 const TRANSFER_BADGE = { pending: 'warning', assigned: 'info', completed: 'success', cancelled: 'error', rejected: 'error' };
 
-// Closer-facing transfer status â€” the raw lifecycle keys are ambiguous from the
+// Closer-facing transfer status — the raw lifecycle keys are ambiguous from the
 // closer's seat ("pending" / "completed" mean little). Map each to a plain label
 // + one-line meaning shown as a tooltip so the closer knows exactly what to do.
 const TRANSFER_STATUS_INFO = {
   pending:   { label: 'Awaiting assignment', desc: 'Lead created but not yet assigned to a closer.' },
-  assigned:  { label: 'Ready to work',       desc: 'Assigned to you â€” convert it to a sale or reject it.' },
+  assigned:  { label: 'Ready to work',       desc: 'Assigned to you — convert it to a sale or reject it.' },
   completed: { label: 'Converted to sale',   desc: 'You already created a sale from this lead.' },
   rejected:  { label: 'Rejected',            desc: 'Sent back as not a valid/workable lead.' },
   cancelled: { label: 'Cancelled',           desc: 'This lead was cancelled.' },
 };
-const transferStatusInfo = (st) => TRANSFER_STATUS_INFO[st] || { label: (st || 'â€”').replace(/_/g, ' '), desc: '' };
+const transferStatusInfo = (st) => TRANSFER_STATUS_INFO[st] || { label: (st || '—').replace(/_/g, ' '), desc: '' };
 
 // Short, safe date formatter for card chips.
 const fmtCardDate = (iso) => {
@@ -126,7 +126,7 @@ const fmtCardDate = (iso) => {
   const d = new Date(iso);
   return isNaN(d) ? '' : d.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
 };
-// Incentive pill on a closer's own sale card â€” reads the two compliance-set
+// Incentive pill on a closer's own sale card — reads the two compliance-set
 // payout fields (payout_confirmed tri-state + paid_to_closer, mig 244/246)
 // and turns them into the label/color a closer actually needs to see: not
 // whether the DP itself has posted, just where their own incentive stands.
@@ -140,7 +140,7 @@ const incentivePill = (s) => {
     : { label: 'Eligible', bg: '#dbeafe', fg: '#1d4ed8' };
 };
 // Whole-card tint for a closer's own sale, keyed off the same payout fields
-// the Incentive pill reads (mig 244/246) â€” so a closer sees at a glance which
+// the Incentive pill reads (mig 244/246) — so a closer sees at a glance which
 // cards need action without reading every pill. Low-opacity via color-mix
 // (not a hardcoded pastel hex) so it stays correct in dark mode too. Only
 // meaningful once compliance has approved the sale, same gate as the pill.
@@ -153,7 +153,7 @@ const incentiveHighlight = (s) => {
       ? 'color-mix(in srgb, var(--color-success-600) 10%, transparent)'
       : 'color-mix(in srgb, var(--color-warning-600) 12%, transparent)';
   }
-  return null;   // pending â€” no tint
+  return null;   // pending — no tint
 };
 // Pull a "Year Make Model" string out of a transfer's form_data, if present.
 const transferVehicle = (fd) => {
@@ -210,7 +210,7 @@ const StaffShell = () => {
   const tabKey = `biztrix.staffTab.${user?.role || 'default'}`;
   const navKey = `biztrix.staffNav.${user?.role || 'default'}`;
   const secKey = `biztrix.closerSection.${user?.role || 'default'}`;
-  // Same storage keys as before â€” a reload still restores the tab. What is new
+  // Same storage keys as before — a reload still restores the tab. What is new
   // is that each switch pushes a history entry, so the iOS edge swipe goes back
   // a tab instead of falling through and dismissing the installed app.
   // closerSection below stays on usePersistedState deliberately: it is a toggle
@@ -224,13 +224,13 @@ const StaffShell = () => {
   const { fields, fetchFields } = useFormFields();
   const { clients: saleClients, plans: salePlans, fetchConfigs } = useSaleConfigs(user?.company_id);
   // Per-user client access: restrict the client dropdown to this user's allowed
-  // clients (null/absent = unrestricted â†’ full list, unchanged for everyone else).
+  // clients (null/absent = unrestricted → full list, unchanged for everyone else).
   const allowedClientNames = (Array.isArray(user?.client_access) && user.client_access.length) ? user.client_access : null;
   const visibleSaleClients = allowedClientNames ? saleClients.filter(c => allowedClientNames.includes(c.value)) : saleClients;
   const notifHook = useNotifications();
 
   // Cross-closer double-sell badge (issue #6): map of the fronter's own leads
-  // whose customer was closed_won by >= 2 closer companies â†’ { closer_company_count }.
+  // whose customer was closed_won by >= 2 closer companies → { closer_company_count }.
   const [doubleSold, setDoubleSold] = useState({});
   useEffect(() => {
     if (!isFronter) return;
@@ -253,24 +253,24 @@ const StaffShell = () => {
       ? [{ key: 'forms',   label: 'Forms',   icon: FileText }] : []),
     ...(hasPermission('view_call_reviews') || hasPermission('view_all_call_reviews')
       ? [{ key: 'reviews', label: 'Reviews', icon: Star     }] : []),
-    // QA v2 read-only self-view â€” final score + pass/fail only (mig 238's
+    // QA v2 read-only self-view — final score + pass/fail only (mig 238's
     // qa2.view_own_scores, seeded only for fronter/closer).
     ...(hasPermission('qa2.view_own_scores')
       ? [{ key: 'qa2_scores', label: 'QA Scores', icon: Award }] : []),
     ...(hasPermission('view_fronter_stats') || hasPermission('view_closer_stats') || hasPermission('view_company_reports') || hasPermission('view_reports')
       ? [{ key: 'reports', label: 'Reports', icon: BarChart3}] : []),
-    // Monthly-payment reminders â€” closers (and anyone who can see sales) get
+    // Monthly-payment reminders — closers (and anyone who can see sales) get
     // their due policies to call + confirm payment.
     ...((isCloser || hasPermission('view_team_sales') || hasPermission('view_own_sales'))
       ? [{ key: 'payments', label: 'Payments', icon: DollarSign }] : []),
-    // Delegated superadmin tools â€” STRICT gate: shown only when a superadmin
+    // Delegated superadmin tools — STRICT gate: shown only when a superadmin
     // grants the flag to this user (default-off, never shown by accident).
     ...(isEnabledStrict('tool_customer_profiles') ? [{ key: 'tool_customer_profiles', label: 'Customer Profiles', icon: UserCircle    }] : []),
     ...(isEnabledStrict('tool_data_analyzer')     ? [{ key: 'tool_data_analyzer',     label: 'Data Analyzer',     icon: Database      }] : []),
     ...(isEnabledStrict('tool_chat_control')      ? [{ key: 'tool_chat_control',      label: 'Chat Control',      icon: MessageSquare }] : []),
     ...(isEnabledStrict('tool_blacklist_lookup')  ? [{ key: 'dnc',                    label: 'DNC Check',         icon: Shield        }] : []),
     ...(isEnabledStrict('tool_card_validator')    ? [{ key: 'card_validator',         label: 'Card Validator',    icon: CreditCard    }] : []),
-    // Quiz system (mig 273) â€” anyone can be assigned a quiz; a team lead also
+    // Quiz system (mig 273) — anyone can be assigned a quiz; a team lead also
     // sees their team's progress inline here.
     { key: 'my_quizzes', label: 'My Quizzes', icon: ClipboardList },
   ];
@@ -308,15 +308,15 @@ const StaffShell = () => {
   // Detail drawers
   const [detailTransfer, setDetailTransfer] = useState(null);
   const [detailSale, setDetailSale]         = useState(null);
-  // The post-date whose card just failed â€” opens ChargeFailedModal.
+  // The post-date whose card just failed — opens ChargeFailedModal.
   const [failSale, setFailSale]             = useState(null);
-  // Resolves last_charge_fail_reason_key â†’ the admin-configured label.
+  // Resolves last_charge_fail_reason_key → the admin-configured label.
   const { labelOf: failReasonLabel }        = usePostDateFailReasons();
-  // Selection/copy lock on the shell root â€” superadmin-configurable in
-  // Business Rules â†’ Copy Protection. Default ON (historical behavior).
+  // Selection/copy lock on the shell root — superadmin-configurable in
+  // Business Rules → Copy Protection. Default ON (historical behavior).
   const copyLocked                          = useCopyProtection('staff');
 
-  // â”€â”€ Team Transfers tab (rich server-side view) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Team Transfers tab (rich server-side view) ───────────────────────────
   const [xferTabRows,    setXferTabRows]    = useState([]);
   const [xferTabTotal,   setXferTabTotal]   = useState(0);
   const [xferTabLoading, setXferTabLoading] = useState(false);
@@ -325,7 +325,7 @@ const StaffShell = () => {
   const [xferSearch,     setXferSearch]     = useState('');
   const [xferPage,       setXferPage]       = useState(1);
 
-  // â”€â”€ Team Sales tab (rich server-side view) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Team Sales tab (rich server-side view) ───────────────────────────────
   const [salesTabRows,    setSalesTabRows]    = useState([]);
   const [salesTabTotal,   setSalesTabTotal]   = useState(0);
   const [salesTabLoading, setSalesTabLoading] = useState(false);
@@ -334,7 +334,7 @@ const StaffShell = () => {
   const [salesSearch,     setSalesSearch]     = useState('');
   const [salesPage,       setSalesPage]       = useState(1);
 
-  // â”€â”€ Company agents (for agent selector dropdowns) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Company agents (for agent selector dropdowns) ────────────────────────
   const [companyAgents, setCompanyAgents] = useState([]);
 
   // Schedule callback from sale
@@ -362,7 +362,7 @@ const StaffShell = () => {
   const [dupOpen, setDupOpen] = useState(false);
 
   // Near-instant Confirm button: the dialer XFER fires a realtime
-  // 'pending_transfer' notification â€” the moment one lands, refresh the pending
+  // 'pending_transfer' notification — the moment one lands, refresh the pending
   // banner so the fronter sees the Confirm without waiting for the poll.
   const seenPendingNotif = useRef(new Set());
   useEffect(() => {
@@ -377,7 +377,7 @@ const StaffShell = () => {
   }, [notifHook.notifications]);
   const [closerSection, setCloserSection]   = usePersistedState(secKey, 'assigned'); // 'assigned' | 'sales'
 
-  // Notification deep-link â†’ jump to the right tab/section so the record shows
+  // Notification deep-link → jump to the right tab/section so the record shows
   // and self-highlights for ~5s (the lists read useFocus()).
   // useNavFocus (not useFocus) for the JUMP: the target now outlives the 6s
   // ring so a slow cold start still lands, and useNavFocus is what bounds it to
@@ -398,7 +398,7 @@ const StaffShell = () => {
     }
   }, [navFocus]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // â€¦and when the notification asked for the record itself (not just its tab),
+  // …and when the notification asked for the record itself (not just its tab),
   // open the drawer on it. The tab switch above still runs, so closing the
   // drawer leaves the user on the right list rather than nowhere.
   useSaleDeepLink(navFocus, setDetailSale);
@@ -417,7 +417,7 @@ const StaffShell = () => {
     }
   }, [focus, transfers, sales]);
 
-  // Vehicle registry â€” populates the CarMake / CarModel typeahead inside the
+  // Vehicle registry — populates the CarMake / CarModel typeahead inside the
   // fronter's New Transfer modal. Fetched once on mount; cheap enough that we
   // don't gate it behind showCreateForm.
   const [vehicleTree, setVehicleTree] = useState([]);
@@ -431,8 +431,8 @@ const StaffShell = () => {
   };
 
   // Report the most specific active context to the mascot: a cross-role section
-  // (calendar/team/â€¦), the closer's Assigned/My-Sales sub-toggle, or the active
-  // dashboard tab (callbacks, transfers, faqs, â€¦) â€” so guidance is tab-specific.
+  // (calendar/team/…), the closer's Assigned/My-Sales sub-toggle, or the active
+  // dashboard tab (callbacks, transfers, faqs, …) — so guidance is tab-specific.
   useEffect(() => {
     let sec;
     if (activeNav !== 'dashboard') sec = activeNav;
@@ -441,17 +441,17 @@ const StaffShell = () => {
     window.crmAssistant?.setSection?.(sec);
   }, [activeNav, activeTab, closerSection]);
   const [transfersPage, setTransfersPage]   = useState(1);  // fronter My Leads + closer Assigned
-  // Status filter for the fronter My Leads list â€” set when a KPI card is clicked
-  // (e.g. "Completed" â†’ only completed leads). '' = all. Drives fetchTransfers.
+  // Status filter for the fronter My Leads list — set when a KPI card is clicked
+  // (e.g. "Completed" → only completed leads). '' = all. Drives fetchTransfers.
   const [myLeadsStatus, setMyLeadsStatus]   = useState('');
   const [closerSalesPage, setCloserSalesPage] = useState(1);
-  // â”€â”€ "My Sales" filter bar + list/grid toggle (Compliance-Sales-tab parity) â”€â”€
-  // Scoped to the My Sales sub-tab only â€” Assigned Transfers / dispo tabs are
+  // ── "My Sales" filter bar + list/grid toggle (Compliance-Sales-tab parity) ──
+  // Scoped to the My Sales sub-tab only — Assigned Transfers / dispo tabs are
   // untouched. Grid stays the default; the choice persists per role.
   const [mySalesView, setMySalesView] = usePersistedState(`biztrix.mySalesView.${user?.role || 'default'}`, 'grid');
   const [mySalesSearch, setMySalesSearch]         = useState('');
   const [mySalesStatuses, setMySalesStatuses]     = useState([]);
-  // Eligible/Paid/Pending/Not Eligible â€” a derived read of payout_confirmed +
+  // Eligible/Paid/Pending/Not Eligible — a derived read of payout_confirmed +
   // paid_to_closer (mig 244/246), same fields incentivePill() reads below.
   const [mySalesIncentive, setMySalesIncentive]   = useState([]);
   const mySalesTq = useTableQuery({
@@ -468,7 +468,7 @@ const StaffShell = () => {
   const dupTimer       = useRef(null);
   const lastPrefilledId = useRef(null);
 
-  // Which dynamic field holds the phone/CLI â€” drives the duplicate check.
+  // Which dynamic field holds the phone/CLI — drives the duplicate check.
   const phoneFieldName = (fields || []).find(f =>
     ['phone', 'tel'].includes(f.field_type) ||
     /(phone|cli|mobile|cell|contact|number)/i.test(f.name || '') ||
@@ -513,9 +513,9 @@ const StaffShell = () => {
   useEffect(() => { const t = setTimeout(() => { setLeadSearchQ(leadSearch.trim()); setTransfersPage(1); }, 350); return () => clearTimeout(t); }, [leadSearch]);
   useEffect(() => { fetchTransfers({ date_from, date_to, page: transfersPage, limit: PAGE_SIZE, search: leadSearchQ || undefined, ...(myLeadsStatus ? { status: myLeadsStatus } : {}) }); }, [fetchTransfers, date_from, date_to, transfersPage, leadSearchQ, myLeadsStatus]);
   // Params for the closer's sales fetch in the CURRENT section. Post-date sales
-  // carry a FUTURE sale_date, so the sale_date date window would hide them â€” the
+  // carry a FUTURE sale_date, so the sale_date date window would hide them — the
   // Post Date tab is fetched WITHOUT the date filter so every pending post-date
-  // shows (this is why they "disappeared" â€” the list keys on sale_date now).
+  // shows (this is why they "disappeared" — the list keys on sale_date now).
   // Every other section keeps the date window.
   const closerSalesParams = useCallback((page = closerSalesPage) => {
     const p = { page, limit: PAGE_SIZE };
@@ -527,12 +527,12 @@ const StaffShell = () => {
       p.date_from = date_from; p.date_to = date_to;
       if (salesStatus) p.status = salesStatus;
       // The main Sales section hides un-charged post-dates. Without this they
-      // appeared here the moment their FUTURE sale_date became today â€” looking
-      // like the sale had "moved by itself" â€” while the stat cards (which now
+      // appeared here the moment their FUTURE sale_date became today — looking
+      // like the sale had "moved by itself" — while the stat cards (which now
       // exclude them) said something different. The Post Date tab above is the
       // one place they live until the card is actually charged.
       p.exclude_post_date = true;
-      // My Sales filter bar + sort â€” scoped to the actual My Sales view so it
+      // My Sales filter bar + sort — scoped to the actual My Sales view so it
       // never narrows the Assigned-tab's background sales fetch (that one only
       // reads salesTotal for the sub-nav count badge). mySalesStatuses (multi)
       // takes over from the single-value salesStatus (KPI-card click) once the
@@ -541,8 +541,8 @@ const StaffShell = () => {
         if (mySalesSearch) p.search = mySalesSearch;
         if (mySalesStatuses.length) p.status = mySalesStatuses.join(',');
         if (mySalesIncentive.length) p.incentive_status = mySalesIncentive.join(',');
-        // Default sort is sale_date desc (was: unsorted â†’ server fell back to
-        // created_at, which disagrees with sale_date on bulk-uploaded rows â€”
+        // Default sort is sale_date desc (was: unsorted → server fell back to
+        // created_at, which disagrees with sale_date on bulk-uploaded rows —
         // that mismatch is why picking a date range looked "unsorted").
         Object.assign(p, mySalesTq.params);
       }
@@ -551,7 +551,7 @@ const StaffShell = () => {
   }, [closerSection, closerSalesPage, date_from, date_to, salesStatus, mySalesSearch, mySalesStatuses, mySalesIncentive, mySalesTq.params]);
 
   // A new sort / column filter / search / status / incentive pick re-windows
-  // the whole dataset â€” page 2 of the old result is meaningless.
+  // the whole dataset — page 2 of the old result is meaningless.
   const mySalesFirstQuery = useRef(true);
   useEffect(() => {
     if (mySalesFirstQuery.current) { mySalesFirstQuery.current = false; return; }
@@ -593,7 +593,7 @@ const StaffShell = () => {
     } catch {} finally { setSalesTabLoading(false); }
   }, [user?.company_id, salesPage, salesStatus, salesAgent, salesSearch, date_from, date_to]);
 
-  // Team tab data â€” only fetch when the tab is active
+  // Team tab data — only fetch when the tab is active
   useEffect(() => { if (activeTab === 'team_transfers') fetchXferTab();  }, [activeTab, fetchXferTab]);
   useEffect(() => { if (activeTab === 'team_sales')     fetchSalesTab(); }, [activeTab, fetchSalesTab]);
 
@@ -607,7 +607,7 @@ const StaffShell = () => {
   const handleLogout = () => { logout(); navigate('/login'); };
 
   // Tracks the dialer dispo-queue item when the sale form was opened from the
-  // CloserPendingDispos banner â€” so only that path clears the queue item on save.
+  // CloserPendingDispos banner — so only that path clears the queue item on save.
   const saleFormQueueId = useRef(null);
   const openSaleModal = (transfer = null) => {
     saleFormQueueId.current = null;   // normal open: not tied to a queue item
@@ -632,7 +632,7 @@ const StaffShell = () => {
     try {
       const res = await createSale(formData);
       const created = res?.sales?.length ? res.sales : (res?.sale ? [res.sale] : []);
-      // Post-dated sales are NOT auto-submitted â€” they sit in the Post Date tab
+      // Post-dated sales are NOT auto-submitted — they sit in the Post Date tab
       // (closer-editable, no compliance lock) until charged. Everything else is
       // auto-submitted for compliance review as before.
       const isPost = isPostDateDispo(formData.closer_disposition);
@@ -646,13 +646,13 @@ const StaffShell = () => {
         saleFormQueueId.current = null;
         setDialerRefresh(x => x + 1);
       }
-      // Item 4 â€” server-side advisory: even if the closer outran the banner,
+      // Item 4 — server-side advisory: even if the closer outran the banner,
       // the response says the customer holds an active policy.
       const advisoryNote = res?.advisory?.active_policy
-        ? ' âš  Note: this customer holds an active policy â€” check the Resell flow if this duplicates coverage.'
+        ? ' ⚠ Note: this customer holds an active policy — check the Resell flow if this duplicates coverage.'
         : '';
       setSaleSuccess((isPost
-        ? 'Post-dated sale saved â€” in the Post Date tab until you charge it.'
+        ? 'Post-dated sale saved — in the Post Date tab until you charge it.'
         : (created.length > 1 ? `${created.length} sales submitted to compliance!` : 'Sale submitted to compliance!')) + advisoryNote);
       setPhoneSearchRefresh(prev => prev + 1);
       fetchStats();
@@ -668,13 +668,13 @@ const StaffShell = () => {
 
   // Charge a post-dated sale: flip its disposition to "sale" (and clear the
   // schedule) so it leaves the Post Date tab, then submit it to compliance so it
-  // shows up â€” approvable â€” in All Sales. submit-review is best-effort (a legacy
+  // shows up — approvable — in All Sales. submit-review is best-effort (a legacy
   // already-in-review sale just stays in review).
   const chargeSale = async (saleId, dispoFilter) => {
     try {
       await client.put(`sales/${saleId}`, { closer_disposition: 'sale', charge_at: null });
       try { await client.post(`sales/${saleId}/submit-review`); } catch { /* already in review */ }
-      setSaleSuccess('Charged â€” sent to compliance as a sale.');
+      setSaleSuccess('Charged — sent to compliance as a sale.');
       fetchSales(closerSalesParams());
       fetchStats();
       setTimeout(() => setSaleSuccess(''), 4000);
@@ -688,13 +688,13 @@ const StaffShell = () => {
     setEditSaleError('');
     try {
       await client.put(`sales/${editSale.id}`, formData);
-      // Resubmit to compliance after a closer edit â€” but NOT while the sale is
+      // Resubmit to compliance after a closer edit — but NOT while the sale is
       // still post-dated. Editing a post-date record (its charging time / note)
       // keeps it in the Post Date tab; it only enters review when the closer
       // either flips the disposition off "post date" here or clicks Charge.
       // Fall back to the sale's CURRENT disposition when the edit payload has
       // none. SaleForm sends closer_disposition: dynVal(...) || null, so an edit
-      // whose form has no resolvable disposition field sent null â€” which read as
+      // whose form has no resolvable disposition field sent null — which read as
       // "not a post-date" and resubmitted the record. That is how four of these
       // reached pending_review. A real flip off post-date sends 'sale' here, so
       // the falsy fallback still lets a genuine conversion through.
@@ -800,7 +800,7 @@ const StaffShell = () => {
     }
   };
 
-  // VICIdial "pending from dialer" â†’ open the SAME create-transfer form, prefill
+  // VICIdial "pending from dialer" → open the SAME create-transfer form, prefill
   // the captured phone, and flag it so submit confirms the pending row.
   const openDialerPending = (item) => {
     const fd0 = item.form_data || {};
@@ -825,7 +825,7 @@ const StaffShell = () => {
   const handleSubmitTransfer = async (e) => {
     e.preventDefault();
     setTransferError('');
-    // Vehicle sanity guard â€” block obviously shifted columns (bad year / numeric make).
+    // Vehicle sanity guard — block obviously shifted columns (bad year / numeric make).
     const vIssue = Object.values(vehicleFieldIssues((fields || []).filter(f => f.show_to_fronter !== false), formData))[0];
     if (vIssue) { setTransferError(vIssue); return; }
     // Snap option values to their canonical spelling (covers Enter-to-submit).
@@ -836,15 +836,15 @@ const StaffShell = () => {
         // Fill the existing VICIdial pending row instead of creating a duplicate.
         const r = await client.post(`vicidial/pending/${pendingDialer.id}/confirm`, { form_data: clean });
         toast.success(r?.data?.merged
-          ? (r.data.message || 'Merged with your existing transfer â€” no duplicate.')
-          : 'Transfer confirmed â€” sent to closer.');
+          ? (r.data.message || 'Merged with your existing transfer — no duplicate.')
+          : 'Transfer confirmed — sent to closer.');
         setDialerRefresh(x => x + 1);
       } else {
         const res = await createTransfer({ ...clean });
         const action = res?.action;
         toast.success(
-          action === 'updated' ? 'Existing transfer refreshed â€” no new transfer counted.'
-            : action === 'created_reengaged' ? 'New transfer created â€” this number was last contacted over 30 days ago.'
+          action === 'updated' ? 'Existing transfer refreshed — no new transfer counted.'
+            : action === 'created_reengaged' ? 'New transfer created — this number was last contacted over 30 days ago.'
             : action === 'created_sale_warning' ? 'New transfer created (you already had a completed sale on this number).'
             : 'Transfer created.');
       }
@@ -865,7 +865,7 @@ const StaffShell = () => {
   };
 
   const handleFronterZipChange = (fieldName, raw, allFields) => {
-    // Strict 5-digit cap â€” strip every non-digit and clip to 5. Anything past
+    // Strict 5-digit cap — strip every non-digit and clip to 5. Anything past
     // five was just causing the zip lookup to 404. The cap also enforces what
     // the form-level normalizer in formFieldNorm does for the same kind.
     const val = String(raw || '').replace(/\D/g, '').slice(0, 5);
@@ -921,7 +921,7 @@ const StaffShell = () => {
       ? [{ key: 'tracked_numbers', label: 'Tracked Numbers', icon: Hash      }] : []),
     ...(isFronter && isEnabled('number_assignment')
       ? [{ key: 'numbers',        label: 'My Numbers',      icon: Hash       }] : []),
-    // Batches assigned to this fronter â€” the same workspace their manager sees,
+    // Batches assigned to this fronter — the same workspace their manager sees,
     // minus the assign controls: work the numbers, disposition them, add notes.
     ...(isFronter ? [{ key: 'batches',        label: 'Batches',         icon: Hash       }] : []),
     ...(hasPermission('search_sales') && isEnabled('search_sales')
@@ -946,19 +946,19 @@ const StaffShell = () => {
     }
   }, [TABS, activeTab, staffDefaultTab, setActiveTab]);
 
-  // â”€â”€ KPI metric map â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── KPI metric map ──────────────────────────────────────────────────────
   // Every data point a staff KPI card can show, keyed to match kpiCatalog. The
   // SuperAdmin builder picks which land in which card / slot; the drill-down
   // for each one is preserved here.
   const goCloser = (status, range) => () => {
     setCloserSection('sales'); setSalesStatus(status); setDateRange(getPresetRange(range));
-    // A KPI-card click is a fresh, single-status intent â€” drop any multi-select
+    // A KPI-card click is a fresh, single-status intent — drop any multi-select
     // filter bar picks so they don't silently mask it.
     setMySalesStatuses([]); setMySalesIncentive([]); setMySalesSearch('');
   };
-  // Fronter leads KPIs â†’ filter the fronter's own "My Leads" list (and jump to
+  // Fronter leads KPIs → filter the fronter's own "My Leads" list (and jump to
   // its tab). Previously this set xferStatus, which only drives the separate
-  // team_transfers tab â€” so the fronter's list never filtered and showed all.
+  // team_transfers tab — so the fronter's list never filtered and showed all.
   const goLeads  = (status, range) => () => { setActiveTab('transfers'); setMyLeadsStatus(status || ''); setTransfersPage(1); if (range) setDateRange(getPresetRange(range)); };
   const staffMetrics = {
     sales_today:     { value: stats.todaySales || 0,     onClick: goCloser('', 'today') },
@@ -999,7 +999,7 @@ const StaffShell = () => {
     );
   };
 
-  // Compact action set for the My Sales LIST view â€” same handlers the grid
+  // Compact action set for the My Sales LIST view — same handlers the grid
   // cards use, just icon-only so a row stays one line.
   const renderMySalesActions = (s) => (
     <div className="flex items-center gap-1 flex-wrap" onClick={e => e.stopPropagation()}>
@@ -1087,9 +1087,9 @@ const StaffShell = () => {
         <TargetsStrip />
 
         {/* VICIdial: transfers captured from the dialer on XFER, awaiting confirm.
-            Shown by ownership, not role â€” /pending only returns transfers THIS
+            Shown by ownership, not role — /pending only returns transfers THIS
             user created (the fronter who XFERd). Confirming a pending transfer is
-            a FRONTER action (it opens the transfer form) â€” closers work leads via
+            a FRONTER action (it opens the transfer form) — closers work leads via
             the sale-form flow below, so gate this to fronters so they never see a
             transfer Confirm button. */}
         {isFronter && <PendingFromDialer onPick={openDialerPending} refreshSignal={dialerRefresh} />}
@@ -1115,7 +1115,7 @@ const StaffShell = () => {
               applied), and 215 also blocks csv_export for the closer + fronter
               roles so canExport is false even once the flag exists. A superadmin
               turns on the flag, then grants the role or the person in
-              Data Egress â†’ Export access. */}
+              Data Egress → Export access. */}
           {isEnabledStrict('staff_export')
             && (canExport('sales') || canExport('transfers') || canExport('callbacks')) && (
             <button onClick={() => setExportOpen(true)}
@@ -1157,7 +1157,7 @@ const StaffShell = () => {
           />
         </div>
 
-        {/* â”€â”€ NON-SALES TABS â”€â”€ */}
+        {/* ── NON-SALES TABS ── */}
         {activeTab === 'callbacks'       && <CallbacksPage user={user} />}
         {activeTab === 'team_callbacks'  && <CallbacksOverview user={user} companyId={user?.company_id} />}
         {activeTab === 'tracked_numbers' && <CallbackNumbers user={user} />}
@@ -1166,7 +1166,7 @@ const StaffShell = () => {
         {activeTab === 'faqs'            && <FAQPanel />}
         {activeTab === 'scripts'         && <ScriptPanel />}
 
-        {/* â”€â”€ TEAM TRANSFERS TAB â”€â”€ */}
+        {/* ── TEAM TRANSFERS TAB ── */}
         {activeTab === 'team_transfers' && (
           <Card className="p-6">
             <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
@@ -1178,7 +1178,7 @@ const StaffShell = () => {
               search={{
                 value: xferSearch,
                 onChange: (v) => { setXferSearch(v); setXferPage(1); },
-                placeholder: 'Search customer / phoneâ€¦',
+                placeholder: 'Search customer / phone…',
               }}
               statusPills={
                 <TransferStatusFilterPills
@@ -1238,9 +1238,9 @@ const StaffShell = () => {
                                   )}
                                 </div>
                               );
-                            })() : <span className="text-text-tertiary text-xs">â€”</span>}
+                            })() : <span className="text-text-tertiary text-xs">—</span>}
                           </td>
-                          <td className="py-3 px-3 text-text-secondary text-xs">{t.closer?.first_name || 'â€”'}</td>
+                          <td className="py-3 px-3 text-text-secondary text-xs">{t.closer?.first_name || '—'}</td>
                           <td className="py-3 px-3 text-text-secondary text-xs">{fmtDateET(t.created_at)}</td>
                           <td className="py-3 px-3">
                             <div className="flex flex-wrap gap-1">
@@ -1264,7 +1264,7 @@ const StaffShell = () => {
           </Card>
         )}
 
-        {/* â”€â”€ TEAM SALES TAB â”€â”€ */}
+        {/* ── TEAM SALES TAB ── */}
         {activeTab === 'team_sales' && (
           <Card className="p-6">
             <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
@@ -1276,7 +1276,7 @@ const StaffShell = () => {
               search={{
                 value: salesSearch,
                 onChange: (v) => { setSalesSearch(v); setSalesPage(1); },
-                placeholder: 'Search customer / phone / referenceâ€¦',
+                placeholder: 'Search customer / phone / reference…',
               }}
               statusPills={
                 <SaleStatusFilterPills
@@ -1315,11 +1315,11 @@ const StaffShell = () => {
                       {salesTabRows.map(s => (
                         <tr key={s.id} onClick={() => setDetailSale(s)}
                           className="border-b border-border hover:bg-bg-secondary transition-colors cursor-pointer">
-                          <td className="py-3 px-3 font-semibold text-text">{s.customer_name || 'â€”'}</td>
-                          <td className="py-3 px-3 text-xs font-mono text-text-tertiary">{s.reference_no || 'â€”'}</td>
-                          <td className="py-3 px-3"><div className="flex items-center gap-1.5 flex-wrap"><SaleStatusBadge sale={s} size="sm" />{s.is_resell && <span title={`Resell Â· ${s.resell_intent || ''}`} className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded whitespace-nowrap" style={{ backgroundColor: '#ddd6fe', color: '#5b21b6' }}>â†» {(s.resell_intent || 'resell').replace(/_/g, ' ')}</span>}</div></td>
-                          <td className="py-3 px-3 text-text-secondary text-xs">{s.closer_name || 'â€”'}</td>
-                          {hasPermission('view_financial_data') && <td className="py-3 px-3 text-xs font-semibold text-success-600">{s.monthly_payment ? `$${s.monthly_payment}/mo` : 'â€”'}</td>}
+                          <td className="py-3 px-3 font-semibold text-text">{s.customer_name || '—'}</td>
+                          <td className="py-3 px-3 text-xs font-mono text-text-tertiary">{s.reference_no || '—'}</td>
+                          <td className="py-3 px-3"><div className="flex items-center gap-1.5 flex-wrap"><SaleStatusBadge sale={s} size="sm" />{s.is_resell && <span title={`Resell · ${s.resell_intent || ''}`} className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded whitespace-nowrap" style={{ backgroundColor: '#ddd6fe', color: '#5b21b6' }}>↻ {(s.resell_intent || 'resell').replace(/_/g, ' ')}</span>}</div></td>
+                          <td className="py-3 px-3 text-text-secondary text-xs">{s.closer_name || '—'}</td>
+                          {hasPermission('view_financial_data') && <td className="py-3 px-3 text-xs font-semibold text-success-600">{s.monthly_payment ? `$${s.monthly_payment}/mo` : '—'}</td>}
                           {/* Sale date = the day the sale actually happened (carried through
                               bulk upload). Falls back to created_at on legacy rows where
                               sale_date wasn't captured. Without this, every bulk-uploaded
@@ -1345,7 +1345,7 @@ const StaffShell = () => {
           </Card>
         )}
 
-        {/* â”€â”€ MY SALES TAB (closer view) â”€â”€ */}
+        {/* ── MY SALES TAB (closer view) ── */}
         {activeTab === 'sales' && isCloser && (
           <div>
             {saleSuccess && <Alert type="success" title="Sale Created!" message={saleSuccess} dismissible onDismiss={() => setSaleSuccess('')} />}
@@ -1353,18 +1353,18 @@ const StaffShell = () => {
             {reviewSuccess && <Alert type="success" title="Saved!" message={reviewSuccess} dismissible onDismiss={() => setReviewSuccess('')} />}
             {submitMsg   && <Alert type="error"   title="Error"         message={submitMsg}   dismissible onDismiss={() => setSubmitMsg('')}    />}
 
-            {/* Phone search â€” find leads from linked fronter companies by number */}
+            {/* Phone search — find leads from linked fronter companies by number */}
             <div className="mb-6">
               <PhoneSearch onCreateSale={openSaleModal} companyTimezone={user?.company_timezone} refreshTrigger={phoneSearchRefresh}
                 onResellComplete={(newSale) => { if (newSale?.id) setEditSale(newSale); }} />
             </div>
 
-            {/* Stats â€” triple-segment cards. Today / MTD / Total each clickable
+            {/* Stats — triple-segment cards. Today / MTD / Total each clickable
                 with its own filter scope. Closer sees: My Sales, Approved,
                 Awaiting Review, Cancelled, Resells, Conversion. */}
             {/* flex-wrap (not a fixed-column grid) so a card count that doesn't
                 divide evenly (e.g. 6 KPI cards + Conversion = 7 at 3 columns)
-                never leaves a dangling empty row â€” the last row's cards just
+                never leaves a dangling empty row — the last row's cards just
                 grow to fill the space instead of leaving 1-2 empty slots. */}
             <div className="flex flex-wrap gap-4 mb-8">
               {STAFF_CLOSER_CARDS.map(key => {
@@ -1372,7 +1372,7 @@ const StaffShell = () => {
                 return card ? <div key={key} className="flex-1" style={{ minWidth: 240 }}>{card}</div> : null;
               })}
 
-              {/* Conversion â€” display-only, kept in the same row. */}
+              {/* Conversion — display-only, kept in the same row. */}
               {isStaffCardVisible('conversion') && (
               <div className="flex-1" style={{ minWidth: 240 }}>
               <Card
@@ -1387,10 +1387,10 @@ const StaffShell = () => {
                 </div>
                 <div className="text-center my-2">
                   <p className="text-4xl font-bold text-info-600 leading-none" style={{ fontFamily: 'var(--font-display)', letterSpacing: '-0.03em', fontVariantNumeric: 'tabular-nums' }}>
-                    {statsLoading ? 'â€”' : `${stats.conversionRate || 0}%`}
+                    {statsLoading ? '—' : `${stats.conversionRate || 0}%`}
                   </p>
                 </div>
-                <p className="text-[10px] text-text-tertiary text-center">Approved Ã· total transfers</p>
+                <p className="text-[10px] text-text-tertiary text-center">Approved ÷ total transfers</p>
               </Card>
               </div>
               )}
@@ -1438,8 +1438,8 @@ const StaffShell = () => {
                       style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>{transferTotal}</span>
                   </h3>
                   <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
-                    Every lead handed to you â€” counts leads you still need to work <strong>and</strong> ones already
-                    converted or rejected. This is why it differs from â€œMy Salesâ€ (only deals you created).
+                    Every lead handed to you — counts leads you still need to work <strong>and</strong> ones already
+                    converted or rejected. This is why it differs from “My Sales” (only deals you created).
                   </p>
                 </div>
                 {tLoading ? (
@@ -1477,12 +1477,12 @@ const StaffShell = () => {
                           </div>
                           <div className="flex flex-col items-end gap-1 flex-shrink-0">
                             <Badge variant={TRANSFER_BADGE[t.status] || 'secondary'} size="sm" title={si.desc}>{si.label}</Badge>
-                            {/* Latest disposition the closer/fronter set on this lead â€” shown
+                            {/* Latest disposition the closer/fronter set on this lead — shown
                                 next to the status so "Awaiting assignment" / "Ready to work"
-                                also tells you what was last decided (callback, not interestedâ€¦). */}
+                                also tells you what was last decided (callback, not interested…). */}
                             {t.latest_disposition?.disposition_name && (
                               <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full whitespace-nowrap"
-                                title={`Last disposition${t.latest_disposition.note ? ` â€” ${t.latest_disposition.note}` : ''}`}
+                                title={`Last disposition${t.latest_disposition.note ? ` — ${t.latest_disposition.note}` : ''}`}
                                 style={{
                                   backgroundColor: `${t.latest_disposition.color || '#6b7280'}22`,
                                   color: t.latest_disposition.color || '#6b7280',
@@ -1535,11 +1535,11 @@ const StaffShell = () => {
                         style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>{salesTotal}</span>
                     </h3>
                     <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
-                      Every sale youâ€™ve created, in any status (draft, awaiting review, approved, returnedâ€¦). Includes resells,
+                      Every sale you’ve created, in any status (draft, awaiting review, approved, returned…). Includes resells,
                       which is why it can exceed the leads assigned to you.
                     </p>
                   </div>
-                  {/* Grid / List toggle â€” persists per role. */}
+                  {/* Grid / List toggle — persists per role. */}
                   <div className="flex gap-1 p-1 rounded-xl flex-shrink-0"
                     style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
                     {[{ k: 'grid', icon: LayoutGrid, label: 'Grid' }, { k: 'list', icon: ListIcon, label: 'List' }].map(v => (
@@ -1557,7 +1557,7 @@ const StaffShell = () => {
                   search={{
                     value: mySalesSearch,
                     onChange: (v) => setMySalesSearch(v),
-                    placeholder: 'Search customer / phone / referenceâ€¦',
+                    placeholder: 'Search customer / phone / reference…',
                   }}
                   extras={
                     <>
@@ -1585,7 +1585,7 @@ const StaffShell = () => {
                   </p>
                 ) : mySalesView === 'grid' ? (
                   <>
-                  {/* flex-wrap (not a fixed-column grid) â€” a partial last row's
+                  {/* flex-wrap (not a fixed-column grid) — a partial last row's
                       cards grow to fill the row instead of leaving 1-2 empty
                       slots, which is what a short trailing row in a rigid
                       xl:grid-cols-3 always did. */}
@@ -1661,7 +1661,7 @@ const StaffShell = () => {
                                 className="flex-1 py-1.5 px-3 rounded-lg text-xs font-bold text-white flex items-center justify-center gap-1 hover:scale-[1.02] transition-all disabled:opacity-50"
                                 style={{ background: 'var(--gradient-sidebar)' }}>
                                 {submitting === s.id
-                                  ? <><RefreshCw size={11} className="animate-spin" /> Submittingâ€¦</>
+                                  ? <><RefreshCw size={11} className="animate-spin" /> Submitting…</>
                                   : <><CheckCircle size={12} /> Submit for Review</>}
                               </button>
                             )}
@@ -1678,7 +1678,7 @@ const StaffShell = () => {
                           <div className="mt-3 py-2 px-3 rounded-lg text-xs font-semibold text-center"
                             style={{ backgroundColor: 'var(--color-warning-50)', color: 'var(--color-warning-700)',
                               border: '1px solid var(--color-warning-200)' }}>
-                            â³ Awaiting compliance review
+                            ⏳ Awaiting compliance review
                           </div>
                         )}
 
@@ -1696,7 +1696,7 @@ const StaffShell = () => {
                               className="flex-1 py-1.5 px-3 rounded-lg text-xs font-bold flex items-center justify-center gap-1 transition-all disabled:opacity-50"
                               style={{ backgroundColor: 'var(--color-error-600)', color: '#fff' }}>
                               {submitting === s.id
-                                ? <><RefreshCw size={11} className="animate-spin" /> Resubmittingâ€¦</>
+                                ? <><RefreshCw size={11} className="animate-spin" /> Resubmitting…</>
                                 : <><RefreshCw size={11} /> Resubmit</>}
                             </button>
                           </div>
@@ -1764,11 +1764,11 @@ const StaffShell = () => {
                               <td className="px-3 py-2">
                                 <p className="font-semibold m-0" style={{ color: 'var(--color-text)' }}>{s.customer_name || 'Sale'}</p>
                                 <p className="text-xs m-0 mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-                                  {s.customer_phone || ''}{s.reference_no ? ` Â· #${s.reference_no}` : ''}
+                                  {s.customer_phone || ''}{s.reference_no ? ` · #${s.reference_no}` : ''}
                                 </p>
                               </td>
                               <td className="px-3 py-2"><SaleStatusBadge sale={s} size="sm" /></td>
-                              <td className="px-3 py-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{s.client_name || s.plan || 'â€”'}</td>
+                              <td className="px-3 py-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{s.client_name || s.plan || '—'}</td>
                               <td className="px-3 py-2 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>{fmtCardDate(s.sale_date || s.created_at)}</td>
                               <td className="px-3 py-2">
                                 {s.status === 'closed_won' ? (
@@ -1776,10 +1776,10 @@ const StaffShell = () => {
                                     style={{ backgroundColor: incentivePill(s).bg, color: incentivePill(s).fg }}>
                                     {incentivePill(s).label}
                                   </span>
-                                ) : <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>â€”</span>}
+                                ) : <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>—</span>}
                               </td>
                               {hasPermission('view_financial_data') && (
-                                <td className="px-3 py-2 text-xs font-semibold text-success-600">{s.monthly_payment ? `$${s.monthly_payment}/mo` : 'â€”'}</td>
+                                <td className="px-3 py-2 text-xs font-semibold text-success-600">{s.monthly_payment ? `$${s.monthly_payment}/mo` : '—'}</td>
                               )}
                               <td className="px-3 py-2">{renderMySalesActions(s)}</td>
                             </tr>
@@ -1794,9 +1794,9 @@ const StaffShell = () => {
               </Card>
             )}
 
-            {/* Dynamic disposition tab (e.g. Post Date) â€” sales the closer
+            {/* Dynamic disposition tab (e.g. Post Date) — sales the closer
                 marked with this disposition. Post-date sales carry a charge
-                date + a "Charge â†’ Sale" button that moves them to My Sales. */}
+                date + a "Charge → Sale" button that moves them to My Sales. */}
             {closerSection.startsWith('dispo:') && (() => {
               const dispo = closerSection.slice(6);
               const isPost = isPostDateDispo(dispo);
@@ -1809,13 +1809,13 @@ const StaffShell = () => {
                       style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>{salesTotal}</span>
                   </h3>
                   <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
-                    Sales you marked â€œ{prettyDispo(dispo)}â€.{isPost ? ' Each is charged at its scheduled time â€” click â€œCharge â†’ Saleâ€ once done to move it to My Sales.' : ''}
+                    Sales you marked “{prettyDispo(dispo)}”.{isPost ? ' Each is charged at its scheduled time — click “Charge → Sale” once done to move it to My Sales.' : ''}
                   </p>
                 </div>
                 {sLoading ? (
                   <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" /></div>
                 ) : sales.length === 0 ? (
-                  <p className="text-text-secondary text-center py-8">No â€œ{prettyDispo(dispo)}â€ sales.</p>
+                  <p className="text-text-secondary text-center py-8">No “{prettyDispo(dispo)}” sales.</p>
                 ) : (
                   <>
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
@@ -1836,7 +1836,7 @@ const StaffShell = () => {
                                 <CalendarDays size={11} /> Charge {new Date(s.charge_at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
                               </p>
                             )}
-                            {/* Last failed attempt â€” so a card that has bounced
+                            {/* Last failed attempt — so a card that has bounced
                                 twice reads that way at a glance, not as a fresh
                                 post-date whose date happens to have moved. */}
                             {s.last_charge_fail_reason_key && (
@@ -1853,15 +1853,15 @@ const StaffShell = () => {
                             <button onClick={() => chargeSale(s.id, dispo)}
                               className="flex-1 py-1.5 px-3 rounded-lg text-xs font-bold text-white flex items-center justify-center gap-1 hover:scale-[1.02] transition-all"
                               style={{ background: 'var(--gradient-sidebar)' }}>
-                              <DollarSign size={12} /> Charge â†’ Sale
+                              <DollarSign size={12} /> Charge → Sale
                             </button>
                             {/* The other half of the charge call. Before this the
-                                closer had nowhere to put "declined" â€” the record
+                                closer had nowhere to put "declined" — the record
                                 just sat here with a date in the past. */}
                             <button onClick={() => setFailSale(s)}
                               className="px-3 py-1.5 rounded-lg text-xs font-bold border flex items-center gap-1 transition-all"
                               style={{ borderColor: '#f59e0b66', color: '#b45309', background: '#f59e0b14' }}>
-                              <AlertTriangle size={11} /> Didnâ€™t go through
+                              <AlertTriangle size={11} /> Didn’t go through
                             </button>
                             </>
                           )}
@@ -1884,15 +1884,15 @@ const StaffShell = () => {
           </div>
         )}
 
-        {/* â”€â”€ MY TRANSFERS TAB (fronter view) â”€â”€ */}
+        {/* ── MY TRANSFERS TAB (fronter view) ── */}
         {activeTab === 'transfers' && isFronter && (
           <div>
-            {/* Stats â€” triple-segment cards for the fronter view. Same
+            {/* Stats — triple-segment cards for the fronter view. Same
                 Today / MTD / Total clickable pattern as the closer side. */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
               {STAFF_FRONTER_CARDS.map(renderStaffCard)}
 
-              {/* Conversion â€” display-only, same color theme as the closer side. */}
+              {/* Conversion — display-only, same color theme as the closer side. */}
               {isStaffCardVisible('conversion') && (
               <Card
                 className="p-4 min-h-[140px] flex flex-col justify-between"
@@ -1906,15 +1906,15 @@ const StaffShell = () => {
                 </div>
                 <div className="text-center my-2">
                   <p className="text-4xl font-bold text-info-600 leading-none" style={{ fontFamily: 'var(--font-display)', letterSpacing: '-0.03em', fontVariantNumeric: 'tabular-nums' }}>
-                    {statsLoading ? 'â€”' : `${stats.conversionRate || 0}%`}
+                    {statsLoading ? '—' : `${stats.conversionRate || 0}%`}
                   </p>
                 </div>
-                <p className="text-[10px] text-text-tertiary text-center">Approved Ã· total transfers</p>
+                <p className="text-[10px] text-text-tertiary text-center">Approved ÷ total transfers</p>
               </Card>
               )}
             </div>
 
-            {/* Create Transfer modal â€” fronter fields only, sized like the sale modal */}
+            {/* Create Transfer modal — fronter fields only, sized like the sale modal */}
             {showCreateForm && hasPermission('create_transfer') && (
               <div className="fixed inset-0 z-50 flex items-start justify-center p-4 overflow-y-auto"
                 style={{ backgroundColor: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)' }}
@@ -1964,12 +1964,12 @@ const StaffShell = () => {
                               <p className="text-xs leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>{dupCheck.message}</p>
                               {prev && (
                                 <p className="text-[11px] mt-1 font-semibold" style={{ color: accent }}>
-                                  Previous: {prev.date ? new Date(prev.date).toLocaleDateString() : 'â€”'} Â· {prev.closer_name || 'not yet assigned'} Â· {prev.disposition || 'no disposition'}
+                                  Previous: {prev.date ? new Date(prev.date).toLocaleDateString() : '—'} · {prev.closer_name || 'not yet assigned'} · {prev.disposition || 'no disposition'}
                                 </p>
                               )}
                             </div>
                             <button type="button" onClick={() => setDupCheck(null)} aria-label="Dismiss"
-                              className="text-lg leading-none px-1 rounded hover:bg-black/5" style={{ color: 'var(--color-text-tertiary)' }}>Ã—</button>
+                              className="text-lg leading-none px-1 rounded hover:bg-black/5" style={{ color: 'var(--color-text-tertiary)' }}>×</button>
                           </div>
                         );
                       })()}
@@ -1989,7 +1989,7 @@ const StaffShell = () => {
                                 {field.is_required && <span className="ml-0.5" style={{ color: '#ef4444' }}>*</span>}
                               </label>
                               {isCarMake(field) ? (
-                                /* CarMake â†’ typeahead from /vehicles registry. Picking a make
+                                /* CarMake → typeahead from /vehicles registry. Picking a make
                                    wipes the sibling model so a Honda Camry can't slip through
                                    after switching brands. MUST match before textarea/select. */
                                 <VehicleSelect mode="make"
@@ -2004,9 +2004,9 @@ const StaffShell = () => {
                                       return next;
                                     });
                                   }}
-                                  placeholder={field.placeholder || 'Type makeâ€¦'} />
+                                  placeholder={field.placeholder || 'Type make…'} />
                               ) : isCarModel(field) ? (
-                                /* CarModel â†’ typeahead scoped to the currently-selected make. */
+                                /* CarModel → typeahead scoped to the currently-selected make. */
                                 (() => {
                                   const makeF = fields.find(f => isCarMake(f));
                                   const activeMake = makeF ? (formData[makeF.name] || '') : '';
@@ -2016,7 +2016,7 @@ const StaffShell = () => {
                                       models={vehicleModelsFor(activeMake)}
                                       requireMake strict
                                       onChange={v => setFormData({ ...formData, [field.name]: v })}
-                                      placeholder={field.placeholder || 'Type modelâ€¦'} />
+                                      placeholder={field.placeholder || 'Type model…'} />
                                   );
                                 })()
                               ) : field.field_type === 'textarea' ? (
@@ -2029,22 +2029,22 @@ const StaffShell = () => {
                               ) : field.field_type === 'sale_client' ? (
                                 <ThemedSelect value={formData[field.name] || ''} onChange={e => setFormData({ ...formData, [field.name]: e.target.value })}
                                   className="input" required={field.is_required}>
-                                  <option value="">Select clientâ€¦</option>
+                                  <option value="">Select client…</option>
                                   {(() => { const cur = formData[field.name]; return cur && !visibleSaleClients.some(c => c.value === cur) ? <option value={cur}>{cur}</option> : null; })()}
                                   {visibleSaleClients.map(c => <option key={c.id} value={c.value}>{c.value}</option>)}
                                 </ThemedSelect>
                               ) : field.field_type === 'sale_plan' ? (
                                 <ThemedSelect value={formData[field.name] || ''} onChange={e => setFormData({ ...formData, [field.name]: e.target.value })}
                                   className="input" required={field.is_required}>
-                                  <option value="">Select planâ€¦</option>
+                                  <option value="">Select plan…</option>
                                   {salePlans.map(p => <option key={p.id} value={p.value}>{p.value}</option>)}
                                 </ThemedSelect>
                               ) : field.field_type === 'zip' ? (
                                 <div className="relative">
                                   {/* No HTML maxLength: a 10-char paste like "90210-1234" would
-                                      be clipped to "90210-1234" â†’ "90210" anyway by the JS
+                                      be clipped to "90210-1234" → "90210" anyway by the JS
                                       digit-strip below, but "(845) 587-6504" pasted into the
-                                      zip slot would clip to "(845)" â†’ "845" without the digit
+                                      zip slot would clip to "(845)" → "845" without the digit
                                       strip seeing the full value. Let normalize handle the cap. */}
                                   <input type="text" inputMode="numeric"
                                     value={formData[field.name] || ''}
@@ -2067,7 +2067,7 @@ const StaffShell = () => {
                                 <>
                                   {/* Pipe through formFieldNorm so phone strips brackets/dashes
                                       and clips at 10 digits, VIN uppercases at 17, name strips
-                                      digits, etc. â€” even when a fronter pastes "(555) 123-4567". */}
+                                      digits, etc. — even when a fronter pastes "(555) 123-4567". */}
                                   <input type={field.field_type === 'phone' || field.field_type === 'tel' ? 'tel' : field.field_type}
                                     value={formData[field.name] || ''}
                                     onChange={e => setFormData({ ...formData, [field.name]: normalizeField(field, e.target.value) })}
@@ -2100,7 +2100,7 @@ const StaffShell = () => {
                           className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl font-bold text-sm text-white disabled:opacity-50 transition-all hover:scale-[1.02] active:scale-[0.98]"
                           style={{ background: 'var(--gradient-sidebar)', boxShadow: 'var(--shadow-md)' }}>
                           {transferSubmitting
-                            ? <><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" /> Submittingâ€¦</>
+                            ? <><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" /> Submitting…</>
                             : <><Send size={13} /> Transfer Lead</>
                           }
                         </button>
@@ -2110,7 +2110,7 @@ const StaffShell = () => {
                 </div>
             )}
 
-            {/* My Leads â€” full width */}
+            {/* My Leads — full width */}
             <Card className="p-6">
               <div className="flex items-center justify-between gap-3 mb-5 flex-wrap">
                 <h3 className="text-xl font-bold text-text flex items-center gap-2">
@@ -2119,7 +2119,7 @@ const StaffShell = () => {
                     style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>{transferTotal}</span>
                   {myLeadsStatus && (
                     <button onClick={() => { setMyLeadsStatus(''); setTransfersPage(1); }}
-                      title="Clear filter â€” show all leads"
+                      title="Clear filter — show all leads"
                       className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold capitalize"
                       style={{ backgroundColor: 'var(--color-primary-50, #eef2ff)', color: 'var(--color-primary-700)', border: '1px solid var(--color-primary-200, #c7d2fe)' }}>
                       {myLeadsStatus.replace(/_/g, ' ')} <XCircle size={12} />
@@ -2130,7 +2130,7 @@ const StaffShell = () => {
                   <div className="relative flex-1 sm:flex-none sm:w-56">
                     <Phone size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
                     <input type="tel" value={leadSearch} onChange={e => setLeadSearch(e.target.value)}
-                      placeholder="Filter by phone or nameâ€¦" className="input pl-8 text-sm" />
+                      placeholder="Filter by phone or name…" className="input pl-8 text-sm" />
                   </div>
                   <button onClick={() => setDupOpen(true)} title="View your duplicate-attempt records"
                     className="flex items-center gap-1.5 py-2 px-3 rounded-xl text-sm font-semibold transition-colors flex-shrink-0"
@@ -2151,7 +2151,7 @@ const StaffShell = () => {
                 <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-7 w-7 border-b-2 border-primary-600" /></div>
               ) : transfers.length === 0 ? (
                 leadSearchQ ? (
-                  <p className="text-text-secondary text-center py-10 text-sm">No leads match â€œ{leadSearch}â€.</p>
+                  <p className="text-text-secondary text-center py-10 text-sm">No leads match “{leadSearch}”.</p>
                 ) : myLeadsStatus ? (
                   <p className="text-text-secondary text-center py-10 text-sm">
                     No leads match this filter.{' '}
@@ -2205,11 +2205,11 @@ const StaffShell = () => {
 
                           {doubleSold[t.customer_uuid] && (
                             <div className="mt-2 flex items-center gap-1.5 px-2 py-1 rounded-lg"
-                              title="This lead was closed by multiple closer companies â€” possible resold/double-dipped lead"
+                              title="This lead was closed by multiple closer companies — possible resold/double-dipped lead"
                               style={{ backgroundColor: 'rgba(239,68,68,0.10)', border: '1px solid rgba(239,68,68,0.35)' }}>
                               <AlertTriangle size={12} style={{ color: '#EF4444', flexShrink: 0 }} />
                               <span className="text-xs font-semibold" style={{ color: '#EF4444' }}>
-                                Double-sold â€” {doubleSold[t.customer_uuid].closer_company_count} closer companies
+                                Double-sold — {doubleSold[t.customer_uuid].closer_company_count} closer companies
                               </span>
                             </div>
                           )}
@@ -2258,7 +2258,7 @@ const StaffShell = () => {
         <DevCredit />
       </main>
 
-      {/* â”€â”€ MODALS â”€â”€ */}
+      {/* ── MODALS ── */}
 
       {dupOpen && <DuplicateRecordsModal onClose={() => setDupOpen(false)} title="My Duplicate Records" />}
 
@@ -2288,7 +2288,7 @@ const StaffShell = () => {
             </p>
             <label className="block text-sm font-medium text-text-secondary mb-1">Reason <span className="text-error-500">*</span></label>
             <textarea value={rejectReason} onChange={e => setRejectReason(e.target.value)}
-              placeholder="Reason for rejectionâ€¦" rows={3} className="input mb-3" />
+              placeholder="Reason for rejection…" rows={3} className="input mb-3" />
             {rejectMsg && <p className="text-sm text-error-600 mb-3">{rejectMsg}</p>}
             <div className="flex gap-3">
               <button onClick={() => setRejectTarget(null)} className="flex-1 py-2 rounded-lg border font-semibold text-sm"
@@ -2296,7 +2296,7 @@ const StaffShell = () => {
               <button onClick={handleRejectTransfer} disabled={rejecting}
                 className="flex-1 py-2 rounded-lg font-semibold text-sm text-white disabled:opacity-50"
                 style={{ backgroundColor: 'var(--color-error-600)' }}>
-                {rejecting ? 'Rejectingâ€¦' : 'Confirm Reject'}
+                {rejecting ? 'Rejecting…' : 'Confirm Reject'}
               </button>
             </div>
           </div>
@@ -2323,7 +2323,7 @@ const StaffShell = () => {
               ))}
             </div>
             <textarea value={ratingNotes} onChange={e => setRatingNotes(e.target.value)}
-              placeholder="Notes (optional)â€¦" rows={2} className="input mb-3" />
+              placeholder="Notes (optional)…" rows={2} className="input mb-3" />
             {ratingMsg && <p className="text-sm text-error-600 mb-3">{ratingMsg}</p>}
             <div className="flex gap-3">
               <button onClick={() => setRateTarget(null)} className="flex-1 py-2 rounded-lg border font-semibold text-sm"
@@ -2331,7 +2331,7 @@ const StaffShell = () => {
               <button onClick={handleRateCall} disabled={ratingSaving}
                 className="flex-1 py-2 rounded-lg font-semibold text-sm text-white disabled:opacity-50"
                 style={{ background: 'var(--gradient-sidebar)' }}>
-                {ratingSaving ? 'Savingâ€¦' : 'Save Rating'}
+                {ratingSaving ? 'Saving…' : 'Save Rating'}
               </button>
             </div>
           </div>
@@ -2352,7 +2352,7 @@ const StaffShell = () => {
               {DISPOS.map(d => <option key={d} value={d}>{d.replace(/_/g, ' ')}</option>)}
             </ThemedSelect>
             <textarea value={dispoNotes} onChange={e => setDispoNotes(e.target.value)}
-              placeholder="Notes (optional)â€¦" rows={2} className="input mb-3" />
+              placeholder="Notes (optional)…" rows={2} className="input mb-3" />
             {dispoMsg && <p className="text-sm text-error-600 mb-3">{dispoMsg}</p>}
             <div className="flex gap-3">
               <button onClick={() => setDispoTarget(null)} className="flex-1 py-2 rounded-lg border font-semibold text-sm"
@@ -2360,7 +2360,7 @@ const StaffShell = () => {
               <button onClick={handleSetDispo} disabled={dispoSaving}
                 className="flex-1 py-2 rounded-lg font-semibold text-sm text-white disabled:opacity-50"
                 style={{ background: 'var(--gradient-sidebar)' }}>
-                {dispoSaving ? 'Savingâ€¦' : 'Save Dispo'}
+                {dispoSaving ? 'Saving…' : 'Save Dispo'}
               </button>
             </div>
           </div>
@@ -2395,7 +2395,7 @@ const StaffShell = () => {
             <textarea
               value={callbackNotes}
               onChange={e => setCallbackNotes(e.target.value)}
-              placeholder="Optional notesâ€¦"
+              placeholder="Optional notes…"
               rows={2}
               className="input mb-3"
             />
@@ -2408,7 +2408,7 @@ const StaffShell = () => {
               <button onClick={handleScheduleCallback} disabled={callbackSaving}
                 className="flex-1 py-2 rounded-lg font-semibold text-sm text-white disabled:opacity-50"
                 style={{ background: 'var(--gradient-sidebar)' }}>
-                {callbackSaving ? 'Savingâ€¦' : 'Schedule'}
+                {callbackSaving ? 'Saving…' : 'Schedule'}
               </button>
             </div>
           </div>
@@ -2427,15 +2427,15 @@ const StaffShell = () => {
         <ChargeFailedModal sale={failSale} onClose={() => setFailSale(null)}
           onDone={() => {
             setFailSale(null);
-            setSaleSuccess('Recorded â€” rescheduled, youâ€™ll be reminded again.');
+            setSaleSuccess('Recorded — rescheduled, you’ll be reminded again.');
             fetchSales(closerSalesParams());
             setTimeout(() => setSaleSuccess(''), 4000);
           }} />
       )}
 
-      {/* Closers only â€” floating call-checklist mini-panel */}
+      {/* Closers only — floating call-checklist mini-panel */}
       {isCloser && <CallChecklistWidget />}
-      {/* Fronters only â€” floating "My Numbers" PiP (copy + work numbers over the dialer) */}
+      {/* Fronters only — floating "My Numbers" PiP (copy + work numbers over the dialer) */}
       {isFronter && <FronterNumbersWidget user={user} />}
     </div>
   );

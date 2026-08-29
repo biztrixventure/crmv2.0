@@ -18,7 +18,7 @@ const ROLE_HIERARCHY = {
   accountant:          4,   // Accounting module lead -- see mig 290
   hr_manager:          4,   // HR module lead -- see mig 290
   closer:              5,
-  qa_agent:            5,   // QA reviewer â€” same tier as closer
+  qa_agent:            5,   // QA reviewer — same tier as closer
   employee:            6,   // HR-only self-service rung
   fronter:             6,
 };
@@ -55,7 +55,7 @@ const getUserRole = async (userId, companyId) => {
 // Resolve a user's EFFECTIVE permission set for a company (role perms, with
 // per-user grants added + revokes removed) and the role level. Cached for
 // PERM_TTL_MS so hot paths (every mutation gate, polled list reads) don't re-hit
-// the DB. Returns { level, perms: [names] } â€” arrays so it caches cleanly.
+// the DB. Returns { level, perms: [names] } — arrays so it caches cleanly.
 const getEffectivePerms = async (userId, companyId) => {
   if (!userId || !companyId) return { level: null, perms: [] };
   return cache.remember('perms', `${userId}|${companyId}`, PERM_TTL_MS, async () => {
@@ -104,12 +104,12 @@ const invalidateUserPerms = (userId, companyId) => {
   if (userId && companyId) cache.invalidate('perms', `${userId}|${companyId}`);
   else cache.invalidateNamespace('perms');
   // the superadmin answer comes from the same role rows, so it goes stale at
-  // exactly the same moments â€” drop it here too rather than leaving a promotion
+  // exactly the same moments — drop it here too rather than leaving a promotion
   // or demotion to wait out its own TTL
   if (userId) cache.invalidate('superadmin', String(userId));
   else cache.invalidateNamespace('superadmin');
 };
-// Clear ALL cached permissions â€” use when a ROLE's permissions change (affects
+// Clear ALL cached permissions — use when a ROLE's permissions change (affects
 // every user holding that role).
 const clearPermissionCache = () => { cache.invalidateNamespace('perms'); cache.invalidateNamespace('superadmin'); };
 
@@ -165,7 +165,7 @@ const getUserPermissions = async (userId, companyId) => {
 // ============================================================================
 // Check Role Hierarchy
 // Strict: a user can only assign roles with LOWER authority (higher number).
-// Same-level assignment is not allowed â€” prevents lateral escalation.
+// Same-level assignment is not allowed — prevents lateral escalation.
 // ============================================================================
 const canAssignRole = async (sourceUserId, sourceCompanyId, targetRoleLevel) => {
   try {
@@ -259,7 +259,7 @@ const assignUserToCompany = async (userId, companyId, roleId, assignedBy) => {
 // It depends only on the user, yet almost every guarded route asks it three or
 // four times over: `can()` asks, then `isManager()` asks again, then
 // `allowedCompanyIds()` asks a third time and calls `isManager()` which asks a
-// fourth. Uncached, each of those was a real round-trip â€” measured at ~445ms
+// fourth. Uncached, each of those was a real round-trip — measured at ~445ms
 // against this database, so ~1.3-2.2s of every QA request was spent
 // re-answering one question. hasPermission was already cached this way; this
 // was the hole beside it.
@@ -279,7 +279,7 @@ const isSuperAdmin = async (userId) => {
 
       if (data?.some(r => r.custom_roles?.level === 'superadmin')) return true;
 
-      // System superadmin has no company assignment â€” check by email against env
+      // System superadmin has no company assignment — check by email against env
       const emails = (process.env.SUPERADMIN_EMAIL || '').split(',').map(e => e.trim()).filter(Boolean);
       if (emails.length > 0) {
         const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(userId);
@@ -322,7 +322,7 @@ const getTeamMembers = async (managerId, companyId) => {
 // TRA reviews FRONTER transfers, RCM optionally reviews CLOSER calls, and one QA
 // org may cover a fronter company AND a closer company. Since role is granted
 // per-company (one user_company_roles row each), the qa levels must be valid on
-// whichever company the QA user is being attached to â€” so both lists include them.
+// whichever company the QA user is being attached to — so both lists include them.
 const getCompanyTypeLevels = (companyType) =>
   companyType === 'fronter'
     ? ['fronter', 'fronter_manager', 'operations_manager', 'company_admin', 'qa_manager', 'qa_agent']
@@ -360,14 +360,14 @@ const getCompanyCurrency = async (companyId) => {
 // Display names for a set of users, but ONLY for those who still hold an ACTIVE
 // company role.
 //
-// A profile with no active role cannot be the person who worked a lead â€” it is
-// a departed account, a duplicate, or a placeholder like "Abandoned (â€¦)". Their
+// A profile with no active role cannot be the person who worked a lead — it is
+// a departed account, a duplicate, or a placeholder like "Abandoned (…)". Their
 // name still reaches the UI through stale attribution: a disposition recorded
 // against a mis-mapped dialer id keeps pointing at them forever. Rendering that
 // name reads as a LIVE attribution, and it has now been reported as a bug three
 // times (an absent closer appearing to have just worked a call).
 //
-// Returning nothing for such a user is the honest answer â€” the disposition is
+// Returning nothing for such a user is the honest answer — the disposition is
 // still shown, just without claiming who set it.
 const activeUserNames = async (userIds) => {
   const ids = [...new Set((userIds || []).filter(Boolean))];
@@ -379,16 +379,16 @@ const activeUserNames = async (userIds) => {
   const active = new Set((roles || []).map(r => r.user_id));
   const out = {};
   for (const p of (profs || [])) {
-    if (!active.has(p.user_id)) continue;            // ghost / departed â†’ no name
+    if (!active.has(p.user_id)) continue;            // ghost / departed → no name
     const n = `${p.first_name || ''} ${p.last_name || ''}`.trim();
     if (n) out[p.user_id] = n;
   }
   return out;
 };
 
-// â”€â”€ Implicit company linking â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// The `company_links` table modelled an explicit fronterâ†”closer pairing, but in
-// practice every fronter company feeds every closer company â€” the link rows were
+// ── Implicit company linking ────────────────────────────────────────────────
+// The `company_links` table modelled an explicit fronter↔closer pairing, but in
+// practice every fronter company feeds every closer company — the link rows were
 // never kept up to date, and the gaps caused real data loss rather than real
 // isolation: with 5 active fronter companies but only 3 link rows, leads from
 // the two unlinked fronters silently vanished from the closer's "attach a dialer
@@ -398,7 +398,7 @@ const activeUserNames = async (userIds) => {
 // Linking is therefore IMPLICIT now: every active company is linked to every
 // active company of the opposite type. These helpers are the one place that rule
 // lives. The `company_links` table is intentionally left in place (no data is
-// destroyed) â€” it is simply no longer consulted for scoping. Note this widens
+// destroyed) — it is simply no longer consulted for scoping. Note this widens
 // nothing security-wise: the closer-side surfaces that use it already read the
 // shared cross-fronter lead pool (see GET /transfers/search-by-phone).
 const getActiveCompanyIdsByType = async (type) => {
@@ -423,10 +423,10 @@ const getCounterpartCompanyIds = async (companyIds) => {
   return [...wanted];
 };
 
-// Which side of the fronterâ†’closer pipeline does this caller read from?
+// Which side of the fronter→closer pipeline does this caller read from?
 //
 // Transfers and sales are STORED under the fronter company's company_id, so
-// closer-side users can't be scoped by company_id at all â€” they are scoped by
+// closer-side users can't be scoped by company_id at all — they are scoped by
 // assigned_closer_id / closer_id across their company's members.
 //
 // closer / closer_manager / compliance_manager are closer-side by ROLE. But
@@ -438,7 +438,7 @@ const getCounterpartCompanyIds = async (companyIds) => {
 // Deliberately `=== 'closer'`, not `!== 'fronter'`: if the company row is
 // missing or the lookup fails we fall back to fronter-side company_id scoping,
 // which is the narrower, already-correct behaviour. No other role's answer
-// changes â€” manager / closer_manager / fronter_manager / operations_manager all
+// changes — manager / closer_manager / fronter_manager / operations_manager all
 // resolve exactly as before.
 const isCloserSideScope = async (role, companyId) => {
   if (role === 'closer' || role === 'closer_manager' || role === 'compliance_manager') return true;

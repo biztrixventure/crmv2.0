@@ -1,0 +1,9 @@
+# Guard against editors re-saving UTF-8 source as cp1252 (see commit fixing mojibake, 2026-08-29).
+root = true
+
+[*]
+charset = utf-8
+
+[*.{js,jsx,ts,tsx,md,sql,json,css,html}]
+end_of_line = lf
+insert_final_newline = true

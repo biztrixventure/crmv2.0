@@ -27,13 +27,13 @@ import { Panel, TableScroll, Loading, EmptyState, SectionHeader } from "../compo
 import ChromeTabs from "../components/UI/ChromeTabs";
 import CompanyPerformance from "../components/Manager/CompanyPerformance";
 
-// â”€â”€ Two-tier nav, the ComplianceShell pattern (docs/ui-design-system.md) â”€â”€â”€â”€â”€
+// ── Two-tier nav, the ComplianceShell pattern (docs/ui-design-system.md) ─────
 // This shell had grown to ~20 sibling tabs on one strip, which is a scroll bar
 // pretending to be navigation: you cannot see where you are, and half the set
 // is always off-screen. Compliance solves it with task GROUPS on top and the
 // active group's tabs below, so the second row is never longer than ~5.
 //
-// Groups reference tab KEYS ONLY â€” no key is renamed, moved out of CODE_TABS,
+// Groups reference tab KEYS ONLY — no key is renamed, moved out of CODE_TABS,
 // or invented here, because readonly-admin governance stores those ids. A tab
 // that matches no group still renders, under "More", so adding a tab to
 // CODE_TABS later can never make it silently disappear.
@@ -57,13 +57,13 @@ import { useShellLayout } from "../hooks/useShellLayout";
 import StatCardTriple from "../components/UI/StatCardTriple";
 import Tooltip from "../components/UI/Tooltip";
 
-// Column-header explanations â€” hover any header to learn what it means.
+// Column-header explanations — hover any header to learn what it means.
 const TRANSFER_COL_TIPS = {
   Customer: 'Lead name captured on the transfer',
   Phone: 'Customer phone number',
   Fronter: 'Agent who generated the lead / created the transfer',
   Closer: 'Agent the transfer was assigned to',
-  Status: 'Where the transfer is in the flow: pending â†’ assigned â†’ completed',
+  Status: 'Where the transfer is in the flow: pending → assigned → completed',
   Disposition: "The closer's call outcome (from the dialer or set manually)",
   Date: 'When the transfer was created',
   Action: 'Rate the call, set a disposition, or delete the transfer',
@@ -71,7 +71,7 @@ const TRANSFER_COL_TIPS = {
 const SALE_COL_TIPS = {
   Customer: 'Customer the policy was sold to',
   Reference: 'Policy reference / confirmation number',
-  Status: 'Compliance stage: Open â†’ Pending Review â†’ Approved (or Cancelled)',
+  Status: 'Compliance stage: Open → Pending Review → Approved (or Cancelled)',
   Fronter: 'Agent who generated the lead',
   Closer: 'Agent who made the sale',
   Monthly: 'Monthly payment on the policy',
@@ -105,7 +105,7 @@ import DuplicateRecordsModal from "../components/Shared/DuplicateRecordsModal";
 const FormBuilder  = lazy(() => import("../components/Admin/FormBuilder/FormBuilder"));
 const SpiffManager = lazy(() => import("../components/Admin/Engagement/SpiffManager"));
 // Delegatable superadmin tools (shown only when a superadmin grants the flag).
-// (MyTeam is the team-lead home tab â€” imported eagerly above, small component.)
+// (MyTeam is the team-lead home tab — imported eagerly above, small component.)
 const CustomerProfile = lazy(() => import("../components/Admin/CustomerProfile/CustomerProfile"));
 const DataAnalyzer    = lazy(() => import("../components/Admin/DataAnalyzer/DataAnalyzer"));
 const ChatAdmin       = lazy(() => import("../components/Admin/Chat/ChatAdmin"));
@@ -125,7 +125,7 @@ const SALE_LABEL  = { open: 'Pending', sold: 'Sold', cancelled: 'Cancelled', fol
 const XFER_BADGE  = { pending: 'warning', assigned: 'info', completed: 'success', cancelled: 'error', rejected: 'error' };
 const DEFAULT_PAGE_SIZE = 25;   // list.layout override resolves at runtime (useListLayout)
 
-// â”€â”€ Overview helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Overview helpers ──────────────────────────────────────────────────────────
 const MEDAL_COLORS    = ['#f59e0b', '#94a3b8', '#b45309'];
 const AVATAR_PALETTE  = ['#6366f1','#0891b2','#059669','#dc2626','#7c3aed','#ea580c','#0284c7','#65a30d','#c026d3','#0d9488'];
 const getInitials     = n => (n || '?').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
@@ -152,7 +152,7 @@ const Pagination = ({ page, total, pageSize, onChange }) => {
   return (
     <div className="flex items-center justify-between pt-4 border-t" style={{ borderColor: 'var(--color-border)' }}>
       <span className="text-xs text-text-secondary">
-        {Math.min((page - 1) * pageSize + 1, total)}â€“{Math.min(page * pageSize, total)} of {total}
+        {Math.min((page - 1) * pageSize + 1, total)}–{Math.min(page * pageSize, total)} of {total}
       </span>
       <div className="flex items-center gap-2">
         <button onClick={() => onChange(page - 1)} disabled={page <= 1}
@@ -186,7 +186,7 @@ const MGR_CARD_META = {
 };
 const MGR_CARD_ORDER = ['transfers', 'sales', 'approved', 'awaiting_review', 'returned', 'cancelled', 'resells', 'dup_attempts'];
 
-// â”€â”€ Record-table header cells, matching the Compliance record tabs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Record-table header cells, matching the Compliance record tabs ──────────
 // Function declarations, not const arrows: this file sits in an import cycle
 // through Compliance/shared (via ManagerCallbacksTab), and a const in a cycle
 // is a temporal-dead-zone blank page waiting on the next bundler reshuffle.
@@ -216,11 +216,11 @@ function SortTh({ col, sort, onSort, children }) {
 // A company_admin's KPI strip leads with the metric their room is judged on and
 // drops the cards belonging to the other side of the pipeline:
 //   dup_attempts counts duplicate TRANSFER submissions, and /stats only computes
-//     it for fronter-side callers â€” a closer company's admin read a hard 0.
+//     it for fronter-side callers — a closer company's admin read a hard 0.
 //   returned + resells are closer-desk states. Resells belong to the closer's
 //     company and are hidden from fronters by resell.hide_from_fronter anyway,
 //     so a fronter admin's card was 0 by construction too.
-// Both lists are subsets of MGR_CARD_ORDER â€” no new card keys, so the
+// Both lists are subsets of MGR_CARD_ORDER — no new card keys, so the
 // superadmin card config keeps deciding visibility and content of each one.
 const FRONTER_CARD_ORDER = ['transfers', 'sales', 'approved', 'awaiting_review', 'cancelled', 'dup_attempts'];
 const CLOSER_CARD_ORDER  = ['sales', 'approved', 'awaiting_review', 'returned', 'cancelled', 'resells', 'transfers'];
@@ -245,7 +245,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
   const [dateRange, setDateRange] = useState(() => getPresetRange('today'));
   const { date_from, date_to } = dateRange;
 
-  // â”€â”€ Cross-role top nav (matches StaffShell pattern) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Cross-role top nav (matches StaffShell pattern) ───────────────────────
   // These sit in the AppHeader top-nav row alongside Dashboard. Selecting one
   // hides the dashboard content area and renders <CrossRoleContent> instead.
   // Mirrors StaffShell.crossNavItems gating so a manager who lacks a permission
@@ -262,24 +262,24 @@ const ManagerShell = ({ workspaceMode = false }) => {
       ? [{ key: 'reviews', label: 'Reviews', icon: Star     }] : []),
     ...((hasPermission('view_fronter_stats') || hasPermission('view_closer_stats') || hasPermission('view_company_reports') || hasPermission('view_reports')) && isEnabled('reports')
       ? [{ key: 'reports', label: 'Reports', icon: BarChart3}] : []),
-    // Monthly-payment reminders â€” team view of due policies.
+    // Monthly-payment reminders — team view of due policies.
     ...((hasPermission('view_team_sales') || hasPermission('view_all_company_sales'))
       ? [{ key: 'payments', label: 'Payments', icon: DollarSign }] : []),
     // Quiz system (mig 273): manage tab for quiz.manage holders (compliance_manager /
-    // qa_manager / company_admin / superadmin); My Quizzes is unconditional â€” anyone
+    // qa_manager / company_admin / superadmin); My Quizzes is unconditional — anyone
     // can be an assignee, and a team lead sees their team's progress inside it.
     ...(hasPermission('quiz.manage') ? [{ key: 'quizzes', label: 'Quizzes', icon: ClipboardList }] : []),
     { key: 'my_quizzes', label: 'My Quizzes', icon: ClipboardList },
   ];
 
-  // â”€â”€ Tab logic â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Tab logic ─────────────────────────────────────────────────────────────
   // Inline tabs here are workflow-specific (team transfers/sales/callbacks/
   // numbers/spiffs/activity_log/faqs/scripts). Cross-role admin surfaces
   // (Calendar/Team/Roles/Forms/Reviews/Reports) have moved to crossNavItems
   // above so the dashboard tab bar doesn't carry duplicate destinations.
   // CODE_TABS = the catalog gated by permissions + feature flags. The admin
-  // layout override (shell.layout.manager) can only narrow this â€” hide,
-  // rename, reorder â€” never widen. Permission-gated tabs stay hidden
+  // layout override (shell.layout.manager) can only narrow this — hide,
+  // rename, reorder — never widen. Permission-gated tabs stay hidden
   // regardless of admin config.
   const CODE_TABS = [
     { key: 'overview',     label: 'Overview',        icon: TrendingUp,   always: true },
@@ -295,15 +295,15 @@ const ManagerShell = ({ workspaceMode = false }) => {
       ? [{ key: 'numbers',    label: 'Numbers',        icon: Hash       }] : []),
     ...(hasPermission('search_sales') && isEnabled('search_sales')
       ? [{ key: 'search',     label: 'Sale Search',    icon: Search     }] : []),
-    // SPIFFs â€” company admins / managers can run incentives scoped to their
+    // SPIFFs — company admins / managers can run incentives scoped to their
     // company. Superadmin still uses /admin's SPIFF tab for cross-company.
     ...(['company_admin', 'operations_manager', 'closer_manager', 'fronter_manager', 'manager'].includes(user?.role)
       ? [{ key: 'spiffs',     label: 'SPIFFs',         icon: Trophy     }] : []),
-    // Team-lead home â€” your own team's live progress + roster/goal management.
+    // Team-lead home — your own team's live progress + roster/goal management.
     // Shown to every manager role (they may lead or belong to a team).
     ...(['company_admin', 'operations_manager', 'closer_manager', 'fronter_manager', 'manager'].includes(user?.role)
       ? [{ key: 'my_team',    label: 'My Team',        icon: Users      }] : []),
-    // Team structure (create/edit/delete teams) is company-org management â€” only
+    // Team structure (create/edit/delete teams) is company-org management — only
     // company_admin + operations_manager (superadmin uses the Admin panel).
     // Fronter/closer managers do NOT see this; they manage their OWN team from
     // the "My Team" tab above.
@@ -316,13 +316,13 @@ const ManagerShell = ({ workspaceMode = false }) => {
     ...(['company_admin', 'operations_manager', 'closer_manager', 'fronter_manager', 'manager'].includes(user?.role)
       ? [{ key: 'quota_report', label: 'Quotas',       icon: Target     }] : []),
     { key: 'activity_log', label: 'Activity Log', icon: Activity },
-    // Batches = upload â†’ assign â†’ dispositions â†’ reporting, one surface.
+    // Batches = upload → assign → dispositions → reporting, one surface.
     // "Assigned Numbers" is retired from the nav (renderer kept for deep-links).
     { key: 'batches',      label: 'Batches',      icon: Send },
     { key: 'note_shortcodes', label: 'Note Shortcuts', icon: FileText },
     { key: 'faqs',         label: 'FAQs',         icon: HelpCircle },
     { key: 'scripts',      label: 'Scripts',      icon: FileText },
-    // Delegated superadmin tools â€” STRICT gate: hidden unless the flag is
+    // Delegated superadmin tools — STRICT gate: hidden unless the flag is
     // catalogued AND enabled for this user (default-off, never shown by accident).
     ...(isEnabledStrict('tool_customer_profiles') ? [{ key: 'tool_customer_profiles', label: 'Customer Profiles', icon: UserCircle    }] : []),
     ...(isEnabledStrict('tool_data_analyzer')     ? [{ key: 'tool_data_analyzer',     label: 'Data Analyzer',     icon: Database      }] : []),
@@ -342,7 +342,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
     isActionVisible: isMgrActionVisible,
     cardConfig: mgrCardConfig,
   } = useShellLayout('manager');
-  // â”€â”€ Which side of the pipeline is this company_admin on? â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Which side of the pipeline is this company_admin on? ──────────────────
   // A fronter company's admin and a closer company's admin were handed the
   // IDENTICAL tab set, so each carried half a shell belonging to the other
   // side: the closer company's admin got lead-distribution surfaces (Numbers,
@@ -351,7 +351,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
   // only makes sense while a closer is on a call.
   //
   // Narrowing ONLY applies to company_admin, and only when the company type is
-  // known â€” every other manager role, and any admin whose company_type has not
+  // known — every other manager role, and any admin whose company_type has not
   // loaded yet, sees exactly what it saw before. Tab ids are untouched (hidden,
   // never renamed or deleted) because readonly-admin governance stores them.
   const coType    = user?.company_type || null;
@@ -365,13 +365,13 @@ const ManagerShell = ({ workspaceMode = false }) => {
     return true;
   }, [isCoAdmin, coType]);   // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Fronter-side viewers don't rate or disposition closer calls â€” their agents
+  // Fronter-side viewers don't rate or disposition closer calls — their agents
   // weren't on them. Previously only fronter_manager was excluded, which left a
   // fronter company's admin with Rate / Dispo buttons on every transfer row.
   const isFronterSideViewer = user?.role === 'fronter_manager' || (isCoAdmin && coType === 'fronter');
 
-  // Same rule for the KPI strip. Any role other than company_admin â€” and an
-  // admin whose company_type hasn't loaded â€” keeps the full default order.
+  // Same rule for the KPI strip. Any role other than company_admin — and an
+  // admin whose company_type hasn't loaded — keeps the full default order.
   const cardOrder = (!isCoAdmin || !coType)
     ? MGR_CARD_ORDER
     : (coType === 'fronter' ? FRONTER_CARD_ORDER : CLOSER_CARD_ORDER);
@@ -398,18 +398,18 @@ const ManagerShell = ({ workspaceMode = false }) => {
 
   const tabKeys = useMemo(() => new Set(TABS.map(t => t.key)), [TABS]);
 
-  // Persisted across reloads â€” per-role storage key so manager state stays
+  // Persisted across reloads — per-role storage key so manager state stays
   // distinct from any other role using the same machine.
   const mgrTabKey = `biztrix.managerTab.${user?.role || 'default'}`;
   const mgrNavKey = `biztrix.managerNav.${user?.role || 'default'}`;
-  // Same storage keys as before â€” a reload still restores the tab. The change
+  // Same storage keys as before — a reload still restores the tab. The change
   // is that each switch now pushes a history entry, so the iOS edge swipe goes
   // back a tab instead of falling through and dismissing the installed app.
   const [activeTab, setActiveTab] = useHistoryTab(mgrTabKey, 'overview');
   const [activeNav, setActiveNav] = useHistoryTab(mgrNavKey, 'dashboard', { param: 'nav' });
 
   // Which task group owns the current tab. MUST stay below the activeTab
-  // declaration â€” it was above it, which is a temporal-dead-zone read on every
+  // declaration — it was above it, which is a temporal-dead-zone read on every
   // render, and it blanked the whole shell. Neither `vite build --minify false`
   // nor the terser build catches that: esbuild does no TDZ analysis and the
   // error only exists at runtime.
@@ -429,7 +429,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
     }
   }, [TABS, activeTab, managerDefaultTab, setActiveTab]);
 
-  // Notification deep-link â†’ jump to the matching tab.
+  // Notification deep-link → jump to the matching tab.
   const focus = useNavFocus();
   useEffect(() => {
     if (!focus) return;
@@ -444,17 +444,17 @@ const ManagerShell = ({ workspaceMode = false }) => {
   // Report the active section to the assistant for section-specific guidance.
   useEffect(() => { window.crmAssistant?.setSection?.(activeNav !== 'dashboard' ? activeNav : activeTab); }, [activeTab, activeNav]);
 
-  // â”€â”€ Overview data â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Overview data ─────────────────────────────────────────────────────────
   const [fronterLb, setFronterLb]       = useState([]);
   const [closerLb, setCloserLb]         = useState([]);
   const [loading, setLoading]           = useState(false);
   const [overviewTotals, setOverviewTotals] = useState({ transfers: 0, sales: 0, approved: 0, pendingReview: 0 });
 
-  // â”€â”€ Pagination â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Pagination ────────────────────────────────────────────────────────────
   const [xferPage, setXferPage]           = useState(1);
   const [salesPage, setSalesPage]         = useState(1);
   // Server-side sort, the same shape the Compliance record tabs use. Both
-  // endpoints already accepted sort_by/sort_dir (TRANSFER_SORT / SALE_SORT) â€”
+  // endpoints already accepted sort_by/sort_dir (TRANSFER_SORT / SALE_SORT) —
   // this shell simply never sent them, so its records were stuck on newest
   // first and you could not, say, pull the biggest monthly payments to the top.
   const [xferSort,  setXferSort]  = useState({ col: 'created_at', dir: 'desc' });
@@ -465,7 +465,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
   const [activityLoading, setActivityLoading] = useState(false);
   const [activityAgent,   setActivityAgent]   = useState('');
 
-  // â”€â”€ Tab-specific server-side state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Tab-specific server-side state ────────────────────────────────────────
   const [xferTabRows,    setXferTabRows]    = useState([]);
   const [xferTabTotal,   setXferTabTotal]   = useState(0);
   const [xferTabLoading, setXferTabLoading] = useState(false);
@@ -484,7 +484,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
 
   const [companyAgents, setCompanyAgents] = useState([]);
 
-  // â”€â”€ Detail drawers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Detail drawers ────────────────────────────────────────────────────────
   const [detailTransfer, setDetailTransfer] = useState(null);
   const [detailSale, setDetailSale]         = useState(null);
 
@@ -492,11 +492,11 @@ const ManagerShell = ({ workspaceMode = false }) => {
   // its tab (the tab switch is the `focus` effect further up, which still
   // runs). This call lives HERE, below the state it feeds, rather than next to
   // that effect: `setDetailSale` is a const declared on the line above, so
-  // calling it from up there would be a temporal-dead-zone read â€” the kind
+  // calling it from up there would be a temporal-dead-zone read — the kind
   // that builds green and blanks the page at runtime.
   useSaleDeepLink(focus, setDetailSale);
 
-  // â”€â”€ Rate call / Set dispo â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Rate call / Set dispo ─────────────────────────────────────────────────
   const RATINGS = ['excellent', 'good', 'average', 'below_average', 'bad'];
   const DISPOS  = ['sale', 'no_sale', 'callback', 'not_interested', 'hung_up', 'voicemail', 'other'];
   const RATING_COLOR = { excellent: '#16a34a', good: '#2563eb', average: '#d97706', below_average: '#ea580c', bad: '#dc2626' };
@@ -537,7 +537,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
     }
   };
 
-  // â”€â”€ My Sales (for closer_manager who also sells) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── My Sales (for closer_manager who also sells) ──────────────────────────
   const [saleModalOpen, setSaleModalOpen] = useState(false);
   const [saleTransfer, setSaleTransfer]   = useState(null);
   const [saleLoading, setSaleLoading]     = useState(false);
@@ -608,7 +608,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
     if (!companyId) return;
     setLoading(true);
     try {
-      // Leaderboard data + accurate total counts â€” all parallel
+      // Leaderboard data + accurate total counts — all parallel
       const [tRes, sRes, soldRes, wonRes, pendingRes] = await Promise.all([
         client.get('transfers', { params: { company_id: companyId, limit: 1000, date_from, date_to } }),
         client.get('sales',     { params: { company_id: companyId, limit: 1000, date_from, date_to, exclude_post_date: true } }),
@@ -674,7 +674,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
 
   // Clicking the active column flips direction; a new column starts descending,
   // because for every column here (newest date, biggest payment, latest status)
-  // the interesting end is the top. Page resets to 1 â€” sorting while on page 4
+  // the interesting end is the top. Page resets to 1 — sorting while on page 4
   // of the old order lands you somewhere meaningless.
   const toggleXferSort = useCallback((col) => {
     setXferSort(s => ({ col, dir: s.col === col && s.dir === 'desc' ? 'asc' : 'desc' }));
@@ -705,7 +705,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
   const pagedTransfers    = transfers.slice((xferPage - 1) * PAGE_SIZE, xferPage * PAGE_SIZE);
   const pagedSales        = sales.slice((salesPage - 1) * PAGE_SIZE, salesPage * PAGE_SIZE);
 
-  // â”€â”€ KPI metric map â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── KPI metric map ──────────────────────────────────────────────────────
   // Every data point a manager KPI card can display, keyed to match the
   // kpiCatalog metric keys. The SuperAdmin builder decides which of these land
   // in which card / slot; here we just supply each one's value + drill-down.
@@ -720,10 +720,10 @@ const ManagerShell = ({ workspaceMode = false }) => {
   const mgrMetrics = {
     transfers_today: { value: stats?.todayTransfers || 0, onClick: goXfer('today'), title: 'Transfers today' },
     transfers_month: { value: stats?.monthTransfers || 0, onClick: goXfer('month'), title: 'Transfers this month' },
-    // â”€â”€ "Total" means ALL TIME, not "whatever the date picker says" â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── "Total" means ALL TIME, not "whatever the date picker says" ─────────
     // overviewTotals comes from loadOverview, which passes date_from/date_to,
     // so with the default "Today" preset the segment labelled Total showed the
-    // same number as the Today segment beside it â€” measured live as Transfers
+    // same number as the Today segment beside it — measured live as Transfers
     // Today 0 / Total 0 on a company holding 17,459, and Sales Today 1 /
     // Total 1 on 6,474. /stats/dashboard is already all-time AND role-scoped
     // server-side, so read the totals from there and keep overviewTotals for
@@ -735,7 +735,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
     approved_today:  { value: stats?.todayClosedWon || 0, onClick: goSales('closed_won', 'today') },
     approved_month:  { value: stats?.monthClosedWon || 0, onClick: goSales('closed_won', 'month') },
     // closedWon only: overviewTotals.approved summed status 'sold' + 'closed_won',
-    // and 'sold' is 0 in every company in this database â€” the extra term bought
+    // and 'sold' is 0 in every company in this database — the extra term bought
     // nothing but a second round-trip and a number that moved with the picker.
     approved_total:  { value: stats?.closedWon ?? overviewTotals.approved,    onClick: goSales('closed_won', 'all') },
     pending_total:   { value: stats?.awaitingCompliance ?? overviewTotals.pendingReview, onClick: () => { setSalesStatus('pending_review'); setSalesPage(1); setActiveTab('team_sales'); }, title: 'Show pending-review sales' },
@@ -796,11 +796,11 @@ const ManagerShell = ({ workspaceMode = false }) => {
 
       <EngagementBanners />
       {activeNav !== 'dashboard' && <CrossRoleContent section={activeNav} user={user} />}
-      {/* Compliance's shell padding â€” full width, no max-w cap. */}
+      {/* Compliance's shell padding — full width, no max-w cap. */}
       <main className="w-full px-4 sm:px-6 lg:px-8 xl:px-10 py-6 sm:py-8 relative z-10"
         style={{ display: activeNav !== 'dashboard' ? 'none' : undefined }}>
 
-        {/* Page identity â€” SectionHeader level="page", the same treatment every
+        {/* Page identity — SectionHeader level="page", the same treatment every
             migrated surface uses. The gradient survives only as the 9x9 icon
             chip; the hairline baseline under it is what makes the nav below
             read as belonging to this page instead of floating. */}
@@ -808,13 +808,13 @@ const ManagerShell = ({ workspaceMode = false }) => {
           level="page"
           icon={TrendingUp}
           title={workspaceMode ? 'Custom Access Workspace' : (user?.company_name || 'Dashboard')}
-          subtitle={`${user?.role_name || user?.role}${user?.first_name ? ` Â· ${[user.first_name, user.last_name].filter(Boolean).join(' ')}` : ''}`}
+          subtitle={`${user?.role_name || user?.role}${user?.first_name ? ` · ${[user.first_name, user.last_name].filter(Boolean).join(' ')}` : ''}`}
           actions={<div className="flex items-center gap-2 flex-wrap flex-shrink-0">
             {/* Export gated ONLY by Data Egress (canExport). We deliberately do
                 NOT also gate on the shell-layout action toggle: that config
                 loads async (~2s after mount) so it made the button flash in then
                 vanish for fronter/closer/ops managers (shell.layout.manager had
-                actions.export=false). Data Egress â†’ Export Access is the single
+                actions.export=false). Data Egress → Export Access is the single
                 source of truth for who can export. */}
             {canExport() && (
               <button onClick={() => setExportOpen(true)} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white transition-all hover:opacity-90"
@@ -832,7 +832,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
         {exportOpen && <ManagerExportModal onClose={() => setExportOpen(false)} agents={companyAgents} />}
         {dupOpen && <DuplicateRecordsModal onClose={() => setDupOpen(false)} title="Duplicate Transfer Records" />}
 
-        {/* Tier 1 â€” task groups. basis-full below sm puts the date picker on its
+        {/* Tier 1 — task groups. basis-full below sm puts the date picker on its
             own line rather than letting it eat ~180px out of the strip on a
             phone; with flex-1 the tabs shrank instead of the picker wrapping.
             Clicking a group jumps to its first tab, so there are no dead clicks. */}
@@ -852,7 +852,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
           )}
         </div>
 
-        {/* Tier 2 â€” the active group's tabs. A one-tab group shows no second
+        {/* Tier 2 — the active group's tabs. A one-tab group shows no second
             row at all; it still needs the bottom margin the row would have
             provided, or the content jumps up against the chrome tabs. */}
         {activeGroup && activeGroup.items.length > 1 ? (
@@ -862,20 +862,20 @@ const ManagerShell = ({ workspaceMode = false }) => {
             onChange={setActiveTab} />
         ) : <div className="mb-6" />}
 
-        {/* â”€â”€ OVERVIEW TAB â”€â”€ */}
+        {/* ── OVERVIEW TAB ── */}
         {activeTab === 'overview' && (
           <div className="space-y-6">
 
             <TargetsStrip />
 
-            {/* â”€â”€ Stat cards â”€â”€ */}
+            {/* ── Stat cards ── */}
             {/* Drill-down: each card's onClick now ALSO synchronizes the
                 destination tab's filter so the list count matches the card's
                 number. Total Sales clears any residual status filter; Approved
                 and Awaiting Review pre-apply the matching status. Previously a
                 stale filter from the last visit could hide records the user
                 expected to see. */}
-            {/* Triple-segment cards â€” Today / MTD / Total each clickable.
+            {/* Triple-segment cards — Today / MTD / Total each clickable.
                 Today + Month come from useDashboardStats; Total uses the
                 pre-existing overviewTotals so the manager's company-scoped
                 aggregate stays correct even before stats hook loads. */}
@@ -883,11 +883,11 @@ const ManagerShell = ({ workspaceMode = false }) => {
               {cardOrder.map(renderMgrCard)}
             </div>
 
-            {/* â”€â”€ One performance surface â”€â”€
+            {/* ── One performance surface ──
                 Five stacked panels used to live here: Team Performance, the
                 funnel, the agent table and two leaderboards. Each answered an
                 overlapping slice of the same question, each fetched its own
-                window, and they disagreed with each other at the edges â€” the
+                window, and they disagreed with each other at the edges — the
                 leaderboards ranked a 1,000-row sample while the funnel counted
                 the full range. One panel, one request, one date range, one
                 agent selector, so nothing on screen can contradict its
@@ -902,7 +902,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
           </div>
         )}
 
-        {/* â”€â”€ TEAM TRANSFERS TAB â”€â”€ */}
+        {/* ── TEAM TRANSFERS TAB ── */}
         {activeTab === 'transfers' && (
           <Panel pad="lg">
             <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
@@ -938,12 +938,12 @@ const ManagerShell = ({ workspaceMode = false }) => {
               </button>
             </div>
 
-            {/* Unified FilterBar â€” shared chrome across every shell list */}
+            {/* Unified FilterBar — shared chrome across every shell list */}
             <FilterBar
               search={{
                 value: xferSearch,
                 onChange: (v) => { setXferSearch(v); setXferPage(1); },
-                placeholder: 'Search customer / phoneâ€¦',
+                placeholder: 'Search customer / phone…',
               }}
               statusPills={
                 <TransferStatusFilterPills
@@ -974,7 +974,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
                     a condensed table, first column pinned so scrolling right
                     never leaves you reading an unidentifiable row, and the
                     customer's phone stacked under their name instead of eating
-                    a whole column â€” that one change takes ~90px off the width
+                    a whole column — that one change takes ~90px off the width
                     a phone has to scroll through. */}
                 <div className="rounded-xl overflow-hidden"
                   style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
@@ -1003,11 +1003,11 @@ const ManagerShell = ({ workspaceMode = false }) => {
                               {t.form_data?.customer_name || t.form_data?.FirstName || 'Lead'}
                             </p>
                             <p className="m-0 mt-0.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                              {transferPhone(t) || 'â€”'}
+                              {transferPhone(t) || '—'}
                             </p>
                           </td>
-                          <td className="px-3 py-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{t.fronter_name || 'â€”'}</td>
-                          <td className="px-3 py-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{t.closer ? `${t.closer.first_name || ''} ${t.closer.last_name || ''}`.trim() || 'â€”' : 'â€”'}</td>
+                          <td className="px-3 py-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{t.fronter_name || '—'}</td>
+                          <td className="px-3 py-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{t.closer ? `${t.closer.first_name || ''} ${t.closer.last_name || ''}`.trim() || '—' : '—'}</td>
                           <td className="px-3 py-1.5">{(() => { const ds = getTransferDisplayStatus(t); return <Badge variant={ds.variant} size="sm">{ds.label}</Badge>; })()}</td>
                           <td className="px-3 py-1.5">
                             {(t.latest_disposition || t.sale_closer_disposition) ? (() => {
@@ -1015,7 +1015,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
                               const name  = d?.disposition_name || t.sale_closer_disposition;
                               const color = d?.color || '#6b7280';
                               // Consistency: a dialer/fetch dispo carries setter_name; a dispo
-                              // derived from the linked sale has none â€” fall back to the
+                              // derived from the linked sale has none — fall back to the
                               // assigned closer so every row shows "by <closer>".
                               const closerName = t.closer ? `${t.closer.first_name || ''} ${t.closer.last_name || ''}`.trim() : '';
                               const setter = d?.setter_name || closerName || null;
@@ -1033,7 +1033,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
                                   )}
                                 </div>
                               );
-                            })() : <span className="text-text-tertiary text-xs">â€”</span>}
+                            })() : <span className="text-text-tertiary text-xs">—</span>}
                           </td>
                           <td className="px-3 py-1.5 text-xs whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>{fmtDateET(t.created_at)}</td>
                           <td className="px-3 py-1.5">
@@ -1075,7 +1075,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
           </Panel>
         )}
 
-        {/* â”€â”€ TEAM SALES TAB â”€â”€ */}
+        {/* ── TEAM SALES TAB ── */}
         {activeTab === 'team_sales' && (
           <Panel pad="lg">
             <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
@@ -1087,7 +1087,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
               search={{
                 value: salesSearch,
                 onChange: (v) => { setSalesSearch(v); setSalesPage(1); },
-                placeholder: 'Search customer / phone / referenceâ€¦',
+                placeholder: 'Search customer / phone / reference…',
               }}
               statusPills={
                 <SaleStatusFilterPills
@@ -1128,7 +1128,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
                           <SortTh col="monthly_payment" sort={salesSort} onSort={toggleSalesSort}>Monthly</SortTh>
                         )}
                         <SortTh col="sale_date" sort={salesSort} onSort={toggleSalesSort}>Sale Date</SortTh>
-                        {/* Superadmin-set flag (Compliance Sales tab Update popup) â€” the
+                        {/* Superadmin-set flag (Compliance Sales tab Update popup) — the
                             company's own payout status, separate from the individual
                             closer's "Paid to closer" incentive. company_admin only. */}
                         {isCoAdmin && <Th>Paid to Partner</Th>}
@@ -1143,21 +1143,21 @@ const ManagerShell = ({ workspaceMode = false }) => {
                           onMouseEnter={e => { e.currentTarget.style.backgroundColor = 'var(--color-bg-secondary)'; }}
                           onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'var(--color-surface)'; }}>
                           {/* Reference moves under the name, the way the
-                              Compliance sales tab stacks it â€” it was a whole
+                              Compliance sales tab stacks it — it was a whole
                               column for a value you only ever read alongside
                               the customer anyway. */}
                           <td className="px-3 py-1.5">
-                            <p className="m-0 font-semibold" style={{ color: 'var(--color-text)' }}>{s.customer_name || 'â€”'}</p>
+                            <p className="m-0 font-semibold" style={{ color: 'var(--color-text)' }}>{s.customer_name || '—'}</p>
                             {s.reference_no && (
                               <p className="m-0 mt-0.5 text-xs font-mono" style={{ color: 'var(--color-text-tertiary)' }}>#{s.reference_no}</p>
                             )}
                           </td>
-                          <td className="px-3 py-1.5"><div className="flex items-center gap-1.5 flex-wrap"><SaleStatusBadge sale={s} size="sm" />{s.is_resell && <span title={`Resell Â· ${s.resell_intent || ''}`} className="inline-flex items-center gap-1 text-[11px] sm:text-[10px] leading-none font-bold uppercase tracking-wide px-1.5 py-0.5 rounded whitespace-nowrap" style={{ backgroundColor: 'color-mix(in srgb, var(--color-primary-600) 20%, transparent)', color: 'var(--color-primary-600)' }}>â†» {(s.resell_intent || 'resell').replace(/_/g, ' ')}</span>}</div></td>
-                          <td className="px-3 py-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{s.fronter_name || 'â€”'}</td>
-                          <td className="px-3 py-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{s.closer_name || 'â€”'}</td>
-                          {hasPermission('view_financial_data') && <td className="px-3 py-1.5 text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--color-success-600)' }}>{s.monthly_payment ? `$${s.monthly_payment}/mo` : 'â€”'}</td>}
+                          <td className="px-3 py-1.5"><div className="flex items-center gap-1.5 flex-wrap"><SaleStatusBadge sale={s} size="sm" />{s.is_resell && <span title={`Resell · ${s.resell_intent || ''}`} className="inline-flex items-center gap-1 text-[11px] sm:text-[10px] leading-none font-bold uppercase tracking-wide px-1.5 py-0.5 rounded whitespace-nowrap" style={{ backgroundColor: 'color-mix(in srgb, var(--color-primary-600) 20%, transparent)', color: 'var(--color-primary-600)' }}>↻ {(s.resell_intent || 'resell').replace(/_/g, ' ')}</span>}</div></td>
+                          <td className="px-3 py-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{s.fronter_name || '—'}</td>
+                          <td className="px-3 py-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{s.closer_name || '—'}</td>
+                          {hasPermission('view_financial_data') && <td className="px-3 py-1.5 text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--color-success-600)' }}>{s.monthly_payment ? `$${s.monthly_payment}/mo` : '—'}</td>}
                           {/* Show the actual sale_date (carried in the bulk upload) rather
-                              than the row's created_at â€” created_at reflects when the row
+                              than the row's created_at — created_at reflects when the row
                               was inserted/updated, which is misleading for back-filled sales. */}
                           {/* sale_date is a date-only column ("YYYY-MM-DD"). fmtSaleDate
                               prints it as the calendar day stored, never shifting one
@@ -1195,7 +1195,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
           </Panel>
         )}
 
-        {/* â”€â”€ MY SALES TAB (closer-manager who also closes) â”€â”€ */}
+        {/* ── MY SALES TAB (closer-manager who also closes) ── */}
         {activeTab === 'my_sales' && (
           <div>
             {saleSuccess && <Alert type="success" title="Done!" message={saleSuccess} dismissible onDismiss={() => setSaleSuccess('')} />}
@@ -1253,7 +1253,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
           </div>
         )}
 
-        {/* â”€â”€ ACTIVITY LOG TAB â”€â”€ */}
+        {/* ── ACTIVITY LOG TAB ── */}
         {activeTab === 'activity_log' && (
           <Panel pad="lg">
             <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
@@ -1292,18 +1292,18 @@ const ManagerShell = ({ workspaceMode = false }) => {
                       {activityLogs.map(log => (
                         <tr key={log.id} className="border-b border-border hover:bg-bg-secondary">
                           <td className="py-3 px-3 font-semibold text-text text-sm">
-                            {log.actor ? `${log.actor.first_name || ''} ${log.actor.last_name || ''}`.trim() || 'â€”' : 'â€”'}
+                            {log.actor ? `${log.actor.first_name || ''} ${log.actor.last_name || ''}`.trim() || '—' : '—'}
                             {log.metadata?.manager_override && (
                               <span className="ml-1.5 px-1.5 py-0.5 text-xs rounded font-bold bg-warning-100 text-warning-700">Mgr</span>
                             )}
                           </td>
                           <td className="py-3 px-3 text-xs text-text-secondary capitalize">{log.action?.replace(/_/g, ' ')}</td>
-                          <td className="py-3 px-3 text-xs text-text-secondary">{log.metadata?.customer_name || 'â€”'}</td>
+                          <td className="py-3 px-3 text-xs text-text-secondary">{log.metadata?.customer_name || '—'}</td>
                           <td className="py-3 px-3 text-xs">
                             {log.old_value?.disposition && (
-                              <span className="text-text-tertiary">{log.old_value.disposition} â†’ </span>
+                              <span className="text-text-tertiary">{log.old_value.disposition} → </span>
                             )}
-                            <span className="font-semibold text-text">{log.new_value?.disposition || 'â€”'}</span>
+                            <span className="font-semibold text-text">{log.new_value?.disposition || '—'}</span>
                           </td>
                           <td className="py-3 px-3 text-xs text-text-tertiary">{fmtDateET(log.created_at)}</td>
                         </tr>
@@ -1317,7 +1317,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
           </Panel>
         )}
 
-        {/* â”€â”€ PANEL TABS (reuse existing components) â”€â”€ */}
+        {/* ── PANEL TABS (reuse existing components) ── */}
         {activeTab === 'my_team'   && <MyTeam />}
         {activeTab === 'teams'     && <TeamManager />}
         {activeTab === 'quota_report' && <QuotaReport />}
@@ -1325,7 +1325,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
         {activeTab === 'numbers'   && (
           <div className="space-y-6">
             {isEnabled('callback_numbers') && <CallbackNumbers user={user} />}
-            {/* Number Assignment (day-scoped number_lists) retired â€” uploading and
+            {/* Number Assignment (day-scoped number_lists) retired — uploading and
                 assigning numbers now happens in Batches. */}
           </div>
         )}
@@ -1351,7 +1351,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
             <SpiffManager />
           </Suspense>
         )}
-        {/* Delegated superadmin tools â€” gated by the tool flag on the nav side. */}
+        {/* Delegated superadmin tools — gated by the tool flag on the nav side. */}
         {activeTab === 'tool_customer_profiles' && isEnabledStrict('tool_customer_profiles') && (
           <Suspense fallback={<Loading variant="block" height={200} />}>
             <CustomerProfile />
@@ -1413,7 +1413,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
               ))}
             </div>
             <textarea value={ratingNotes} onChange={e => setRatingNotes(e.target.value)}
-              placeholder="Notes (optional)â€¦" rows={2} className="input mb-3" />
+              placeholder="Notes (optional)…" rows={2} className="input mb-3" />
             {ratingMsg && <p className="text-sm text-error-600 mb-3">{ratingMsg}</p>}
             <div className="flex gap-3">
               <button onClick={() => setRateTarget(null)} className="flex-1 py-2 rounded-lg border font-semibold text-sm"
@@ -1421,7 +1421,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
               <button onClick={handleRateCall} disabled={ratingSaving}
                 className="flex-1 py-2 rounded-lg font-semibold text-sm text-white disabled:opacity-50"
                 style={{ background: 'var(--gradient-sidebar)' }}>
-                {ratingSaving ? 'Savingâ€¦' : 'Save Rating'}
+                {ratingSaving ? 'Saving…' : 'Save Rating'}
               </button>
             </div>
           </div>
@@ -1443,7 +1443,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
               {DISPOS.map(d => <option key={d} value={d}>{d.replace(/_/g, ' ')}</option>)}
             </ThemedSelect>
             <textarea value={dispoNotes} onChange={e => setDispoNotes(e.target.value)}
-              placeholder="Notes (optional)â€¦" rows={2} className="input mb-3" />
+              placeholder="Notes (optional)…" rows={2} className="input mb-3" />
             {dispoMsg && <p className="text-sm text-error-600 mb-3">{dispoMsg}</p>}
             <div className="flex gap-3">
               <button onClick={() => setDispoTarget(null)} className="flex-1 py-2 rounded-lg border font-semibold text-sm"
@@ -1451,7 +1451,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
               <button onClick={handleSetDispo} disabled={dispoSaving}
                 className="flex-1 py-2 rounded-lg font-semibold text-sm text-white disabled:opacity-50"
                 style={{ background: 'var(--gradient-sidebar)' }}>
-                {dispoSaving ? 'Savingâ€¦' : 'Save Dispo'}
+                {dispoSaving ? 'Saving…' : 'Save Dispo'}
               </button>
             </div>
           </div>

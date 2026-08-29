@@ -44,9 +44,9 @@ const MascotAssistant = lazy(() => import("./components/Assistant/MascotAssistan
 // strand a white-on-white mark.
 const PageSpinner = () => <BrandedLoader />;
 
-// Protected Route â€” checks auth + role access (or a feature-flag grant).
+// Protected Route — checks auth + role access (or a feature-flag grant).
 // requireFlag: access is granted purely by a strict feature flag, regardless of
-// role â€” used by the opt-in Custom Access workspace.
+// role — used by the opt-in Custom Access workspace.
 const ProtectedRoute = ({ children, requiredRole = null, requireFlag = null }) => {
   const { user, isAuthenticated } = useAuth();
   const { isEnabledStrict, loading: flagsLoading } = useFeatureFlags();
@@ -62,7 +62,7 @@ const ProtectedRoute = ({ children, requiredRole = null, requireFlag = null }) =
   return children;
 };
 
-// Smart redirect â€” waits for /auth/me AND feature flags before routing, so a
+// Smart redirect — waits for /auth/me AND feature flags before routing, so a
 // Custom Access user lands in /workspace instead of their role shell.
 const DashboardRedirect = () => {
   const { user, isRefreshing } = useAuth();
@@ -81,7 +81,7 @@ const AppContent = () => {
 
   // Branding (name / logo / tab title / favicon / meta) comes from
   // BrandingProvider, mounted below, so the configured name reaches the UI and
-  // not just the browser tab. Public endpoint â€” it runs on the login page too.
+  // not just the browser tab. Public endpoint — it runs on the login page too.
   // Server-side injection still handles the very first paint + crawlers.
   return (
     <Router>
@@ -112,28 +112,28 @@ const AppContent = () => {
             <ProtectedRoute requiredRole="compliance_manager"><ComplianceShell /></ProtectedRoute>
           } />
 
-          {/* QA Department â€” isolated shell for qa_manager + qa_agent */}
+          {/* QA Department — isolated shell for qa_manager + qa_agent */}
           <Route path="/qa/*" element={
             <ProtectedRoute requiredRole="qa_agent"><QAShell /></ProtectedRoute>
           } />
 
-          {/* QA v2 â€” new, parallel to v1 above during the build-out. Same
+          {/* QA v2 — new, parallel to v1 above during the build-out. Same
               access rule as /qa (hasRoleAccess already treats qa_agent,
               qa_manager, and compliance_manager identically for this pair). */}
           <Route path="/qa2/*" element={
             <ProtectedRoute requiredRole="qa_agent"><QA2Shell /></ProtectedRoute>
           } />
 
-          {/* Staff Shell â€” closer / fronter */}
+          {/* Staff Shell — closer / fronter */}
           <Route path="/closer/*"  element={<ProtectedRoute requiredRole="closer"><StaffShell /></ProtectedRoute>} />
           <Route path="/fronter/*" element={<ProtectedRoute requiredRole="fronter"><StaffShell /></ProtectedRoute>} />
           <Route path="/staff/*"   element={<ProtectedRoute requiredRole="closer"><StaffShell /></ProtectedRoute>} />
 
-          {/* Custom Access workspace â€” opt-in unified shell, granted by flag (any
+          {/* Custom Access workspace — opt-in unified shell, granted by flag (any
               base role). Reuses ManagerShell; every tab/tool is permission-gated. */}
           <Route path="/workspace/*" element={<ProtectedRoute requireFlag="custom_workspace"><ManagerShell workspaceMode /></ProtectedRoute>} />
 
-          {/* Manager Shell â€” all manager roles + company_admin */}
+          {/* Manager Shell — all manager roles + company_admin */}
           <Route path="/manager/*"         element={<ProtectedRoute requiredRole="closer_manager"><ManagerShell /></ProtectedRoute>} />
           <Route path="/closer-manager/*"  element={<ProtectedRoute requiredRole="closer_manager"><ManagerShell /></ProtectedRoute>} />
           <Route path="/fronter-manager/*" element={<ProtectedRoute requiredRole="fronter_manager"><ManagerShell /></ProtectedRoute>} />
@@ -149,14 +149,14 @@ const AppContent = () => {
           <Route path="/accounting/*" element={<ProtectedRoute><AccountingShell /></ProtectedRoute>} />
           <Route path="/hr/*"         element={<ProtectedRoute><HRShell /></ProtectedRoute>} />
 
-          {/* Client recording portal â€” isolated external login (no CRM chrome) */}
+          {/* Client recording portal — isolated external login (no CRM chrome) */}
           <Route path="/portal/*" element={<ProtectedRoute requiredRole="portal_client"><ClientPortal /></ProtectedRoute>} />
 
           <Route path="/" element={<Navigate to={isAuthenticated ? "/dashboard" : "/login"} />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </Suspense>
-      {/* Floating CRM assistant mascot â€” signed in + enabled by superadmin (Features â†’ crm_assistant) */}
+      {/* Floating CRM assistant mascot — signed in + enabled by superadmin (Features → crm_assistant) */}
       {isAuthenticated && assistantOn && (
         <Suspense fallback={null}><MascotAssistant /></Suspense>
       )}
@@ -204,7 +204,7 @@ function App() {
       <BrandingProvider>
       <AuthProvider>
         <FeatureFlagsProvider>
-          {/* App-wide realtime presence â€” online from login to logout, every
+          {/* App-wide realtime presence — online from login to logout, every
               shell. Chat dots, last-seen, and the admin activity panel all
               read from this one channel. */}
           <PresenceProvider>

@@ -408,7 +408,7 @@ router.get(
       const emailMap = {};
       authUsers?.users?.forEach((u) => { emailMap[u.id] = u.email; });
 
-      // Exclude system superadmins from member lists â€” they are env-level,
+      // Exclude system superadmins from member lists — they are env-level,
       // not real company members even if a stale user_company_roles row exists.
       const saEmails = new Set(
         (process.env.SUPERADMIN_EMAIL || '').split(',').map(e => e.trim().toLowerCase()).filter(Boolean)
@@ -441,7 +441,7 @@ router.get(
 );
 
 // ============================================================================
-// DELETE /companies/:id â€” Hard delete company (SuperAdmin only)
+// DELETE /companies/:id — Hard delete company (SuperAdmin only)
 // - Nullifies company_id on sales + transfers (records preserved, orphaned)
 // - Deletes all user_company_roles for this company
 // - Deletes the company record
@@ -463,11 +463,11 @@ router.delete(
 
     if (fetchErr || !company) return res.status(404).json({ error: "Company not found" });
 
-    // 1. Preserve sales/transfers â€” unlink company, keep the records
+    // 1. Preserve sales/transfers — unlink company, keep the records
     await supabaseAdmin.from("sales").update({ company_id: null }).eq("company_id", id);
     await supabaseAdmin.from("transfers").update({ company_id: null }).eq("company_id", id);
 
-    // 2. Preserve review/dispo records â€” unlink company
+    // 2. Preserve review/dispo records — unlink company
     await supabaseAdmin.from("call_reviews").update({ company_id: null }).eq("company_id", id);
     await supabaseAdmin.from("call_dispositions").update({ company_id: null }).eq("company_id", id);
 
@@ -476,7 +476,7 @@ router.delete(
       .from("custom_roles").select("id").eq("company_id", id);
     const roleIds = (companyRoles || []).map(r => r.id);
 
-    // 4. Delete user_company_roles â€” by company AND by any of this company's roles
+    // 4. Delete user_company_roles — by company AND by any of this company's roles
     await supabaseAdmin.from("user_company_roles").delete().eq("company_id", id);
     if (roleIds.length > 0) {
       await supabaseAdmin.from("user_company_roles").delete().in("role_id", roleIds);
