@@ -14,6 +14,7 @@ const ChatAdmin       = lazy(() => import('../Admin/Chat/ChatAdmin'));
 const PaymentRemindersPanel = lazy(() => import('../Payments/PaymentRemindersPanel'));
 const DncLookupPanel        = lazy(() => import('../Shared/DncLookupPanel'));
 const CardValidator         = lazy(() => import('../Shared/CardValidator'));
+const CustomerLookupPanel   = lazy(() => import('../Shared/CustomerLookupPanel'));
 const MyScoresPanel         = lazy(() => import('../QA2/MyScoresPanel'));
 const QuizManager           = lazy(() => import('../Quiz/QuizManager'));
 const MyQuizzes             = lazy(() => import('../Quiz/MyQuizzes'));
@@ -41,6 +42,7 @@ const CrossRoleContent = ({ section, user }) => {
   if (section === 'payments')               return <Suspense fallback={<ToolFallback />}><PaymentRemindersPanel /></Suspense>;
   if (section === 'dnc')                     return <Suspense fallback={<ToolFallback />}><DncLookupPanel /></Suspense>;
   if (section === 'card_validator')          return <Suspense fallback={<ToolFallback />}><CardValidator /></Suspense>;
+  if (section === 'customer_lookup')         return <Suspense fallback={<ToolFallback />}><CustomerLookupPanel /></Suspense>;
   if (section === 'qa2_scores')              return <Suspense fallback={<ToolFallback />}><MyScoresPanel /></Suspense>;
   if (section === 'quizzes')                 return <Suspense fallback={<ToolFallback />}><QuizManager /></Suspense>;
   if (section === 'my_quizzes')              return <Suspense fallback={<ToolFallback />}><MyQuizzes /></Suspense>;

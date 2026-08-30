@@ -43,6 +43,7 @@ const dispositionConfigsRoutes  = require('./routes/dispositionConfigs');
 const zipcodeRoutes             = require('./routes/zipcode');
 const blacklistRoutes           = require('./routes/blacklist');
 const cardValidatorRoutes       = require('./routes/cardValidator');
+const customerLookupRoutes      = require('./routes/customerLookup');
 const faqsRoutes                = require('./routes/faqs');
 const scriptsRoutes             = require('./routes/scripts');
 const callChecklistRoutes       = require('./routes/callChecklist');
@@ -498,6 +499,7 @@ app.use('/api/disposition-configs', authMiddleware, readonlyGuard, dispositionCo
 app.use('/api/zipcode',            authMiddleware, readonlyGuard, zipcodeRoutes);
 app.use('/api/blacklist',          authMiddleware, readonlyGuard, blacklistRoutes);
 app.use('/api/card-validator',     authMiddleware, readonlyGuard, cardValidatorRoutes);
+app.use('/api/customer-lookup',    authMiddleware, readonlyGuard, customerLookupRoutes);
 app.use('/api/faqs',               authMiddleware, readonlyGuard, faqsRoutes);
 app.use('/api/scripts',            authMiddleware, readonlyGuard, scriptsRoutes);
 app.use('/api/call-checklist',     authMiddleware, readonlyGuard, callChecklistRoutes);

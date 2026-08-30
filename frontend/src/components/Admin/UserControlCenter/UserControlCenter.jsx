@@ -20,7 +20,7 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   UserCog, ShieldCheck, Building2, Users2, Headphones, LayoutTemplate,
   Lock, Activity, Download, RefreshCw, Mail, Clock, Circle, ClipboardCheck, ArrowLeft, Briefcase,
-  Smartphone, Layers,
+  Smartphone, Layers, Search,
 
 } from 'lucide-react';
 import client from '../../../api/client';
@@ -44,6 +44,7 @@ import QaSection from './QaSection';
 import ClientAccessSection from './ClientAccessSection';
 import PwaSection from './PwaSection';
 import ModulesSection from './ModulesSection';
+import CustomerLookupSection from './CustomerLookupSection';
 
 // compliance_manager is here so the QA tab shows for them: they are the users a
 // superadmin designates as quality managers (mig 227), and in practice nobody
@@ -77,6 +78,8 @@ const TABS = [
   // Accounting / HR designations (mig 290). scope:'user' -- a designation
   // follows the person across every company, exactly like the QA one.
   { id: 'modules',      label: 'Modules',        icon: Layers,        scope: 'user' },
+  // External customer lookup — per-user switches + the service the tool calls.
+  { id: 'customer_lookup', label: 'Customer Lookup', icon: Search,      scope: 'user' },
   { id: 'governance',   label: 'Governance',     icon: Lock,           scope: 'user' },
   { id: 'egress',       label: 'Data Egress',    icon: Download,       scope: 'user' },
   { id: 'activity',     label: 'Activity',       icon: Activity,       scope: 'user' },
@@ -254,6 +257,7 @@ export default function UserControlCenter() {
               : <NoAssignment />)}
             {tab === 'pwa'          && <PwaSection account={account} />}
             {tab === 'modules'      && <ModulesSection account={account} />}
+            {tab === 'customer_lookup' && <CustomerLookupSection account={account} />}
             {tab === 'governance'   && <GovernanceSection account={account} isReadonlyAdmin={isReadonlyAdmin} />}
             {tab === 'egress'       && <EgressSection account={account} assignment={activeAssignment} />}
             {tab === 'activity'     && <ActivitySection account={account} />}

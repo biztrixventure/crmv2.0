@@ -239,6 +239,18 @@ const StaffShell = () => {
       .catch(() => setDoubleSold({}));
   }, [isFronter, transferTotal]);
 
+  // Customer Lookup is granted PER USER (User Control Center → Customer
+  // Lookup), not by role or company flag, so the tab has to ask. Null until
+  // the answer lands, which keeps the tab hidden rather than flashing it.
+  const [lookupAccess, setLookupAccess] = useState(null);
+  useEffect(() => {
+    let dead = false;
+    client.get('customer-lookup/my-access')
+      .then(r => { if (!dead) setLookupAccess(r.data); })
+      .catch(() => { if (!dead) setLookupAccess({ any: false }); });
+    return () => { dead = true; };
+  }, []);
+
   const [dateRange, setDateRange] = useState(() => getPresetRange('today'));
   const { date_from, date_to } = dateRange;
 
@@ -270,6 +282,7 @@ const StaffShell = () => {
     ...(isEnabledStrict('tool_chat_control')      ? [{ key: 'tool_chat_control',      label: 'Chat Control',      icon: MessageSquare }] : []),
     ...(isEnabledStrict('tool_blacklist_lookup')  ? [{ key: 'dnc',                    label: 'DNC Check',         icon: Shield        }] : []),
     ...(isEnabledStrict('tool_card_validator')    ? [{ key: 'card_validator',         label: 'Card Validator',    icon: CreditCard    }] : []),
+    ...(lookupAccess?.any                        ? [{ key: 'customer_lookup',        label: 'Customer Lookup',   icon: Search        }] : []),
     // Quiz system (mig 273) — anyone can be assigned a quiz; a team lead also
     // sees their team's progress inline here.
     { key: 'my_quizzes', label: 'My Quizzes', icon: ClipboardList },
