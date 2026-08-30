@@ -34,6 +34,20 @@ const fmtPhone = (v) => {
 };
 const errText = (e, fallback) => e?.response?.data?.error || fallback;
 
+// People paste the whole thing — "7307 Independence Way, San Antonio, TX 78223
+// 4870". The service matches a street, so split it here instead of sending the
+// city and state along and quietly missing. Only fires once the value actually
+// LOOKS complete (state + 5-digit ZIP at the end), so it never fights typing.
+function splitFullAddress(v) {
+  const str = String(v || '').trim();
+  if (!str.includes(',')) return null;
+  const parts = str.split(',').map(x => x.trim()).filter(Boolean);
+  if (parts.length < 2) return null;
+  const m = parts[parts.length - 1].match(/^([A-Za-z]{2})\s+(\d{5})(?:[-\s]\d{4})?$/);
+  if (!m) return null;
+  return { street: parts.slice(0, Math.max(1, parts.length - 2)).join(', '), zip: m[2] };
+}
+
 // The service answers /lookup as { result } and /search as { results:[{data}] }.
 // Flatten either into one list of person objects, most complete first.
 function peopleFrom(data) {
@@ -266,9 +280,12 @@ function VehicleResults({ data }) {
 
   if (!data) return null;
   if (!data.found || list.length === 0) {
+    const tried = data.tried || [];
     return (
-      <EmptyState icon={Car} title="No vehicles on record for that address"
-        hint="The service has nothing for this address. Check the street and ZIP, or try another address from the person's history." />
+      <EmptyState icon={Car} title="The lookup service has no vehicles for that address"
+        hint={tried.length
+          ? `Asked for ${tried.map(t => `"${t.address}"${t.zip ? ` (${t.zip})` : ''}`).join(', ')} and it answered "none" to each. If you can see vehicles for this address in the service's own screen, its API is not returning them — that side needs fixing, not the CRM.`
+          : "The service answered but had nothing for this address."} />
     );
   }
 
@@ -364,6 +381,7 @@ export default function CustomerLookupPanel({ access: accessProp }) {
   const [vData, setVData]       = useState(null);
   const [cands, setCands]       = useState(null);   // addresses resolved from a person
   const [zipInfo, setZipInfo]   = useState(null);
+  const [splitNote, setSplitNote] = useState(false);   // we split a pasted full address
 
   const { people, merged } = useMemo(() => peopleFrom(pData), [pData]);
   const person = people[pIdx] || people[0] || null;
@@ -578,7 +596,12 @@ export default function CustomerLookupPanel({ access: accessProp }) {
                 <div className="relative">
                   <Home size={14} className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: 'var(--color-text-tertiary)' }} />
                   <input className="input pl-9" value={vAddress} placeholder="169 W Euclid Ave"
-                    onChange={e => setVAddress(e.target.value)} onKeyDown={e => e.key === 'Enter' && runVehicles()} />
+                    onChange={e => {
+                      const sp = splitFullAddress(e.target.value);
+                      if (sp) { setVAddress(sp.street); setVZip(sp.zip); setSplitNote(true); }
+                      else { setVAddress(e.target.value); setSplitNote(false); }
+                    }}
+                    onKeyDown={e => e.key === 'Enter' && runVehicles()} />
                 </div>
               </Field>
               <Field label="ZIP"
@@ -590,6 +613,11 @@ export default function CustomerLookupPanel({ access: accessProp }) {
                 </div>
               </Field>
             </div>
+            {splitNote && (
+              <p className="m-0 mt-2 text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>
+                Split the full address into the street and ZIP — that is what the service matches on.
+              </p>
+            )}
             <div className="flex items-center justify-end mt-3">
               <button type="button" onClick={() => runVehicles()} disabled={vBusy}
                 className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-60"

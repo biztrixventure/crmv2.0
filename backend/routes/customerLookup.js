@@ -86,14 +86,39 @@ router.get('/search', asyncHandler(async (req, res) => {
 }));
 
 // ── vehicles at an address ───────────────────────────────────────────────────
+// The upstream matches on a literal address string, so ONE spelling is a
+// coin flip: someone pasting "7307 Independence Way, San Antonio, TX 78223
+// 4870" and someone typing "7307 Independence Way" must not get different
+// answers. Try the sensible forms in order and take the first hit, then say
+// which ones were tried so an empty result is diagnosable instead of silent.
 router.get('/vehicles', asyncHandler(async (req, res) => {
   if (!await guard(req, res, 'vehicles')) return;
-  const address = String(req.query.address || '').trim();
-  if (!address) return res.status(422).json({ error: 'Enter a street address' });
-  const zip = String(req.query.zip || '').replace(/\D/g, '').slice(0, 5);
-  const r = await cl.call('/api/vehicles', { address, zip: zip || undefined },
-    { userId: req.user.id, label: `vehicles ${address} ${zip}` });
-  send(res, r);
+  const raw = String(req.query.address || '').trim();
+  if (!raw) return res.status(422).json({ error: 'Enter a street address' });
+
+  const typedZip = String(req.query.zip || '').replace(/\D/g, '').slice(0, 5);
+  const parsed = parseAddress(raw);                  // splits a pasted full address
+  const street = parsed?.street || raw;
+  const zip = typedZip || parsed?.zip || '';
+
+  const forms = [];
+  const push = (address, z) => {
+    const key = `${address}|${z}`.toLowerCase();
+    if (address && !forms.some(f => `${f.address}|${f.zip}`.toLowerCase() === key)) forms.push({ address, zip: z });
+  };
+  push(street, zip);        // street + ZIP — the documented shape
+  push(street, '');         // some stores key the street alone
+  push(raw, zip);           // exactly what the user typed, in case it is stored whole
+
+  let last = null;
+  for (const f of forms) {
+    const r = await cl.call('/api/vehicles', { address: f.address, zip: f.zip || undefined },
+      { userId: req.user.id, label: `vehicles ${f.address} ${f.zip}` });
+    if (!r.ok) return res.status(r.status).json({ error: r.error });
+    last = r;
+    if (r.data?.found) return res.json({ ...r.data, matched: f, tried: forms });
+  }
+  res.json({ ...(last?.data || {}), address: street, found: false, vehicles: null, tried: forms });
 }));
 
 // ── addresses for a person, WITHOUT the rest of their profile ────────────────
