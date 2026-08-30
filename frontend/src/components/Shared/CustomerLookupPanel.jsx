@@ -270,16 +270,222 @@ function PersonCard({ person, merged, canVehicles, onVehicles }) {
   );
 }
 
-// ── vehicles result (shape-agnostic: objects or strings) ─────────────────────
+// ── vehicles result ──────────────────────────────────────────────────────────
+// The service's vehicle payload has no documented shape, so nothing here
+// assumes one. Records are located wherever they live (a plain array, a wrapper
+// like { list: [...] }, a map keyed by the vehicle, or a single object), the
+// fields a vehicle actually has are promoted into a card, and anything left
+// over is flattened into label/value pairs — a nested object becomes
+// "Parent · Child" rows.
+//
+// The first version put the raw keys in a table and printed any nested value
+// with JSON.stringify, so a payload that was one object, or objects with
+// sub-objects, rendered as a wall of JSON. Nothing below ever stringifies a
+// value for display.
+
+const prettyKey = (k) => String(k)
+  .replace(/[_-]+/g, ' ')
+  .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+  .replace(/\s+/g, ' ')
+  .trim()
+  .replace(/^./, c => c.toUpperCase());
+
+// Flatten any value into ordered [label, value] pairs of printable scalars.
+function flattenFields(value, prefix = '', out = []) {
+  if (value === null || value === undefined || value === '') return out;
+  if (Array.isArray(value)) {
+    const scalars = value.filter(v => v !== null && v !== undefined && typeof v !== 'object' && String(v) !== '');
+    if (scalars.length === value.length) {
+      if (scalars.length) out.push([prefix || 'Values', scalars.join(', ')]);
+    } else {
+      value.forEach((v, i) => flattenFields(v, prefix ? `${prefix} ${i + 1}` : `Item ${i + 1}`, out));
+    }
+    return out;
+  }
+  if (typeof value === 'object') {
+    for (const [k, v] of Object.entries(value)) {
+      flattenFields(v, prefix ? `${prefix} · ${prettyKey(k)}` : prettyKey(k), out);
+    }
+    return out;
+  }
+  if (typeof value === 'boolean') { out.push([prefix, value ? 'Yes' : 'No']); return out; }
+  out.push([prefix, String(value)]);
+  return out;
+}
+
+// Find the actual vehicle records inside whatever came back.
+function vehicleRecords(v) {
+  if (!v) return [];
+  if (Array.isArray(v)) {
+    if (!v.length) return [];
+    return v.filter(x => x !== null && x !== undefined && x !== '')
+      .map(x => (x && typeof x === 'object' ? x : { Vehicle: String(x) }));
+  }
+  if (typeof v === 'object') {
+    // A wrapper around the real list: { list: [...] } / { vehicles: [...] }
+    const arrKey = Object.keys(v).find(k => Array.isArray(v[k]) && v[k].length);
+    if (arrKey) return vehicleRecords(v[arrKey]);
+    // A map keyed by the vehicle itself: { "2015 Ford F-150": { … } }
+    const vals = Object.values(v);
+    if (vals.length && vals.every(x => x && typeof x === 'object' && !Array.isArray(x))) {
+      return Object.entries(v).map(([k, rec]) => ({ Vehicle: k, ...rec }));
+    }
+    return [v];
+  }
+  return [{ Vehicle: String(v) }];
+}
+
+// Pull a known field out of a record whatever it happens to be called, and
+// wherever it sits. Payloads nest as often as they are flat — { vehicle: {
+// year, make }, owner: { name } } must still title itself "2020 Honda" rather
+// than falling back to the VIN — so scalars are collected one level down too
+// and remembered by path, which is what stops a promoted field being repeated
+// in the details grid below.
+const normKey = (k) => String(k).toLowerCase().replace(/[^a-z0-9]/g, '');
+const pathKey = (p) => p.join('.').toLowerCase();
+const scalarText = (v) => (typeof v === 'boolean' ? (v ? 'Yes' : 'No') : String(v));
+const isScalar = (v) => v !== null && v !== undefined && v !== '' && typeof v !== 'object';
+
+function collectScalars(rec) {
+  const out = [];
+  for (const [k, v] of Object.entries(rec)) {
+    if (isScalar(v)) { out.push({ path: [k], key: k, value: scalarText(v) }); continue; }
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      for (const [k2, v2] of Object.entries(v)) {
+        if (isScalar(v2)) out.push({ path: [k, k2], key: k2, value: scalarText(v2) });
+      }
+    }
+  }
+  return out;
+}
+
+function pickFrom(scalars, names, usedPaths) {
+  for (const want of names) {
+    const hit = scalars.find(s => normKey(s.key) === want && !usedPaths.has(pathKey(s.path)));
+    if (hit) return hit;
+  }
+  return null;
+}
+
+const FIELD_SETS = {
+  year:    ['year', 'modelyear', 'vehicleyear', 'yr'],
+  make:    ['make', 'manufacturer', 'vehiclemake', 'brand'],
+  model:   ['model', 'vehiclemodel', 'modelname'],
+  trim:    ['trim', 'series', 'style', 'bodystyle', 'body', 'vehicletype'],
+  vin:     ['vin', 'vinnumber', 'vinno', 'serialnumber', 'serial'],
+  plate:   ['plate', 'plateno', 'licenseplate', 'license', 'tag', 'tagnumber', 'registration'],
+  color:   ['color', 'colour', 'exteriorcolor', 'extcolor'],
+  plstate: ['platestate', 'registrationstate', 'state'],
+  owner:   ['owner', 'ownername', 'registeredowner'],
+  mileage: ['mileage', 'miles', 'odometer'],
+};
+
+function VehicleCard({ record, index }) {
+  const scalars = collectScalars(record);
+  const got = {};
+  const usedPaths = new Set();
+  for (const [slot, names] of Object.entries(FIELD_SETS)) {
+    const hit = pickFrom(scalars, names, usedPaths);
+    if (hit) { got[slot] = hit.value; usedPaths.add(pathKey(hit.path)); }
+  }
+
+  // A real "2015 Ford F-150" beats the map key, which beats a bare VIN.
+  const title = [got.year, got.make, got.model].filter(Boolean).join(' ');
+  const heading = title || record.Vehicle || got.vin || `Vehicle ${index + 1}`;
+  if (record.Vehicle && heading === record.Vehicle) usedPaths.add(pathKey(['Vehicle']));
+
+  // Everything not already promoted, one nesting level named "Parent · Child".
+  const rest = [];
+  for (const [k, v] of Object.entries(record)) {
+    if (isScalar(v)) {
+      if (!usedPaths.has(pathKey([k]))) rest.push([prettyKey(k), scalarText(v)]);
+    } else if (Array.isArray(v)) {
+      flattenFields(v, prettyKey(k), rest);
+    } else if (v && typeof v === 'object') {
+      for (const [k2, v2] of Object.entries(v)) {
+        const label = `${prettyKey(k)} · ${prettyKey(k2)}`;
+        if (isScalar(v2)) {
+          if (!usedPaths.has(pathKey([k, k2]))) rest.push([label, scalarText(v2)]);
+        } else {
+          flattenFields(v2, label, rest);
+        }
+      }
+    }
+  }
+
+  const badges = [got.trim, got.color, got.mileage ? `${got.mileage} mi` : null].filter(Boolean);
+
+  return (
+    <Panel pad="md" radius="xl">
+      <div className="flex items-start gap-3">
+        <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
+          style={{ background: 'color-mix(in srgb, var(--color-primary-600) 12%, transparent)' }}>
+          <Car size={17} style={{ color: 'var(--color-primary-600)' }} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <h4 className="m-0 text-base font-bold leading-tight break-words" style={{ color: 'var(--color-text)' }}>{heading}</h4>
+          {badges.length > 0 && (
+            <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+              {badges.map((b, i) => <Chip key={i}>{b}</Chip>)}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {(got.vin || got.plate || got.owner) && (
+        <div className="mt-3 pt-3 space-y-2" style={{ borderTop: '1px solid var(--color-border)' }}>
+          {got.vin && (
+            <Row icon={Hash} label="VIN">
+              <span className="inline-flex items-center gap-1">
+                <span className="font-mono break-all">{got.vin}</span><CopyBtn value={got.vin} label="Copy VIN" />
+              </span>
+            </Row>
+          )}
+          {got.plate && (
+            <Row icon={Hash} label="Plate">
+              <span className="inline-flex items-center gap-1">
+                <span className="font-mono">{got.plate}{got.plstate ? ` · ${got.plstate}` : ''}</span>
+                <CopyBtn value={got.plate} label="Copy plate" />
+              </span>
+            </Row>
+          )}
+          {got.owner && <Row icon={User} label="Owner">{got.owner}</Row>}
+        </div>
+      )}
+
+      {rest.length > 0 && (
+        <div className="mt-3 pt-3 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5"
+          style={{ borderTop: '1px solid var(--color-border)' }}>
+          {rest.map(([label, value], i) => (
+            <div key={`${label}-${i}`} className="flex items-baseline justify-between gap-2 text-xs min-w-0">
+              <span className="flex-shrink-0" style={{ color: 'var(--color-text-secondary)' }}>{label}</span>
+              <span className="min-w-0 text-right font-medium break-words" style={{ color: 'var(--color-text)' }}>{value}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </Panel>
+  );
+}
+
 function VehicleResults({ data }) {
-  const list = useMemo(() => {
-    const v = data?.vehicles;
-    if (!v) return [];
-    return Array.isArray(v) ? v : [v];
+  const [showRaw, setShowRaw] = useState(false);
+  const records = useMemo(() => {
+    if (!data) return [];
+    // Normally data.vehicles; fall back to other envelopes rather than claiming
+    // "none" when the service answered under a different key.
+    const found = vehicleRecords(data.vehicles);
+    if (found.length) return found;
+    for (const k of ['results', 'data', 'records', 'list']) {
+      const alt = vehicleRecords(data[k]);
+      if (alt.length) return alt;
+    }
+    return [];
   }, [data]);
 
   if (!data) return null;
-  if (!data.found || list.length === 0) {
+
+  if (records.length === 0) {
     const tried = data.tried || [];
     return (
       <EmptyState icon={Car} title="The lookup service has no vehicles for that address"
@@ -289,52 +495,31 @@ function VehicleResults({ data }) {
     );
   }
 
-  const objects = list.filter(x => x && typeof x === 'object');
-  if (objects.length === list.length) {
-    const cols = [...new Set(objects.flatMap(o => Object.keys(o)))];
-    return (
-      <Panel pad="none" radius="xl" className="overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr style={{ borderBottom: '1px solid var(--color-border)', background: 'var(--color-bg-secondary)' }}>
-                {cols.map(c => (
-                  <th key={c} className="px-3 py-2 text-left text-[11px] font-bold uppercase tracking-wider whitespace-nowrap"
-                    style={{ color: 'var(--color-text-secondary)' }}>{c.replace(/_/g, ' ')}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {objects.map((o, i) => (
-                <tr key={i} style={{ borderBottom: '1px solid var(--color-border)' }}>
-                  {cols.map(c => (
-                    <td key={c} className="px-3 py-2 text-xs whitespace-nowrap" style={{ color: 'var(--color-text)' }}>
-                      {o[c] === null || o[c] === undefined || o[c] === ''
-                        ? <span style={{ color: 'var(--color-text-tertiary)' }}>—</span>
-                        : String(typeof o[c] === 'object' ? JSON.stringify(o[c]) : o[c])}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </Panel>
-    );
-  }
-
   return (
-    <Panel pad="md" radius="xl">
-      <ul className="m-0 p-0 list-none space-y-1.5">
-        {list.map((v, i) => (
-          <li key={i} className="flex items-center gap-2 text-sm rounded-lg px-3 py-2"
-            style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}>
-            <Car size={14} style={{ color: 'var(--color-primary-600)' }} />
-            {typeof v === 'object' ? JSON.stringify(v) : String(v)}
-          </li>
-        ))}
-      </ul>
-    </Panel>
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <p className="m-0 text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
+          {records.length} vehicle{records.length === 1 ? '' : 's'} at this address
+        </p>
+        {/* Kept for support: the shape varies, and seeing it is how a missing
+            field gets added to FIELD_SETS. Collapsed, so it is never the view. */}
+        <button type="button" onClick={() => setShowRaw(v => !v)}
+          className="text-[11px] font-semibold" style={{ color: 'var(--color-text-tertiary)' }}>
+          {showRaw ? 'Hide raw response' : 'Show raw response'}
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        {records.map((rec, i) => <VehicleCard key={i} record={rec} index={i} />)}
+      </div>
+
+      {showRaw && (
+        <Panel pad="md" radius="xl" tone="inset">
+          <pre className="m-0 text-[11px] overflow-x-auto whitespace-pre-wrap break-all"
+            style={{ color: 'var(--color-text-secondary)' }}>{JSON.stringify(data, null, 2)}</pre>
+        </Panel>
+      )}
+    </div>
   );
 }
 
