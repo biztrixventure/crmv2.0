@@ -11,6 +11,7 @@ import {
   Calendar, BarChart3, Search, RefreshCw, Settings, Download, Upload,
   PlusCircle, Trash2, CheckCircle, XCircle, Edit2, Hash, Phone,
   AlertCircle, ChevronUp, ChevronDown, ChevronsUpDown, LogIn, Copy, ExternalLink,
+  AlertTriangle, TrendingUp, TrendingDown, Minus, Layers, Globe, Banknote, Clock, Link2, Activity,
 } from 'lucide-react';
 import { Card, Badge, Button } from '../../UI';
 import SaleStatusBadge from '../../UI/SaleStatusBadge';
@@ -28,9 +29,7 @@ import CallbackDetailDrawer          from '../../Shared/CallbackDetailDrawer';
 import UserDetailDrawer              from '../../Shared/UserDetailDrawer';
 import CallbackNumberDetailDrawer    from '../../Shared/CallbackNumberDetailDrawer';
 import CallbackPhoneHistoryDrawer    from '../../Shared/CallbackPhoneHistoryDrawer';
-import { Loading } from '../../UI/kit';
-import { TableScroll } from "../../UI/kit";
-import { PillTabs } from '../../UI/kit';
+import { Loading, TableScroll, PillTabs, KpiTile, Panel, SectionHeader, EmptyState, accent } from '../../UI/kit';
 
 // ── constants ─────────────────────────────────────────────────────────────────
 const SALE_BADGE     = { open:'info', sold:'success', cancelled:'error', follow_up:'warning', closed_won:'success', closed_lost:'error', compliance_cancelled:'error', dispute:'warning', chargeback:'error' };
@@ -418,48 +417,243 @@ const RecordsPanel = ({ companyId, type, companyType, companyName }) => {
 };
 
 // ── OverviewPanel ─────────────────────────────────────────────────────────────
-const OverviewPanel = ({ companyId }) => {
-  const [stats, setStats] = useState({});
-  const [loading, setLoading] = useState(false);
+// One request (GET /companies/:id/overview) → a readable picture of the company:
+// a KPI strip with month-over-month movement, the transfer and sale pipelines
+// as proportional bars, the callback queue, and the profile with link partners.
+//
+// Replaces four limit=1 list calls that could only ever surface four raw totals
+// — and used template-built Tailwind classes (`text-${c.color}-600`) that the
+// compiler never generates, which is why "Conversion" rendered in plain black
+// and the tint chips vanished in dark mode. Everything below is kit + CSS vars.
+const fmtN = (n) => Number(n || 0).toLocaleString();
+const fmtMoney = (n, cur) => {
+  try { return new Intl.NumberFormat(undefined, { style: 'currency', currency: cur || 'USD', maximumFractionDigits: 0 }).format(n || 0); }
+  catch { return `${cur || ''} ${Math.round(n || 0).toLocaleString()}`.trim(); }
+};
+const relTime = (iso) => {
+  if (!iso) return 'no activity yet';
+  const s = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (s < 60)      return 'just now';
+  if (s < 3600)    return `${Math.floor(s / 60)} min ago`;
+  if (s < 86400)   return `${Math.floor(s / 3600)} h ago`;
+  if (s < 2592000) return `${Math.floor(s / 86400)} d ago`;
+  return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+};
+const zonedNow = (tz) => {
+  try { return new Date().toLocaleTimeString(undefined, { timeZone: tz, hour: '2-digit', minute: '2-digit' }); }
+  catch { return null; }
+};
 
-  useEffect(() => {
-    setLoading(true);
-    Promise.all([
-      client.get('transfers', { params: { company_id: companyId, limit: 1 } }),
-      client.get('sales',     { params: { company_id: companyId, limit: 1 } }),
-      client.get('callbacks', { params: { company_id: companyId, limit: 1 } }),
-      client.get('users',     { params: { company_id: companyId } }),
-    ]).then(([tr, sa, cb, us]) => {
-      const totalT = tr.data.total || 0;
-      const totalS = sa.data.total || 0;
-      const conv   = totalT > 0 ? Math.round((totalS / totalT) * 100) : 0;
-      setStats({ totalT, totalS, totalC: cb.data.total || 0, totalU: (us.data.users||[]).length, conv });
-    }).catch(() => {}).finally(() => setLoading(false));
+// Month-over-month — a signed % when last month gives a baseline, a plain
+// count when it doesn't (a brand-new company has nothing to compare against).
+const Delta = ({ now, prev }) => {
+  if (!prev) return <>{now ? `${fmtN(now)} this month` : 'none this month'}</>;
+  const pct  = Math.round(((now - prev) / prev) * 100);
+  const flat = pct === 0, up = pct > 0;
+  const Icon = flat ? Minus : up ? TrendingUp : TrendingDown;
+  return (
+    <span className="inline-flex items-center gap-1"
+      style={{ color: flat ? 'var(--color-text-tertiary)' : up ? 'var(--color-success-600)' : 'var(--color-error-600)' }}>
+      <Icon size={11} />{up ? '+' : ''}{pct}% vs last month
+    </span>
+  );
+};
+
+const STATUS_META = {
+  pending:        { label: 'Pending',        tone: 'warn'    },
+  assigned:       { label: 'Assigned',       tone: 'info'    },
+  completed:      { label: 'Completed',      tone: 'success' },
+  rejected:       { label: 'Rejected',       tone: 'danger'  },
+  cancelled:      { label: 'Cancelled',      tone: 'muted'   },
+  open:           { label: 'Open',           tone: 'info'    },
+  pending_review: { label: 'Pending review', tone: 'warn'    },
+  closed_won:     { label: 'Approved',       tone: 'success' },
+};
+
+// A proportional bar + legend. A zero stage still gets its legend line (so the
+// reader learns the stage exists) but no bar segment.
+const Pipeline = ({ icon, title, total, byStatus, order, footer }) => {
+  const rows  = order.map(k => ({ key: k, n: byStatus?.[k] || 0, ...(STATUS_META[k] || { label: k, tone: 'muted' }) }));
+  const denom = rows.reduce((a, r) => a + r.n, 0) || 1;
+  return (
+    <Panel pad="md" radius="xl" className="flex flex-col">
+      <SectionHeader level="sub" icon={icon} title={title}
+        actions={<span className="text-sm font-bold tabular-nums" style={{ color: 'var(--color-text)' }}>{fmtN(total)}</span>} />
+      <div className="flex h-2 rounded-full overflow-hidden" style={{ background: 'var(--color-bg-secondary)' }}
+        role="img" aria-label={rows.map(r => `${r.label} ${r.n}`).join(', ')}>
+        {rows.filter(r => r.n > 0).map(r => (
+          <span key={r.key} title={`${r.label}: ${fmtN(r.n)}`}
+            style={{ width: `${(r.n / denom) * 100}%`, background: accent(r.tone).fg, minWidth: 2 }} />
+        ))}
+      </div>
+      <ul className="m-0 mt-3 p-0 list-none space-y-1.5 flex-1">
+        {rows.map(r => (
+          <li key={r.key} className="flex items-center justify-between gap-3 text-xs">
+            <span className="inline-flex items-center gap-2 min-w-0" style={{ color: 'var(--color-text-secondary)' }}>
+              <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: accent(r.tone).fg, opacity: r.n ? 1 : 0.35 }} />
+              <span className="truncate">{r.label}</span>
+            </span>
+            <span className="tabular-nums font-semibold whitespace-nowrap"
+              style={{ color: r.n ? 'var(--color-text)' : 'var(--color-text-tertiary)' }}>
+              {fmtN(r.n)}
+              <span className="font-normal ml-1.5" style={{ color: 'var(--color-text-tertiary)' }}>{Math.round((r.n / denom) * 100)}%</span>
+            </span>
+          </li>
+        ))}
+      </ul>
+      {footer && (
+        <p className="m-0 mt-3 pt-3 text-[11px] leading-snug"
+          style={{ color: 'var(--color-text-tertiary)', borderTop: '1px solid var(--color-border)' }}>{footer}</p>
+      )}
+    </Panel>
+  );
+};
+
+const ProfileRow = ({ icon: Icon, label, children }) => (
+  <div className="flex items-start gap-2.5 text-xs">
+    <Icon size={13} className="flex-shrink-0 mt-px" style={{ color: 'var(--color-text-tertiary)' }} />
+    <span className="w-20 flex-shrink-0" style={{ color: 'var(--color-text-secondary)' }}>{label}</span>
+    <span className="min-w-0 flex-1 font-medium" style={{ color: 'var(--color-text)' }}>{children}</span>
+  </div>
+);
+
+const PartnerChip = ({ partner }) => {
+  const a = accent(partner.company_type === 'fronter' ? 'success' : 'primary');
+  return (
+    <span className="inline-flex items-center px-1.5 py-px rounded-md text-[11px] font-semibold"
+      title={`${partner.company_type || 'company'}${partner.is_active ? '' : ' · inactive'}`}
+      style={{ background: a.soft, color: a.fg, opacity: partner.is_active ? 1 : 0.6 }}>
+      {partner.name}
+    </span>
+  );
+};
+
+const OverviewPanel = ({ companyId }) => {
+  const [data, setData]       = useState(null);
+  const [error, setError]     = useState('');
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    setLoading(true); setError('');
+    try {
+      const res = await client.get(`companies/${companyId}/overview`);
+      setData(res.data);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Could not load the overview.');
+    } finally { setLoading(false); }
   }, [companyId]);
 
-  const cards = [
-    { label: 'Transfers',  value: stats.totalT, color: 'info',    icon: Send       },
-    { label: 'Sales',      value: stats.totalS, color: 'success', icon: DollarSign },
-    { label: 'Callbacks',  value: stats.totalC, color: 'warning', icon: Calendar   },
-    { label: 'Members',    value: stats.totalU, color: 'primary', icon: Users      },
-    { label: 'Conversion', value: `${stats.conv||0}%`, color: 'secondary', icon: BarChart3 },
-  ];
+  useEffect(() => { load(); }, [load]);
+
+  if (loading) return <Loading variant="rows" rows={4} />;
+  if (error || !data) {
+    return (
+      <EmptyState icon={AlertTriangle} tone="warn" title="Overview unavailable" hint={error}
+        action={<Button variant="secondary" size="sm" onClick={load}>Try again</Button>} />
+    );
+  }
+
+  const { company, transfers: t, sales: s, callbacks: c, members: m, roles, partners = [], conversion, period } = data;
+  const isFronter = data.scope === 'fronter';
+  const tz        = period?.timezone;
+  const localNow  = tz ? zonedNow(tz) : null;
+  const levels    = Object.entries(m.byLevel || {}).sort((a, b) => b[1] - a[1]);
+  const monthLabel = period?.monthStart
+    ? new Date(period.monthStart).toLocaleDateString(undefined, { month: 'long', year: 'numeric', timeZone: tz || undefined })
+    : 'This month';
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
-      {cards.map(c => (
-        <Card key={c.label} className="p-5">
-          <div className="flex items-start justify-between">
-            <div>
-              <p className="text-xs text-text-secondary mb-1">{c.label}</p>
-              <p className={`text-2xl font-bold text-${c.color}-600`}>{loading ? '—' : (c.value ?? 0)}</p>
-            </div>
-            <div className={`p-2 rounded-lg bg-${c.color}-100 dark:bg-${c.color}-900`}>
-              <c.icon size={16} className={`text-${c.color}-600`} />
-            </div>
+    <div className="space-y-4">
+      {/* ── KPI strip: the number, then how it moved ───────────────────── */}
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
+        <KpiTile icon={Send}       label="Transfers"  value={fmtN(t.total)} tone="info"    sub={<Delta now={t.month} prev={t.prevMonth} />} />
+        <KpiTile icon={DollarSign} label="Sales"      value={fmtN(s.total)} tone="success" sub={<Delta now={s.month} prev={s.prevMonth} />} />
+        <KpiTile icon={BarChart3}  label="Conversion" value={`${conversion}%`} tone="primary" sub="sales ÷ transfers, all time" />
+        <KpiTile icon={Calendar}   label="Callbacks"  value={fmtN(c.total)} tone={c.overdue ? 'warn' : 'muted'}
+          sub={c.overdue ? `${fmtN(c.overdue)} overdue · ${fmtN(c.pending)} pending` : `${fmtN(c.pending)} pending`} />
+        <KpiTile icon={Users}      label="Members"    value={fmtN(m.active)} tone="primary"
+          sub={`${fmtN(m.inactive)} inactive · ${fmtN(roles)} role${roles === 1 ? '' : 's'}`} />
+      </div>
+
+      {/* ── pipelines + profile ────────────────────────────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <Pipeline icon={Send} title="Transfer pipeline" total={t.total} byStatus={t.byStatus}
+          order={['pending', 'assigned', 'completed', 'rejected', 'cancelled']}
+          footer={`Last transfer ${relTime(t.lastAt)}${isFronter ? '' : " · matched through this company's closers"}`} />
+        <Pipeline icon={DollarSign} title="Sales pipeline" total={s.total} byStatus={s.byStatus}
+          order={['open', 'pending_review', 'closed_won', 'cancelled']}
+          footer={[
+            `Last sale ${relTime(s.lastAt)}`,
+            s.postDates ? `${fmtN(s.postDates)} post-dated reminder${s.postDates === 1 ? '' : 's'} not counted` : null,
+          ].filter(Boolean).join(' · ')} />
+
+        <Panel pad="md" radius="xl">
+          <SectionHeader level="sub" icon={Building2} title="Profile" />
+          <div className="space-y-2.5">
+            <ProfileRow icon={Layers} label="Type">
+              <Badge variant={isFronter ? 'success' : 'primary'} size="sm">{isFronter ? 'Fronter' : 'Closer'}</Badge>
+              <span className="ml-2 font-normal" style={{ color: 'var(--color-text-secondary)' }}>
+                {isFronter ? 'generates leads → transfers' : 'works transfers → sales'}
+              </span>
+            </ProfileRow>
+            {company.slug && <ProfileRow icon={Hash} label="Slug"><span className="font-mono">{company.slug}</span></ProfileRow>}
+            <ProfileRow icon={Globe} label="Timezone">
+              {tz || '—'}
+              {localNow && <span className="ml-2 font-normal tabular-nums" style={{ color: 'var(--color-text-secondary)' }}>{localNow} now</span>}
+            </ProfileRow>
+            <ProfileRow icon={Banknote} label="Currency">{company.currency || '—'}</ProfileRow>
+            <ProfileRow icon={Clock} label="Since">
+              {company.created_at ? new Date(company.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
+            </ProfileRow>
+            <ProfileRow icon={Users} label="Team">
+              {levels.length ? (
+                <span className="flex flex-wrap gap-1">
+                  {levels.map(([lvl, n]) => (
+                    <span key={lvl} className="px-1.5 py-px rounded-md text-[11px] font-semibold capitalize"
+                      style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>
+                      {n} {lvl.replace(/_/g, ' ')}
+                    </span>
+                  ))}
+                </span>
+              ) : <span className="font-normal" style={{ color: 'var(--color-text-tertiary)' }}>no active members</span>}
+            </ProfileRow>
+            <ProfileRow icon={Link2} label="Partners">
+              {partners.length ? (
+                <span className="flex flex-wrap gap-1">{partners.map(p => <PartnerChip key={p.id} partner={p} />)}</span>
+              ) : (
+                <span className="font-normal" style={{ color: 'var(--color-text-tertiary)' }}>
+                  {isFronter ? 'no closer company linked' : 'no fronter company linked'}
+                </span>
+              )}
+            </ProfileRow>
           </div>
-        </Card>
-      ))}
+        </Panel>
+      </div>
+
+      {/* ── this month, on the company's own clock ─────────────────────── */}
+      <Panel pad="md" radius="xl">
+        <SectionHeader level="sub" icon={Activity} title={monthLabel}
+          actions={tz ? <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{tz}</span> : null} />
+        <div className={`grid grid-cols-2 ${s.monthRevenue !== undefined ? 'md:grid-cols-4' : 'md:grid-cols-3'} gap-3`}>
+          {[
+            { label: 'Transfers', value: fmtN(t.month), prev: t.prevMonth, tone: 'info' },
+            { label: 'Sales',     value: fmtN(s.month), prev: s.prevMonth, tone: 'success' },
+            { label: 'Callbacks', value: fmtN(c.month), tone: 'muted' },
+            ...(s.monthRevenue !== undefined
+              ? [{ label: 'Monthly premium', value: fmtMoney(s.monthRevenue, company.currency), hint: 'from approved sales', tone: 'primary' }]
+              : []),
+          ].map(x => (
+            <div key={x.label} className="rounded-lg px-3 py-2.5"
+              style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+              <p className="m-0 text-[11px] font-bold uppercase tracking-wider leading-none" style={{ color: 'var(--color-text-secondary)' }}>{x.label}</p>
+              <p className="m-0 mt-1.5 text-lg font-bold leading-none tabular-nums" style={{ color: accent(x.tone).fg }}>{x.value}</p>
+              <p className="m-0 mt-1.5 text-[11px] leading-none" style={{ color: 'var(--color-text-tertiary)' }}>
+                {x.hint || (x.prev !== undefined ? `${fmtN(x.prev)} last month` : 'created this month')}
+              </p>
+            </div>
+          ))}
+        </div>
+      </Panel>
     </div>
   );
 };
@@ -1054,7 +1248,7 @@ const SettingsPanel = ({ company, onCompanyUpdated }) => {
                     background:  companyType === opt.value ? `var(--color-${opt.color}-50)`  : 'transparent',
                   }}
                 >
-                  <p className={`font-semibold text-sm text-${opt.color}-700 mb-1`}>{opt.label}</p>
+                  <p className="font-semibold text-sm mb-1" style={{ color: `var(--color-${opt.color}-700)` }}>{opt.label}</p>
                   <p className="text-xs text-text-secondary leading-relaxed">{opt.desc}</p>
                 </button>
               ))}

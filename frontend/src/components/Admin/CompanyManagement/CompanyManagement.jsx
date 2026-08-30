@@ -3,9 +3,10 @@ import { createPortal } from 'react-dom';
 import {
   Plus, Search, Building2, MoreVertical,
   Edit2, XCircle, CheckCircle, Trash2,
-  ArrowUpDown, ChevronUp, ChevronDown, GripVertical,
+  ArrowUpDown, ChevronUp, ChevronDown, GripVertical, Send, DollarSign,
 } from 'lucide-react';
 import { Alert } from '../../../components/UI';
+import { KpiTile } from '../../UI/kit';
 import { useAuth } from '../../../contexts/AuthContext';
 import { useCompanies } from '../../../hooks/useCompanies';
 import client from '../../../api/client';
@@ -183,34 +184,32 @@ const CompanyCard = ({ company, isSelected, onSelect, onEdit, onDeactivate, onAc
 };
 
 // ── SummaryPanel (right panel when nothing selected) ──────────────────────────
+// Same kit tiles the company overview uses, so the section reads as one design
+// before and after a company is picked. (The old primary-50 dashed box was
+// unreadable in dark mode — -50 tints stay light on a dark surface.)
 const SummaryPanel = ({ companies }) => {
-  const stats = [
-    { label: 'Total',    value: companies.length,                                  color: 'var(--color-text)'          },
-    { label: 'Active',   value: companies.filter(c => c.is_active).length,         color: 'var(--color-success-600)'   },
-    { label: 'Fronter',  value: companies.filter(c => c.company_type==='fronter').length, color: 'var(--color-success-600)' },
-    { label: 'Closer',   value: companies.filter(c => c.company_type==='closer').length,  color: 'var(--color-primary-600)' },
+  const n = (f) => companies.filter(f).length;
+  const tiles = [
+    { label: 'Companies', value: companies.length,                     icon: Building2,   tone: 'primary', sub: 'in the CRM' },
+    { label: 'Active',    value: n(c => c.is_active),                   icon: CheckCircle, tone: 'success', sub: `${n(c => !c.is_active)} inactive` },
+    { label: 'Fronter',   value: n(c => c.company_type === 'fronter'),  icon: Send,        tone: 'success', sub: 'generate leads' },
+    { label: 'Closer',    value: n(c => c.company_type === 'closer'),   icon: DollarSign,  tone: 'info',    sub: 'work transfers' },
   ];
-
   return (
-    <div className="h-full flex flex-col items-center justify-center gap-5 p-8">
+    <div className="h-full flex flex-col items-center justify-center gap-6 p-8">
       <div className="text-center">
-        <div className="w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center"
-          style={{ backgroundColor: 'var(--color-primary-50)', border: '2px dashed var(--color-primary-200)' }}>
-          <Building2 size={28} style={{ color: 'var(--color-primary-400)' }} />
+        <div className="w-14 h-14 rounded-2xl mx-auto mb-3 flex items-center justify-center"
+          style={{ background: 'var(--gradient-sidebar)', boxShadow: 'var(--shadow-sm)' }}>
+          <Building2 size={24} className="text-white" />
         </div>
-        <h3 className="text-lg font-bold text-text mb-1">Select a Company</h3>
-        <p className="text-sm text-text-secondary max-w-xs leading-relaxed">
-          Click any company in the list to view its details, members, roles, transfers, and more.
+        <h3 className="text-lg font-bold m-0" style={{ color: 'var(--color-text)', fontFamily: 'var(--font-display)' }}>Select a company</h3>
+        <p className="text-sm m-0 mt-1 max-w-xs leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+          Pick one from the list to see its overview, members, roles, transfers, sales and callbacks.
         </p>
       </div>
-
-      <div className="grid grid-cols-2 gap-3 w-full max-w-xs">
-        {stats.map(s => (
-          <div key={s.label} className="rounded-xl p-4 text-center"
-            style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
-            <p className="text-3xl font-bold" style={{ color: s.color }}>{s.value}</p>
-            <p className="text-xs text-text-secondary mt-1">{s.label}</p>
-          </div>
+      <div className="grid grid-cols-2 gap-3 w-full max-w-md">
+        {tiles.map(t => (
+          <KpiTile key={t.label} icon={t.icon} label={t.label} value={t.value.toLocaleString()} sub={t.sub} tone={t.tone} />
         ))}
       </div>
     </div>

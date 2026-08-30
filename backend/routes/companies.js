@@ -5,6 +5,7 @@ const { asyncHandler } = require('../middleware/errorHandler');
 // Auth middleware is applied in server.js
 const { hasPermission, isSuperAdmin, getUserCompanies, assignUserToCompany } = require('../models/helpers');
 const logger = require('../utils/logger');
+const { excludePostDate, POST_DATE_ILIKE } = require('../utils/postDate');
 
 const router = express.Router();
 
@@ -492,6 +493,186 @@ router.delete(
 
     res.json({
       message: `Company "${company.name}" permanently deleted. Sales and transfers preserved.`,
+    });
+  })
+);
+
+// ============================================================================
+// GET /companies/:id/overview — everything the Company Detail overview shows,
+// in ONE round-trip.
+//
+// The old panel fired four list requests with limit=1 just to read `total`, so
+// it could only ever show four raw counts. This returns the counts plus what
+// makes them readable: status breakdowns, this month against last, overdue
+// callbacks, the member split, roles, and the link partners.
+//
+// Counts mirror the list endpoints EXACTLY so the Overview never disagrees
+// with the Transfers / Sales / Callbacks tabs beside it:
+//   • fronter company → rows carry its company_id
+//   • closer company  → transfers via its members' assigned_closer_id, sales
+//     via closer_id (transfers.js:128, sales.js:231). Callbacks always carry
+//     company_id (callbacks.js:72).
+// Post-dated sales are reminders, not sales (utils/postDate.js) — excluded
+// from every sales figure and reported separately as `sales.postDates`.
+// ============================================================================
+
+// Start of the month in the company's own timezone (offset back by `minus`
+// months), as a UTC ISO string. Falls back to UTC if Intl rejects the tz.
+const zonedMonthStart = (tz, minus = 0) => {
+  const now = new Date();
+  try {
+    const fmt = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz, hourCycle: 'h23',
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+    });
+    const parts = (d) => Object.fromEntries(fmt.formatToParts(d).map(p => [p.type, p.value]));
+    const p = parts(now);
+    let y = +p.year, m = +p.month - 1 - minus;
+    while (m < 0) { m += 12; y -= 1; }
+    // Guess the instant as if UTC, then correct by the zone's offset there.
+    const guess = new Date(Date.UTC(y, m, 1));
+    const g = parts(guess);
+    const asUtc = Date.UTC(+g.year, +g.month - 1, +g.day, +g.hour, +g.minute, +g.second);
+    return new Date(guess.getTime() - (asUtc - guess.getTime())).toISOString();
+  } catch {
+    return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - minus, 1)).toISOString();
+  }
+};
+
+router.get(
+  "/:id/overview",
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const userId = req.user.id;
+
+    const { data: company, error: coErr } = await supabaseAdmin
+      .from("companies")
+      .select("id, name, slug, is_active, company_type, internal_timezone, currency, created_at")
+      .eq("id", id)
+      .single();
+    if (coErr || !company) return res.status(404).json({ error: "Company not found" });
+
+    const superadmin = await isSuperAdmin(userId);
+    const isAdminRole = superadmin || ['superadmin', 'readonly_admin'].includes(req.user.role);
+    if (!isAdminRole) {
+      const mine = await getUserCompanies(userId);
+      if (!mine.some((c) => c.id === id)) {
+        return res.status(403).json({ error: "You don't have access to this company" });
+      }
+    }
+    const canFin = superadmin || await hasPermission(userId, id, 'view_financial_data');
+
+    const tz = company.internal_timezone || 'UTC';
+    const monthStart = zonedMonthStart(tz, 0);
+    const prevStart  = zonedMonthStart(tz, 1);
+    const nowIso     = new Date().toISOString();
+
+    // Members — all of them; the active/inactive split is part of the picture.
+    const { data: roleRows } = await supabaseAdmin
+      .from('user_company_roles')
+      .select('user_id, is_active, custom_roles(level)')
+      .eq('company_id', id);
+    const members   = roleRows || [];
+    const activeIds = [...new Set(members.filter(m => m.is_active).map(m => m.user_id))];
+    const byLevel   = {};
+    for (const m of members) {
+      if (!m.is_active) continue;
+      const lvl = m.custom_roles?.level || 'unassigned';
+      byLevel[lvl] = (byLevel[lvl] || 0) + 1;
+    }
+
+    // Scope builders — the same rows the list routes return.
+    const isFronter   = company.company_type === 'fronter';
+    const closerEmpty = !isFronter && activeIds.length === 0;   // .in([]) is a 400 — short-circuit
+    const scopeT = (q) => isFronter ? q.eq('company_id', id) : q.in('assigned_closer_id', activeIds);
+    const scopeS = (q) => isFronter ? q.eq('company_id', id) : q.in('closer_id', activeIds);
+    const scopeC = (q) => q.eq('company_id', id);
+
+    const cnt = (table, scope, extra = (q) => q) => {
+      if (table !== 'callbacks' && closerEmpty) return Promise.resolve(0);
+      return extra(scope(supabaseAdmin.from(table).select('id', { count: 'exact', head: true })))
+        .then(r => r.count || 0);
+    };
+    const lastAt = (table, scope) => {
+      if (closerEmpty) return Promise.resolve(null);
+      return scope(supabaseAdmin.from(table).select('created_at').order('created_at', { ascending: false }).limit(1))
+        .then(r => r.data?.[0]?.created_at || null);
+    };
+
+    const T_STATUSES = ['pending', 'assigned', 'completed', 'rejected', 'cancelled'];
+    const S_STATUSES = ['open', 'pending_review', 'closed_won', 'cancelled'];
+
+    const [tTotal, tMonth, tPrev, tLast, ...tByStatus] = await Promise.all([
+      cnt('transfers', scopeT),
+      cnt('transfers', scopeT, q => q.gte('created_at', monthStart)),
+      cnt('transfers', scopeT, q => q.gte('created_at', prevStart).lt('created_at', monthStart)),
+      lastAt('transfers', scopeT),
+      ...T_STATUSES.map(s => cnt('transfers', scopeT, q => q.eq('status', s))),
+    ]);
+
+    const [sTotal, sMonth, sPrev, sLast, sPostDates, ...sByStatus] = await Promise.all([
+      cnt('sales', scopeS, excludePostDate),
+      cnt('sales', scopeS, q => excludePostDate(q).gte('created_at', monthStart)),
+      cnt('sales', scopeS, q => excludePostDate(q).gte('created_at', prevStart).lt('created_at', monthStart)),
+      lastAt('sales', scopeS),
+      cnt('sales', scopeS, q => q.ilike('closer_disposition', POST_DATE_ILIKE)),
+      ...S_STATUSES.map(s => cnt('sales', scopeS, q => excludePostDate(q).eq('status', s))),
+    ]);
+
+    const [cTotal, cPending, cOverdue, cCompleted, cMonth] = await Promise.all([
+      cnt('callbacks', scopeC),
+      cnt('callbacks', scopeC, q => q.eq('status', 'pending')),
+      cnt('callbacks', scopeC, q => q.eq('status', 'pending').lt('callback_at', nowIso)),
+      cnt('callbacks', scopeC, q => q.eq('status', 'completed')),
+      cnt('callbacks', scopeC, q => q.gte('created_at', monthStart)),
+    ]);
+
+    // Money: this month's closed-won monthly premium. Only for callers who may
+    // see financials — the field is ABSENT for everyone else, not zero.
+    let monthRevenue;
+    if (canFin && !closerEmpty) {
+      const { data: rev } = await excludePostDate(
+        scopeS(supabaseAdmin.from('sales').select('monthly_payment'))
+          .eq('status', 'closed_won').gte('created_at', monthStart)
+      );
+      monthRevenue = (rev || []).reduce((a, r) => a + (parseFloat(r.monthly_payment) || 0), 0);
+    }
+
+    const [{ count: rolesCount }, { data: linkRows }] = await Promise.all([
+      supabaseAdmin.from('custom_roles').select('id', { count: 'exact', head: true }).eq('company_id', id),
+      supabaseAdmin.from('company_links')
+        .select('fronter_company_id, closer_company_id')
+        .or(`fronter_company_id.eq.${id},closer_company_id.eq.${id}`),
+    ]);
+    const partnerIds = [...new Set((linkRows || []).map(l => l.fronter_company_id === id ? l.closer_company_id : l.fronter_company_id))];
+    const { data: partners } = partnerIds.length
+      ? await supabaseAdmin.from('companies').select('id, name, company_type, is_active').in('id', partnerIds).order('name')
+      : { data: [] };
+
+    res.json({
+      company,
+      scope: isFronter ? 'fronter' : 'closer',
+      period: { monthStart, prevStart, timezone: tz },
+      members: {
+        active: activeIds.length,
+        inactive: members.filter(m => !m.is_active).length,
+        total: members.length,
+        byLevel,
+      },
+      roles: rolesCount || 0,
+      transfers: {
+        total: tTotal, month: tMonth, prevMonth: tPrev, lastAt: tLast,
+        byStatus: Object.fromEntries(T_STATUSES.map((s, i) => [s, tByStatus[i]])),
+      },
+      sales: {
+        total: sTotal, month: sMonth, prevMonth: sPrev, lastAt: sLast, postDates: sPostDates,
+        byStatus: Object.fromEntries(S_STATUSES.map((s, i) => [s, sByStatus[i]])),
+        ...(monthRevenue !== undefined ? { monthRevenue } : {}),
+      },
+      callbacks: { total: cTotal, pending: cPending, overdue: cOverdue, completed: cCompleted, month: cMonth },
+      conversion: tTotal > 0 ? Math.round((sTotal / tTotal) * 1000) / 10 : 0,
+      partners: partners || [],
     });
   })
 );
