@@ -19,11 +19,11 @@
 import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import {
   Search, Phone, User, MapPin, Car, Loader2, Copy, Check, Home, Users2,
-  Mail, Building2, Hash, ChevronRight, Info, AlertTriangle, Database,
+  Mail, Building2, Hash, ChevronRight, Info, AlertTriangle, Database, CalendarClock, RefreshCw,
 } from 'lucide-react';
 import client from '../../api/client';
 import { Panel, SectionHeader, EmptyState, Field, PillTabs, Toggle, Loading } from '../UI/kit';
-import { Badge, Alert } from '../UI';
+import { Badge, Alert, Button } from '../UI';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 const digits = (s) => String(s || '').replace(/\D/g, '');
@@ -52,6 +52,7 @@ function splitFullAddress(v) {
 // Flatten either into one list of person objects, most complete first.
 function peopleFrom(data) {
   const roots = [];
+  if (data?.person) roots.push(data.person);      // /enrich
   if (data?.result) roots.push(data.result);
   for (const r of (data?.results || [])) if (r?.data) roots.push(r.data);
   const out = [];
@@ -134,7 +135,7 @@ function PersonCard({ person, merged, canVehicles, onVehicles }) {
           </div>
           {canVehicles && (addr.street || addr.full) && (
             <button type="button"
-              onClick={() => onVehicles({ address: addr.street || addr.full, zip: digits(addr.zip).slice(0, 5) })}
+              onClick={() => onVehicles({ address: addr.street || addr.full, zip: digits(addr.zip).slice(0, 5), name: p.name })}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-white flex-shrink-0"
               style={{ background: 'var(--gradient-sidebar)' }}>
               <Car size={13} /> Vehicles here
@@ -213,7 +214,7 @@ function PersonCard({ person, merged, canVehicles, onVehicles }) {
                 <span className="min-w-0 flex-1" style={{ color: 'var(--color-text-secondary)' }}>{a}</span>
                 <CopyBtn value={a} label="Copy address" />
                 {canVehicles && (
-                  <button type="button" onClick={() => onVehicles({ addressFull: a })}
+                  <button type="button" onClick={() => onVehicles({ addressFull: a, name: p.name })}
                     className="inline-flex items-center gap-1 text-[11px] font-semibold flex-shrink-0"
                     style={{ color: 'var(--color-primary-600)' }}>
                     <Car size={11} /> Vehicles
@@ -468,7 +469,7 @@ function VehicleCard({ record, index }) {
   );
 }
 
-function VehicleResults({ data }) {
+function VehicleResults({ data, onRetry }) {
   const [showRaw, setShowRaw] = useState(false);
   const records = useMemo(() => {
     if (!data) return [];
@@ -485,13 +486,27 @@ function VehicleResults({ data }) {
 
   if (!data) return null;
 
-  if (records.length === 0) {
-    const tried = data.tried || [];
+  // A search that FAILED and a search that found nothing are different facts,
+  // and conflating them is why a broken provider looked like "this address has
+  // no cars". The run reports its own status — believe it.
+  const runStatus = data.result?.status || data.vehicles_status || null;
+  const runError  = data.result?.error || data.vehicles_error || null;
+  if (records.length === 0 && (runStatus === 'error' || runError)) {
+    const transient = data.result?.error_transient;
+    const short = String(runError || '').split('\n')[0].slice(0, 200);
     return (
-      <EmptyState icon={Car} title="The lookup service has no vehicles for that address"
-        hint={tried.length
-          ? `Asked for ${tried.map(t => `"${t.address}"${t.zip ? ` (${t.zip})` : ''}`).join(', ')} and it answered "none" to each. If you can see vehicles for this address in the service's own screen, its API is not returning them — that side needs fixing, not the CRM.`
-          : "The service answered but had nothing for this address."} />
+      <EmptyState icon={AlertTriangle} tone="warn" title="The vehicle search did not complete"
+        hint={`${short || 'The provider run failed.'}${data.result?.attempts ? ` (after ${data.result.attempts} attempts)` : ''} — no result was returned, so this is not the same as the address having no vehicles.${transient === false ? '' : ' It may be temporary, so a retry is worth a try.'}`}
+        action={onRetry ? <Button variant="secondary" size="sm" onClick={onRetry}>Try again</Button> : null} />
+    );
+  }
+
+  if (records.length === 0) {
+    return (
+      <EmptyState icon={Car} title="No vehicles on file for that address"
+        hint={data.cached
+          ? 'This address is already on file and no vehicles are recorded against it.'
+          : 'Nothing is on file for this address yet. Add the person’s name and switch to “Search if new” to run a real search.'} />
     );
   }
 
@@ -551,6 +566,7 @@ export default function CustomerLookupPanel({ access: accessProp }) {
   const [name, setName]           = useState('');
   const [q, setQ]                 = useState('');
   const [cacheOnly, setCacheOnly] = useState(false);
+  const [withVehicles, setWithVehicles] = useState(false);   // /enrich: person AND vehicles
   const [pBusy, setPBusy]         = useState(false);
   const [pErr, setPErr]           = useState('');
   const [pData, setPData]         = useState(null);
@@ -567,6 +583,27 @@ export default function CustomerLookupPanel({ access: accessProp }) {
   const [cands, setCands]       = useState(null);   // addresses resolved from a person
   const [zipInfo, setZipInfo]   = useState(null);
   const [splitNote, setSplitNote] = useState(false);   // we split a pasted full address
+  const [vDob, setVDob]         = useState('');
+  const [vMode, setVMode]       = useState('auto');    // cache | auto | fresh
+  const [jobNote, setJobNote]   = useState('');        // live progress of a running search
+
+  // A new vehicle search fills a real quote form on the provider's site, which
+  // takes far longer than a request should wait on. The server hands back a job
+  // ticket instead and we poll it — slow is normal here, so show the seconds
+  // ticking rather than an indefinite spinner.
+  const pollJob = useCallback(async (ticket, onTick) => {
+    const started = Date.now();
+    for (let i = 0; i < 100; i++) {
+      await new Promise(r => setTimeout(r, i < 5 ? 2000 : 4000));
+      let r;
+      try { r = await client.get(`customer-lookup/job/${ticket}`); }
+      catch (e) { throw new Error(errText(e, 'Lost track of the search.')); }
+      onTick?.(Math.round((Date.now() - started) / 1000));
+      const st = r.data?.status;
+      if (st === 'done' || st === 'error') return r.data;
+    }
+    throw new Error('The search is taking unusually long. Try again in a moment.');
+  }, []);
 
   const { people, merged } = useMemo(() => peopleFrom(pData), [pData]);
   const person = people[pIdx] || people[0] || null;
@@ -588,28 +625,62 @@ export default function CustomerLookupPanel({ access: accessProp }) {
     if (mode === 'name'  && q.trim().length < 3)       { setPErr('Type at least 3 characters.'); return; }
     setPBusy(true);
     try {
-      const r = mode === 'phone'
-        ? await client.get('customer-lookup/person', { params: { phone: digits(phone), name: name.trim() || undefined, scrape: cacheOnly ? '0' : undefined } })
-        : await client.get('customer-lookup/search', { params: { q: q.trim() } });
-      setPData(r.data);
+      if (mode === 'phone' && withVehicles && canVehicles) {
+        // One call: who it is AND what they drive. The vehicle half can run a
+        // real search, so this comes back as a job to poll.
+        const r = await client.get('customer-lookup/enrich', {
+          params: { phone: digits(phone), name: name.trim() || undefined, mode: cacheOnly ? 'cache' : 'auto' },
+        });
+        if (r.data?.job) {
+          setJobNote('Searching...');
+          const done = await pollJob(r.data.job, (sec) => setJobNote('Searching... ' + sec + 's'));
+          setPData(done);
+        } else {
+          setPData(r.data);
+        }
+      } else {
+        const r = mode === 'phone'
+          ? await client.get('customer-lookup/person', { params: { phone: digits(phone), name: name.trim() || undefined, scrape: cacheOnly ? '0' : undefined } })
+          : await client.get('customer-lookup/search', { params: { q: q.trim() } });
+        setPData(r.data);
+      }
     } catch (e) {
-      setPErr(errText(e, 'Lookup failed.'));
-    } finally { setPBusy(false); }
-  }, [mode, phone, name, q, cacheOnly]);
+      setPErr(e?.response ? errText(e, 'Lookup failed.') : (e.message || 'Lookup failed.'));
+    } finally { setPBusy(false); setJobNote(''); }
+  }, [mode, phone, name, q, cacheOnly, withVehicles, canVehicles, pollJob]);
 
-  const runVehicles = useCallback(async (override) => {
-    const address = (override?.address ?? vAddress).trim();
-    const zip = digits(override?.zip ?? vZip).slice(0, 5);
-    setVErr(''); setVData(null);
+  const runVehicles = useCallback(async (override = {}) => {
+    const address = (override.address ?? vAddress).trim();
+    const zip     = digits(override.zip ?? vZip).slice(0, 5);
+    const name    = (override.name ?? vName).trim();
+    const dob     = (override.dob ?? vDob).trim();
+    const mode    = override.mode ?? vMode;
+
+    setVErr(''); setVData(null); setJobNote('');
     if (!address) { setVErr('Enter a street address, or find one from a name or phone below.'); return; }
+    // Only a cache read can work without a name — a new search fills a quote
+    // form. Saying so beats letting the server return an empty-looking result.
+    if (mode !== 'cache' && !name) {
+      setVErr('A new search needs the person’s name. Add it below, or switch to “Cached only”.');
+      return;
+    }
+
     setVBusy(true);
     try {
-      const r = await client.get('customer-lookup/vehicles', { params: { address, zip: zip || undefined } });
-      setVData(r.data);
+      const r = await client.get('customer-lookup/vehicles', {
+        params: { address, zip: zip || undefined, name: name || undefined, dob: dob || undefined, mode },
+      });
+      if (r.data?.job) {
+        setJobNote('Searching…');
+        const done = await pollJob(r.data.job, (s) => setJobNote(`Searching… ${s}s`));
+        setVData(done);
+      } else {
+        setVData(r.data);
+      }
     } catch (e) {
-      setVErr(errText(e, 'Vehicle search failed.'));
-    } finally { setVBusy(false); }
-  }, [vAddress, vZip]);
+      setVErr(e?.response ? errText(e, 'Vehicle search failed.') : (e.message || 'Vehicle search failed.'));
+    } finally { setVBusy(false); setJobNote(''); }
+  }, [vAddress, vZip, vName, vDob, vMode, pollJob]);
 
   // Name / phone → candidate addresses (server returns addresses only).
   const resolveAddresses = useCallback(async () => {
@@ -642,6 +713,7 @@ export default function CustomerLookupPanel({ access: accessProp }) {
       setVAddress(a.address || '');
       setVZip(a.zip || '');
     }
+    if (a.name) setVName(a.name);
     setCands(null); setVData(null); setVErr('');
     setTab('vehicles');
   }, [canVehicles]);
@@ -712,8 +784,14 @@ export default function CustomerLookupPanel({ access: accessProp }) {
 
             <div className="flex items-center justify-between gap-3 flex-wrap mt-3">
               {mode === 'phone' ? (
-                <Toggle checked={cacheOnly} onChange={setCacheOnly} label="Cached only"
-                  hint="Instant, but only returns someone already on file — never goes out to fetch." />
+                <div className="space-y-2">
+                  <Toggle checked={cacheOnly} onChange={setCacheOnly} label="Cached only"
+                    hint="Instant, but only returns someone already on file — never goes out to fetch." />
+                  {canVehicles && (
+                    <Toggle checked={withVehicles} onChange={setWithVehicles} label="Include vehicles"
+                      hint="One search for the person and the vehicles at their address." />
+                  )}
+                </div>
               ) : <span />}
               <button type="button" onClick={() => runPeople()} disabled={pBusy}
                 className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-60 flex-shrink-0"
@@ -766,6 +844,12 @@ export default function CustomerLookupPanel({ access: accessProp }) {
                 </div>
               )}
               <PersonCard person={person} merged={merged} canVehicles={canVehicles} onVehicles={gotoVehicles} />
+              {canVehicles && withVehicles && (pData?.vehicles || pData?.vehicles_status) && (
+                <div className="space-y-2">
+                  <SectionHeader level="sub" icon={Car} title="Vehicles at their address" />
+                  <VehicleResults data={pData} onRetry={() => runPeople()} />
+                </div>
+              )}
             </>
           )}
         </div>
@@ -803,12 +887,60 @@ export default function CustomerLookupPanel({ access: accessProp }) {
                 Split the full address into the street and ZIP — that is what the service matches on.
               </p>
             )}
-            <div className="flex items-center justify-end mt-3">
+
+            {/* The person, not just the address. A cached address answers from
+                the name alone being absent, but a NEW search fills a quote form
+                and cannot start without a name — so these sit in the main form
+                rather than being hidden as optional extras. */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3">
+              <Field label="Name" className="sm:col-span-2"
+                hint={vMode === 'cache' ? 'Not needed for a cached address' : 'Required to run a new search'}>
+                <div className="relative">
+                  <User size={14} className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: 'var(--color-text-tertiary)' }} />
+                  <input className="input pl-9" value={vName} placeholder="Alfredo Garcia"
+                    onChange={e => setVName(e.target.value)} onKeyDown={e => e.key === 'Enter' && runVehicles()} />
+                </div>
+              </Field>
+              <Field label="Date of birth" hint="Optional, but makes a match far more likely">
+                <div className="relative">
+                  <CalendarClock size={14} className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: 'var(--color-text-tertiary)' }} />
+                  <input className="input pl-9" value={vDob} placeholder="03/24/1946"
+                    onChange={e => setVDob(e.target.value)} onKeyDown={e => e.key === 'Enter' && runVehicles()} />
+                </div>
+              </Field>
+            </div>
+
+            {/* How hard to look. A cached address is instant and free; a new
+                search runs against the provider and takes a while, so the
+                choice is the user's rather than a hidden default. */}
+            <div className="flex items-center gap-1.5 flex-wrap mt-3">
+              {[
+                { k: 'cache', l: 'Cached only',   t: 'Instant. Only answers for an address already on file.' },
+                { k: 'auto',  l: 'Search if new', t: 'Uses the cache, and runs a real search when the address is not on file.' },
+                { k: 'fresh', l: 'Force fresh',   t: 'Always runs a new search, even if the address is cached.' },
+              ].map(m => (
+                <button key={m.k} type="button" onClick={() => setVMode(m.k)} title={m.t}
+                  className="px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-colors"
+                  style={{
+                    background: vMode === m.k ? 'var(--color-primary-600)' : 'transparent',
+                    color: vMode === m.k ? '#fff' : 'var(--color-text-secondary)',
+                    borderColor: vMode === m.k ? 'var(--color-primary-600)' : 'var(--color-border)',
+                  }}>{m.l}</button>
+              ))}
+            </div>
+
+            <div className="flex items-center justify-between gap-3 flex-wrap mt-3">
+              <p className="m-0 text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>
+                {jobNote
+                  || (vMode === 'cache'
+                    ? 'Reads what is already on file — instant, and never goes out to search.'
+                    : 'A new search runs against the provider and can take a minute.')}
+              </p>
               <button type="button" onClick={() => runVehicles()} disabled={vBusy}
                 className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-60"
                 style={{ background: 'var(--gradient-sidebar)' }}>
                 {vBusy ? <Loader2 size={15} className="animate-spin" /> : <Car size={15} />}
-                {vBusy ? 'Searching…' : 'Find vehicles'}
+                {vBusy ? (jobNote || 'Searching…') : 'Find vehicles'}
               </button>
             </div>
           </Panel>
@@ -843,7 +975,7 @@ export default function CustomerLookupPanel({ access: accessProp }) {
                   {cands.map((a, i) => (
                     <li key={`${a.full}-${i}`}>
                       <button type="button"
-                        onClick={() => { setVAddress(a.street); setVZip(a.zip || ''); setCands(null); runVehicles({ address: a.street, zip: a.zip }); }}
+                        onClick={() => { setVAddress(a.street); setVZip(a.zip || ''); if (a.person) setVName(a.person); setCands(null); runVehicles({ address: a.street, zip: a.zip, name: a.person || vName }); }}
                         className="w-full text-left flex items-center gap-2 text-xs rounded-lg px-2.5 py-2 transition-colors"
                         style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}>
                         <MapPin size={12} className="flex-shrink-0" style={{ color: 'var(--color-primary-600)' }} />
@@ -866,7 +998,7 @@ export default function CustomerLookupPanel({ access: accessProp }) {
                 <MapPin size={11} /> {vData.address}{vZip ? ` · ${digits(vZip).slice(0, 5)}` : ''}
                 {zipInfo && !zipInfo.error ? ` · ${zipInfo.city}, ${zipInfo.state_abbr}` : ''}
               </div>
-              <VehicleResults data={vData} />
+              <VehicleResults data={vData} onRetry={() => runVehicles()} />
             </div>
           )}
         </div>
