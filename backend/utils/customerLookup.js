@@ -188,9 +188,162 @@ function normPhone(p) {
   return ten.length === 10 ? `${ten.slice(0, 3)}-${ten.slice(3, 6)}-${ten.slice(6)}` : '';
 }
 
+// ── quotas ───────────────────────────────────────────────────────────────────
+// "N searches per D days", set globally and overridable per person. People and
+// vehicle searches are counted separately because they cost different things.
+//
+// Config lives beside the access switches:
+//   global default  business_config global customer_lookup.quota
+//                   { people: { limit, days }, vehicles: { limit, days } }
+//   per user        customer_lookup.users -> <id>.quota.{people,vehicles}
+// limit 0 means unlimited, which is the shipped default so nothing is capped
+// until somebody decides to cap it.
+//
+// USAGE is one row PER USER (scope customer_lookup.usage, key = user id) and is
+// read straight from the table, never through the 60s config cache. A single
+// shared blob would have every counter fighting the same read-modify-write, and
+// a cached read would hand out a stale count.
+//
+// The window rolls from the FIRST search in it, not the calendar month: the
+// first search starts the clock, and D days later the count is back to zero.
+const USAGE_SCOPE = 'customer_lookup.usage';
+const QUOTA_KEY   = 'customer_lookup.quota';
+const KINDS = ['people', 'vehicles'];
+
+const oneQuota = (x, fallbackDays) => ({
+  limit: Math.max(0, parseInt(x && x.limit, 10) || 0),
+  days:  Math.min(Math.max(parseInt(x && x.days, 10) || fallbackDays, 1), 365),
+});
+
+async function globalQuota() {
+  const q = await getConfig(null, QUOTA_KEY, null);
+  return { people: oneQuota(q && q.people, 30), vehicles: oneQuota(q && q.vehicles, 30) };
+}
+
+async function setGlobalQuota(patch, updatedBy) {
+  const cur = await globalQuota();
+  const next = {
+    people:   oneQuota(patch && patch.people   ? patch.people   : cur.people,   cur.people.days),
+    vehicles: oneQuota(patch && patch.vehicles ? patch.vehicles : cur.vehicles, cur.vehicles.days),
+  };
+  await setConfig('global', QUOTA_KEY, next, updatedBy);
+  return next;
+}
+
+// Effective limits for one person: their own override wins, else the global.
+async function quotaFor(userId) {
+  const [g, map] = await Promise.all([globalQuota(), userMap()]);
+  const own = (map[userId] || {}).quota || {};
+  const out = {};
+  for (const kind of KINDS) {
+    const o = own[kind];
+    out[kind] = (o && (o.limit !== undefined || o.days !== undefined))
+      ? Object.assign(oneQuota(o, g[kind].days), { source: 'user' })
+      : Object.assign({}, g[kind], { source: 'global' });
+  }
+  return out;
+}
+
+async function setUserQuota(userId, patch, updatedBy) {
+  const map = await userMap();
+  const row = Object.assign({}, map[userId] || {});
+  const quota = Object.assign({}, row.quota || {});
+  for (const kind of KINDS) {
+    if (!patch || patch[kind] === undefined) continue;
+    // null clears the override and puts them back on the global default.
+    if (patch[kind] === null) delete quota[kind];
+    else quota[kind] = oneQuota(patch[kind], 30);
+  }
+  if (Object.keys(quota).length) row.quota = quota; else delete row.quota;
+  // Keep the row only while it still says something.
+  if (!row.people && !row.vehicles && !row.quota) delete map[userId];
+  else map[userId] = row;
+  await setConfig('global', 'customer_lookup.users', map, updatedBy);
+  return row.quota || {};
+}
+
+async function readUsage(userId) {
+  const { data } = await supabaseAdmin.from('business_config')
+    .select('value').eq('scope', USAGE_SCOPE).eq('key', userId).maybeSingle();
+  return (data && data.value && typeof data.value === 'object' && !Array.isArray(data.value)) ? data.value : {};
+}
+
+async function writeUsage(userId, value) {
+  const { error } = await supabaseAdmin.from('business_config').upsert(
+    { scope: USAGE_SCOPE, key: userId, value, updated_at: new Date().toISOString() },
+    { onConflict: 'scope,key' },
+  );
+  if (error) logger.warn('CUSTOMER_LOOKUP', 'usage write failed: ' + error.message);
+}
+
+// Where one counter stands right now, expiring the window if it has run out.
+function windowState(entry, days) {
+  const ms = days * 86400000;
+  const since = entry && entry.since ? Date.parse(entry.since) : 0;
+  if (!since || Number.isNaN(since) || Date.now() - since >= ms) return { used: 0, since: null, resetsAt: null };
+  return {
+    used: Math.max(0, parseInt(entry.used, 10) || 0),
+    since: new Date(since).toISOString(),
+    resetsAt: new Date(since + ms).toISOString(),
+  };
+}
+
+async function quotaStatus(userId) {
+  const [q, usage] = await Promise.all([quotaFor(userId), readUsage(userId)]);
+  const out = {};
+  for (const kind of KINDS) {
+    const w = windowState(usage[kind], q[kind].days);
+    const unlimited = q[kind].limit === 0;
+    out[kind] = {
+      limit: q[kind].limit, days: q[kind].days, source: q[kind].source,
+      unlimited, used: w.used,
+      remaining: unlimited ? null : Math.max(0, q[kind].limit - w.used),
+      window_started: w.since, resets_at: w.resetsAt,
+    };
+  }
+  return out;
+}
+
+// Spend one search. Checked and written BEFORE the upstream call so a quota
+// cannot be walked past by firing several at once; refund() puts it back when
+// the call turns out to have failed.
+async function consume(userId, kind) {
+  const q = (await quotaFor(userId))[kind];
+  const usage = await readUsage(userId);
+  const w = windowState(usage[kind], q.days);
+  if (q.limit > 0 && w.used >= q.limit) {
+    return { ok: false, limit: q.limit, days: q.days, used: w.used, resets_at: w.resetsAt };
+  }
+  const since = w.since || new Date().toISOString();
+  usage[kind] = { used: w.used + 1, since };
+  await writeUsage(userId, usage);
+  return { ok: true, limit: q.limit, days: q.days, used: w.used + 1, resets_at: new Date(Date.parse(since) + q.days * 86400000).toISOString() };
+}
+
+async function refund(userId, kind) {
+  const usage = await readUsage(userId);
+  const e = usage[kind];
+  if (!e || !e.since) return;
+  const used = Math.max(0, (parseInt(e.used, 10) || 0) - 1);
+  // Dropping to zero also drops the window, so the next search starts a fresh
+  // one rather than inheriting a clock nothing is counted against.
+  if (used === 0) delete usage[kind]; else usage[kind] = { used, since: e.since };
+  await writeUsage(userId, usage);
+}
+
+async function resetUsage(userId, kind) {
+  if (!kind) { await writeUsage(userId, {}); return {}; }
+  const usage = await readUsage(userId);
+  delete usage[kind];
+  await writeUsage(userId, usage);
+  return usage;
+}
+
 module.exports = {
   KEY_NAME, DEFAULT_BASE,
   getApiKey, setApiKey, normalizeBase, settings,
   userMap, accessFor, setAccess,
   rateLimit, call, normPhone,
+  globalQuota, setGlobalQuota, quotaFor, setUserQuota,
+  quotaStatus, consume, refund, resetUsage, readUsage,
 };

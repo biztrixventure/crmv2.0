@@ -9,7 +9,11 @@
 //   GET  /customer-lookup/settings             superadmin — service config, key masked
 //   PUT  /customer-lookup/settings             superadmin — base URL / key / on-off
 //   GET  /customer-lookup/settings/test        superadmin — reachability + auth probe
-//   GET  /customer-lookup/access/:userId       superadmin — one user's switches
+//   GET  /customer-lookup/my-quota             what is left of the caller's allowance
+//   GET  /customer-lookup/quota                superadmin — global default allowance
+//   PUT  /customer-lookup/quota                superadmin — set it
+//   POST /customer-lookup/quota/reset/:userId  superadmin — clear one user's usage
+//   GET  /customer-lookup/access/:userId       superadmin — one user's switches + quota
 //   PUT  /customer-lookup/access/:userId       superadmin — set them
 //
 // Nothing here writes a lookup result anywhere. The API key never leaves the
@@ -51,7 +55,24 @@ async function guard(req, res, need) {
     res.status(429).json({ error: `Too many lookups — wait ${rl.retryAfter}s and try again.` });
     return null;
   }
+  // Quota is spent BEFORE the upstream call, so firing several at once cannot
+  // walk past the limit. finish() hands it back if the call turns out to fail.
+  const q = await cl.consume(req.user.id, need);
+  if (!q.ok) {
+    res.status(429).json({
+      error: `You have used all ${q.limit} ${need === 'people' ? 'people' : 'vehicle'} searches for this period.`,
+      quota: q, quota_exhausted: true,
+    });
+    return null;
+  }
   return acc;
+}
+
+// One exit for a proxied call: a failure refunds the search it just spent.
+async function finish(req, res, r, kind) {
+  if (r.ok) return res.json(r.data);
+  if (kind) await cl.refund(req.user.id, kind);
+  return res.status(r.status).json({ error: r.error });
 }
 
 const send = (res, r) => (r.ok ? res.json(r.data) : res.status(r.status).json({ error: r.error }));
@@ -59,7 +80,35 @@ const send = (res, r) => (r.ok ? res.json(r.data) : res.status(r.status).json({ 
 // ── my-access ────────────────────────────────────────────────────────────────
 router.get('/my-access', asyncHandler(async (req, res) => {
   const a = await myAccess(req);
-  res.json({ people: a.people, vehicles: a.vehicles, any: a.people || a.vehicles });
+  const quota = (a.people || a.vehicles) ? await cl.quotaStatus(req.user.id) : null;
+  res.json({ people: a.people, vehicles: a.vehicles, any: a.people || a.vehicles, quota });
+}));
+
+// Just the allowance — polled after a search so the bars move without a reload.
+router.get('/my-quota', asyncHandler(async (req, res) => {
+  const a = await myAccess(req);
+  if (!a.people && !a.vehicles) return res.status(403).json({ error: 'Customer lookup is not enabled for you' });
+  res.json(await cl.quotaStatus(req.user.id));
+}));
+
+// ── quota administration (superadmin) ────────────────────────────────────────
+// The global default applies to everyone who has no override of their own.
+router.get('/quota', asyncHandler(async (req, res) => {
+  if (!await superadminOnly(req, res)) return;
+  res.json({ global: await cl.globalQuota() });
+}));
+
+router.put('/quota', asyncHandler(async (req, res) => {
+  if (!await superadminOnly(req, res)) return;
+  res.json({ global: await cl.setGlobalQuota(req.body || {}, req.user.id) });
+}));
+
+// Put someone back to a full allowance without waiting for their window.
+router.post('/quota/reset/:userId', asyncHandler(async (req, res) => {
+  if (!await superadminOnly(req, res)) return;
+  const kind = ['people', 'vehicles'].includes(req.body?.kind) ? req.body.kind : null;
+  await cl.resetUsage(req.params.userId, kind);
+  res.json({ user_id: req.params.userId, reset: kind || 'all', quota: await cl.quotaStatus(req.params.userId) });
 }));
 
 // ── person lookup (phone, optionally narrowed to one name) ───────────────────
@@ -73,7 +122,7 @@ router.get('/person', asyncHandler(async (req, res) => {
     // scrape=0 is cache-only; anything else lets the service scrape on a miss.
     scrape: req.query.scrape === '0' ? '0' : undefined,
   }, { userId: req.user.id, label: `person ${phone}` });
-  send(res, r);
+  await finish(req, res, r, 'people');
 }));
 
 // ── free-text search ─────────────────────────────────────────────────────────
@@ -82,7 +131,7 @@ router.get('/search', asyncHandler(async (req, res) => {
   const q = String(req.query.q || '').trim();
   if (q.length < 3) return res.status(422).json({ error: 'Type at least 3 characters' });
   const r = await cl.call('/api/search', { q }, { userId: req.user.id, label: `search "${q}"` });
-  send(res, r);
+  await finish(req, res, r, 'people');
 }));
 
 // ── vehicles at an address ───────────────────────────────────────────────────
@@ -127,13 +176,15 @@ router.get('/vehicles', asyncHandler(async (req, res) => {
   if (mode === 'cache') {
     params.run = '0';
     const r = await cl.call('/api/vehicles', params, { userId: req.user.id, label: `vehicles cache ${street}` });
-    return r.ok ? res.json({ ...r.data, mode }) : res.status(r.status).json({ error: r.error });
+    if (!r.ok) { await cl.refund(req.user.id, 'vehicles'); return res.status(r.status).json({ error: r.error }); }
+    return res.json({ ...r.data, mode });
   }
 
   // A fresh run fills a quote form — without a name it cannot even start, and
   // the upstream would just hand back an empty cache read that looks like
   // "no vehicles". Say what is missing instead.
   if (!params.name && !(params.first_name && params.last_name)) {
+    await cl.refund(req.user.id, 'vehicles');    // nothing was searched
     return res.status(422).json({
       error: 'A new vehicle search needs the person’s name. Add a name (a date of birth makes it far more reliable), or switch to cached-only.',
       needs: ['name'],
@@ -143,13 +194,15 @@ router.get('/vehicles', asyncHandler(async (req, res) => {
   params.async = '1';
 
   const r = await cl.call('/api/vehicles', params, { userId: req.user.id, label: `vehicles ${mode} ${street}` });
-  if (!r.ok) return res.status(r.status).json({ error: r.error });
+  if (!r.ok) { await cl.refund(req.user.id, 'vehicles'); return res.status(r.status).json({ error: r.error }); }
   res.json({ ...r.data, mode, address: street, zip });
 }));
 
 // ── poll an async job ────────────────────────────────────────────────────────
 // The ticket is opaque and generated by the service; keep it to the character
 // set it actually uses so it can never be bent into another upstream path.
+const refunded = new Set();   // tickets already refunded, so polling cannot over-refund
+
 router.get('/job/:ticket', asyncHandler(async (req, res) => {
   const acc = await myAccess(req);
   if (!acc.people && !acc.vehicles) return res.status(403).json({ error: 'Customer lookup is not enabled for you' });
@@ -158,6 +211,15 @@ router.get('/job/:ticket', asyncHandler(async (req, res) => {
 
   const r = await cl.call(`/api/job/${ticket}`, {}, { userId: req.user.id, label: `job ${ticket}` });
   if (!r.ok) return res.status(r.status).json({ error: r.error });
+
+  // A job that finished in failure searched nothing, so hand the quota back —
+  // but polling repeats, so only the first terminal look refunds.
+  const failed = r.data?.status === 'error' || r.data?.vehicles_status === 'error' || r.data?.result?.status === 'error';
+  if (failed && !refunded.has(ticket)) {
+    refunded.add(ticket);
+    if (refunded.size > 500) refunded.clear();
+    await cl.refund(req.user.id, 'vehicles');
+  }
   // A vehicles-only user must not receive the person half of an enrich job.
   const data = { ...r.data };
   if (!acc.people) delete data.person;
@@ -181,6 +243,21 @@ router.get('/enrich', asyncHandler(async (req, res) => {
   const phone = cl.normPhone(req.query.phone);
   if (!phone) return res.status(422).json({ error: 'Enter a 10-digit US phone number' });
 
+  // Enrich returns a person AND vehicles, so it spends from both allowances —
+  // otherwise it would be a way around the vehicle limit.
+  const spent = [];
+  for (const kind of (acc.vehicles ? ['people', 'vehicles'] : ['people'])) {
+    const q = await cl.consume(req.user.id, kind);
+    if (!q.ok) {
+      for (const done of spent) await cl.refund(req.user.id, done);
+      return res.status(429).json({
+        error: `You have used all ${q.limit} ${kind === 'people' ? 'people' : 'vehicle'} searches for this period.`,
+        quota: q, quota_exhausted: true,
+      });
+    }
+    spent.push(kind);
+  }
+
   const mode = ['cache', 'fresh', 'auto'].includes(req.query.mode) ? req.query.mode : 'auto';
   const params = { phone };
   for (const k of ['name', 'dob']) {
@@ -195,7 +272,10 @@ router.get('/enrich', asyncHandler(async (req, res) => {
   if (mode !== 'cache' && acc.vehicles) params.async = '1';
 
   const r = await cl.call('/api/enrich', params, { userId: req.user.id, label: `enrich ${phone}` });
-  if (!r.ok) return res.status(r.status).json({ error: r.error });
+  if (!r.ok) {
+    for (const kind of spent) await cl.refund(req.user.id, kind);
+    return res.status(r.status).json({ error: r.error });
+  }
   const data = { ...r.data, mode };
   if (!acc.vehicles) { delete data.vehicles; delete data.vehicles_status; delete data.vehicles_cached; }
   res.json(data);
@@ -234,11 +314,22 @@ router.get('/addresses', asyncHandler(async (req, res) => {
   const name  = String(req.query.name || '').trim();
   if (!phone && name.length < 3) return res.status(422).json({ error: 'Enter a phone number or a name' });
 
+  // Finding someone's addresses IS a search. Charge it to the allowance the
+  // caller actually holds, so a vehicles-only user is not billed for people.
+  const kind = acc.people ? 'people' : 'vehicles';
+  const spend = await cl.consume(req.user.id, kind);
+  if (!spend.ok) {
+    return res.status(429).json({
+      error: `You have used all ${spend.limit} ${kind === 'people' ? 'people' : 'vehicle'} searches for this period.`,
+      quota: spend, quota_exhausted: true,
+    });
+  }
+
   const r = phone
     ? await cl.call('/api/lookup', { phone, name: name || undefined, scrape: req.query.scrape === '0' ? '0' : undefined },
         { userId: req.user.id, label: `addresses ${phone}` })
     : await cl.call('/api/search', { q: name }, { userId: req.user.id, label: `addresses "${name}"` });
-  if (!r.ok) return res.status(r.status).json({ error: r.error });
+  if (!r.ok) { await cl.refund(req.user.id, kind); return res.status(r.status).json({ error: r.error }); }
 
   // Both shapes carry the same person object — /lookup as `result`, /search as
   // `results[].data` — so flatten to one list either way.
@@ -331,15 +422,37 @@ router.get('/access/:userId', asyncHandler(async (req, res) => {
   if (!await superadminOnly(req, res)) return;
   const map = await cl.userMap();
   const row = map[req.params.userId] || {};
-  res.json({ user_id: req.params.userId, people: !!row.people, vehicles: !!row.vehicles, settings: await masked() });
+  res.json({
+    user_id: req.params.userId,
+    people: !!row.people, vehicles: !!row.vehicles,
+    quota_override: row.quota || {},
+    quota: await cl.quotaStatus(req.params.userId),
+    global_quota: await cl.globalQuota(),
+    settings: await masked(),
+  });
 }));
 
 router.put('/access/:userId', asyncHandler(async (req, res) => {
   if (!await superadminOnly(req, res)) return;
   const b = req.body || {};
-  if (b.people === undefined && b.vehicles === undefined) return res.status(422).json({ error: 'Nothing to change' });
-  const row = await cl.setAccess(req.params.userId, b, req.user.id);
-  res.json({ user_id: req.params.userId, people: !!row.people, vehicles: !!row.vehicles, settings: await masked() });
+  if (b.people === undefined && b.vehicles === undefined && b.quota === undefined) {
+    return res.status(422).json({ error: 'Nothing to change' });
+  }
+  // Order matters: both writers rewrite the same users row, so the quota write
+  // has to read back what the access write just saved.
+  if (b.people !== undefined || b.vehicles !== undefined) await cl.setAccess(req.params.userId, b, req.user.id);
+  if (b.quota !== undefined) await cl.setUserQuota(req.params.userId, b.quota, req.user.id);
+
+  const map = await cl.userMap();
+  const row = map[req.params.userId] || {};
+  res.json({
+    user_id: req.params.userId,
+    people: !!row.people, vehicles: !!row.vehicles,
+    quota_override: row.quota || {},
+    quota: await cl.quotaStatus(req.params.userId),
+    global_quota: await cl.globalQuota(),
+    settings: await masked(),
+  });
 }));
 
 module.exports = router;

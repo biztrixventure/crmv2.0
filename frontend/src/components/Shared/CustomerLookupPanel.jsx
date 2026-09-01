@@ -19,10 +19,10 @@
 import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import {
   Search, Phone, User, MapPin, Car, Loader2, Copy, Check, Home, Users2,
-  Mail, Building2, Hash, ChevronRight, Info, AlertTriangle, Database, CalendarClock, RefreshCw,
+  Mail, Building2, Hash, ChevronRight, Info, AlertTriangle, Database, CalendarClock, RefreshCw, Gauge,
 } from 'lucide-react';
 import client from '../../api/client';
-import { Panel, SectionHeader, EmptyState, Field, PillTabs, Toggle, Loading } from '../UI/kit';
+import { Panel, SectionHeader, EmptyState, Field, PillTabs, Toggle, Loading, accent } from '../UI/kit';
 import { Badge, Alert, Button } from '../UI';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -33,6 +33,55 @@ const fmtPhone = (v) => {
   return t.length === 10 ? `(${t.slice(0, 3)}) ${t.slice(3, 6)}-${t.slice(6)}` : (v || '');
 };
 const errText = (e, fallback) => e?.response?.data?.error || fallback;
+
+const untilText = (iso) => {
+  if (!iso) return '';
+  const s = (new Date(iso).getTime() - Date.now()) / 1000;
+  if (s <= 0) return 'resets now';
+  if (s < 3600) return `resets in ${Math.max(1, Math.round(s / 60))} min`;
+  if (s < 86400) return `resets in ${Math.round(s / 3600)} h`;
+  return `resets in ${Math.round(s / 86400)} d`;
+};
+
+// ── allowance ────────────────────────────────────────────────────────────────
+// What is left, stated up front rather than discovered by being refused.
+// "Unlimited" says so plainly instead of drawing a bar that can never move.
+function QuotaBar({ icon: Icon, label, q }) {
+  if (!q) return null;
+  if (q.unlimited) {
+    return (
+      <div className="flex items-center gap-2 text-xs">
+        <Icon size={13} style={{ color: 'var(--color-text-tertiary)' }} />
+        <span style={{ color: 'var(--color-text-secondary)' }}>{label}</span>
+        <span className="font-semibold" style={{ color: 'var(--color-text)' }}>Unlimited</span>
+      </div>
+    );
+  }
+  const pct = q.limit > 0 ? Math.min(100, Math.round((q.used / q.limit) * 100)) : 0;
+  const tone = q.remaining === 0 ? 'danger' : pct >= 80 ? 'warn' : 'primary';
+  const bar = accent(tone).fg;
+  return (
+    <div className="min-w-0">
+      <div className="flex items-baseline justify-between gap-2 mb-1">
+        <span className="inline-flex items-center gap-1.5 text-xs min-w-0" style={{ color: 'var(--color-text-secondary)' }}>
+          <Icon size={13} className="flex-shrink-0" style={{ color: bar }} />
+          <span className="truncate">{label}</span>
+        </span>
+        <span className="text-xs font-semibold tabular-nums whitespace-nowrap" style={{ color: bar }}>
+          {q.remaining} left
+        </span>
+      </div>
+      <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--color-bg-secondary)' }}
+        role="img" aria-label={`${q.used} of ${q.limit} used`}>
+        <span className="block h-full transition-all" style={{ width: `${pct}%`, background: bar }} />
+      </div>
+      <p className="m-0 mt-1 text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>
+        {q.used} of {q.limit} used in {q.days} day{q.days === 1 ? '' : 's'}
+        {q.resets_at ? ` · ${untilText(q.resets_at)}` : ''}
+      </p>
+    </div>
+  );
+}
 
 // People paste the whole thing — "7307 Independence Way, San Antonio, TX 78223
 // 4870". The service matches a street, so split it here instead of sending the
@@ -553,6 +602,10 @@ export default function CustomerLookupPanel({ access: accessProp }) {
   }, [accessProp]);
   const access = accessProp || fetched;
 
+  // my-access already carries the allowance, so the bars are drawn on the same
+  // round-trip that decides which tabs exist.
+  useEffect(() => { if (access?.quota) setQuota(access.quota); }, [access]);
+
   const canPeople   = !!access?.people;
   const canVehicles = !!access?.vehicles;
   const [tab, setTab] = useState('people');
@@ -586,6 +639,15 @@ export default function CustomerLookupPanel({ access: accessProp }) {
   const [vDob, setVDob]         = useState('');
   const [vMode, setVMode]       = useState('auto');    // cache | auto | fresh
   const [jobNote, setJobNote]   = useState('');        // live progress of a running search
+  const [quota, setQuota]       = useState(null);
+
+  // Re-read after every search so the bars move as they are spent, without a
+  // reload and without the panel trying to guess the count itself.
+  const refreshQuota = useCallback(() => {
+    client.get('customer-lookup/my-quota')
+      .then(r => setQuota(r.data))
+      .catch(() => {});
+  }, []);
 
   // A new vehicle search fills a real quote form on the provider's site, which
   // takes far longer than a request should wait on. The server hands back a job
@@ -646,7 +708,7 @@ export default function CustomerLookupPanel({ access: accessProp }) {
       }
     } catch (e) {
       setPErr(e?.response ? errText(e, 'Lookup failed.') : (e.message || 'Lookup failed.'));
-    } finally { setPBusy(false); setJobNote(''); }
+    } finally { setPBusy(false); setJobNote(''); refreshQuota(); }
   }, [mode, phone, name, q, cacheOnly, withVehicles, canVehicles, pollJob]);
 
   const runVehicles = useCallback(async (override = {}) => {
@@ -679,7 +741,7 @@ export default function CustomerLookupPanel({ access: accessProp }) {
       }
     } catch (e) {
       setVErr(e?.response ? errText(e, 'Vehicle search failed.') : (e.message || 'Vehicle search failed.'));
-    } finally { setVBusy(false); setJobNote(''); }
+    } finally { setVBusy(false); setJobNote(''); refreshQuota(); }
   }, [vAddress, vZip, vName, vDob, vMode, pollJob]);
 
   // Name / phone → candidate addresses (server returns addresses only).
@@ -736,6 +798,16 @@ export default function CustomerLookupPanel({ access: accessProp }) {
     <div className="max-w-5xl mx-auto px-4 py-5 space-y-4">
       <SectionHeader level="page" icon={Search} title="Customer Lookup"
         subtitle="Look a customer up by phone or name, and see the vehicles recorded at an address. Nothing you search here is saved to the CRM." />
+
+      {quota && (canPeople || canVehicles) && !(quota.people?.unlimited && quota.vehicles?.unlimited) && (
+        <Panel pad="md" radius="xl" tone="inset">
+          <SectionHeader level="sub" icon={Gauge} title="Your search allowance" />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {canPeople   && <QuotaBar icon={User} label="People searches"  q={quota.people} />}
+            {canVehicles && <QuotaBar icon={Car}  label="Vehicle searches" q={quota.vehicles} />}
+          </div>
+        </Panel>
+      )}
 
       {tabs.length > 1 && <PillTabs items={tabs} value={tab} onChange={setTab} />}
 
