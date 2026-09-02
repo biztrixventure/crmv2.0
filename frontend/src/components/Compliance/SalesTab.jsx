@@ -156,6 +156,11 @@ const RowMenu = ({ items }) => {
 // with the dollar sign." Payout Status (the separate manual tri-state) stays
 // three individual KpiTiles with plain counts, no $ — a different field with
 // no $ meaning of its own.
+// Payout-eligible means APPROVED. compliance_reviewed_at alone was too narrow:
+// a sale that reached closed_won through the generic update route never gets
+// that stamp, and its DP / Payout / Paid to Partner cells sat blank forever.
+const isApproved = (s) => !!s?.compliance_reviewed_at || s?.status === 'closed_won';
+
 const DpStatusCard = ({ rows, width = 168, title = 'DP Status' }) => (
   <div className="rounded-xl p-3 flex-shrink-0" style={{ width, backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
     <p className="text-[11px] font-bold uppercase tracking-widest mb-2 m-0 truncate" style={{ color: 'var(--color-text-tertiary)' }} title={title}>{title}</p>
@@ -474,7 +479,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
       // Payout section (superadmin only, only for a sale compliance has ever
       // approved) — a second, independent write so a rejected payout PATCH
       // never blocks the compliance status update that already succeeded.
-      if (isSuperadmin && editTarget?.compliance_reviewed_at) {
+      if (isSuperadmin && isApproved(editTarget)) {
         const prevStatus    = editTarget.payout_status || 'pending';
         const prevConfirmed = editTarget.payout_confirmed || 'pending';
         const prevPaid      = !!editTarget.paid_to_closer;
@@ -928,7 +933,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                           from the Update popup, not inline. */}
                       {isSuperadmin && (
                         <td className="px-3 py-1.5 text-xs">
-                          {s.compliance_reviewed_at ? (
+                          {isApproved(s) ? (
                             <span className="inline-flex items-center text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded whitespace-nowrap"
                               style={{ backgroundColor: DP_TINT[s.payout_status || 'pending'].bg, color: DP_TINT[s.payout_status || 'pending'].fg }}>
                               {PAYOUT_LABEL[s.payout_status || 'pending']}
@@ -938,7 +943,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                       )}
                       {isSuperadmin && (
                         <td className="px-3 py-1.5 text-xs">
-                          {s.compliance_reviewed_at ? (
+                          {isApproved(s) ? (
                             <span className="inline-flex items-center gap-1 flex-wrap">
                               <span className="inline-flex items-center text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded whitespace-nowrap"
                                 style={{ backgroundColor: PAYOUT_CONFIRMED_TINT[s.payout_confirmed || 'pending'].bg, color: PAYOUT_CONFIRMED_TINT[s.payout_confirmed || 'pending'].fg }}>
@@ -960,7 +965,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                           Update popup. */}
                       {isSuperadmin && (
                         <td className="px-3 py-1.5 text-xs">
-                          {s.compliance_reviewed_at ? (
+                          {isApproved(s) ? (
                             <span className="inline-flex items-center text-[11px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded whitespace-nowrap"
                               style={{
                                 backgroundColor: s.paid_to_partner ? 'var(--color-success-100)' : 'var(--color-bg-secondary)',

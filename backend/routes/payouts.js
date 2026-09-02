@@ -27,6 +27,13 @@ const { isSuperAdmin } = require('../models/helpers');
 
 const router = express.Router();
 
+// A sale is payout-eligible once it is APPROVED. That used to be read as
+// "compliance_reviewed_at is stamped", but a sale can reach closed_won through
+// the generic update route, which never stamps it — so six approved sales had
+// their DP Status, Payout Status and Paid to Partner columns permanently blank
+// and unsettable. closed_won IS the approved state, so accept either.
+const APPROVED_FILTER = 'compliance_reviewed_at.not.is.null,status.eq.closed_won';
+
 const PAYOUT_STATUSES = ['pending', 'paid', 'reverted'];
 const PAYOUT_CONFIRMED_STATUSES = ['pending', 'yes', 'no'];
 
@@ -84,9 +91,9 @@ router.patch('/bulk', asyncHandler(async (req, res) => {
       .update(updates)
       .in('id', chunk)
       // Same eligibility gate as the single-row PATCH — a row that was never
-      // compliance-approved silently stays untouched rather than erroring
-      // the whole batch, so a mixed selection just reports it as skipped.
-      .not('compliance_reviewed_at', 'is', null)
+      // approved silently stays untouched rather than erroring the whole
+      // batch, so a mixed selection just reports it as skipped.
+      .or(APPROVED_FILTER)
       .select('id');
     if (error) return res.status(500).json({ error: error.message, updated });
     updated += (data || []).length;
@@ -126,7 +133,7 @@ router.patch('/:id', asyncHandler(async (req, res) => {
     .from('sales')
     .update(updates)
     .eq('id', id)
-    .not('compliance_reviewed_at', 'is', null)
+    .or(APPROVED_FILTER)
     .select('id, payout_status, payout_confirmed, paid_to_closer, paid_to_partner, payout_updated_at')
     .maybeSingle();
   if (error) return res.status(500).json({ error: error.message });

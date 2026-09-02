@@ -1609,7 +1609,15 @@ router.put(
     if (payment_due_note !== undefined) updates.payment_due_note = payment_due_note;
     if (reference_no !== undefined)    updates.reference_no     = reference_no;
     if (client_name !== undefined)     updates.client_name      = titleCase(client_name);
-    if (fronter_id !== undefined)          updates.fronter_id          = fronter_id;
+    // Fronter credit is NEVER dropped by an edit that simply did not carry it.
+    // The sale form builds this from the `sale_fronter` dynamic field, and no
+    // company has that field configured, so every edit was sending null and
+    // wiping the fronter the transfer had credited — 443 sales lost their
+    // fronter this way, which is why a fronter's own month came up short.
+    // Clearing a fronter on purpose is what Reassign Ownership is for.
+    if (fronter_id !== undefined && (fronter_id || !existing.fronter_id)) {
+      updates.fronter_id = fronter_id || null;
+    }
     if (sale_date !== undefined)           updates.sale_date           = sale_date;
     if (form_data !== undefined)           updates.form_data           = titleCaseFormData(expandStateInFormData(form_data));
     if (closer_disposition !== undefined)  updates.closer_disposition  = closer_disposition;

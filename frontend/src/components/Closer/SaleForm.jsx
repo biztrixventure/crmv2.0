@@ -401,7 +401,12 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
       payment_due_note: dynVal('sale_payment_due_note') || null,
       reference_no:     dynVal('sale_reference_no')     || null,
       client_name:      dynVal('sale_client')           || null,
-      fronter_id:          dynVal('sale_fronter')     || null,
+      // Only travels when the form actually HAS a fronter field. Sending it
+      // blind sent null on every edit and wiped the fronter the transfer
+      // credited; omitting the key leaves the server's value alone.
+      ...(fields.some(f => f.field_type === 'sale_fronter')
+        ? { fronter_id: dynVal('sale_fronter') || null }
+        : {}),
       sale_date:           dynVal('sale_date')         || new Date().toISOString().split('T')[0],
       // Only stamp 'open' when CREATING. On an edit (e.g. a closer fixing a
       // needs_revision sale) we must not force the status — the caller resubmits
