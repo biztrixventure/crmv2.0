@@ -12,7 +12,7 @@
 // Both user switches default OFF. Turning the service on globally still shows
 // the tool to nobody until a switch is flipped for a named person.
 import { useState, useEffect, useCallback } from 'react';
-import { Search, User, Car, Link2, KeyRound, Timer, Plug, CheckCircle2, XCircle, Gauge, RotateCcw } from 'lucide-react';
+import { Search, User, Car, Link2, KeyRound, Timer, Plug, CheckCircle2, XCircle, Gauge, RotateCcw, Fingerprint } from 'lucide-react';
 import client from '../../../api/client';
 import { Alert } from '../../../components/UI';
 import { Panel, SectionHeader, Loading, Toggle, Field, useFlash } from '../../UI/kit';
@@ -30,11 +30,18 @@ const SWITCHES = [
     label: 'Find vehicles at an address',
     hint: 'Opens the Vehicles search: vehicles recorded at an address. They can type the address, or turn a name or phone into one — that path returns addresses only, never a full profile.',
   },
+  {
+    key: 'vin',
+    icon: Fingerprint,
+    label: 'Look up a VIN for a vehicle',
+    hint: 'Adds a Get VIN button to each vehicle found. It resolves the VIN for that exact car at that address, and is the most expensive of the three — it drives a real browser upstream, so give it the tightest allowance.',
+  },
 ];
 
 const QUOTA_KINDS = [
   { key: 'people',   label: 'People searches' },
   { key: 'vehicles', label: 'Vehicle searches' },
+  { key: 'vin',      label: 'VIN lookups' },
 ];
 
 const untilText = (iso) => {
@@ -79,7 +86,7 @@ function AdminUsage({ label, q }) {
 
 export default function CustomerLookupSection({ account }) {
   const userId = account?.user_id;
-  const [access, setAccess]   = useState({ people: false, vehicles: false });
+  const [access, setAccess]   = useState({ people: false, vehicles: false, vin: false });
   const [cfg, setCfg]         = useState(null);
   const [loading, setLoading] = useState(true);
   const [allowed, setAllowed] = useState(true);
@@ -116,7 +123,7 @@ export default function CustomerLookupSection({ account }) {
     setLoading(true);
     try {
       const r = await client.get(`customer-lookup/access/${userId}`);
-      setAccess({ people: !!r.data.people, vehicles: !!r.data.vehicles });
+      setAccess({ people: !!r.data.people, vehicles: !!r.data.vehicles, vin: !!r.data.vin });
       hydrate(r.data.settings);
       takeQuota(r.data);
       setAllowed(true);
@@ -144,7 +151,7 @@ export default function CustomerLookupSection({ account }) {
     try {
       const r = await client.put(`customer-lookup/access/${userId}`, { quota: { [kind]: value } });
       takeQuota(r.data);
-      const what = kind === 'people' ? 'People' : 'Vehicle';
+      const what = kind === 'people' ? 'People' : kind === 'vin' ? 'VIN' : 'Vehicle';
       flash('success', value === null
         ? `${what} searches follow the default again.`
         : `${what} searches set to ${value.limit ? `${value.limit} per ${value.days} day${value.days === 1 ? '' : 's'}` : 'unlimited'} for this user.`);
@@ -174,7 +181,7 @@ export default function CustomerLookupSection({ account }) {
     setBusy(key);
     try {
       const r = await client.put(`customer-lookup/access/${userId}`, { [key]: next });
-      setAccess({ people: !!r.data.people, vehicles: !!r.data.vehicles });
+      setAccess({ people: !!r.data.people, vehicles: !!r.data.vehicles, vin: !!r.data.vin });
       hydrate(r.data.settings);
       const what = key === 'people' ? 'People search' : 'Vehicle search';
       flash('success', next

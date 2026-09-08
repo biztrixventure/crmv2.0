@@ -88,13 +88,15 @@ async function accessFor(userId, { superadmin = false } = {}) {
   // same rule the DNC lookup uses. Everyone else needs their own switch.
   const people   = superadmin || !!row.people;
   const vehicles = superadmin || !!row.vehicles;
+  const vin      = superadmin || !!row.vin;
   const live = cfg.enabled && configured;
   return {
     people:   live && people,
     vehicles: live && vehicles,
+    vin:      live && vin,
     // Diagnostics, so the UI can say WHY it is closed instead of just vanishing.
     enabled: cfg.enabled, configured, superadmin,
-    granted: { people, vehicles },
+    granted: { people, vehicles, vin },
   };
 }
 
@@ -103,9 +105,10 @@ async function setAccess(userId, patch, updatedBy) {
   const row = { ...(map[userId] || {}) };
   if (patch.people   !== undefined) row.people   = !!patch.people;
   if (patch.vehicles !== undefined) row.vehicles = !!patch.vehicles;
+  if (patch.vin      !== undefined) row.vin      = !!patch.vin;
   // Drop the key entirely when nothing is granted — keeps the config row from
   // growing a tombstone for every user ever toggled.
-  if (!row.people && !row.vehicles) delete map[userId];
+  if (!row.people && !row.vehicles && !row.vin) delete map[userId];
   else map[userId] = row;
   await setConfig('global', 'customer_lookup.users', map, updatedBy);
   return row;
@@ -208,7 +211,7 @@ function normPhone(p) {
 // first search starts the clock, and D days later the count is back to zero.
 const USAGE_SCOPE = 'customer_lookup.usage';
 const QUOTA_KEY   = 'customer_lookup.quota';
-const KINDS = ['people', 'vehicles'];
+const KINDS = ['people', 'vehicles', 'vin'];
 
 const oneQuota = (x, fallbackDays) => ({
   limit: Math.max(0, parseInt(x && x.limit, 10) || 0),
@@ -217,7 +220,7 @@ const oneQuota = (x, fallbackDays) => ({
 
 async function globalQuota() {
   const q = await getConfig(null, QUOTA_KEY, null);
-  return { people: oneQuota(q && q.people, 30), vehicles: oneQuota(q && q.vehicles, 30) };
+  return { people: oneQuota(q && q.people, 30), vehicles: oneQuota(q && q.vehicles, 30), vin: oneQuota(q && q.vin, 30) };
 }
 
 async function setGlobalQuota(patch, updatedBy) {
@@ -225,6 +228,7 @@ async function setGlobalQuota(patch, updatedBy) {
   const next = {
     people:   oneQuota(patch && patch.people   ? patch.people   : cur.people,   cur.people.days),
     vehicles: oneQuota(patch && patch.vehicles ? patch.vehicles : cur.vehicles, cur.vehicles.days),
+    vin:      oneQuota(patch && patch.vin      ? patch.vin      : cur.vin,      cur.vin.days),
   };
   await setConfig('global', QUOTA_KEY, next, updatedBy);
   return next;
@@ -256,7 +260,7 @@ async function setUserQuota(userId, patch, updatedBy) {
   }
   if (Object.keys(quota).length) row.quota = quota; else delete row.quota;
   // Keep the row only while it still says something.
-  if (!row.people && !row.vehicles && !row.quota) delete map[userId];
+  if (!row.people && !row.vehicles && !row.vin && !row.quota) delete map[userId];
   else map[userId] = row;
   await setConfig('global', 'customer_lookup.users', map, updatedBy);
   return row.quota || {};

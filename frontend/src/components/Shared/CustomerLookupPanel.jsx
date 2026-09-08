@@ -19,7 +19,7 @@
 import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import {
   Search, Phone, User, MapPin, Car, Loader2, Copy, Check, Home, Users2,
-  Mail, Building2, Hash, ChevronRight, Info, AlertTriangle, Database, CalendarClock, RefreshCw, Gauge,
+  Mail, Building2, Hash, ChevronRight, Info, AlertTriangle, Database, CalendarClock, RefreshCw, Gauge, Fingerprint,
 } from 'lucide-react';
 import client from '../../api/client';
 import { Panel, SectionHeader, EmptyState, Field, PillTabs, Toggle, Loading, accent } from '../UI/kit';
@@ -430,7 +430,24 @@ const FIELD_SETS = {
   mileage: ['mileage', 'miles', 'odometer'],
 };
 
-function VehicleCard({ record, index }) {
+// The three fields /api/vin requires, read out of whatever shape the record
+// arrived in. Returns null when the record cannot identify a car, so the
+// button is never offered for a lookup that would just 422.
+function vehicleIdent(record) {
+  const scalars = collectScalars(record || {});
+  const used = new Set();
+  const grab = (names) => {
+    const hit = pickFrom(scalars, names, used);
+    if (hit) { used.add(pathKey(hit.path)); return hit.value; }
+    return '';
+  };
+  const year  = grab(FIELD_SETS.year);
+  const make  = grab(FIELD_SETS.make);
+  const model = grab(FIELD_SETS.model);
+  return (year && make && model) ? { year, make, model } : null;
+}
+
+function VehicleCard({ record, index, canVin, vinState, onVin }) {
   const scalars = collectScalars(record);
   const got = {};
   const usedPaths = new Set();
@@ -482,6 +499,39 @@ function VehicleCard({ record, index }) {
         </div>
       </div>
 
+      {canVin && vehicleIdent(record) && (
+        <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--color-border)' }}>
+          {!vinState?.vin && !vinState?.error && (
+            <button type="button" onClick={() => onVin(index, record)} disabled={vinState?.busy}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border disabled:opacity-60"
+              style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-primary-600)' }}>
+              {vinState?.busy ? <Loader2 size={13} className="animate-spin" /> : <Fingerprint size={13} />}
+              {vinState?.busy ? (vinState.note || 'Looking up VIN…') : 'Get VIN'}
+            </button>
+          )}
+          {vinState?.vin && (
+            <Row icon={Fingerprint} label="VIN">
+              <span className="inline-flex items-center gap-1">
+                <span className="font-mono font-semibold break-all">{vinState.vin}</span>
+                <CopyBtn value={vinState.vin} label="Copy VIN" />
+              </span>
+            </Row>
+          )}
+          {!vinState?.vin && vinState?.status === 'not_found' && (
+            <p className="m-0 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
+              No VIN on record for this car at this address.
+            </p>
+          )}
+          {vinState?.error && (
+            <p className="m-0 text-xs flex items-center gap-2 flex-wrap" style={{ color: 'var(--color-error-600)' }}>
+              {vinState.error}
+              <button type="button" onClick={() => onVin(index, record)}
+                className="font-semibold" style={{ color: 'var(--color-primary-600)' }}>Try again</button>
+            </p>
+          )}
+        </div>
+      )}
+
       {(got.vin || got.plate || got.owner) && (
         <div className="mt-3 pt-3 space-y-2" style={{ borderTop: '1px solid var(--color-border)' }}>
           {got.vin && (
@@ -518,7 +568,7 @@ function VehicleCard({ record, index }) {
   );
 }
 
-function VehicleResults({ data, onRetry }) {
+function VehicleResults({ data, onRetry, canVin, vins, onVin }) {
   const [showRaw, setShowRaw] = useState(false);
   const records = useMemo(() => {
     if (!data) return [];
@@ -574,7 +624,10 @@ function VehicleResults({ data, onRetry }) {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        {records.map((rec, i) => <VehicleCard key={i} record={rec} index={i} />)}
+        {records.map((rec, i) => (
+          <VehicleCard key={i} record={rec} index={i}
+            canVin={canVin} vinState={vins?.[i]} onVin={onVin} />
+        ))}
       </div>
 
       {showRaw && (
@@ -608,6 +661,7 @@ export default function CustomerLookupPanel({ access: accessProp }) {
 
   const canPeople   = !!access?.people;
   const canVehicles = !!access?.vehicles;
+  const canVin      = !!access?.vin;
   const [tab, setTab] = useState('people');
 
   // Land on whichever search they actually hold once the answer arrives.
@@ -640,6 +694,7 @@ export default function CustomerLookupPanel({ access: accessProp }) {
   const [vMode, setVMode]       = useState('auto');    // cache | auto | fresh
   const [jobNote, setJobNote]   = useState('');        // live progress of a running search
   const [quota, setQuota]       = useState(null);
+  const [vins, setVins]         = useState({});   // vehicle row index -> VIN state
 
   // Re-read after every search so the bars move as they are spent, without a
   // reload and without the panel trying to guess the count itself.
@@ -727,7 +782,7 @@ export default function CustomerLookupPanel({ access: accessProp }) {
     const dob     = (override.dob ?? vDob).trim();
     const mode    = override.mode ?? vMode;
 
-    setVErr(''); setVData(null); setJobNote('');
+    setVErr(''); setVData(null); setJobNote(''); setVins({});
     if (!address) { setVErr('Enter a street address, or find one from a name or phone below.'); return; }
     // Only a cache read can work without a name — a new search fills a quote
     // form. Saying so beats letting the server return an empty-looking result.
@@ -771,6 +826,32 @@ export default function CustomerLookupPanel({ access: accessProp }) {
     } finally { setVBusy(false); }
   }, [vPhone, vName]);
 
+  // Clicking a vehicle resolves that exact car, at the address just searched,
+  // for the person named on the form. A cold VIN drives a browser upstream, so
+  // it comes back as a ticket and we poll it like the vehicle search.
+  const lookupVin = useCallback(async (idx, record) => {
+    const ident = vehicleIdent(record);
+    if (!ident) return;
+    const address = (vData?.address || vAddress || '').trim();
+    const zip = digits(vZip).slice(0, 5) || digits(vData?.result?.address_used?.zip || '').slice(0, 5);
+    setVins(v => ({ ...v, [idx]: { busy: true } }));
+    try {
+      const r = await client.get('customer-lookup/vin', {
+        params: { address, zip: zip || undefined, name: vName.trim() || undefined, ...ident },
+      });
+      let d = r.data;
+      if (d?.job) {
+        d = await pollJob(d.job, (sec) => setVins(v => ({ ...v, [idx]: { busy: true, note: 'Looking up VIN… ' + sec + 's' } })));
+      }
+      const status = d?.result?.status || (d?.vin ? 'found' : 'not_found');
+      setVins(v => ({ ...v, [idx]: { busy: false, vin: d?.vin || null, status } }));
+      refreshQuota();
+    } catch (e) {
+      setVins(v => ({ ...v, [idx]: { busy: false, error: e?.response ? errText(e, 'VIN lookup failed.') : (e.message || 'VIN lookup failed.') } }));
+      refreshQuota();
+    }
+  }, [vAddress, vZip, vName, vData, pollJob, refreshQuota]);
+
   // Jump from a people result straight into a vehicle search.
   const gotoVehicles = useCallback((a) => {
     if (!canVehicles) return;
@@ -796,7 +877,7 @@ export default function CustomerLookupPanel({ access: accessProp }) {
 
   if (!access) return <Loading variant="rows" rows={3} label="Checking your access" />;
 
-  if (!canPeople && !canVehicles) {
+  if (!canPeople && !canVehicles && !canVin) {
     return (
       <EmptyState icon={Search} title="Customer lookup is not enabled for you"
         hint="A superadmin turns this on per person in User Control Center → Customer Lookup." />
@@ -808,12 +889,14 @@ export default function CustomerLookupPanel({ access: accessProp }) {
       <SectionHeader level="page" icon={Search} title="Customer Lookup"
         subtitle="Look a customer up by phone or name, and see the vehicles recorded at an address. Nothing you search here is saved to the CRM." />
 
-      {quota && (canPeople || canVehicles) && !(quota.people?.unlimited && quota.vehicles?.unlimited) && (
+      {quota && (canPeople || canVehicles || canVin)
+        && !(quota.people?.unlimited && quota.vehicles?.unlimited && quota.vin?.unlimited) && (
         <Panel pad="md" radius="xl" tone="inset">
           <SectionHeader level="sub" icon={Gauge} title="Your search allowance" />
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             {canPeople   && <QuotaBar icon={User} label="People searches"  q={quota.people} />}
             {canVehicles && <QuotaBar icon={Car}  label="Vehicle searches" q={quota.vehicles} />}
+            {canVin      && <QuotaBar icon={Fingerprint} label="VIN lookups" q={quota.vin} />}
           </div>
         </Panel>
       )}
@@ -928,7 +1011,8 @@ export default function CustomerLookupPanel({ access: accessProp }) {
               {canVehicles && withVehicles && (pData?.vehicles || pData?.vehicles_status) && (
                 <div className="space-y-2">
                   <SectionHeader level="sub" icon={Car} title="Vehicles at their address" />
-                  <VehicleResults data={pData} onRetry={() => runPeople()} />
+                  <VehicleResults data={pData} onRetry={() => runPeople()}
+                    canVin={canVin} vins={vins} onVin={lookupVin} />
                 </div>
               )}
             </>
@@ -1079,7 +1163,8 @@ export default function CustomerLookupPanel({ access: accessProp }) {
                 <MapPin size={11} /> {vData.address}{vZip ? ` · ${digits(vZip).slice(0, 5)}` : ''}
                 {zipInfo && !zipInfo.error ? ` · ${zipInfo.city}, ${zipInfo.state_abbr}` : ''}
               </div>
-              <VehicleResults data={vData} onRetry={() => runVehicles()} />
+              <VehicleResults data={vData} onRetry={() => runVehicles()}
+                canVin={canVin} vins={vins} onVin={lookupVin} />
             </div>
           )}
         </div>

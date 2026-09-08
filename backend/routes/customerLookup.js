@@ -27,6 +27,8 @@ const cl = require('../utils/customerLookup');
 
 const router = express.Router();
 
+const KIND_LABEL = { people: 'people', vehicles: 'vehicle', vin: 'VIN' };
+
 const superadminOnly = async (req, res) => {
   if (req.user.role === 'superadmin' || await isSuperAdmin(req.user.id)) return true;
   res.status(403).json({ error: 'Superadmin only' });
@@ -60,7 +62,7 @@ async function guard(req, res, need) {
   const q = await cl.consume(req.user.id, need);
   if (!q.ok) {
     res.status(429).json({
-      error: `You have used all ${q.limit} ${need === 'people' ? 'people' : 'vehicle'} searches for this period.`,
+      error: `You have used all ${q.limit} ${KIND_LABEL[need] || need} searches for this period.`,
       quota: q, quota_exhausted: true,
     });
     return null;
@@ -80,14 +82,14 @@ const send = (res, r) => (r.ok ? res.json(r.data) : res.status(r.status).json({ 
 // ── my-access ────────────────────────────────────────────────────────────────
 router.get('/my-access', asyncHandler(async (req, res) => {
   const a = await myAccess(req);
-  const quota = (a.people || a.vehicles) ? await cl.quotaStatus(req.user.id) : null;
-  res.json({ people: a.people, vehicles: a.vehicles, any: a.people || a.vehicles, quota });
+  const quota = (a.people || a.vehicles || a.vin) ? await cl.quotaStatus(req.user.id) : null;
+  res.json({ people: a.people, vehicles: a.vehicles, vin: a.vin, any: a.people || a.vehicles || a.vin, quota });
 }));
 
 // Just the allowance — polled after a search so the bars move without a reload.
 router.get('/my-quota', asyncHandler(async (req, res) => {
   const a = await myAccess(req);
-  if (!a.people && !a.vehicles) return res.status(403).json({ error: 'Customer lookup is not enabled for you' });
+  if (!a.people && !a.vehicles && !a.vin) return res.status(403).json({ error: 'Customer lookup is not enabled for you' });
   res.json(await cl.quotaStatus(req.user.id));
 }));
 
@@ -106,7 +108,7 @@ router.put('/quota', asyncHandler(async (req, res) => {
 // Put someone back to a full allowance without waiting for their window.
 router.post('/quota/reset/:userId', asyncHandler(async (req, res) => {
   if (!await superadminOnly(req, res)) return;
-  const kind = ['people', 'vehicles'].includes(req.body?.kind) ? req.body.kind : null;
+  const kind = ['people', 'vehicles', 'vin'].includes(req.body?.kind) ? req.body.kind : null;
   await cl.resetUsage(req.params.userId, kind);
   res.json({ user_id: req.params.userId, reset: kind || 'all', quota: await cl.quotaStatus(req.params.userId) });
 }));
@@ -205,6 +207,68 @@ router.get('/vehicles', asyncHandler(async (req, res) => {
   res.json({ ...r.data, mode, address: street, zip });
 }));
 
+// ── VIN for one vehicle at one address ──────────────────────────────────────
+// The last step of the chain: a vehicle we already found, plus the person at
+// that address, resolved to its VIN. Upstream drives a real browser, so this is
+// the most expensive of the three lookups and carries its own switch and its
+// own allowance.
+//
+// Everything it needs is already on screen when a user clicks a vehicle card —
+// the address and ZIP they searched, and the year/make/model of the row they
+// clicked — so the client sends what it has and this only validates.
+router.get('/vin', asyncHandler(async (req, res) => {
+  if (!await guard(req, res, 'vin')) return;
+
+  // A pasted full address still works, same as the vehicle search.
+  const raw = String(req.query.address || '').trim();
+  const parsed = parseAddress(raw);
+  const address = parsed?.street || raw;
+  const zip = String(req.query.zip || '').replace(/\D/g, '').slice(0, 5) || parsed?.zip || '';
+  const year  = String(req.query.year  || '').trim();
+  const make  = String(req.query.make  || '').trim();
+  const model = String(req.query.model || '').trim();
+
+  const missing = [];
+  if (!address) missing.push('address');
+  if (!zip)     missing.push('ZIP');
+  if (!year)    missing.push('year');
+  if (!make)    missing.push('make');
+  if (!model)   missing.push('model');
+  if (missing.length) {
+    await cl.refund(req.user.id, 'vin');        // nothing was looked up
+    return res.status(422).json({ error: 'A VIN lookup needs ' + missing.join(', ') + '.', needs: missing });
+  }
+
+  // The name is what ties a VIN to a person at that address. Accept it split or
+  // whole, because the vehicle form collects a single Name field.
+  let first = String(req.query.first_name || '').trim();
+  let last  = String(req.query.last_name  || '').trim();
+  const whole = String(req.query.name || '').trim();
+  if (!first && !last && whole) {
+    const bits = whole.split(/\s+/).filter(Boolean);
+    first = bits[0] || '';
+    last  = bits.length > 1 ? bits[bits.length - 1] : '';
+  }
+
+  const mode = ['cache', 'fresh', 'auto'].includes(req.query.mode) ? req.query.mode : 'auto';
+  const params = { address, zip, year, make, model };
+  if (first) params.first_name = first;
+  if (last)  params.last_name  = last;
+
+  if (mode === 'cache') {
+    params.run = '0';
+  } else {
+    if (mode === 'fresh') params.refresh = '1';
+    // A cold VIN opens a browser and can take a minute — never inline.
+    params.async = '1';
+  }
+
+  const label = 'vin ' + year + ' ' + make + ' ' + model + ' @ ' + address;
+  const r = await cl.call('/api/vin', params, { userId: req.user.id, label });
+  if (!r.ok) { await cl.refund(req.user.id, 'vin'); return res.status(r.status).json({ error: r.error }); }
+  res.json({ ...r.data, mode });
+}));
+
 // ── poll an async job ────────────────────────────────────────────────────────
 // The ticket is opaque and generated by the service; keep it to the character
 // set it actually uses so it can never be bent into another upstream path.
@@ -212,7 +276,7 @@ const refunded = new Set();   // tickets already refunded, so polling cannot ove
 
 router.get('/job/:ticket', asyncHandler(async (req, res) => {
   const acc = await myAccess(req);
-  if (!acc.people && !acc.vehicles) return res.status(403).json({ error: 'Customer lookup is not enabled for you' });
+  if (!acc.people && !acc.vehicles && !acc.vin) return res.status(403).json({ error: 'Customer lookup is not enabled for you' });
   const ticket = String(req.params.ticket || '');
   if (!/^[A-Za-z0-9_-]{4,64}$/.test(ticket)) return res.status(422).json({ error: 'Bad job reference' });
 
@@ -230,7 +294,11 @@ router.get('/job/:ticket', asyncHandler(async (req, res) => {
   // A vehicles-only user must not receive the person half of an enrich job.
   const data = { ...r.data };
   if (!acc.people) delete data.person;
-  if (!acc.vehicles) { delete data.vehicles; delete data.vehicles_status; delete data.result; }
+  if (!acc.vin) delete data.vin;
+  if (!acc.vehicles) { delete data.vehicles; delete data.vehicles_status; }
+  // result is the run detail for whichever job this was; keep it only when the
+  // caller holds a switch that could have started that kind of job.
+  if (!acc.vehicles && !acc.vin) delete data.result;
   res.json(data);
 }));
 
@@ -431,7 +499,7 @@ router.get('/access/:userId', asyncHandler(async (req, res) => {
   const row = map[req.params.userId] || {};
   res.json({
     user_id: req.params.userId,
-    people: !!row.people, vehicles: !!row.vehicles,
+    people: !!row.people, vehicles: !!row.vehicles, vin: !!row.vin,
     quota_override: row.quota || {},
     quota: await cl.quotaStatus(req.params.userId),
     global_quota: await cl.globalQuota(),
@@ -442,19 +510,19 @@ router.get('/access/:userId', asyncHandler(async (req, res) => {
 router.put('/access/:userId', asyncHandler(async (req, res) => {
   if (!await superadminOnly(req, res)) return;
   const b = req.body || {};
-  if (b.people === undefined && b.vehicles === undefined && b.quota === undefined) {
+  if (b.people === undefined && b.vehicles === undefined && b.vin === undefined && b.quota === undefined) {
     return res.status(422).json({ error: 'Nothing to change' });
   }
   // Order matters: both writers rewrite the same users row, so the quota write
   // has to read back what the access write just saved.
-  if (b.people !== undefined || b.vehicles !== undefined) await cl.setAccess(req.params.userId, b, req.user.id);
+  if (b.people !== undefined || b.vehicles !== undefined || b.vin !== undefined) await cl.setAccess(req.params.userId, b, req.user.id);
   if (b.quota !== undefined) await cl.setUserQuota(req.params.userId, b.quota, req.user.id);
 
   const map = await cl.userMap();
   const row = map[req.params.userId] || {};
   res.json({
     user_id: req.params.userId,
-    people: !!row.people, vehicles: !!row.vehicles,
+    people: !!row.people, vehicles: !!row.vehicles, vin: !!row.vin,
     quota_override: row.quota || {},
     quota: await cl.quotaStatus(req.params.userId),
     global_quota: await cl.globalQuota(),
