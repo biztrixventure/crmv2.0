@@ -116,11 +116,18 @@ router.get('/person', asyncHandler(async (req, res) => {
   if (!await guard(req, res, 'people')) return;
   const phone = cl.normPhone(req.query.phone);
   if (!phone) return res.status(422).json({ error: 'Enter a 10-digit US phone number' });
+  const cacheOnly = req.query.scrape === '0';
   const r = await cl.call('/api/lookup', {
     phone,
     name: req.query.name,
     // scrape=0 is cache-only; anything else lets the service scrape on a miss.
-    scrape: req.query.scrape === '0' ? '0' : undefined,
+    scrape: cacheOnly ? '0' : undefined,
+    // A cache read answers inline in a second or two. Anything that MIGHT
+    // scrape goes through the job queue instead, so a slow scrape can never
+    // walk into our 25s abort — the same ticket + /job/:ticket polling the
+    // vehicle search already uses. A cache hit still answers inline even with
+    // async=1 set, so this costs nothing when the record is already there.
+    async: cacheOnly ? undefined : '1',
   }, { userId: req.user.id, label: `person ${phone}` });
   await finish(req, res, r, 'people');
 }));

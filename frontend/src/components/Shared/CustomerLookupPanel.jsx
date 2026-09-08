@@ -704,7 +704,16 @@ export default function CustomerLookupPanel({ access: accessProp }) {
         const r = mode === 'phone'
           ? await client.get('customer-lookup/person', { params: { phone: digits(phone), name: name.trim() || undefined, scrape: cacheOnly ? '0' : undefined } })
           : await client.get('customer-lookup/search', { params: { q: q.trim() } });
-        setPData(r.data);
+        // A phone that is not already on file is fetched through the job queue,
+        // so the answer may be a ticket rather than the record. A cached hit
+        // still comes back inline — one branch handles both.
+        if (r.data?.job) {
+          setJobNote('Searching…');
+          const done = await pollJob(r.data.job, (sec) => setJobNote(`Searching… ${sec}s`));
+          setPData(done);
+        } else {
+          setPData(r.data);
+        }
       }
     } catch (e) {
       setPErr(e?.response ? errText(e, 'Lookup failed.') : (e.message || 'Lookup failed.'));
