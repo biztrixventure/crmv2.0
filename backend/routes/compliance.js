@@ -1248,8 +1248,12 @@ router.get('/sales', asyncHandler(async (req, res) => {
     paid_flags = { paid_to_closer: 0, paid_to_partner: 0 };
     try {
       const scopedPaidCount = (field) => {
+        // Approved, not merely stamped — a sale can reach closed_won through
+        // the generic update route without ever getting compliance_reviewed_at,
+        // and counting it as approved in the list while dropping it here is
+        // what made the payout tiles disagree with MATCHES (mig 309).
         let q = supabaseAdmin.from('sales').select('id', { count: 'exact', head: true })
-          .not('compliance_reviewed_at', 'is', null)
+          .or('compliance_reviewed_at.not.is.null,status.eq.closed_won')
           .eq(field, true);
         if (kpiCompanyIds)  q = q.in('company_id', kpiCompanyIds);
         if (kpiClientNames) q = q.in('client_name', kpiClientNames);
