@@ -27,6 +27,21 @@ const manageAccess = asyncHandler(async (req, res, next) => {
   return res.status(403).json({ error: 'Manager access required' });
 });
 
+// STARTING a campaign is the company owner's call, not every manager's -- a
+// SPIFF commits company money. company_admin is that owner (there is no
+// separate owner role); superadmin keeps cross-company creation.
+//
+// Enforced here and not only in the UI: hiding the button leaves the endpoint
+// open, and an operations_manager could still POST a campaign directly.
+// Editing, pausing and deleting an EXISTING campaign stay on manageAccess, so
+// a manager can still run what the owner started.
+const CREATE_ROLES = ['company_admin'];
+const createAccess = asyncHandler(async (req, res, next) => {
+  if (await isSuperAdmin(req.user.id)) { req._isSuperadmin = true; return next(); }
+  if (CREATE_ROLES.includes(req.user.role)) return next();
+  return res.status(403).json({ error: 'Only a company owner can create a SPIFF campaign' });
+});
+
 // Validate that a non-superadmin's targeting fields stay inside their own
 // company. Returns null on success, or a string error to send back as 400.
 async function validateScopedTargeting(req, body) {
@@ -193,7 +208,7 @@ router.get('/:id', manageAccess, asyncHandler(async (req, res) => {
   res.json({ campaign, leaderboard: await leaderboardFor(campaign) });
 }));
 
-router.post('/', manageAccess, [
+router.post('/', createAccess, [
   body('title').trim().notEmpty(),
   body('metric').trim().notEmpty(),
   body('metric_source').optional().isIn(VALID_METRIC_SOURCE),

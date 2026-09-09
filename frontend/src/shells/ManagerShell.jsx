@@ -9,7 +9,6 @@ import BatchInbox from "../components/Distribution/BatchInbox";
 import NoteShortcodesManager from "../components/Numbers/NoteShortcodesManager";
 import ThemedSelect from '../components/UI/Select';
 import TeamManager from '../components/Admin/Teams/TeamManager';
-import MyTeam from '../components/Admin/Teams/MyTeam';
 import QuotaReport from '../components/Teams/QuotaReport';
 import { useTheme } from "../contexts/ThemeContext";
 import { useFeatureFlags } from "../contexts/FeatureFlagsContext";
@@ -41,7 +40,7 @@ const TAB_GROUPS = [
   { id: 'g_overview',  label: 'Overview',  icon: TrendingUp, tabs: ['overview'] },
   { id: 'g_records',   label: 'Records',   icon: Database,   tabs: ['transfers', 'team_sales', 'my_sales', 'search', 'activity_log'] },
   { id: 'g_callbacks', label: 'Callbacks', icon: Phone,      tabs: ['callbacks', 'numbers', 'batches'] },
-  { id: 'g_team',      label: 'Team',      icon: Users,      tabs: ['my_team', 'teams', 'quota_report', 'spiffs'] },
+  { id: 'g_team',      label: 'Team',      icon: Users,      tabs: ['teams', 'quota_report'] },
   { id: 'g_resources', label: 'Resources', icon: HelpCircle, tabs: ['faqs', 'scripts', 'note_shortcodes'] },
   { id: 'g_tools',     label: 'Tools',     icon: Shield,     tabs: ['tool_customer_profiles', 'tool_data_analyzer', 'tool_chat_control', 'dnc', 'card_validator'] },
 ];
@@ -110,9 +109,9 @@ import EventsCalendar from "../components/Calendar/EventsCalendar";
 import ManagerExportModal from "../components/Manager/ManagerExportModal";
 import DuplicateRecordsModal from "../components/Shared/DuplicateRecordsModal";
 const FormBuilder  = lazy(() => import("../components/Admin/FormBuilder/FormBuilder"));
-const SpiffManager = lazy(() => import("../components/Admin/Engagement/SpiffManager"));
+// SpiffManager and MyTeam are no longer imported here: SPIFFs render under the
+// header Engagement section (CrossRoleContent) and My Team is retired.
 // Delegatable superadmin tools (shown only when a superadmin grants the flag).
-// (MyTeam is the team-lead home tab — imported eagerly above, small component.)
 const CustomerProfile = lazy(() => import("../components/Admin/CustomerProfile/CustomerProfile"));
 const DataAnalyzer    = lazy(() => import("../components/Admin/DataAnalyzer/DataAnalyzer"));
 const ChatAdmin       = lazy(() => import("../components/Admin/Chat/ChatAdmin"));
@@ -246,14 +245,20 @@ const ManagerShell = ({ workspaceMode = false }) => {
     // Quiz system (mig 273): manage tab for quiz.manage holders (compliance_manager /
     // qa_manager / company_admin / superadmin); My Quizzes is unconditional — anyone
     // can be an assignee, and a team lead sees their team's progress inside it.
+    // Engagement — the header home for company-wide incentive programmes.
+    // SPIFF Campaigns moved out of the Team tab group and under here: it is
+    // an engagement programme, not team structure. Same role set that could
+    // reach the old tab, so nobody loses sight of a running campaign.
+    ...(['company_admin', 'operations_manager', 'closer_manager', 'fronter_manager', 'manager'].includes(user?.role)
+      ? [{ key: 'engagement', label: 'Engagement', icon: Trophy }] : []),
     ...(hasPermission('quiz.manage') ? [{ key: 'quizzes', label: 'Quizzes', icon: ClipboardList }] : []),
     { key: 'my_quizzes', label: 'My Quizzes', icon: ClipboardList },
   ];
 
   // ── Tab logic ─────────────────────────────────────────────────────────────
   // Inline tabs here are workflow-specific (team transfers/sales/callbacks/
-  // numbers/spiffs/activity_log/faqs/scripts). Cross-role admin surfaces
-  // (Calendar/Team/Roles/Forms/Reviews/Reports) have moved to crossNavItems
+  // numbers/activity_log/faqs/scripts). Cross-role admin surfaces
+  // (Calendar/Team/Roles/Forms/Reviews/Reports/Engagement) live in crossNavItems
   // above so the dashboard tab bar doesn't carry duplicate destinations.
   // CODE_TABS = the catalog gated by permissions + feature flags. The admin
   // layout override (shell.layout.manager) can only narrow this — hide,
@@ -273,18 +278,15 @@ const ManagerShell = ({ workspaceMode = false }) => {
       ? [{ key: 'numbers',    label: 'Numbers',        icon: Hash       }] : []),
     ...(hasPermission('search_sales') && isEnabled('search_sales')
       ? [{ key: 'search',     label: 'Sale Search',    icon: Search     }] : []),
-    // SPIFFs — company admins / managers can run incentives scoped to their
-    // company. Superadmin still uses /admin's SPIFF tab for cross-company.
-    ...(['company_admin', 'operations_manager', 'closer_manager', 'fronter_manager', 'manager'].includes(user?.role)
-      ? [{ key: 'spiffs',     label: 'SPIFFs',         icon: Trophy     }] : []),
-    // Team-lead home — your own team's live progress + roster/goal management.
-    // Shown to every manager role (they may lead or belong to a team).
-    ...(['company_admin', 'operations_manager', 'closer_manager', 'fronter_manager', 'manager'].includes(user?.role)
-      ? [{ key: 'my_team',    label: 'My Team',        icon: Users      }] : []),
+    // The SPIFFs tab moved to the header's Engagement section (crossNavItems
+    // above). The key is retired from this catalog, so the saved
+    // shell.layout.manager entry for it is simply inert -- applyTabs only
+    // decorates keys the catalog still offers, it never invents one.
+    // My Team is gone: it overlapped Teams almost entirely, and two doors onto
+    // one roster is how they drift. Teams is now the single team surface, and
+    // Team Performance below answers the progress half.
     // Team structure (create/edit/delete teams) is company-org management — only
     // company_admin + operations_manager (superadmin uses the Admin panel).
-    // Fronter/closer managers do NOT see this; they manage their OWN team from
-    // the "My Team" tab above.
     ...(['company_admin', 'operations_manager'].includes(user?.role)
       ? [{ key: 'teams',      label: 'Teams',          icon: UserCircle }] : []),
     // Quota performance. Shown to every manager role, because the SERVER scopes
@@ -292,7 +294,10 @@ const ManagerShell = ({ workspaceMode = false }) => {
     // team gets only that team. Gating it here by role as well would hide the
     // page from the lead it was built for.
     ...(['company_admin', 'operations_manager', 'closer_manager', 'fronter_manager', 'manager'].includes(user?.role)
-      ? [{ key: 'quota_report', label: 'Quotas',       icon: Target     }] : []),
+      // Renamed to "Team Performance" — "Quotas" described the config, not what
+      // the page shows. LABEL only: the key stays quota_report because
+      // shell.layout.manager and the admin sidebar both store it.
+      ? [{ key: 'quota_report', label: 'Team Performance', icon: Target }] : []),
     { key: 'activity_log', label: 'Activity Log', icon: Activity },
     // Batches = upload → assign → dispositions → reporting, one surface.
     // "Assigned Numbers" is retired from the nav (renderer kept for deep-links).
@@ -1265,7 +1270,6 @@ const ManagerShell = ({ workspaceMode = false }) => {
         )}
 
         {/* ── PANEL TABS (reuse existing components) ── */}
-        {activeTab === 'my_team'   && <MyTeam />}
         {activeTab === 'teams'     && <TeamManager />}
         {activeTab === 'quota_report' && <QuotaReport />}
         {activeTab === 'callbacks' && <ManagerCallbacksTab user={user} />}
@@ -1292,11 +1296,6 @@ const ManagerShell = ({ workspaceMode = false }) => {
               <FormBuilder />
             </Suspense>
           </div>
-        )}
-        {activeTab === 'spiffs'    && (
-          <Suspense fallback={<Loading variant="block" height={200} />}>
-            <SpiffManager />
-          </Suspense>
         )}
         {/* Delegated superadmin tools — gated by the tool flag on the nav side. */}
         {activeTab === 'tool_customer_profiles' && isEnabledStrict('tool_customer_profiles') && (

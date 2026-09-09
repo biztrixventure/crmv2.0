@@ -204,8 +204,11 @@ const DetailModal = ({ campaign, reference, onClose, onChanged }) => {
 };
 
 const SpiffManager = () => {
-  const { roControlAllowed } = useAuth();
-  const { user } = useAuth();
+  const { roControlAllowed, user } = useAuth();
+  // Only the company OWNER (company_admin) starts a campaign; superadmin keeps
+  // cross-company creation. Declared after user, not before it -- the first
+  // pass at this put the const above the destructure and the TDZ blanked the tab.
+  const canCreateSpiff = user?.role === 'superadmin' || user?.role === 'company_admin';
   const [rows, setRows] = useState([]);
   const [reference, setReference] = useState({ roles: [], companies: [], users: [] });
   const [loading, setLoading] = useState(false);
@@ -230,7 +233,14 @@ const SpiffManager = () => {
     <div className="space-y-5 animate-fade-in">
       <SectionHeader level="page" icon={Trophy} title="SPIFF Campaigns"
         subtitle="Incentive competitions with live leaderboards."
-        actions={roControlAllowed('spiff.add') && <Button variant="primary" onClick={() => setModal({ row: null })} className="flex items-center gap-1.5"><Plus size={16} /> New SPIFF</Button>} />
+        // New SPIFF is the company OWNER's action (company_admin) plus
+        // superadmin -- a campaign commits company money, so an operations
+        // manager no longer starts one. They keep every other control here, so
+        // a campaign the owner started is still theirs to run. The server
+        // enforces the same rule (createAccess in routes/spiff.js); this only
+        // stops offering a button that would 403.
+        // roControlAllowed is the separate readonly-admin governance gate.
+        actions={canCreateSpiff && roControlAllowed('spiff.add') && <Button variant="primary" onClick={() => setModal({ row: null })} className="flex items-center gap-1.5"><Plus size={16} /> New SPIFF</Button>} />
 
       {error && <Alert type="error" message={error} />}
 

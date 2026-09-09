@@ -18,6 +18,10 @@ const CustomerLookupPanel   = lazy(() => import('../Shared/CustomerLookupPanel')
 const MyScoresPanel         = lazy(() => import('../QA2/MyScoresPanel'));
 const QuizManager           = lazy(() => import('../Quiz/QuizManager'));
 const MyQuizzes             = lazy(() => import('../Quiz/MyQuizzes'));
+// Engagement: company-wide incentive programmes. SPIFF Campaigns moved here
+// from the manager shell's Team tab group -- an incentive programme is
+// engagement, not team structure.
+const SpiffManager          = lazy(() => import('../Admin/Engagement/SpiffManager'));
 
 const ToolFallback = () => (
   <div className="flex justify-center py-16"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" /></div>
@@ -46,6 +50,7 @@ const CrossRoleContent = ({ section, user }) => {
   if (section === 'qa2_scores')              return <Suspense fallback={<ToolFallback />}><MyScoresPanel /></Suspense>;
   if (section === 'quizzes')                 return <Suspense fallback={<ToolFallback />}><QuizManager /></Suspense>;
   if (section === 'my_quizzes')              return <Suspense fallback={<ToolFallback />}><MyQuizzes /></Suspense>;
+  if (section === 'engagement')              return <Suspense fallback={<ToolFallback />}><SpiffManager /></Suspense>;
 
   return null;
 };

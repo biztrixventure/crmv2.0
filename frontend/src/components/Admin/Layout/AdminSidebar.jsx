@@ -34,7 +34,7 @@ const NAV_SECTIONS = [
     items: [
       { id: 'companies',     label: 'Companies',       icon: Building2  },
       { id: 'teams',         label: 'Teams',           icon: Users      },
-      { id: 'quota_report',  label: 'Quotas',          icon: Target     },
+      { id: 'quota_report',  label: 'Team Performance', icon: Target     },
       { id: 'user-control',  label: 'User Control',    icon: UserCircle },
       { id: 'clients-plans', label: 'Clients & Plans', icon: Tag        },
       { id: 'forms',         label: 'Form Builder',    icon: FileText   },

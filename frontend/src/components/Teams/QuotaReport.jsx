@@ -235,7 +235,7 @@ export default function QuotaReport({ embedded = false }) {
       <SectionHeader
         level={embedded ? 'section' : 'page'}
         icon={Gauge}
-        title="Quota performance"
+        title="Team performance"
         subtitle={`${scopeLabel} · ${fronter ? 'fronter company — judged on leads sent and the deals they produced' : 'closer company — judged on deals closed'}${range ? ` · ${range.from} → ${range.to}` : ''}`}
         actions={
           <>

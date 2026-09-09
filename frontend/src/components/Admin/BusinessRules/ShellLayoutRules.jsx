@@ -66,7 +66,6 @@ const SHELLS = [
       { key: 'callbacks',    label: 'Team Callbacks' },
       { key: 'numbers',      label: 'Numbers' },
       { key: 'search',       label: 'Sale Search' },
-      { key: 'spiffs',       label: 'SPIFFs' },
       { key: 'activity_log', label: 'Activity Log' },
       { key: 'faqs',         label: 'FAQs' },
       { key: 'scripts',      label: 'Scripts' },
