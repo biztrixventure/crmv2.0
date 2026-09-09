@@ -1626,6 +1626,43 @@ router.put(
         note: String(req.body.cancellation_reason_note || '').trim().slice(0, 500) || null,
       }];
     }
+    // A compliance DECISION reached through this route must leave the same
+    // trace the dedicated /approve and /return routes leave.
+    //
+    // PUT already refuses closed_won to anyone but compliance/superadmin, but
+    // when compliance set it here it wrote the status and nothing else — no
+    // compliance_reviewed_by, no compliance_reviewed_at, no audit entry. The
+    // sale then read as approved with no record of anyone approving it, which
+    // is what gated the payout cells until c47851d, and it is the difference
+    // between "reviewed and passed" and "someone edited a dropdown".
+    //
+    // 3 of 3,110 closed_won rows in production are in that state (none carries
+    // an `approved` policy_event, confirming the path). They are NOT
+    // backfilled: there is no evidence a review happened, and inventing a
+    // timestamp would assert one that nobody performed. This stops it
+    // recurring; those three are a question for a human.
+    const REVIEW_TERMINAL = new Set(['closed_won', 'needs_revision']);
+    const becomingReviewed = status !== undefined && status !== existing.status
+      && REVIEW_TERMINAL.has(status) && isCompliance;
+    if (becomingReviewed) {
+      const reviewIso = new Date().toISOString();
+      updates.compliance_reviewed_by = userId;
+      updates.compliance_reviewed_at = reviewIso;
+      // Build on whatever a preceding block already staged, so two status
+      // rules in one request cannot drop each other's audit entry.
+      const histBase = Array.isArray(updates.edit_history)
+        ? updates.edit_history
+        : (Array.isArray(existing.edit_history) ? existing.edit_history : []);
+      updates.edit_history = [...histBase, {
+        edited_at: reviewIso, at: reviewIso, by: userId, editor_id: userId, role: userRole,
+        // Same action vocabulary the /approve and /return routes write, so the
+        // drawer's Audit Trail reads identically however the decision was made.
+        action: status === 'closed_won' ? 'approved' : 'returned',
+        previous_status: existing.status, new_status: status,
+        via: 'sale_edit',
+      }];
+    }
+
     if (customer_name !== undefined)   updates.customer_name    = titleCase(customer_name);
     if (customer_phone !== undefined)  updates.customer_phone   = customer_phone;
     if (customer_phone_2 !== undefined) updates.customer_phone_2 = customer_phone_2;

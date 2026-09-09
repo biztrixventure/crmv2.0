@@ -307,9 +307,15 @@ const ManagerShell = ({ workspaceMode = false }) => {
     // My Team is gone: it overlapped Teams almost entirely, and two doors onto
     // one roster is how they drift. Teams is now the single team surface, and
     // Team Performance below answers the progress half.
-    // Team structure (create/edit/delete teams) is company-org management — only
+    // Team structure (create/edit/delete teams) is company-org management —
     // company_admin + operations_manager (superadmin uses the Admin panel).
-    ...(['company_admin', 'operations_manager'].includes(user?.role)
+    //
+    // Team LEADS are here too, and TeamManager scopes itself to the one team
+    // they lead. Retiring MyTeam.jsx removed their only roster-and-goals UI
+    // while routes/teams.js went on accepting their edits — every active team
+    // in production has lead_can_edit=true — so this is where that capability
+    // lives now. One surface scoped by role, instead of two that overlapped.
+    ...(['company_admin', 'operations_manager', 'fronter_manager', 'closer_manager'].includes(user?.role)
       ? [{ key: 'teams',      label: 'Teams',          icon: UserCircle }] : []),
     // Quota performance. Shown to every manager role, because the SERVER scopes
     // it: a company_admin gets every team, a fronter/closer manager who leads a

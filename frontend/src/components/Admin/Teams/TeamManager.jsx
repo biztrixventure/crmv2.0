@@ -11,9 +11,28 @@ import ThemedSelect from '../../UI/Select';
 import ThemedDate from '../../UI/ThemedDate';
 import { Panel, SectionHeader, Loading, EmptyState, Field, accent } from '../../UI/kit';
 
-// ── Team structure + reporting (superadmin / company_admin / operations_manager)
+// ── Team structure + reporting ──────────────────────────────────────────────
 // Additive org layer: create teams per company, assign members, set goals, and
-// view live team progress. Does not change any existing access.
+// view live team progress.
+//
+// TWO MODES, because this is now also a TEAM LEAD's surface.
+//
+// Managers (superadmin / company_admin / operations_manager) get the whole
+// company: create, delete, re-parent, appoint leads.
+//
+// A team LEAD gets only the team they lead. That mode exists because deleting
+// MyTeam.jsx -- the right call, it duplicated this panel -- took away the only
+// UI a lead had, while the server went on granting them the rights:
+// PUT /teams/:id accepts a lead's edit when `lead_can_edit` is set, and
+// POST/DELETE /teams/:id/members accept a lead unconditionally. All six active
+// teams in production have a lead AND lead_can_edit=true, so six people held
+// rights they could no longer exercise anywhere.
+//
+// The server is the boundary, not this file: lead_user_id, parent_team_id,
+// is_active and lead_can_edit are all written inside `if (canManage)` in
+// routes/teams.js, so a lead cannot appoint themselves or widen their own
+// grant. Lead mode hides those controls so the form never offers something the
+// API would silently drop.
 
 const TEAM_TYPES = [
   { k: 'general',  label: 'General' },
@@ -60,8 +79,25 @@ export default function TeamManager() {
 
   const unassigned = useMemo(() => members.filter(m => !m.team_id), [members]);
 
-  const roots = teams.filter(t => !t.parent_team_id);
+  // Mirrors MANAGER_LEVELS in routes/teams.js -- the roles canManageCompany()
+  // accepts. Anyone else reaching this panel is here as a team lead.
+  const canManageTeams = ['superadmin', 'company_admin', 'operations_manager'].includes(user?.role);
+  const ledTeamIds = useMemo(
+    () => new Set(teams.filter(t => t.lead_user_id === user?.id).map(t => t.id)),
+    [teams, user?.id],
+  );
+  const leadMode = !canManageTeams;
+  // A lead may edit their own team only where the manager granted it. Computed
+  // per team, not per user: one person can lead two teams with different grants.
+  const mayEdit = (t) => canManageTeams || (ledTeamIds.has(t.id) && t.lead_can_edit);
+
   const childrenOf = (id) => teams.filter(t => t.parent_team_id === id);
+  // In lead mode the tree starts at the team they lead, not at the company's
+  // top level -- otherwise the lead of a NESTED team would see nothing, their
+  // team not being a root.
+  const roots = leadMode
+    ? teams.filter(t => ledTeamIds.has(t.id))
+    : teams.filter(t => !t.parent_team_id);
 
   const saveTeam = async (form) => {
     try {
@@ -110,8 +146,14 @@ export default function TeamManager() {
               style={reportTeam?.id === t.id
                 ? { border: '1px solid transparent', background: accent('primary').fg, color: '#fff' }
                 : { border: '1px solid var(--color-border)', color: 'var(--color-primary-600)' }}><BarChart3 size={14} /></button>
-            <button onClick={() => setEditTeam(t)} title="Edit" className="p-1.5 rounded-lg" style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}><Pencil size={14} /></button>
-            <button onClick={() => delTeam(t)} title="Delete" className="p-1.5 rounded-lg" style={{ border: '1px solid var(--color-border)', color: '#ef4444' }}><Trash2 size={14} /></button>
+            {mayEdit(t) && (
+              <button onClick={() => setEditTeam(t)} title="Edit" className="p-1.5 rounded-lg" style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}><Pencil size={14} /></button>
+            )}
+            {/* Deleting a team is structural -- manager only, and the server
+                refuses it for a lead in any case. */}
+            {canManageTeams && (
+              <button onClick={() => delTeam(t)} title="Delete" className="p-1.5 rounded-lg" style={{ border: '1px solid var(--color-border)', color: '#ef4444' }}><Trash2 size={14} /></button>
+            )}
           </div>
         </div>
         <div className="mt-2 flex flex-wrap gap-1.5">
@@ -133,19 +175,25 @@ export default function TeamManager() {
       <SectionHeader
         level="page"
         icon={Users}
-        title="Teams"
-        subtitle="Org structure, members, goals and live progress — per company."
+        title={leadMode ? 'My Team' : 'Teams'}
+        subtitle={leadMode
+          ? 'Your team: members, goals and live progress.'
+          : 'Org structure, members, goals and live progress — per company.'}
         actions={
           <>
-            {companies.length > 1 && (
+            {/* A lead has one company and one team; a company switcher would
+                only offer them rows they cannot act on. */}
+            {!leadMode && companies.length > 1 && (
               <ThemedSelect value={companyId} onChange={e => setCompanyId(e.target.value)} className="input min-w-[200px]">
                 {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </ThemedSelect>
             )}
             <button onClick={load} title="Refresh" className="p-2 rounded-lg"
               style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}><RefreshCw size={15} /></button>
-            <button onClick={() => setEditTeam({})} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-bold text-white"
-              style={{ background: 'var(--color-primary-600)' }}><Plus size={14} /> New team</button>
+            {canManageTeams && (
+              <button onClick={() => setEditTeam({})} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-bold text-white"
+                style={{ background: 'var(--color-primary-600)' }}><Plus size={14} /> New team</button>
+            )}
           </>
         }
       />
@@ -168,9 +216,16 @@ export default function TeamManager() {
       {loading ? <Loading variant="cards" cards={3} label="Loading teams…" /> : (
         <>
           {roots.length === 0 ? (
-            <EmptyState icon={Users} title="No teams yet for this company" hint="Click New team to start." />
+            <EmptyState icon={Users}
+              title={leadMode ? 'You do not lead a team yet' : 'No teams yet for this company'}
+              hint={leadMode
+                ? 'A company manager appoints team leads. Ask them to point a team at you.'
+                : 'Click New team to start.'} />
           ) : roots.map(t => <TeamCard key={t.id} t={t} />)}
 
+          {/* Unassigned is a company-wide roster view. A lead still needs it --
+              it is what AddMemberInline draws from -- so it stays in both modes,
+              and the server does allow a lead to add to their own team. */}
           <div className="rounded-2xl p-4" style={box}>
             <p className="text-[11px] font-bold uppercase tracking-widest mb-2" style={{ color: 'var(--color-text-tertiary)' }}>Unassigned ({unassigned.length})</p>
             {unassigned.length === 0 ? <p className="text-xs italic" style={{ color: 'var(--color-text-tertiary)' }}>Everyone in this company is on a team.</p> : (
@@ -186,7 +241,7 @@ export default function TeamManager() {
         </>
       )}
 
-      {editTeam && <TeamModal team={editTeam} teams={teams} members={members} onSave={saveTeam} onClose={() => setEditTeam(null)} />}
+      {editTeam && <TeamModal team={editTeam} teams={teams} members={members} canManageTeams={canManageTeams} onSave={saveTeam} onClose={() => setEditTeam(null)} />}
     </div>
   );
 }
@@ -210,7 +265,7 @@ function AddMemberInline({ unassigned, onAdd }) {
   );
 }
 
-function TeamModal({ team, teams, members, onSave, onClose }) {
+function TeamModal({ team, teams, members, canManageTeams = true, onSave, onClose }) {
   const [f, setF] = useState({
     id: team.id, name: team.name || '', description: team.description || '', team_type: team.team_type || 'general',
     lead_user_id: team.lead_user_id || '', parent_team_id: team.parent_team_id || '',
@@ -228,16 +283,25 @@ function TeamModal({ team, teams, members, onSave, onClose }) {
           <Field label="Type"><ThemedSelect value={f.team_type} onChange={e => set('team_type', e.target.value)} className="w-full">{TEAM_TYPES.map(t => <option key={t.k} value={t.k}>{t.label}</option>)}</ThemedSelect></Field>
           <Field label="Color"><input type="color" value={f.color || TYPE_COLOR[f.team_type]} onChange={e => set('color', e.target.value)} style={{ ...inp, padding: 2, height: 34 }} /></Field>
         </div>
-        <Field label="Team lead"><ThemedSelect value={f.lead_user_id} onChange={e => set('lead_user_id', e.target.value)} className="w-full" placeholder="— none —"><option value="">— none —</option>{members.map(m => <option key={m.user_id} value={m.user_id}>{m.name} ({(m.role || '').replace(/_/g, ' ')})</option>)}</ThemedSelect></Field>
-        <Field label="Parent team (nesting)"><ThemedSelect value={f.parent_team_id} onChange={e => set('parent_team_id', e.target.value)} className="w-full" placeholder="— top level —"><option value="">— top level —</option>{teams.filter(t => t.id !== f.id).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</ThemedSelect></Field>
+        {/* Lead, parent and the lead_can_edit grant are structural: PUT
+            /teams/:id writes them only inside `if (canManage)`. Offering them
+            to a lead would promise edits the API drops without complaint. */}
+        {canManageTeams && (
+          <>
+            <Field label="Team lead"><ThemedSelect value={f.lead_user_id} onChange={e => set('lead_user_id', e.target.value)} className="w-full" placeholder="— none —"><option value="">— none —</option>{members.map(m => <option key={m.user_id} value={m.user_id}>{m.name} ({(m.role || '').replace(/_/g, ' ')})</option>)}</ThemedSelect></Field>
+            <Field label="Parent team (nesting)"><ThemedSelect value={f.parent_team_id} onChange={e => set('parent_team_id', e.target.value)} className="w-full" placeholder="— top level —"><option value="">— top level —</option>{teams.filter(t => t.id !== f.id).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</ThemedSelect></Field>
+          </>
+        )}
         <div className="grid grid-cols-2 gap-2">
           <Field label="Monthly sales goal"><input type="number" min="0" value={f.goal_monthly_sales} onChange={e => set('goal_monthly_sales', e.target.value)} placeholder="—" style={inp} /></Field>
           <Field label="Monthly transfers goal"><input type="number" min="0" value={f.goal_monthly_transfers} onChange={e => set('goal_monthly_transfers', e.target.value)} placeholder="—" style={inp} /></Field>
         </div>
-        <label className="flex items-start gap-2 text-xs cursor-pointer pt-1" style={{ color: 'var(--color-text-secondary)' }}>
-          <input type="checkbox" className="mt-0.5" checked={!!f.lead_can_edit} onChange={e => set('lead_can_edit', e.target.checked)} />
-          <span>Let the <b>team lead</b> edit this team (name, color, goals). Off = only company managers can edit it.</span>
-        </label>
+        {canManageTeams && (
+          <label className="flex items-start gap-2 text-xs cursor-pointer pt-1" style={{ color: 'var(--color-text-secondary)' }}>
+            <input type="checkbox" className="mt-0.5" checked={!!f.lead_can_edit} onChange={e => set('lead_can_edit', e.target.checked)} />
+            <span>Let the <b>team lead</b> edit this team (name, color, goals). Off = only company managers can edit it.</span>
+          </label>
+        )}
         <div className="flex justify-end gap-2 pt-1">
           <button onClick={onClose} className="px-3 py-2 rounded-lg text-sm font-semibold border" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>Cancel</button>
           <button onClick={() => f.name && onSave(f)} disabled={!f.name} className="px-3 py-2 rounded-lg text-sm font-bold text-white inline-flex items-center gap-1.5 disabled:opacity-40" style={{ background: 'var(--gradient-sidebar)' }}><Save size={13} /> Save</button>

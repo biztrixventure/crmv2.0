@@ -178,7 +178,21 @@ const ASSIGNABLE_LEVELS = {
   // Agents (fronter / closer) and the Team Lead rung. Deliberately excludes
   // qa_agent + qa_manager, and also accountant / hr_manager, which are their
   // own modules with their own designations (mig 290).
-  operations_manager: ['fronter', 'closer', 'fronter_manager'],
+  //
+  // BOTH manager levels are listed because "Team Lead" is a DIFFERENT level
+  // depending which side the company is on: a fronter company's lead rung is
+  // fronter_manager, a closer company's is closer_manager, and the two are the
+  // same rank (4) here. Listing only fronter_manager left the one
+  // operations_manager in production — at 1-Vertex, a closer company whose only
+  // agent/lead levels are `closer` and `closer_manager` — able to create an
+  // agent but no Team Lead at all.
+  //
+  // This widens nothing in practice: a company only holds the custom roles for
+  // its own side (verified: every fronter company has exactly
+  // fronter + fronter_manager, 1-Vertex exactly closer + closer_manager), and
+  // roles.js `for_assignment` already filters to the company's own roles. The
+  // effective offer stays "Agent and Team Lead", whichever side you are on.
+  operations_manager: ['fronter', 'closer', 'fronter_manager', 'closer_manager'],
 };
 
 /** The levels `sourceLevelName` may assign, or null for "hierarchy only". */
