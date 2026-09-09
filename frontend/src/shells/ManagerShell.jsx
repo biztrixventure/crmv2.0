@@ -230,7 +230,10 @@ const ManagerShell = ({ workspaceMode = false }) => {
   const crossNavItems = [
     { key: 'calendar', label: 'Calendar', icon: CalendarDays },
     ...(hasPermission('view_company_members') || hasPermission('create_user') || hasPermission('edit_user') || hasPermission('manage_company_users')
-      ? [{ key: 'team',    label: 'Team',    icon: Users    }] : []),
+      // "Team Management", not "Team": this section is agent and team-lead
+      // administration -- creating a CRM login, activating or deactivating
+      // someone, managing members -- not the team dashboards.
+      ? [{ key: 'team',    label: 'Team Management', icon: Users }] : []),
     ...(hasPermission('manage_roles') || hasPermission('manage_company_roles') || hasPermission('create_role') || hasPermission('update_role') || hasPermission('delete_role')
       ? [{ key: 'roles',   label: 'Roles',   icon: Shield   }] : []),
     ...(hasPermission('manage_forms') && isEnabled('form_builder')

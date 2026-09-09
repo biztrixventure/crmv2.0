@@ -3,7 +3,7 @@ const { body, validationResult } = require('express-validator');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 // Auth middleware is applied in server.js
-const { hasPermission, canAssignRole, createRole, getCompanyTypeLevels, getUserRole, ROLE_HIERARCHY, clearPermissionCache } = require('../models/helpers');
+const { hasPermission, canAssignRole, createRole, getCompanyTypeLevels, getUserRole, ROLE_HIERARCHY, clearPermissionCache, assignableLevelsFor } = require('../models/helpers');
 const logger = require('../utils/logger');
 
 const router = express.Router();
@@ -95,6 +95,12 @@ router.get(
         const requesterRole = await getUserRole(userId, companyId);
         const requesterLevel = ROLE_HIERARCHY[requesterRole?.role_level] ?? 0;
         roles = roles.filter(r => (ROLE_HIERARCHY[r.level] ?? 0) > requesterLevel);
+        // ...then the department allowlist, so the picker offers exactly what
+        // POST /users will accept. Without this the two disagreed: an ops
+        // manager was shown QA roles and then refused when they picked one,
+        // which reads as a broken form rather than a boundary.
+        const allowed = assignableLevelsFor(requesterRole?.role_level);
+        if (allowed) roles = roles.filter(r => allowed.includes(r.level));
         logger.debug('GET_ROLES', `for_assignment filter: requesterLevel=${requesterLevel}, kept ${roles.length} roles`);
       }
 

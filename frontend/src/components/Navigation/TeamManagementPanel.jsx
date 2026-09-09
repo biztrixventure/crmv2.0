@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { Users, PlusCircle, Trash2, XCircle, CheckCircle, Edit2, BarChart3 } from 'lucide-react';
 import { Card, Badge, Button } from '../UI';
@@ -8,6 +8,95 @@ import UserScorecard from '../Manager/UserScorecard';
 import CreateUserModal from '../Admin/UserManagement/CreateUserModal';
 import UserModal from '../Admin/UserManagement/UserModal';
 import client from '../../api/client';
+
+// One roster table, rendered once per status. Kept as a component rather than a
+// loop body so the two sections cannot drift into different columns.
+const MemberSection = ({ title, tone, rows, emptyHint, hasPermission, setEditUser, setScorecard, setConfirm, toggleActive }) => (
+  <div>
+    <div className="flex items-center gap-2 mb-2">
+      <h3 className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>{title}</h3>
+      <span className="text-xs font-bold px-1.5 py-0.5 rounded-md tabular-nums"
+        style={{
+          color: tone === 'success' ? 'var(--color-success-600)' : 'var(--color-text-secondary)',
+          background: tone === 'success'
+            ? 'color-mix(in srgb, var(--color-success-600) 12%, transparent)'
+            : 'var(--color-bg-secondary)',
+        }}>{rows.length}</span>
+    </div>
+    {rows.length === 0 ? (
+      <Card className="p-6 text-center">
+        <p className="text-xs m-0" style={{ color: 'var(--color-text-tertiary)' }}>{emptyHint}</p>
+      </Card>
+    ) : (
+      <Card className="overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
+                {['Name', 'Email', 'Role', 'Level', 'Status', 'Actions'].map(h => (
+                  <th key={h} className="px-4 py-3 text-left text-xs font-bold text-text-secondary uppercase">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+                {rows.map(u => (
+                  <tr key={u.id} onClick={() => setEditUser(u)}
+                    className="hover:bg-bg-secondary cursor-pointer transition-colors"
+                    style={{ borderBottom: '1px solid var(--color-border)' }}>
+                    <td className="px-4 py-3 font-semibold text-text">
+                      {[u.first_name, u.last_name].filter(Boolean).join(' ') || '—'}
+                    </td>
+                    <td className="px-4 py-3 text-xs text-text-secondary">{u.email || '—'}</td>
+                    <td className="px-4 py-3 text-xs text-text-secondary">{u.role || '—'}</td>
+                    <td className="px-4 py-3 text-xs text-text-secondary capitalize">
+                      {u.role_level?.replace(/_/g, ' ') || '—'}
+                    </td>
+                    <td className="px-4 py-3">
+                      <Badge variant={u.is_active ? 'success' : 'secondary'} size="sm">
+                        {u.is_active ? 'Active' : 'Inactive'}
+                      </Badge>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <Tooltip text="View this user's performance scorecard">
+                          <button onClick={e => { e.stopPropagation(); setScorecard(u); }}
+                            className="p-1 rounded hover:bg-bg-secondary transition-colors">
+                            <BarChart3 size={15} style={{ color: 'var(--color-success-600)' }} />
+                          </button>
+                        </Tooltip>
+                        {hasPermission('edit_user') && (
+                          <>
+                            <button onClick={e => { e.stopPropagation(); setEditUser(u); }} title="Edit"
+                              className="p-1 rounded hover:bg-bg-secondary transition-colors">
+                              <Edit2 size={15} style={{ color: 'var(--color-primary-500)' }} />
+                            </button>
+                            <button onClick={e => { e.stopPropagation(); toggleActive(u); }} title={u.is_active ? 'Deactivate' : 'Activate'}
+                              className="p-1 rounded hover:bg-bg-secondary transition-colors">
+                              {u.is_active
+                                ? <XCircle size={15} className="text-warning-500" />
+                                : <CheckCircle size={15} className="text-success-500" />}
+                            </button>
+                          </>
+                        )}
+                        {hasPermission('delete_user') && (
+                          <button
+                            onClick={e => { e.stopPropagation(); setConfirm({ id: u.id, name: [u.first_name, u.last_name].filter(Boolean).join(' ') || u.email }); }}
+                            title="Delete"
+                            className="p-1 rounded hover:bg-error-50 dark:hover:bg-error-900 transition-colors">
+                            <Trash2 size={15} className="text-error-500" />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+    )}
+  </div>
+);
 
 const TeamManagementPanel = ({ companyId: companyIdProp }) => {
   const { hasPermission, user } = useAuth();
@@ -32,6 +121,15 @@ const TeamManagementPanel = ({ companyId: companyIdProp }) => {
   }, [companyId]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Two sections, because "who is working here" and "who used to" are different
+  // questions and the flat list forced a Status column to be read row by row to
+  // tell them apart. Sorted by name inside each so a roster is scannable.
+  const byName = (a, b) => (
+    [a.first_name, a.last_name].filter(Boolean).join(' ') || a.email || ''
+  ).localeCompare([b.first_name, b.last_name].filter(Boolean).join(' ') || b.email || '');
+  const activeMembers   = useMemo(() => members.filter(u => u.is_active).sort(byName), [members]);
+  const inactiveMembers = useMemo(() => members.filter(u => !u.is_active).sort(byName), [members]);
 
   const toggleActive = async (u) => {
     setActionErr('');
@@ -108,72 +206,18 @@ const TeamManagementPanel = ({ companyId: companyIdProp }) => {
           )}
         </Card>
       ) : (
-        <Card className="overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
-                  {['Name', 'Email', 'Role', 'Level', 'Status', 'Actions'].map(h => (
-                    <th key={h} className="px-4 py-3 text-left text-xs font-bold text-text-secondary uppercase">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {members.map(u => (
-                  <tr key={u.id} onClick={() => setEditUser(u)}
-                    className="hover:bg-bg-secondary cursor-pointer transition-colors"
-                    style={{ borderBottom: '1px solid var(--color-border)' }}>
-                    <td className="px-4 py-3 font-semibold text-text">
-                      {[u.first_name, u.last_name].filter(Boolean).join(' ') || '—'}
-                    </td>
-                    <td className="px-4 py-3 text-xs text-text-secondary">{u.email || '—'}</td>
-                    <td className="px-4 py-3 text-xs text-text-secondary">{u.role || '—'}</td>
-                    <td className="px-4 py-3 text-xs text-text-secondary capitalize">
-                      {u.role_level?.replace(/_/g, ' ') || '—'}
-                    </td>
-                    <td className="px-4 py-3">
-                      <Badge variant={u.is_active ? 'success' : 'secondary'} size="sm">
-                        {u.is_active ? 'Active' : 'Inactive'}
-                      </Badge>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <Tooltip text="View this user's performance scorecard">
-                          <button onClick={e => { e.stopPropagation(); setScorecard(u); }}
-                            className="p-1 rounded hover:bg-bg-secondary transition-colors">
-                            <BarChart3 size={15} style={{ color: 'var(--color-success-600)' }} />
-                          </button>
-                        </Tooltip>
-                        {hasPermission('edit_user') && (
-                          <>
-                            <button onClick={e => { e.stopPropagation(); setEditUser(u); }} title="Edit"
-                              className="p-1 rounded hover:bg-bg-secondary transition-colors">
-                              <Edit2 size={15} style={{ color: 'var(--color-primary-500)' }} />
-                            </button>
-                            <button onClick={e => { e.stopPropagation(); toggleActive(u); }} title={u.is_active ? 'Deactivate' : 'Activate'}
-                              className="p-1 rounded hover:bg-bg-secondary transition-colors">
-                              {u.is_active
-                                ? <XCircle size={15} className="text-warning-500" />
-                                : <CheckCircle size={15} className="text-success-500" />}
-                            </button>
-                          </>
-                        )}
-                        {hasPermission('delete_user') && (
-                          <button
-                            onClick={e => { e.stopPropagation(); setConfirm({ id: u.id, name: [u.first_name, u.last_name].filter(Boolean).join(' ') || u.email }); }}
-                            title="Delete"
-                            className="p-1 rounded hover:bg-error-50 dark:hover:bg-error-900 transition-colors">
-                            <Trash2 size={15} className="text-error-500" />
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
+        <div className="space-y-5">
+          <MemberSection title="Active agents" tone="success" rows={activeMembers}
+            emptyHint="Nobody is active in this company yet."
+            hasPermission={hasPermission} setEditUser={setEditUser} setScorecard={setScorecard}
+            setConfirm={setConfirm} toggleActive={toggleActive} />
+          {/* Rendered even when empty, so "we have no inactive agents" is stated
+              rather than left as an absence the reader has to interpret. */}
+          <MemberSection title="Inactive agents" tone="muted" rows={inactiveMembers}
+            emptyHint="No inactive agents — everyone here is active."
+            hasPermission={hasPermission} setEditUser={setEditUser} setScorecard={setScorecard}
+            setConfirm={setConfirm} toggleActive={toggleActive} />
+        </div>
       )}
 
       {scorecard && <UserScorecard user={scorecard} onClose={() => setScorecard(null)} />}

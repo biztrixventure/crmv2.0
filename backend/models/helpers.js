@@ -163,9 +163,33 @@ const getUserPermissions = async (userId, companyId) => {
 };
 
 // ============================================================================
+// DEPARTMENT allowlist, layered on top of the hierarchy.
+//
+// The hierarchy alone answers "is this role beneath me", which is not the same
+// question as "is this role mine to staff". An operations_manager sits at 3, so
+// every rank below it was assignable -- including qa_manager (4) and qa_agent
+// (5). QA is a separate department with its own org chart (mig 208: compliance
+// wires managers to companies, the QA manager owns the team), so an ops manager
+// staffing it from Team Management put people into a structure they do not run.
+//
+// A level listed here means: these are the ONLY levels that role may assign.
+// A role absent from this map keeps the hierarchy rule alone, exactly as before.
+const ASSIGNABLE_LEVELS = {
+  // Agents (fronter / closer) and the Team Lead rung. Deliberately excludes
+  // qa_agent + qa_manager, and also accountant / hr_manager, which are their
+  // own modules with their own designations (mig 290).
+  operations_manager: ['fronter', 'closer', 'fronter_manager'],
+};
+
+/** The levels `sourceLevelName` may assign, or null for "hierarchy only". */
+const assignableLevelsFor = (sourceLevelName) => ASSIGNABLE_LEVELS[sourceLevelName] || null;
+
+// ============================================================================
 // Check Role Hierarchy
 // Strict: a user can only assign roles with LOWER authority (higher number).
 // Same-level assignment is not allowed — prevents lateral escalation.
+// A department allowlist (above) can narrow this further; it can never widen
+// it, because the hierarchy test still has to pass first.
 // ============================================================================
 const canAssignRole = async (sourceUserId, sourceCompanyId, targetRoleLevel) => {
   try {
@@ -173,12 +197,20 @@ const canAssignRole = async (sourceUserId, sourceCompanyId, targetRoleLevel) => 
     if (!sourceRole) return false;
 
     const sourceLevel = ROLE_HIERARCHY[sourceRole.role_level] ?? 999;
+    const targetName  = typeof targetRoleLevel === 'number' ? null : targetRoleLevel;
     const targetLevel = typeof targetRoleLevel === 'number'
       ? targetRoleLevel
       : (ROLE_HIERARCHY[targetRoleLevel] ?? 999);
 
     // Strict less-than: can only assign roles with strictly lower authority
-    return sourceLevel < targetLevel;
+    if (sourceLevel >= targetLevel) return false;
+
+    // ...and, where one exists, inside their own department's allowlist. Only
+    // checkable when the caller passed a level NAME; a bare number carries no
+    // department, so the hierarchy result stands.
+    const allowed = assignableLevelsFor(sourceRole.role_level);
+    if (allowed && targetName) return allowed.includes(targetName);
+    return true;
   } catch {
     return false;
   }
@@ -486,6 +518,7 @@ module.exports = {
   clearPermissionCache,
   getUserPermissions,
   canAssignRole,
+  assignableLevelsFor,
   getUserCompanies,
   isCompanyMember,
   getCompanyType,
