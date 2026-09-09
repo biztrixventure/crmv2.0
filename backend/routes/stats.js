@@ -991,6 +991,62 @@ router.get('/agent-performance', asyncHandler(async (req, res) => {
     (profs || []).forEach(p => { names[p.user_id] = [p.first_name, p.last_name].filter(Boolean).join(' ') || null; });
   }
 
+  // ── QA scores per agent ──────────────────────────────────────────────────
+  // qa_reviews.max_score is 100 in every row in this database, so final_score
+  // is already a percentage. Averaged per agent it is the number a coaching
+  // conversation actually opens with, which is why it belongs beside the
+  // funnel instead of only inside the QA shell.
+  //
+  // Filtered by company_id and deliberately NOT by an .in() over the agent id
+  // list: PostgREST silently returns an EMPTY result once an .in() carries more
+  // than ~100-150 UUIDs, so a big roster would blank every score with no error.
+  // One paginated company-scoped read, grouped in memory, cannot.
+  //
+  // An agent with no review in the window gets null, never 0 — a manager has to
+  // tell "scored badly" from "never reviewed", and on the largest company only
+  // 26 of 62 active agents have ever been reviewed.
+  const qaByAgent = {};
+  if (companyId) {
+    try {
+      const reviews = await fetchAll(() => {
+        let q = supabaseAdmin.from('qa_reviews')
+          .select('subject_user_id, final_score, total_score, max_score, passed, created_at')
+          .eq('company_id', companyId)
+          .not('subject_user_id', 'is', null)
+          .in('status', ['submitted', 'finalized'])
+          .order('created_at', { ascending: true });
+        if (tFrom) q = q.gte('created_at', tFrom);
+        if (tTo)   q = q.lte('created_at', tTo);
+        return q;
+      });
+      reviews.forEach(r => {
+        // final_score is the post-penalty number the scorecard settled on;
+        // total_score/max_score is the pre-penalty raw. Prefer the former and
+        // fall back rather than dropping a review that carries only the raw.
+        const score = r.final_score != null
+          ? Number(r.final_score)
+          : (Number(r.max_score) > 0 ? (Number(r.total_score) / Number(r.max_score)) * 100 : null);
+        if (score === null || !Number.isFinite(score)) return;
+        const b = qaByAgent[r.subject_user_id] || (qaByAgent[r.subject_user_id] = { sum: 0, n: 0, passed: 0 });
+        b.sum += score; b.n += 1; if (r.passed) b.passed += 1;
+      });
+    } catch (e) {
+      // QA is an optional module — a missing table or renamed column must leave
+      // the scoreboard working, with the QA column simply empty.
+      logger.warn('AGENT_PERF', `QA scores unavailable: ${e.message}`);
+    }
+  }
+  const qaOf = (id) => {
+    const b = qaByAgent[id];
+    if (!b || !b.n) return null;
+    return {
+      score:     Math.round((b.sum / b.n) * 10) / 10,
+      reviews:   b.n,
+      passed:    b.passed,
+      pass_rate: Math.round((b.passed / b.n) * 1000) / 10,
+    };
+  };
+
   // A rate with a zero denominator is undefined, not 0 — the UI shows "—".
   // Reporting 0% for a fronter who sent no leads today reads as failure.
   const rate = (num, den) => (den > 0 ? Math.round((num / den) * 1000) / 10 : null);
@@ -1008,6 +1064,7 @@ router.get('/agent-performance', asyncHandler(async (req, res) => {
       revenue: Math.round(a.revenue * 100) / 100,
       conversion: rate(a.sales, a.transfers),
       approval:   rate(a.approved, a.sales),
+      qa: qaOf(id),
     };
   })
   // Rank by the metric this side is judged on, then by approved as the
@@ -1030,61 +1087,89 @@ router.get('/agent-performance', asyncHandler(async (req, res) => {
   const scopeT = transfers.length, scopeS = sales.length;
   const scopeA = sales.filter(s => s.status === 'closed_won').length;
 
-  // ── Daily series ─────────────────────────────────────────────────────────
-  // Buckets span the REQUESTED range, not whatever the data happens to cover,
-  // so a quiet day renders as a gap in the chart instead of vanishing and
-  // making the line look continuous. Capped so a year-long range can't return
-  // 365 buckets to a phone.
-  const MAX_DAYS = 120;
-  const dayOf = etDayOf;
-  const allDates = [
-    ...transfers.map(t => dayOf(t.created_at)),
-    ...sales.map(s => dayOf(s.sale_date || s.created_at)),
-  ].filter(Boolean).sort();
-  const firstDay = date_from || allDates[0] || null;
-  const lastDay  = date_to   || allDates[allDates.length - 1] || firstDay;
-  const dayKeys = [];
-  if (firstDay && lastDay) {
-    let cur = Date.parse(`${firstDay}T00:00:00Z`);
-    const end = Date.parse(`${lastDay}T00:00:00Z`);
-    while (cur <= end && dayKeys.length < MAX_DAYS) {
-      dayKeys.push(new Date(cur).toISOString().slice(0, 10));
-      cur += 86400000;
+  // The per-day series that fed the Daily Activity chart is gone with the
+  // chart. It built up to 120 buckets for the company AND another 120 for a
+  // focused agent on every date change, to draw a shape the KPI tiles and the
+  // funnel already state as numbers. /stats/team-trends still serves a daily
+  // series for anything that genuinely needs one.
+  const focusId = safeUuid(req.query.user_id) || null;
+  const focus = focusId
+    ? {
+        user_id: focusId,
+        ...(agents.find(a => a.user_id === focusId) || {
+          name: 'Unknown', transfers: 0, sales: 0, approved: 0, cancelled: 0,
+          pending: 0, revenue: 0, conversion: null, approval: null, qa: null,
+        }),
+      }
+    : null;
+
+  // ── Team rollup ──────────────────────────────────────────────────────────
+  // Teams are an additive org layer (mig 211): one team per user, optionally
+  // nested. Rolling the SAME per-agent rows up means a team's numbers can never
+  // disagree with the agent rows underneath it — the alternative, a second set
+  // of queries scoped by team, is how two panels on one screen start
+  // contradicting each other.
+  //
+  // Only agents who actually appear in this window are summed, so `agents` on a
+  // team row means "active in this range", not "on the roster". Teams with no
+  // activity are dropped rather than listed as a row of zeros, and the whole
+  // array comes back empty for a company that has never made a team — which is
+  // what makes the UI's "if applicable" honest.
+  let teams = [];
+  if (companyId) {
+    try {
+      const [{ data: teamRows }, { data: memberRows }] = await Promise.all([
+        supabaseAdmin.from('teams')
+          .select('id, name, parent_team_id')
+          .eq('company_id', companyId).eq('is_active', true),
+        supabaseAdmin.from('team_members')
+          .select('team_id, user_id')
+          .eq('company_id', companyId),
+      ]);
+      const teamOfUser = {};
+      (memberRows || []).forEach(m => { teamOfUser[m.user_id] = m.team_id; });
+      const acc = {};
+      (teamRows || []).forEach(t => {
+        acc[t.id] = {
+          team_id: t.id, name: t.name, parent_team_id: t.parent_team_id || null,
+          agents: 0, transfers: 0, sales: 0, approved: 0, cancelled: 0, pending: 0,
+          qa_sum: 0, qa_n: 0,
+        };
+      });
+      agents.forEach(a => {
+        const b = acc[teamOfUser[a.user_id]];
+        if (!b) return;                       // unassigned agent — counted at company level only
+        b.agents++;
+        b.transfers += a.transfers; b.sales += a.sales;
+        b.approved  += a.approved;  b.cancelled += a.cancelled; b.pending += a.pending;
+        // Team QA is the mean of its REVIEWED members only; averaging an
+        // unreviewed member in as 0 would punish a team for QA's sampling.
+        if (a.qa) { b.qa_sum += a.qa.score; b.qa_n += 1; }
+      });
+      teams = Object.values(acc)
+        .filter(t => t.agents > 0)
+        .map(({ qa_sum, qa_n, ...t }) => ({
+          ...t,
+          conversion: rate(t.sales, t.transfers),
+          approval:   rate(t.approved, t.sales),
+          qa_score:   qa_n ? Math.round((qa_sum / qa_n) * 10) / 10 : null,
+          qa_reviewed: qa_n,
+        }))
+        .sort((x, y) => (side === 'fronter'
+          ? (y.transfers - x.transfers) || (y.approved - x.approved)
+          : (y.sales - x.sales) || (y.approved - x.approved)));
+    } catch (e) {
+      // Teams are optional (pre-mig 211 deployments have no table).
+      logger.warn('AGENT_PERF', `Team rollup unavailable: ${e.message}`);
     }
   }
-  // One pass builds the company series and, when a specific agent is asked
-  // for, that agent's series too — same buckets, so the two are comparable.
-  const focusId = safeUuid(req.query.user_id) || null;
-  const mkSeries = () => {
-    const m = {};
-    dayKeys.forEach(d => { m[d] = { date: d, transfers: 0, sales: 0, approved: 0 }; });
-    return m;
-  };
-  const coSeries = mkSeries();
-  const fcSeries = focusId ? mkSeries() : null;
-
-  transfers.forEach(t => {
-    const d = dayOf(t.created_at);
-    if (coSeries[d]) coSeries[d].transfers++;
-    if (fcSeries && fcSeries[d] && t[tKey] === focusId) fcSeries[d].transfers++;
-  });
-  sales.forEach(s => {
-    const d = dayOf(s.sale_date || s.created_at);
-    const won = s.status === 'closed_won';
-    if (coSeries[d]) { coSeries[d].sales++; if (won) coSeries[d].approved++; }
-    if (fcSeries && fcSeries[d] && s[sKey] === focusId) { fcSeries[d].sales++; if (won) fcSeries[d].approved++; }
-  });
-
-  const focus = focusId
-    ? { user_id: focusId, ...(agents.find(a => a.user_id === focusId) || { name: 'Unknown', transfers: 0, sales: 0, approved: 0, cancelled: 0, pending: 0, revenue: 0, conversion: null, approval: null }), daily: Object.values(fcSeries) }
-    : null;
 
   res.json({
     side,
     agent_metric: side === 'fronter' ? 'transfers' : 'sales',
     range: { from: date_from || null, to: date_to || null },
-    daily: Object.values(coSeries),
     focus,
+    teams,
     agents,
     totals: {
       agents: agents.length,
@@ -1099,6 +1184,17 @@ router.get('/agent-performance', asyncHandler(async (req, res) => {
       attributed_transfers: totT, attributed_sales: totS, attributed_approved: totA,
       unattributed_transfers: unattributedTransfers,
       unattributed_sales: unattributedSales,
+      // Company QA: the mean over REVIEWS in the window, not over agents, so
+      // one heavily-sampled agent doesn't count the same as one sampled once.
+      // qa_reviewed_agents says how much of the roster the score covers — the
+      // score alone would imply the whole company had been assessed.
+      qa_score: (() => {
+        const b = Object.values(qaByAgent);
+        const n = b.reduce((t, x) => t + x.n, 0);
+        return n ? Math.round((b.reduce((t, x) => t + x.sum, 0) / n) * 10) / 10 : null;
+      })(),
+      qa_reviews: Object.values(qaByAgent).reduce((t, x) => t + x.n, 0),
+      qa_reviewed_agents: agents.filter(a => a.qa).length,
     },
   });
 }));
