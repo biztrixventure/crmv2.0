@@ -500,4 +500,310 @@ router.get('/my/:attemptId/result', asyncHandler(async (req, res) => {
   res.json({ quiz, questions: questions || [], attempt });
 }));
 
+// ============================================================================
+// OVERSIGHT — read-only visibility into QA-conducted quizzes.
+//
+// WHY THIS IS SEPARATE FROM THE MANAGE SURFACE. Manage access is
+// CREATOR-BASED: canManageThisQuiz passes for the quiz's own creator,
+// compliance_manager, or superadmin. Granting an operations_manager
+// `quiz.manage` would therefore show them only quizzes THEY created — never
+// the QA Department's, which is the entire point — and would hand them
+// edit/delete/assign on top. Oversight answers a different question ("what
+// happened to my agents") and gets its own gate and its own read-only routes.
+//
+// VISIBILITY RULE. A quiz is visible when this viewer's company owns it OR any
+// member of their company was assigned it. Agent rows are ALWAYS filtered to
+// their own company's members — never widened by owning the quiz.
+//
+// That boundary is load-bearing, not theoretical. The one quiz in production is
+// owned by 1-Vertex and was assigned, by three TEAM assignments, to 40 people:
+// 30 Wavetech Infomatics agents, none of them 1-Vertex members, plus 10 with no
+// active company role at all. Scoping agent rows on quiz OWNERSHIP would show a
+// 1-Vertex manager another company's agents question by question, answer by
+// answer. So the number of people who took it is reported (a count reveals
+// nothing) while the rows are only ever your own people.
+// ============================================================================
+
+// Read-only oversight, by role. operations_manager holds no quiz permission at
+// all today — quiz.manage sits with company_admin, compliance_manager and
+// qa_manager — so this grants sight of results without creating a write path.
+const OVERSIGHT_ROLES = ['operations_manager'];
+const canOversee = (req) => OVERSIGHT_ROLES.includes(req.user.role);
+
+// PostgREST returns an EMPTY result once an .in() carries more than ~100-150
+// uuids, with no error at all. Every id list below is chunked for that reason.
+const IN_CHUNK = 100;
+async function inChunks(ids, run) {
+  const out = [];
+  for (let i = 0; i < ids.length; i += IN_CHUNK) out.push(...((await run(ids.slice(i, i + IN_CHUNK))) || []));
+  return out;
+}
+
+async function companyMemberIds(companyId) {
+  if (!companyId) return [];
+  const { data } = await supabaseAdmin
+    .from('user_company_roles').select('user_id')
+    .eq('company_id', companyId).eq('is_active', true);
+  return [...new Set((data || []).map(r => r.user_id))];
+}
+
+// Every quiz this viewer may see: owned by their company, or taken by one of
+// their members.
+async function visibleQuizIds(companyId, memberIds) {
+  const owned = companyId
+    ? (await supabaseAdmin.from('quizzes').select('id').eq('company_id', companyId)).data || []
+    : [];
+  const taken = memberIds.length
+    ? await inChunks(memberIds, async (chunk) =>
+        (await supabaseAdmin.from('quiz_attempts').select('quiz_id').in('user_id', chunk)).data)
+    : [];
+  return [...new Set([...owned.map(z => z.id), ...taken.map(a => a.quiz_id)])];
+}
+
+const numOf = (v) => (v === null || v === undefined ? null : Number(v));
+const avgOf = (nums) => (nums.length ? +(nums.reduce((s, n) => s + n, 0) / nums.length).toFixed(1) : null);
+
+// ── oversight: one call for the whole panel — quiz-wise AND agent-wise ───────
+router.get('/oversight/summary', asyncHandler(async (req, res) => {
+  if (!canOversee(req)) return res.status(403).json({ error: 'Not allowed' });
+  const companyId = req.user.company_id;
+  const empty = { quizzes: [], agents: [], totals: { quizzes: 0, agents_participating: 0, submitted: 0, avg_percent: null } };
+  if (!companyId) return res.json(empty);
+
+  const memberIds = await companyMemberIds(companyId);
+  const memberSet = new Set(memberIds);
+  const quizIds = await visibleQuizIds(companyId, memberIds);
+  if (!quizIds.length) return res.json(empty);
+
+  const quizzes = await inChunks(quizIds, async (chunk) =>
+    (await supabaseAdmin.from('quizzes')
+      .select('id, title, description, category, pass_threshold, is_active, created_by, created_at, company_id')
+      .in('id', chunk).order('created_at', { ascending: false })).data);
+
+  const questions = await inChunks(quizIds, async (chunk) =>
+    (await supabaseAdmin.from('quiz_questions').select('quiz_id').in('quiz_id', chunk)).data);
+
+  // Every attempt on every visible quiz. Membership then splits my company's
+  // people from everyone else: the rest contribute to a participation COUNT
+  // only, never a row.
+  const attempts = await inChunks(quizIds, async (chunk) =>
+    (await supabaseAdmin.from('quiz_attempts')
+      .select('quiz_id, user_id, status, score, total_points, percent, submitted_at')
+      .in('quiz_id', chunk)).data);
+
+  const qCount = {};
+  questions.forEach(q => { qCount[q.quiz_id] = (qCount[q.quiz_id] || 0) + 1; });
+
+  const names = await nameMap([...new Set([
+    ...quizzes.map(z => z.created_by),
+    ...attempts.filter(a => memberSet.has(a.user_id)).map(a => a.user_id),
+  ])]);
+
+  const thresholdOf = Object.fromEntries(quizzes.map(z => [z.id, Number(z.pass_threshold) || 0]));
+  const didPass = (a) => (Number(a.percent) || 0) >= thresholdOf[a.quiz_id];
+
+  // ── quiz-wise ─────────────────────────────────────────────────────────────
+  const byQuiz = {};
+  attempts.forEach(a => {
+    const b = byQuiz[a.quiz_id] || (byQuiz[a.quiz_id] = { total: 0, mine: [], mineSubmitted: [] });
+    b.total += 1;
+    if (!memberSet.has(a.user_id)) return;
+    b.mine.push(a);
+    if (a.status === 'submitted') b.mineSubmitted.push(a);
+  });
+
+  const quizRows = quizzes.map(z => {
+    const b = byQuiz[z.id] || { total: 0, mine: [], mineSubmitted: [] };
+    const pcts = b.mineSubmitted.map(a => Number(a.percent) || 0);
+    const passCount = b.mineSubmitted.filter(didPass).length;
+    return {
+      id: z.id,
+      title: z.title,
+      description: z.description,
+      category: z.category,
+      pass_threshold: Number(z.pass_threshold) || 0,
+      is_active: z.is_active,
+      created_at: z.created_at,
+      created_by_name: names[z.created_by] || 'Unknown',
+      // True when another company owns the quiz — an ops manager should be able
+      // to tell "QA ran this at us" from "this one is ours".
+      external: z.company_id !== companyId,
+      question_count: qCount[z.id] || 0,
+      // Participation, both ways round. participants_total counts everyone
+      // assigned whatever company they are in; assigned counts only this
+      // viewer's own agents. Both are shown so an empty table explains itself
+      // instead of looking broken: "0 of 30 participants are in your company".
+      participants_total: b.total,
+      assigned: b.mine.length,
+      submitted: b.mineSubmitted.length,
+      pending: b.mine.length - b.mineSubmitted.length,
+      avg_percent: avgOf(pcts),
+      pass_count: passCount,
+      fail_count: b.mineSubmitted.length - passCount,
+      completion_rate: b.mine.length ? +(100 * b.mineSubmitted.length / b.mine.length).toFixed(1) : null,
+    };
+  });
+
+  // ── agent-wise ────────────────────────────────────────────────────────────
+  // Each of my agents with their quiz history attached, so the panel can pivot
+  // by person without a second round trip.
+  const titleOf = Object.fromEntries(quizzes.map(z => [z.id, z.title]));
+  const byAgent = {};
+  attempts.filter(a => memberSet.has(a.user_id)).forEach(a => {
+    const b = byAgent[a.user_id] || (byAgent[a.user_id] = { user_id: a.user_id, rows: [] });
+    b.rows.push(a);
+  });
+
+  const agentRows = Object.values(byAgent).map(b => {
+    const submitted = b.rows.filter(a => a.status === 'submitted');
+    const pcts = submitted.map(a => Number(a.percent) || 0);
+    return {
+      user_id: b.user_id,
+      name: names[b.user_id] || 'Unknown',
+      assigned: b.rows.length,
+      submitted: submitted.length,
+      pending: b.rows.length - submitted.length,
+      // null, not 0, for an agent assigned a quiz they have not sat — "no score
+      // yet" is not "scored zero", and a 0% would read as a failing agent.
+      avg_percent: avgOf(pcts),
+      best_percent: pcts.length ? Math.max(...pcts) : null,
+      pass_count: submitted.filter(didPass).length,
+      last_submitted_at: submitted.map(a => a.submitted_at).filter(Boolean).sort().pop() || null,
+      quizzes: b.rows
+        .map(a => ({
+          quiz_id: a.quiz_id,
+          title: titleOf[a.quiz_id] || 'Unknown quiz',
+          status: a.status,
+          percent: numOf(a.percent),
+          score: numOf(a.score),
+          total_points: numOf(a.total_points),
+          pass: a.status === 'submitted' ? didPass(a) : null,
+          submitted_at: a.submitted_at,
+        }))
+        .sort((x, y) => String(y.submitted_at || '').localeCompare(String(x.submitted_at || ''))),
+    };
+  }).sort((x, y) => (y.avg_percent ?? -1) - (x.avg_percent ?? -1) || y.submitted - x.submitted);
+
+  const mineSubmitted = attempts.filter(a => memberSet.has(a.user_id) && a.status === 'submitted');
+  res.json({
+    quizzes: quizRows,
+    agents: agentRows,
+    totals: {
+      quizzes: quizRows.length,
+      agents_participating: agentRows.length,
+      submitted: mineSubmitted.length,
+      avg_percent: avgOf(mineSubmitted.map(a => Number(a.percent) || 0)),
+    },
+  });
+}));
+
+// ── oversight: one quiz in full — questions, correct answers, agent answers ──
+router.get('/oversight/quizzes/:id', asyncHandler(async (req, res) => {
+  if (!canOversee(req)) return res.status(403).json({ error: 'Not allowed' });
+  const companyId = req.user.company_id;
+  const quiz = await quizById(req.params.id);
+  if (!quiz) return res.status(404).json({ error: 'Quiz not found' });
+
+  const memberIds = await companyMemberIds(companyId);
+  const memberSet = new Set(memberIds);
+
+  // The same visibility rule as the summary, re-checked here: a quiz id typed
+  // into the URL must not reach further than the list would have shown.
+  const mineTook = memberIds.length
+    ? (await inChunks(memberIds, async (chunk) =>
+        (await supabaseAdmin.from('quiz_attempts').select('user_id')
+          .eq('quiz_id', quiz.id).in('user_id', chunk)).data)).length > 0
+    : false;
+  if (quiz.company_id !== companyId && !mineTook) return res.status(403).json({ error: 'Not allowed' });
+
+  const { data: questions } = await supabaseAdmin.from('quiz_questions')
+    .select('id, question_text, options, correct_index, points, order_index, display_type')
+    .eq('quiz_id', quiz.id).order('order_index', { ascending: true });
+
+  const { data: allAttempts } = await supabaseAdmin.from('quiz_attempts')
+    .select('id, user_id, status, answers, score, total_points, percent, started_at, submitted_at, due_at')
+    .eq('quiz_id', quiz.id);
+
+  const mine = (allAttempts || []).filter(a => memberSet.has(a.user_id));
+  const names = await nameMap([...mine.map(a => a.user_id), quiz.created_by]);
+  const threshold = Number(quiz.pass_threshold) || 0;
+  const didPass = (a) => (Number(a.percent) || 0) >= threshold;
+
+  const rows = mine.map(a => {
+    const answers = Array.isArray(a.answers) ? a.answers : [];
+    return {
+      attempt_id: a.id,
+      user_id: a.user_id,
+      user_name: names[a.user_id] || 'Unknown',
+      status: a.status,
+      score: numOf(a.score),
+      total_points: numOf(a.total_points),
+      percent: numOf(a.percent),
+      pass: a.status === 'submitted' ? didPass(a) : null,
+      started_at: a.started_at,
+      submitted_at: a.submitted_at,
+      due_at: a.due_at,
+      // On the production quiz 14 of 40 attempts carry a non-empty answers
+      // array while 23 are submitted — so a submitted attempt can hold a score
+      // and no per-question record. The UI has to say "not recorded" rather
+      // than render every question as answered wrongly.
+      answers_recorded: answers.length > 0,
+      answers: answers.map(x => ({ question_id: x.question_id, selected_index: Number(x.selected_index) })),
+    };
+  }).sort((x, y) => (y.status === 'submitted') - (x.status === 'submitted') || (y.percent ?? -1) - (x.percent ?? -1));
+
+  const submitted = rows.filter(r => r.status === 'submitted');
+
+  // Per-question difficulty across MY agents only. Which question the team got
+  // wrong is the most actionable thing on this screen.
+  const perQuestion = (questions || []).map(q => {
+    const answered = submitted.filter(r => r.answers_recorded)
+      .map(r => r.answers.find(x => x.question_id === q.id))
+      .filter(Boolean);
+    const correct = answered.filter(x => x.selected_index === q.correct_index).length;
+    const chosen = {};
+    answered.forEach(x => { chosen[x.selected_index] = (chosen[x.selected_index] || 0) + 1; });
+    return {
+      question_id: q.id,
+      answered: answered.length,
+      correct,
+      correct_rate: answered.length ? +(100 * correct / answered.length).toFixed(1) : null,
+      chosen_counts: chosen,
+    };
+  });
+
+  const passCount = submitted.filter(r => r.pass).length;
+  res.json({
+    quiz: {
+      id: quiz.id, title: quiz.title, description: quiz.description, category: quiz.category,
+      pass_threshold: threshold, is_active: quiz.is_active, created_at: quiz.created_at,
+      time_limit_minutes: quiz.time_limit_minutes,
+      created_by_name: names[quiz.created_by] || 'Unknown',
+      external: quiz.company_id !== companyId,
+    },
+    questions: questions || [],
+    rows,
+    // Top performers among my own agents.
+    ranked: submitted.slice()
+      .sort((x, y) => (y.percent ?? 0) - (x.percent ?? 0))
+      .slice(0, 10)
+      .map(r => ({
+        user_id: r.user_id, user_name: r.user_name, percent: r.percent,
+        score: r.score, total_points: r.total_points, submitted_at: r.submitted_at,
+      })),
+    per_question: perQuestion,
+    summary: {
+      participants_total: (allAttempts || []).length,
+      assigned: rows.length,
+      submitted: submitted.length,
+      pending: rows.length - submitted.length,
+      avg_percent: avgOf(submitted.map(r => r.percent ?? 0)),
+      pass_count: passCount,
+      fail_count: submitted.length - passCount,
+      completion_rate: rows.length ? +(100 * submitted.length / rows.length).toFixed(1) : null,
+      answers_recorded: submitted.filter(r => r.answers_recorded).length,
+    },
+  });
+}));
+
 module.exports = router;

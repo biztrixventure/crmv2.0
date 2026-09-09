@@ -18,6 +18,10 @@ const CustomerLookupPanel   = lazy(() => import('../Shared/CustomerLookupPanel')
 const MyScoresPanel         = lazy(() => import('../QA2/MyScoresPanel'));
 const QuizManager           = lazy(() => import('../Quiz/QuizManager'));
 const MyQuizzes             = lazy(() => import('../Quiz/MyQuizzes'));
+// Read-only quiz results, for a viewer who oversees quizzes without building
+// them. QuizManager filters every read on `created_by === me`, so pointing an
+// operations_manager at it shows an empty list however many quizzes QA has run.
+const QuizOversight         = lazy(() => import('../Quiz/QuizOversight'));
 // Engagement: company-wide incentive programmes. SPIFF Campaigns moved here
 // from the manager shell's Team tab group -- an incentive programme is
 // engagement, not team structure.
@@ -48,7 +52,21 @@ const CrossRoleContent = ({ section, user }) => {
   if (section === 'card_validator')          return <Suspense fallback={<ToolFallback />}><CardValidator /></Suspense>;
   if (section === 'customer_lookup')         return <Suspense fallback={<ToolFallback />}><CustomerLookupPanel /></Suspense>;
   if (section === 'qa2_scores')              return <Suspense fallback={<ToolFallback />}><MyScoresPanel /></Suspense>;
-  if (section === 'quizzes')                 return <Suspense fallback={<ToolFallback />}><QuizManager /></Suspense>;
+  // Quiz builders get the manage surface; everyone else who can reach this
+  // section gets read-only results. The test mirrors the backend's own
+  // canManageQuizzes (permission, plus compliance_manager and superadmin
+  // unconditionally) so the UI and the API agree on which one you are —
+  // rendering QuizManager to a viewer the API refuses shows a broken panel.
+  if (section === 'quizzes') {
+    const canBuildQuizzes = user?.role === 'superadmin'
+      || user?.role === 'compliance_manager'
+      || (Array.isArray(user?.permissions) && user.permissions.includes('quiz.manage'));
+    return (
+      <Suspense fallback={<ToolFallback />}>
+        {canBuildQuizzes ? <QuizManager /> : <QuizOversight />}
+      </Suspense>
+    );
+  }
   if (section === 'my_quizzes')              return <Suspense fallback={<ToolFallback />}><MyQuizzes /></Suspense>;
   if (section === 'engagement')              return <Suspense fallback={<ToolFallback />}><SpiffManager /></Suspense>;
 

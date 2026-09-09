@@ -266,7 +266,14 @@ const ManagerShell = ({ workspaceMode = false }) => {
     // reach the old tab, so nobody loses sight of a running campaign.
     ...(['company_admin', 'operations_manager', 'closer_manager', 'fronter_manager', 'manager'].includes(user?.role)
       ? [{ key: 'engagement', label: 'Engagement', icon: Trophy }] : []),
-    ...(hasPermission('quiz.manage') ? [{ key: 'quizzes', label: 'Quizzes', icon: ClipboardList }] : []),
+    // Quizzes — the manage surface for a builder, read-only results for an
+    // operations_manager, who holds no quiz permission at all (quiz.manage
+    // sits with company_admin / compliance_manager / qa_manager) and so had no
+    // way to see a QA-conducted quiz its own agents had sat. CrossRoleContent
+    // picks the panel; the same key serves both, so the nav does not grow a
+    // near-duplicate tab.
+    ...(hasPermission('quiz.manage') || user?.role === 'operations_manager'
+      ? [{ key: 'quizzes', label: 'Quizzes', icon: ClipboardList }] : []),
     { key: 'my_quizzes', label: 'My Quizzes', icon: ClipboardList },
   ];
 
