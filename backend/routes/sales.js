@@ -2254,6 +2254,24 @@ router.post('/:id/compliance', [
   // Build update — only allow specific fields for compliance
   const updates = await stampActor('sales', { updated_at: new Date().toISOString() }, userId);
   if (status) updates.status = status;
+
+  // The same omission PUT /:id had, in the route actually named /compliance:
+  // closed_won is in COMPLIANCE_STATUSES, so this endpoint could approve a sale
+  // while recording nobody as having reviewed it. It stamps compliance_locked_at
+  // for the TERMINAL_LOCK set but never compliance_reviewed_by/at.
+  //
+  // Kept to the same two statuses PUT stamps — the ones /approve and /return
+  // stamp. NOT widened to CANCEL_LIKE, even though the compliance BULK route
+  // (routes/compliance.js) stamps all seven: migration 309 defines approved as
+  // `compliance_reviewed_at IS NOT NULL OR status = 'closed_won'` for the payout
+  // KPIs, so stamping a cancellation here would newly pull cancelled rows into
+  // that definition and move money figures. Reconciling those two routes is a
+  // decision about what the column MEANS, not a bug fix, so it stays flagged
+  // rather than being made silently.
+  if ((status === 'closed_won' || status === 'needs_revision') && status !== existing.status) {
+    updates.compliance_reviewed_by = userId;
+    updates.compliance_reviewed_at = updates.updated_at;
+  }
   // Write cancellation_date when caller sent one OR when status is
   // cancel-like (then default to today if not provided).
   const isCancelLike = status && CANCEL_LIKE.has(status);
