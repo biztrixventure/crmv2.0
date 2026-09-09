@@ -640,6 +640,69 @@ function VehicleResults({ data, onRetry, canVin, vins, onVin }) {
   );
 }
 
+// ── VIN result ───────────────────────────────────────────────────────────────
+// Three outcomes, and they are genuinely different: a VIN, a real "there is no
+// VIN for this person at this address", and a run that failed. Only the last
+// one is an error, so only the last one offers a retry.
+function VinResult({ data, onRetry }) {
+  const r = data?.result || {};
+  const list = (Array.isArray(r.vins) && r.vins.length ? r.vins : (data?.vin ? [data.vin] : []))
+    .filter(Boolean);
+  const status = r.status || (list.length ? 'found' : 'not_found');
+
+  if (status === 'error') {
+    const short = String(r.error || '').split('\n')[0].slice(0, 200);
+    return (
+      <EmptyState icon={AlertTriangle} tone="warn" title="The VIN lookup did not complete"
+        hint={(short || 'The lookup failed before it could answer.') + ' Nothing was returned, so this is not the same as there being no VIN.'}
+        action={onRetry ? <Button variant="secondary" size="sm" onClick={onRetry}>Try again</Button> : null} />
+    );
+  }
+
+  if (!list.length) {
+    return (
+      <EmptyState icon={Fingerprint} title="No VIN on record for that vehicle"
+        hint="The service has no VIN for that person at that address. Check the spelling of the name, the street, and that the year, make and model match the car." />
+    );
+  }
+
+  return (
+    <Panel pad="md" radius="xl">
+      <div className="flex items-start gap-3">
+        <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
+          style={{ background: 'color-mix(in srgb, var(--color-success-600) 12%, transparent)' }}>
+          <Fingerprint size={17} style={{ color: 'var(--color-success-600)' }} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <h4 className="m-0 text-base font-bold leading-tight break-words" style={{ color: 'var(--color-text)' }}>
+            {[r.year, r.make, r.model].filter(Boolean).join(' ') || 'Vehicle'}
+          </h4>
+          <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+            {(r.city || r.zip) && <Chip>{[r.city, r.zip].filter(Boolean).join(' ')}</Chip>}
+            {data?.cached && <Chip>from storage</Chip>}
+            {list.length > 1 && <Chip tone="strong">{list.length} VINs</Chip>}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-3 pt-3 space-y-2" style={{ borderTop: '1px solid var(--color-border)' }}>
+        {list.map(v => (
+          <Row key={v} icon={Fingerprint} label={list.length > 1 ? 'VIN' : 'VIN'}>
+            <span className="inline-flex items-center gap-1">
+              <span className="font-mono font-semibold break-all" style={{ fontSize: 13 }}>{v}</span>
+              <CopyBtn value={v} label="Copy VIN" />
+            </span>
+          </Row>
+        ))}
+        {(r.first_name || r.last_name) && (
+          <Row icon={User} label="Matched to">{[r.first_name, r.last_name].filter(Boolean).join(' ')}</Row>
+        )}
+        {r.address && <Row icon={Home} label="Address">{[r.address, r.city, r.zip].filter(Boolean).join(', ')}</Row>}
+      </div>
+    </Panel>
+  );
+}
+
 // ── main ─────────────────────────────────────────────────────────────────────
 export default function CustomerLookupPanel({ access: accessProp }) {
   // The shell already knows the answer (it needs it to show the tab at all),
@@ -665,7 +728,12 @@ export default function CustomerLookupPanel({ access: accessProp }) {
   const [tab, setTab] = useState('people');
 
   // Land on whichever search they actually hold once the answer arrives.
-  useEffect(() => { if (access && !access.people && access.vehicles) setTab('vehicles'); }, [access]);
+  // Land on the first tab this person actually holds, whichever that is.
+  useEffect(() => {
+    if (!access) return;
+    const first = access.people ? 'people' : access.vehicles ? 'vehicles' : access.vin ? 'vin' : null;
+    if (first) setTab(t => ((t === 'people' && !access.people) || (t === 'vehicles' && !access.vehicles) || (t === 'vin' && !access.vin)) ? first : t);
+  }, [access]);
 
   // people
   const [mode, setMode]           = useState('phone');   // 'phone' | 'name'
@@ -695,6 +763,21 @@ export default function CustomerLookupPanel({ access: accessProp }) {
   const [jobNote, setJobNote]   = useState('');        // live progress of a running search
   const [quota, setQuota]       = useState(null);
   const [vins, setVins]         = useState({});   // vehicle row index -> VIN state
+
+  // Standalone VIN search — its own form, independent of the vehicle results.
+  const [vnAddress, setVnAddress] = useState('');
+  const [vnZip, setVnZip]         = useState('');
+  const [vnYear, setVnYear]       = useState('');
+  const [vnMake, setVnMake]       = useState('');
+  const [vnModel, setVnModel]     = useState('');
+  const [vnFirst, setVnFirst]     = useState('');
+  const [vnLast, setVnLast]       = useState('');
+  const [vnMode, setVnMode]       = useState('auto');
+  const [vnBusy, setVnBusy]       = useState(false);
+  const [vnErr, setVnErr]         = useState('');
+  const [vnData, setVnData]       = useState(null);
+  const [vnNote, setVnNote]       = useState('');
+  const [vnZipInfo, setVnZipInfo] = useState(null);
 
   // Re-read after every search so the bars move as they are spent, without a
   // reload and without the panel trying to guess the count itself.
@@ -735,6 +818,52 @@ export default function CustomerLookupPanel({ access: accessProp }) {
       .catch(() => { if (!dead) setZipInfo({ error: true }); });
     return () => { dead = true; };
   }, [vZip]);
+
+  useEffect(() => {
+    const z = digits(vnZip).slice(0, 5);
+    if (z.length !== 5) { setVnZipInfo(null); return; }
+    let dead = false;
+    client.get('zipcode/' + z)
+      .then(r => { if (!dead) setVnZipInfo(r.data); })
+      .catch(() => { if (!dead) setVnZipInfo({ error: true }); });
+    return () => { dead = true; };
+  }, [vnZip]);
+
+  // The standalone VIN search. Same call the Get VIN button makes, driven by a
+  // form instead of a row that was already found.
+  const runVinSearch = useCallback(async () => {
+    setVnErr(''); setVnData(null); setVnNote('');
+    const address = vnAddress.trim();
+    const zip = digits(vnZip).slice(0, 5);
+    const missing = [];
+    if (!address)      missing.push('street address');
+    if (zip.length !== 5) missing.push('ZIP');
+    if (!vnYear.trim())   missing.push('year');
+    if (!vnMake.trim())   missing.push('make');
+    if (!vnModel.trim())  missing.push('model');
+    if (missing.length) { setVnErr('Still needed: ' + missing.join(', ') + '.'); return; }
+
+    setVnBusy(true);
+    try {
+      const r = await client.get('customer-lookup/vin', {
+        params: {
+          address, zip,
+          year: vnYear.trim(), make: vnMake.trim(), model: vnModel.trim(),
+          first_name: vnFirst.trim() || undefined,
+          last_name:  vnLast.trim()  || undefined,
+          mode: vnMode,
+        },
+      });
+      let d = r.data;
+      if (d?.job) {
+        setVnNote('Looking up…');
+        d = await pollJob(d.job, (sec) => setVnNote('Looking up… ' + sec + 's'));
+      }
+      setVnData(d);
+    } catch (e) {
+      setVnErr(e?.response ? errText(e, 'VIN lookup failed.') : (e.message || 'VIN lookup failed.'));
+    } finally { setVnBusy(false); setVnNote(''); refreshQuota(); }
+  }, [vnAddress, vnZip, vnYear, vnMake, vnModel, vnFirst, vnLast, vnMode, pollJob, refreshQuota]);
 
   const runPeople = useCallback(async () => {
     setPErr(''); setPData(null); setPIdx(0);
@@ -873,6 +1002,7 @@ export default function CustomerLookupPanel({ access: accessProp }) {
   const tabs = [
     ...(canPeople   ? [{ key: 'people',   label: 'People',   icon: User }] : []),
     ...(canVehicles ? [{ key: 'vehicles', label: 'Vehicles', icon: Car  }] : []),
+    ...(canVin      ? [{ key: 'vin',      label: 'VIN',      icon: Fingerprint }] : []),
   ];
 
   if (!access) return <Loading variant="rows" rows={3} label="Checking your access" />;
@@ -1167,6 +1297,104 @@ export default function CustomerLookupPanel({ access: accessProp }) {
                 canVin={canVin} vins={vins} onVin={lookupVin} />
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── VIN ────────────────────────────────────────────────────────────
+          The same call the Get VIN button makes, driven by a form so a car
+          that was never in a vehicle result can still be resolved. */}
+      {tab === 'vin' && canVin && (
+        <div className="space-y-4">
+          <Panel pad="md" radius="xl">
+            <SectionHeader level="sub" icon={Fingerprint} title="Find a VIN"
+              subtitle="The VIN is matched to the person living at that address, so the name matters." />
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <Field label="Street address" className="sm:col-span-2" hint="Street only — no city or state">
+                <div className="relative">
+                  <Home size={14} className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: 'var(--color-text-tertiary)' }} />
+                  <input className="input pl-9" value={vnAddress} placeholder="2100 Old River Rd"
+                    onChange={e => {
+                      const sp = splitFullAddress(e.target.value);
+                      if (sp) { setVnAddress(sp.street); setVnZip(sp.zip); }
+                      else setVnAddress(e.target.value);
+                    }}
+                    onKeyDown={e => e.key === 'Enter' && runVinSearch()} />
+                </div>
+              </Field>
+              <Field label="ZIP"
+                hint={vnZipInfo && !vnZipInfo.error ? vnZipInfo.city + ', ' + vnZipInfo.state_abbr : (vnZipInfo?.error ? 'ZIP not recognised' : 'City and state fill in automatically')}>
+                <div className="relative">
+                  <Hash size={14} className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: 'var(--color-text-tertiary)' }} />
+                  <input className="input pl-9" value={vnZip} inputMode="numeric" placeholder="31808" maxLength={10}
+                    onChange={e => setVnZip(e.target.value)} onKeyDown={e => e.key === 'Enter' && runVinSearch()} />
+                </div>
+              </Field>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3">
+              <Field label="Year">
+                <input className="input" value={vnYear} inputMode="numeric" placeholder="2010" maxLength={4}
+                  onChange={e => setVnYear(e.target.value)} onKeyDown={e => e.key === 'Enter' && runVinSearch()} />
+              </Field>
+              <Field label="Make">
+                <input className="input" value={vnMake} placeholder="Chevrolet"
+                  onChange={e => setVnMake(e.target.value)} onKeyDown={e => e.key === 'Enter' && runVinSearch()} />
+              </Field>
+              <Field label="Model" className="col-span-2" hint="Trim text is fine — Impala 4DR 6CYL matches Impala">
+                <input className="input" value={vnModel} placeholder="Impala"
+                  onChange={e => setVnModel(e.target.value)} onKeyDown={e => e.key === 'Enter' && runVinSearch()} />
+              </Field>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+              <Field label="First name" hint="Recommended — ties the VIN to the right person">
+                <div className="relative">
+                  <User size={14} className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: 'var(--color-text-tertiary)' }} />
+                  <input className="input pl-9" value={vnFirst} placeholder="John"
+                    onChange={e => setVnFirst(e.target.value)} onKeyDown={e => e.key === 'Enter' && runVinSearch()} />
+                </div>
+              </Field>
+              <Field label="Last name">
+                <input className="input" value={vnLast} placeholder="Shingles"
+                  onChange={e => setVnLast(e.target.value)} onKeyDown={e => e.key === 'Enter' && runVinSearch()} />
+              </Field>
+            </div>
+
+            <div className="flex items-center gap-1.5 flex-wrap mt-3">
+              {[
+                { k: 'cache', l: 'Cached only',   t: 'Instant. Only answers if this exact car at this address is already on file.' },
+                { k: 'auto',  l: 'Search if new', t: 'Uses what is stored, and looks it up for real when it is not.' },
+                { k: 'fresh', l: 'Force fresh',   t: 'Ignores the stored answer and looks it up again.' },
+              ].map(m => (
+                <button key={m.k} type="button" onClick={() => setVnMode(m.k)} title={m.t}
+                  className="px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-colors"
+                  style={{
+                    background: vnMode === m.k ? 'var(--color-primary-600)' : 'transparent',
+                    color: vnMode === m.k ? '#fff' : 'var(--color-text-secondary)',
+                    borderColor: vnMode === m.k ? 'var(--color-primary-600)' : 'var(--color-border)',
+                  }}>{m.l}</button>
+              ))}
+            </div>
+
+            <div className="flex items-center justify-between gap-3 flex-wrap mt-3">
+              <p className="m-0 text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>
+                {vnNote || (vnMode === 'cache'
+                  ? 'Reads what is already stored — instant, and never looks anything up.'
+                  : 'A new lookup drives a browser on the service and can take up to a minute.')}
+              </p>
+              <button type="button" onClick={runVinSearch} disabled={vnBusy}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-60"
+                style={{ background: 'var(--gradient-sidebar)' }}>
+                {vnBusy ? <Loader2 size={15} className="animate-spin" /> : <Fingerprint size={15} />}
+                {vnBusy ? (vnNote || 'Looking up…') : 'Find VIN'}
+              </button>
+            </div>
+          </Panel>
+
+          {vnErr && <Alert type="error" dismissible={false}>{vnErr}</Alert>}
+
+          {vnData && <VinResult data={vnData} onRetry={runVinSearch} />}
         </div>
       )}
 
