@@ -23,6 +23,7 @@
 import { Layers } from 'lucide-react';
 import { KpiTile } from '../UI/kit';
 import { toneOfBadge } from '../../utils/statusTone';
+import { sharePct } from '../../utils/recordFormat';
 
 const num = (v) => Number(v || 0).toLocaleString();
 
@@ -73,7 +74,7 @@ export default function StatusStrip({
             // An em-dash, not 0, when counts are absent — they ride page 1
             // only, and a 0 there would be a lie rather than a gap.
             value={n === null ? '—' : num(n)}
-            sub={total > 0 && n !== null ? `${Math.round((n / total) * 100)}% of total` : undefined}
+            sub={n !== null && sharePct(n, total) ? `${sharePct(n, total)} of total` : undefined}
             active={value === s.key}
             onClick={() => pick(s.key)}
           />

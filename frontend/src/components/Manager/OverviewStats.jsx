@@ -42,6 +42,7 @@ import { useAbortable, isCanceled } from '../../hooks/useTableQuery';
 // the kit says warn/danger, and one copy of that map is what keeps 'cancelled'
 // the same colour on every surface that reads these catalogs.
 import { toneOfBadge as toneOf } from '../../utils/statusTone';
+import { sharePct } from '../../utils/recordFormat';
 
 const fmt = (n) => (typeof n === 'number' ? n.toLocaleString() : '—');
 
@@ -165,7 +166,7 @@ function StatSection({ entity, title, icon, tone, refreshToken, onDrill, onDupli
               value={fmt(s.count)}
               // Percent-of-total turns raw counts into a shape you can read at
               // a glance. Omitted at 0 total, where every share is 0/0.
-              sub={total > 0 ? `${Math.round((s.count / total) * 100)}% of total` : undefined}
+              sub={sharePct(s.count, total) ? `${sharePct(s.count, total)} of total` : undefined}
               // "Other" is a reconciliation bucket, not a filterable status —
               // no list view answers a click on it.
               onClick={(onDrill && s.key !== '__other') ? () => onDrill({ status: s.key, range }) : undefined}

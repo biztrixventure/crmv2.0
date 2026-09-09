@@ -20,9 +20,9 @@ import { Trophy, AlertTriangle } from 'lucide-react';
 import client from '../../api/client';
 import { Panel, SectionHeader, TableScroll, Loading, EmptyState, accent } from '../UI/kit';
 import { useAbortable, isCanceled } from '../../hooks/useTableQuery';
+import { pct1 } from '../../utils/recordFormat';
 
 const num = (v) => Number(v || 0).toLocaleString();
-const pct = (v) => (v === null || v === undefined ? '—' : `${v}%`);
 
 // Display heuristic only — each scorecard carries its own pass_threshold, so
 // the colour is never the verdict. The passed/reviews count rides in the title.
@@ -112,7 +112,9 @@ export default function TopAgents({ dateFrom, dateTo, limit = 5, onPick, refresh
                   <td className="py-2 px-3 tabular-nums font-bold" style={{ color: accent('success').fg }}>{num(a.approved)}</td>
                   <td className="py-2 px-3 tabular-nums" style={{ color: accent('danger').fg }}>{num(a.cancelled)}</td>
                   <td className="py-2 px-3 tabular-nums" style={{ color: accent('warn').fg }}>{num(a.pending)}</td>
-                  <td className="py-2 px-3 tabular-nums font-semibold" style={{ color: 'var(--color-text)' }}>{pct(a.conversion)}</td>
+                  {/* pct1, not `${v}%`: a column of 7.9 / 3.5 / 3 / 2.5 reads ragged and
+                      the whole number looks like a different unit. */}
+                  <td className="py-2 px-3 tabular-nums font-semibold" style={{ color: 'var(--color-text)' }}>{pct1(a.conversion)}</td>
                   {hasQa && (
                     <td className="py-2 px-3">
                       {a.qa ? (

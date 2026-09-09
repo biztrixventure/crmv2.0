@@ -9,6 +9,37 @@
 // ============================================================================
 import { ET_ZONE } from './timezone';
 
+/**
+ * A count's share of a total, for the sub-label under a stat box.
+ *
+ * Never prints "0%" for a NON-ZERO count. Measured live: 2 pending out of
+ * 5,976 transfers rounds to 0%, so the box read "2" above "0% of total" —
+ * which says the opposite of the number it sits under. "<1%" is both accurate
+ * and non-contradictory. A genuine zero still reads "0%".
+ *
+ * Returns null when there is no total to divide by, so callers can omit the
+ * sub-label entirely rather than render "NaN%".
+ */
+export const sharePct = (n, total) => {
+  const c = Number(n), t = Number(total);
+  if (!Number.isFinite(c) || !Number.isFinite(t) || t <= 0) return null;
+  if (c === 0) return '0%';
+  const p = (c / t) * 100;
+  return p < 1 ? '<1%' : `${Math.round(p)}%`;
+};
+
+/**
+ * One-decimal percentage, for a COLUMN of rates.
+ *
+ * `${7.9}%` and `${3}%` render as "7.9%" and "3%", so a column reads
+ * 7.9 / 7.2 / 3.5 / 3 / 2.5 and the whole number looks like a different unit.
+ * Single tiles keep whole numbers on purpose — this is for tabular use.
+ */
+export const pct1 = (v) => {
+  const n = Number(v);
+  return (v === null || v === undefined || !Number.isFinite(n)) ? '—' : `${n.toFixed(1)}%`;
+};
+
 export const STATUS_BADGE = {
   open: 'info', sold: 'success', closed_won: 'success', closed_lost: 'error',
   cancelled: 'error', compliance_cancelled: 'error', follow_up: 'warning',

@@ -64,7 +64,12 @@ export default function SectionHeader({
           {Icon && <Icon size={13} className="flex-shrink-0" />}
           <span className="truncate">{title}</span>
         </h4>
-        {actions && <div className="flex items-center gap-1.5 flex-shrink-0">{actions}</div>}
+        {/* Same pairing rule as level="page" above, which learned it the hard
+            way: `flex-shrink-0` made the group refuse to narrow, so a wide
+            action set pushed past the viewport instead of wrapping inside it.
+            Measured at 390 — two pill groups in a sub-header put the whole page
+            42px into sideways scroll. flex-wrap + min-w-0 lets it fold. */}
+        {actions && <div className="flex items-center gap-1.5 flex-wrap min-w-0">{actions}</div>}
       </div>
     );
   }

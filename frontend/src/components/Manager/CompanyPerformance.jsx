@@ -7,6 +7,7 @@ import {
 import client from '../../api/client';
 import ThemedSelect from '../UI/Select';
 import DateRangePicker, { getPresetRange } from '../UI/DateRangePicker';
+import { pct1 } from '../../utils/recordFormat';
 import { Panel, SectionHeader, KpiTile, PillTabs, TableScroll, Loading, EmptyState, Field, accent } from '../UI/kit';
 
 // Only one chart left, so it stays lazy — chart.js is ~186KB and a manager who
@@ -102,7 +103,9 @@ function RateBar({ value, best, tone }) {
   const w = best > 0 ? Math.max(4, Math.round((value / best) * 100)) : 0;
   return (
     <div className="flex items-center gap-2 min-w-[92px]">
-      <span className="text-xs font-bold tabular-nums w-10 text-right" style={{ color: accent(tone).fg }}>{value}%</span>
+      {/* One decimal: a column of 7.9 / 7.2 / 3.5 / 3 / 2.5 reads ragged, and
+          the whole number looks like a different unit. w-11 fits the extra digit. */}
+      <span className="text-xs font-bold tabular-nums w-11 text-right" style={{ color: accent(tone).fg }}>{pct1(value)}</span>
       <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
         <div className="h-full rounded-full" style={{ width: `${w}%`, backgroundColor: accent(tone).fg }} />
       </div>
