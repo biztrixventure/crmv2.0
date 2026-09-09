@@ -18,6 +18,7 @@ const readonlyAdminsRoutes = require('./routes/readonlyAdmins');
 const activityBeaconRoutes = require('./routes/activityBeacon');
 const teamsRoutes = require('./routes/teams');
 const quotasRoutes = require('./routes/quotas');
+const dailyPerformanceRoutes = require('./routes/dailyPerformance');
 const companiesRoutes = require('./routes/companies');
 const rolesRoutes = require('./routes/roles');
 const formsRoutes = require('./routes/forms');
@@ -430,6 +431,10 @@ app.use('/api/teams', authMiddleware, readonlyGuard, teamsRoutes);
 app.use('/api/quiz',  authMiddleware, readonlyGuard, quizRoutes);
 // Two-tier team quotas (mig 216) — admin sets the team target, the lead splits it.
 app.use('/api/quotas', authMiddleware, readonlyGuard, quotasRoutes);
+// Daily performance review + finalise (mig 310). readonlyGuard blocks the
+// lock/unlock writes for a readonly_admin, which is correct: signing off a
+// day is a change, not a view.
+app.use('/api/daily-performance', authMiddleware, readonlyGuard, dailyPerformanceRoutes);
 // RO self-reported navigation telemetry. readonlyGuard allowlists /activity/beacon
 // so the read-only account's POST passes; the handler ignores non-RO callers.
 app.use('/api/activity', authMiddleware, readonlyGuard, activityBeaconRoutes);

@@ -9,6 +9,7 @@ import {
   CalendarDays, Plus, X, Trash2, Clock, MapPin, AlignLeft, Loader2, Lock,
 } from 'lucide-react';
 import client from '../../api/client';
+import DayPerformancePanel from './DayPerformancePanel';
 import './EventsCalendar.css';
 
 const COLORS = [
@@ -206,6 +207,11 @@ const Field = ({ label, children }) => (
 );
 
 // ── Main calendar ──────────────────────────────────────────────────────────────
+// ── Daily performance finalising (mig 310) ─────────────────────────────────
+// The calendar is also where a day's figures get signed off. Whether this
+// person may do that is decided by the SERVER (/daily-performance/scope), not
+// by a prop: an operations manager owns the project day and a team lead owns
+// their team's, and neither maps to `canEdit`, which is about editing events.
 const EventsCalendar = ({ canEdit = false }) => {
   const calRef = useRef(null);
   const [events, setEvents] = useState([]);
@@ -213,6 +219,13 @@ const EventsCalendar = ({ canEdit = false }) => {
   const [saving, setSaving] = useState(false);
   const [modal, setModal] = useState({ open: false, mode: 'create', draft: {} });
   const rangeRef = useRef({ start: null, end: null });
+
+  // Daily performance: what this person may finalise, the locks to paint into
+  // the date boxes, and which day the review panel is open on.
+  const [perfScope, setPerfScope] = useState(null);
+  const [locksByDate, setLocksByDate] = useState({});
+  const [perfDate, setPerfDate] = useState(null);
+  const monthRef = useRef(null);
 
   const load = useCallback(async () => {
     const { start, end } = rangeRef.current;
@@ -230,11 +243,74 @@ const EventsCalendar = ({ canEdit = false }) => {
     }
   }, []);
 
+  useEffect(() => {
+    client.get('daily-performance/scope')
+      .then(r => setPerfScope(r.data))
+      .catch(() => setPerfScope({ can_lock_company: false, teams: [] }));
+  }, []);
+
+  const canFinalise = !!(perfScope && (perfScope.can_lock_company || (perfScope.teams || []).length));
+
+  // Only LOCKED days are fetched. Live figures for 31 cells would be dozens of
+  // count queries per calendar paint for numbers nobody asked to see; the spec
+  // populates the box once a day is finalised.
+  const loadLocks = useCallback(async (month) => {
+    if (!month || !canFinalise) return;
+    try {
+      const r = await client.get('daily-performance/month', { params: { month } });
+      const by = {};
+      (r.data.locks || []).forEach(l => {
+        by[l.perf_date] = by[l.perf_date] || { company: null, teams: [] };
+        if (l.scope === 'company') by[l.perf_date].company = l;
+        else by[l.perf_date].teams.push(l);
+      });
+      setLocksByDate(by);
+    } catch { /* the calendar still works without the overlay */ }
+  }, [canFinalise]);
+
+  useEffect(() => { if (monthRef.current) loadLocks(monthRef.current); }, [loadLocks]);
+
   // FullCalendar emits the visible window whenever the view/date changes.
   const handleDatesSet = useCallback((arg) => {
     rangeRef.current = { start: arg.startStr, end: arg.endStr };
+    // The month the grid is actually showing -- arg.start is the first visible
+    // cell, which is usually in the PREVIOUS month, so use the midpoint.
+    const mid = new Date((arg.start.getTime() + arg.end.getTime()) / 2);
+    const month = `${mid.getFullYear()}-${String(mid.getMonth() + 1).padStart(2, '0')}`;
+    monthRef.current = month;
+    loadLocks(month);
     load();
-  }, [load]);
+  }, [load, loadLocks]);
+
+  // What goes INSIDE the date box. A finalised day shows its frozen headline
+  // figures and a lock mark; an open past day shows a quiet "Review" affordance
+  // for whoever may sign it off. Deliberately not wired to dateClick: on a
+  // calendar where canEdit is true that gesture already creates an event.
+  const renderDayCell = useCallback((arg) => {
+    const iso = `${arg.date.getFullYear()}-${String(arg.date.getMonth() + 1).padStart(2, '0')}-${String(arg.date.getDate()).padStart(2, '0')}`;
+    const entry = locksByDate[iso];
+    const lock = entry?.company || entry?.teams?.[0] || null;
+    const st = lock?.stats || null;
+    return (
+      <div className="bsx-daycell">
+        <span className="bsx-daycell-num">{arg.dayNumberText}</span>
+        {canFinalise && st && (
+          <button type="button" className="bsx-daycell-perf" onClick={() => setPerfDate(iso)}
+            title={`Finalised by ${lock.locked_by_name}. Click to review.`}>
+            <Lock size={9} />
+            <span>{Number(st.transfers || 0)}t</span>
+            <span className="bsx-dc-ok">{Number(st.approved || 0)}a</span>
+            <span className="bsx-dc-bad">{Number(st.cancelled || 0)}c</span>
+            {entry?.teams?.length > 0 && !entry?.company && <span className="bsx-dc-team">team</span>}
+          </button>
+        )}
+        {canFinalise && !st && (
+          <button type="button" className="bsx-daycell-review" onClick={() => setPerfDate(iso)}
+            title="Review this day's performance">Review</button>
+        )}
+      </div>
+    );
+  }, [locksByDate, canFinalise]);
 
   const fcEvents = events.map((e) => ({
     id: String(e.id),
@@ -416,9 +492,18 @@ const EventsCalendar = ({ canEdit = false }) => {
           select={handleSelect}
           eventClick={handleEventClick}
           datesSet={handleDatesSet}
+          dayCellContent={renderDayCell}
           eventTimeFormat={{ hour: 'numeric', minute: '2-digit', meridiem: 'short' }}
         />
       </div>
+
+      {perfDate && (
+        <DayPerformancePanel
+          date={perfDate}
+          onClose={() => setPerfDate(null)}
+          onChanged={() => loadLocks(monthRef.current)}
+        />
+      )}
 
       <EventModal
         open={modal.open}

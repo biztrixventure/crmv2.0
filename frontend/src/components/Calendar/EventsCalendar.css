@@ -139,3 +139,37 @@
   .biztrix-calendar .fc .fc-toolbar.fc-header-toolbar { justify-content: center; }
   .biztrix-calendar .fc .fc-toolbar-title { font-size: 1.05rem; }
 }
+
+/* ── Daily performance in the date box (mig 310) ──────────────────────────────
+   FullCalendar's dayCellContent replaces the plain day number, so the number
+   has to be re-laid-out here alongside the performance mark.
+
+   Tokens only, no literals: dark mode inverts the -600 scales, so a hardcoded
+   tint that reads right in light mode is unreadable in dark. The "Review"
+   affordance stays at opacity 0 until the cell is hovered or it is focused --
+   visible on every one of 35 cells it would be louder than the events. */
+.bsx-daycell { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 2px 4px; }
+.bsx-daycell-num { font-weight: 700; }
+
+.bsx-daycell-perf,
+.bsx-daycell-review {
+  display: inline-flex; align-items: center; gap: 3px;
+  font-size: 10px; font-weight: 700; line-height: 1;
+  padding: 2px 5px; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.bsx-daycell-perf {
+  border-color: color-mix(in srgb, var(--color-primary-600) 40%, transparent);
+  background: color-mix(in srgb, var(--color-primary-600) 12%, transparent);
+  color: var(--color-primary-600);
+}
+.bsx-daycell-perf .bsx-dc-ok   { color: var(--color-success-600); }
+.bsx-daycell-perf .bsx-dc-bad  { color: var(--color-error-600); }
+.bsx-daycell-perf .bsx-dc-team { color: var(--color-text-tertiary); font-weight: 600; }
+
+.bsx-daycell-review { opacity: 0; transition: opacity 120ms; }
+.fc-daygrid-day:hover .bsx-daycell-review,
+.bsx-daycell-review:focus-visible { opacity: 1; }
