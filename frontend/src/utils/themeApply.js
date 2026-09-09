@@ -77,15 +77,68 @@ export const CORE_TOKENS = [
   { key: 'accent',        label: 'Accent' },
 ];
 
+// ── contrast ────────────────────────────────────────────────────────────────
+// WCAG relative luminance + contrast ratio. Needed because a token derived by
+// blending TOWARD the background is, by construction, less legible than the one
+// it came from — so a fixed blend fraction cannot promise readability, and the
+// theme editor lets anyone pick a new background at any time.
+function relLuminance(hex) {
+  const rgb = hexToRgb(hex);
+  if (!rgb) return 0;
+  const [r, g, b] = rgb.map((v) => {
+    const c = v / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+export function contrastRatio(a, b) {
+  const la = relLuminance(a), lb = relLuminance(b);
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+}
+
+// WCAG AA for normal-size text. The tertiary tier is small by definition — it
+// is the 10-11px caption tier — so the 3:1 large-text allowance never applies.
+const AA_NORMAL = 4.5;
+
 // Advanced tokens are normally DERIVED from the 7 core colours; the editor can
 // override any of them explicitly. This returns the derived defaults so the UI
 // can show them and buildCssVars can fall back to them.
 export function advancedDefaults(core, mode) {
   const { bg, surface, text, textSecondary, primary, accent } = core;
+  const bgSecondary = mix(bg, text, 0.06);
+
+  // textTertiary WAS mix(textSecondary, bg, 0.35) — a flat 35% toward the
+  // background. Measured across the four presets that produced 2.56-3.80:1
+  // against the surfaces it actually sits on, and the hard-coded pair in
+  // global.css measured 3.07-3.77:1. All of it under AA's 4.5 for small text,
+  // app-wide, in both modes — and this is the tier carrying timestamps, counts,
+  // units and table captions.
+  //
+  // Now the muting is the STRONGEST that still clears AA on every ground this
+  // text can land on: bg, surface, and the derived bgSecondary. Walking back
+  // from the intended 35% keeps the token as soft as the design wants while
+  // making the invariant hold by construction — for these four presets and for
+  // any palette a superadmin builds in the editor, which a re-tuned constant
+  // could never promise.
+  let textTertiary = textSecondary;
+  for (let f = 0.35; f > 0; f -= 0.05) {
+    const cand = mix(textSecondary, bg, f);
+    const worst = Math.min(
+      contrastRatio(cand, bg),
+      contrastRatio(cand, surface),
+      contrastRatio(cand, bgSecondary),
+    );
+    if (worst >= AA_NORMAL) { textTertiary = cand; break; }
+  }
+  // Falling through to textSecondary is the honest floor: if even an unmuted
+  // tertiary cannot clear AA, the CORE palette is what needs changing, and
+  // quietly muting it anyway would only hide that.
+
   return {
-    bgSecondary:  mix(bg, text, 0.06),
+    bgSecondary,
     surfaceHover: mix(surface, text, 0.05),
-    textTertiary: mix(textSecondary, bg, 0.35),
+    textTertiary,
     link:         mode === 'dark' ? lighten(primary, 0.2) : darken(primary, 0.2),
     focusRing:    mode === 'dark' ? accent : darken(primary, 0.2),
   };

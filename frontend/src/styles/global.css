@@ -82,7 +82,13 @@
 
   /* ========== SEMANTIC TEXT COLORS ========== */
   --color-text-secondary: #5A4F45;
-  --color-text-tertiary: #8B7F75;
+  /* WAS #8B7F75, which measured 3.36:1 on --color-bg, 3.77:1 on
+     --color-surface and 3.07:1 on --color-bg-secondary — all under WCAG AA's
+     4.5:1 for small text, and this is the tier carrying timestamps, counts,
+     units and table captions. #6a5f55 measures 5.36 / 6.01 / 4.89:1 on those
+     same three grounds, and matches what themeApply.js now derives for this
+     palette so the default CSS and the Obsidian & Amber preset agree. */
+  --color-text-tertiary: #6a5f55;
   --color-text-disabled: #C0B5A8;
   --color-text-inverse: #FFFFFF;
   --color-placeholder: #A39785;
@@ -195,7 +201,11 @@ html.dark {
   /* ========== TEXT — warm cream ========== */
   --color-text: #F0E6D8;
   --color-text-secondary: #C0A282;
-  --color-text-tertiary: #7A6448;
+  /* WAS #7A6448 — 3.52 / 3.32 / 3.43:1 on the dark bg, surface and
+     bg-secondary. Dark mode was no better off than light: muting toward a
+     near-black background darkens the text, so both modes failed AA the same
+     way. #9c8469 measures 5.56 / 5.25 / 5.42:1. */
+  --color-text-tertiary: #9c8469;
   --color-text-disabled: #4A3828;
   --color-text-inverse: #0D0A07;
   --color-placeholder: #6A5040;
