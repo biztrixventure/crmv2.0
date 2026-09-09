@@ -207,7 +207,7 @@ function SortTh({ col, sort, onSort, children }) {
 const ManagerShell = ({ workspaceMode = false }) => {
   const { user, logout, updateUser, hasPermission, canExport } = useAuth();
   const { theme, toggleTheme } = useTheme();
-  const { isEnabled, isEnabledStrict } = useFeatureFlags();
+  const { isEnabled, isEnabledStrict, loading: flagsLoading } = useFeatureFlags();
   // Superadmin-configurable rows-per-page (list.layout.manager.<role>); falls
   // back to the built-in 25 until configured, so nothing changes on rollout.
   const { pageSize: PAGE_SIZE } = useListLayout('manager', { pageSize: DEFAULT_PAGE_SIZE });
@@ -243,7 +243,19 @@ const ManagerShell = ({ workspaceMode = false }) => {
     ...((hasPermission('view_fronter_stats') || hasPermission('view_closer_stats') || hasPermission('view_company_reports') || hasPermission('view_reports')) && isEnabled('reports')
       ? [{ key: 'reports', label: 'Reports', icon: BarChart3}] : []),
     // Monthly-payment reminders — team view of due policies.
-    ...((hasPermission('view_team_sales') || hasPermission('view_all_company_sales'))
+    //
+    // Hidden from operations_manager: retention calling on due policies is not
+    // their responsibility. Their remit is sales, transfers, team and agent
+    // performance, and the operational activity around those.
+    //
+    // Gated by ROLE, not by permission, because the two permissions this item
+    // reads (view_team_sales / view_all_company_sales) are the SAME two that
+    // gate the Team Sales tab — taking either away to hide Payments would
+    // remove Team Sales along with it.
+    //
+    // The key is hidden, never renamed or dropped: the panel still belongs to
+    // every other manager role.
+    ...((hasPermission('view_team_sales') || hasPermission('view_all_company_sales')) && user?.role !== 'operations_manager'
       ? [{ key: 'payments', label: 'Payments', icon: DollarSign }] : []),
     // Quiz system (mig 273): manage tab for quiz.manage holders (compliance_manager /
     // qa_manager / company_admin / superadmin); My Quizzes is unconditional — anyone
@@ -396,6 +408,35 @@ const ManagerShell = ({ workspaceMode = false }) => {
   // back a tab instead of falling through and dismissing the installed app.
   const [activeTab, setActiveTab] = useHistoryTab(mgrTabKey, 'overview');
   const [activeNav, setActiveNav] = useHistoryTab(mgrNavKey, 'dashboard', { param: 'nav' });
+
+  // A nav section this user cannot reach must not stay open.
+  //
+  // Dropping an item from crossNavItems does not on its own stop it rendering:
+  // activeNav is restored from localStorage AND settable by URL (?nav=…), and
+  // the render below only asks whether it differs from 'dashboard'. So someone
+  // sitting on a section when it is taken away keeps it after the deploy — with
+  // no tab left to navigate away by — and the deep link still opens it.
+  // Resetting to the dashboard closes both paths and clears the stale stored
+  // value. This is not specific to Payments: a manager who loses manage_roles
+  // while parked on ?nav=roles had exactly the same shape.
+  //
+  // Waits for feature flags. Three of these items also gate on isEnabled(), and
+  // FeatureFlagsContext starts with loading=true over a possibly-empty cache —
+  // so during that window isEnabled() is false for everything and the list is
+  // missing items the user really has. Resetting then would silently break a
+  // legitimate deep link (?nav=reports lands on the dashboard on a first-ever
+  // visit). Permissions need no such wait: user.permissions is localStorage-
+  // hydrated and present on the first render.
+  //
+  // A joined string, not the array, so the dependency is a stable primitive —
+  // crossNavItems is rebuilt on every render.
+  const crossNavKeyList = crossNavItems.map(i => i.key).join(',');
+  useEffect(() => {
+    if (flagsLoading) return;
+    if (activeNav !== 'dashboard' && !crossNavKeyList.split(',').includes(activeNav)) {
+      setActiveNav('dashboard');
+    }
+  }, [activeNav, crossNavKeyList, flagsLoading]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   // Which task group owns the current tab. MUST stay below the activeTab
   // declaration — it was above it, which is a temporal-dead-zone read on every
