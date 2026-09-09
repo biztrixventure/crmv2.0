@@ -12,6 +12,7 @@ const { COMPLIANCE_SALE_COLUMNS, TRANSFER_COLUMNS, CALLBACK_COLUMNS } = require(
 const { onSalesActivityChanged: spiffOnSalesChanged } = require('../utils/spiffMetrics');
 const { readonlyAllowedCompanyIds, scopeToCompanies, companyInScope, maskForReadonly, canViewRecordings } = require('../utils/readonlyGovernance');
 const { isPostDateDispo } = require('../utils/postDate');
+const { statusCountsExact } = require('../utils/statusCounts');
 
 const { getConfig } = require('../utils/businessConfig');
 
@@ -33,27 +34,12 @@ const SALE_STATUSES     = ['open', 'closed_won', 'closed_lost', 'sold', 'cancell
 const TRANSFER_STATUSES = ['pending', 'assigned', 'completed', 'cancelled', 'rejected'];
 const CALLBACK_STATUSES = ['pending', 'assigned', 'completed', 'cancelled', 'rejected', 'missed', 'no_answer', 'answering_machine', 'follow_up'];
 
-// Exact per-status totals via one HEAD count query per status.
-//
-// The old approach fetched the whole filtered set with `.limit(20000)` and
-// tallied in JS — but PostgREST silently caps every response at its `max-rows`
-// server setting (5000 here), so any status with >5000 rows (e.g. 6191 approved
-// sales, 61k pending transfers) was undercounted. `head:true, count:'exact'`
-// returns the true count without returning rows, so it is immune to the cap.
-//
-// makeBase MUST return a FRESH query builder (with all non-status filters + a
-// `head:true` count select) on every call — Supabase builders are single-use.
-// Returns { status: count } including only non-zero statuses; {} on total
-// failure so the UI falls back to page-derived counts.
-async function statusCountsExact(makeBase, statuses) {
-  const entries = await Promise.all(statuses.map(async (st) => {
-    try { const { count, error } = await makeBase().eq('status', st); return error ? [st, 0] : [st, count || 0]; }
-    catch { return [st, 0]; }
-  }));
-  const out = {};
-  for (const [st, c] of entries) if (c > 0) out[st] = c;
-  return out;
-}
+// Per-status totals now come from utils/statusCounts.js. It was extracted from
+// here once /transfers and /sales needed the same strip: these numbers are what
+// a manager clicks to filter by, so one implementation is what makes "the box
+// said 26" mean the list shows 26 on every surface. The callers below keep the
+// two-arg form, whose includeZero default (false) is exactly the behaviour this
+// file always had -- a compliance filter bar lists only statuses that exist.
 
 // Resolve a search term to matching row ids via the app_record_search RPC
 // (matches the full record id, every form_data cell, and the key typed

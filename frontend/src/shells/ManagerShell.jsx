@@ -82,8 +82,12 @@ const SALE_COL_TIPS = {
   Action: 'Delete this sale',
 };
 import SaleStatusBadge from "../components/UI/SaleStatusBadge";
-import SaleStatusFilterPills from "../components/UI/SaleStatusFilterPills";
-import TransferStatusFilterPills from "../components/UI/TransferStatusFilterPills";
+// The record tabs' status filter is now a clickable count dashboard, so the
+// count-less pill rows they used are gone from here. Both pill components stay
+// in the repo — StaffShell still uses them, where there is no server-side count
+// strip to drive.
+import StatusStrip from "../components/Manager/StatusStrip";
+import TopAgents from "../components/Manager/TopAgents";
 import FilterBar from "../components/UI/FilterBar";
 import ManagerCallbacksTab from "../components/Callbacks/ManagerCallbacksTab";
 import CallbackNumbers from "../components/CallbackNumbers/CallbackNumbers";
@@ -445,6 +449,11 @@ const ManagerShell = ({ workspaceMode = false }) => {
   // ── Tab-specific server-side state ────────────────────────────────────────
   const [xferTabRows,    setXferTabRows]    = useState([]);
   const [xferTabTotal,   setXferTabTotal]   = useState(0);
+  // The clickable status dashboard. Counts ride page 1 only (they cannot change
+  // between pages of one query), so `null` means "unchanged" — keep the last
+  // set rather than blanking every box the moment somebody pages.
+  const [xferCounts,     setXferCounts]     = useState(null);
+  const [xferCatalog,    setXferCatalog]    = useState([]);
   const [xferTabLoading, setXferTabLoading] = useState(false);
   const [xferStatus,     setXferStatus]     = useState('');
   const [xferAgent,      setXferAgent]      = useState('');
@@ -453,6 +462,8 @@ const ManagerShell = ({ workspaceMode = false }) => {
 
   const [salesTabRows,    setSalesTabRows]    = useState([]);
   const [salesTabTotal,   setSalesTabTotal]   = useState(0);
+  const [salesCounts,     setSalesCounts]     = useState(null);
+  const [salesCatalog,    setSalesCatalog]    = useState([]);
   const [salesTabLoading, setSalesTabLoading] = useState(false);
   const [salesStatus,     setSalesStatus]     = useState('');
   const [salesSearch,     setSalesSearch]     = useState('');
@@ -560,6 +571,10 @@ const ManagerShell = ({ workspaceMode = false }) => {
       const res = await client.get('transfers', { params });
       setXferTabRows(res.data.transfers || []);
       setXferTabTotal(res.data.total    || 0);
+      // ?? not ||: a legitimately empty {} (empty scope) must replace the old
+      // counts, while null (a later page) must not.
+      setXferCounts(prev => res.data.status_counts ?? prev);
+      if (Array.isArray(res.data.status_catalog)) setXferCatalog(res.data.status_catalog);
     } catch {} finally { setXferTabLoading(false); }
   }, [companyId, xferPage, xferStatus, xferAgent, xferSearch, date_from, date_to, xferTodayOnly, xferToday, xferSort]);
 
@@ -578,6 +593,8 @@ const ManagerShell = ({ workspaceMode = false }) => {
       const res = await client.get('sales', { params });
       setSalesTabRows(res.data.sales || []);
       setSalesTabTotal(res.data.total || 0);
+      setSalesCounts(prev => res.data.status_counts ?? prev);
+      if (Array.isArray(res.data.status_catalog)) setSalesCatalog(res.data.status_catalog);
     } catch {} finally { setSalesTabLoading(false); }
   }, [companyId, salesPage, salesStatus, salesAgent, salesSearch, date_from, date_to, salesSort]);
 
@@ -845,19 +862,28 @@ const ManagerShell = ({ workspaceMode = false }) => {
               </button>
             </div>
 
-            {/* Unified FilterBar — shared chrome across every shell list */}
+            {/* Clickable status dashboard. Every box is an exact count over the
+                filters already applied (range, Today chip, agent, search), so
+                clicking one shows exactly that many rows below. Selecting the
+                active box again clears back to All. */}
+            <StatusStrip
+              catalog={xferCatalog}
+              counts={xferCounts}
+              total={xferTabTotal}
+              value={xferStatus}
+              onChange={(k) => { setXferStatus(k); setXferPage(1); }}
+              allLabel="All transfers"
+            />
+
+            {/* Unified FilterBar — shared chrome across every shell list.
+                statusPills is gone: the strip above is the status filter now,
+                and two controls for one filter is how they drift apart. */}
             <FilterBar
               search={{
                 value: xferSearch,
                 onChange: (v) => { setXferSearch(v); setXferPage(1); },
                 placeholder: 'Search customer / phone…',
               }}
-              statusPills={
-                <TransferStatusFilterPills
-                  value={xferStatus}
-                  onChange={(k) => { setXferStatus(k); setXferPage(1); }}
-                />
-              }
               extras={isMgrFilterVisible('agent_select') && companyAgents.length > 0 && (
                 <ThemedSelect value={xferAgent} onChange={e => { setXferAgent(e.target.value); setXferPage(1); }}
                   className="input text-xs h-auto" style={{ minWidth: 160, paddingTop: 6, paddingBottom: 6 }}>
@@ -990,18 +1016,32 @@ const ManagerShell = ({ workspaceMode = false }) => {
               <span className="text-sm text-text-secondary">{salesTabTotal} total</span>
             </div>
 
+            {/* Top performers for the SAME window the records below use, from
+                the same endpoint Company Performance reads — so the two can
+                never disagree about who is on top. Clicking a row filters the
+                list to that agent. */}
+            <TopAgents
+              dateFrom={date_from}
+              dateTo={date_to}
+              limit={5}
+              onPick={(uid) => { setSalesAgent(uid); setSalesPage(1); }}
+            />
+
+            <StatusStrip
+              catalog={salesCatalog}
+              counts={salesCounts}
+              total={salesTabTotal}
+              value={salesStatus}
+              onChange={(k) => { setSalesStatus(k); setSalesPage(1); }}
+              allLabel="All sales"
+            />
+
             <FilterBar
               search={{
                 value: salesSearch,
                 onChange: (v) => { setSalesSearch(v); setSalesPage(1); },
                 placeholder: 'Search customer / phone / reference…',
               }}
-              statusPills={
-                <SaleStatusFilterPills
-                  value={salesStatus}
-                  onChange={(k) => { setSalesStatus(k); setSalesPage(1); }}
-                />
-              }
               extras={isMgrFilterVisible('agent_select') && companyAgents.length > 0 && (
                 <ThemedSelect value={salesAgent} onChange={e => { setSalesAgent(e.target.value); setSalesPage(1); }}
                   className="input text-xs h-auto" style={{ minWidth: 160, paddingTop: 6, paddingBottom: 6 }}>

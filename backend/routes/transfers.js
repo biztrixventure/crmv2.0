@@ -9,6 +9,8 @@ const { escapeOrValue, safeUuid } = require('../utils/searchSanitize');
 const { applySort } = require('../utils/sortHelper');
 const { applyColumnFilters, resolveColumnAccess } = require('../utils/columnFilter');
 const { TRANSFER_COLUMNS } = require('../config/recordColumns');
+const { transferStatusCatalog } = require('../utils/statusCatalog');
+const { statusCountsExact } = require('../utils/statusCounts');
 const { titleCaseFormData } = require('../utils/titleCase');
 const { reconcileQueuedDispoForTransfer } = require('./vicidial');
 const { getConfig } = require('../utils/businessConfig');
@@ -104,10 +106,21 @@ router.get('/', asyncHandler(async (req, res) => {
   // Which columns THIS caller may sort/filter on (narrowed for a masked RO).
   const access = await resolveColumnAccess(req, TRANSFER_COLUMNS);
 
-  let query = applySort(
-    supabaseAdmin.from('transfers').select('*', { count: 'exact' }),
-    sort_by, sort_dir, access.sortMap, { col: 'created_at', asc: false },
-  );
+  // ── Scope, expressed as REPLAYABLE STEPS ─────────────────────────────────
+  // Each filter is pushed as a closure instead of mutating one builder, so the
+  // identical chain can be rebuilt from scratch. That is what makes the status
+  // count strip trustworthy: the boxes are counted from these same steps minus
+  // `status`, so a box saying 26 and the list it filters cannot disagree.
+  // Supabase builders are single-use, so sharing one object would let the first
+  // status consume it and return nothing for the rest.
+  //
+  // Any early return has to answer with the same shape the success path does,
+  // or the client reads `status_counts` off undefined.
+  const steps = [];
+  const emptyPage = () => res.json({
+    transfers: [], total: 0, page: parseInt(page), limit: parseInt(limit),
+    columns: access.catalog, status_counts: {}, status_catalog: [],
+  });
 
   // VICIdial "pending from dialer" rows are not real transfers yet — they only
   // hold lead_id + phone and live in the PendingFromDialer banner (GET /pending),
@@ -118,10 +131,10 @@ router.get('/', asyncHandler(async (req, res) => {
   // the closer's disposition on it — never appeared on the fronter's dashboard
   // at all: 2,798 transfers were in that state, 197 of them in the last week.
   // Once someone has worked it, it is a real transfer and must be listed.
-  query = query.or('vicidial_pending.is.null,vicidial_pending.eq.false,assigned_closer_id.not.is.null,vicidial_dispo.not.is.null');
+  steps.push(q => q.or('vicidial_pending.is.null,vicidial_pending.eq.false,assigned_closer_id.not.is.null,vicidial_dispo.not.is.null'));
   // Dialer ghosts never belong in a transfer list — no customer, no closer, and
   // the dialer itself reported a non-transfer dispo (mig 271).
-  query = query.eq('dialer_ghost', false);
+  steps.push(q => q.eq('dialer_ghost', false));
 
   // Transfers are stored under the fronter's company_id.
   // Closer-side roles are in a different (closer) company — don't filter by company_id for them.
@@ -130,17 +143,16 @@ router.get('/', asyncHandler(async (req, res) => {
     const { data: co } = await supabaseAdmin
       .from('companies').select('company_type').eq('id', req.query.company_id).single();
     if (co?.company_type === 'fronter') {
-      query = query.eq('company_id', req.query.company_id);
+      const cid = req.query.company_id;
+      steps.push(q => q.eq('company_id', cid));
     } else {
       // Closer company: transfers don't carry company_id for closer side — filter by assigned_closer_id
       const { data: coUsers } = await supabaseAdmin
         .from('user_company_roles').select('user_id')
         .eq('company_id', req.query.company_id).eq('is_active', true);
       const assignedIds = (coUsers || []).map(u => u.user_id);
-      if (assignedIds.length === 0) {
-        return res.json({ transfers: [], total: 0, page: parseInt(page), limit: parseInt(limit) });
-      }
-      query = query.in('assigned_closer_id', assignedIds);
+      if (assignedIds.length === 0) return emptyPage();
+      steps.push(q => q.in('assigned_closer_id', assignedIds));
     }
   } else {
     // Closer-side by role, plus a CLOSER company's company_admin (their side is
@@ -148,12 +160,12 @@ router.get('/', asyncHandler(async (req, res) => {
     // under the FRONTER company's company_id, so closer-side callers can never
     // be scoped by company_id; they scope by the closers who worked the lead.
     const isCloserSide = await isCloserSideScope(userRole, companyId);
-    if (!isCloserSide && companyId) query = query.eq('company_id', companyId);
+    if (!isCloserSide && companyId) steps.push(q => q.eq('company_id', companyId));
 
     if (userRole === 'fronter') {
-      query = query.eq('created_by', userId);
+      steps.push(q => q.eq('created_by', userId));
     } else if (userRole === 'closer') {
-      query = query.eq('assigned_closer_id', userId);
+      steps.push(q => q.eq('assigned_closer_id', userId));
     } else if (isCloserSide) {
       // closer_manager / compliance_manager / closer-company company_admin
       const { data: companyUsers } = await supabaseAdmin
@@ -162,48 +174,76 @@ router.get('/', asyncHandler(async (req, res) => {
         .eq('company_id', companyId)
         .eq('is_active', true);
       const closerIds = (companyUsers || []).map(u => u.user_id);
-      if (closerIds.length === 0) {
-        return res.json({ transfers: [], total: 0, page: parseInt(page), limit: parseInt(limit) });
-      }
-      query = query.in('assigned_closer_id', closerIds);
+      if (closerIds.length === 0) return emptyPage();
+      steps.push(q => q.in('assigned_closer_id', closerIds));
     }
     // fronter_manager, operations_manager, fronter-company company_admin — the
     // company_id filter above is their ONLY scope, so a missing company_id must
     // NOT produce an unscoped (global) query.
-    if (!isCloserSide && userRole !== 'fronter' && !companyId) {
-      return res.json({ transfers: [], total: 0, page: parseInt(page), limit: parseInt(limit) });
-    }
+    if (!isCloserSide && userRole !== 'fronter' && !companyId) return emptyPage();
   }
 
   // Agent filter: managers can scope to a specific fronter or closer
   const safeUserId = safeUuid(user_id);
   if (safeUserId && MANAGER_ROLES.includes(userRole)) {
-    query = query.or(`created_by.eq.${safeUserId},assigned_closer_id.eq.${safeUserId}`);
+    steps.push(q => q.or(`created_by.eq.${safeUserId},assigned_closer_id.eq.${safeUserId}`));
   }
 
-  if (status)    query = query.eq('status', status);
-  if (date_from) query = query.gte('created_at', etDateToUtcStart(date_from));
-  if (date_to)   query = query.lte('created_at', etDateToUtcEnd(date_to));
+  if (date_from) steps.push(q => q.gte('created_at', etDateToUtcStart(date_from)));
+  if (date_to)   steps.push(q => q.lte('created_at', etDateToUtcEnd(date_to)));
 
   if (search) {
     const s = escapeOrValue(search);
     // PostgREST JSONB text-extraction notation: ->>key (no SQL quotes around key)
-    query = query.or(
+    steps.push(q => q.or(
       `form_data->>customer_name.ilike.%${s}%,` +
       `form_data->>customer_phone.ilike.%${s}%,` +
       `form_data->>Phone.ilike.%${s}%,` +
       `form_data->>FirstName.ilike.%${s}%`
-    );
+    ));
   }
   // Per-column header filters LAST, so they narrow inside the role/company
   // scope established above rather than around it.
-  query = applyColumnFilters(query, filters, TRANSFER_COLUMNS, access.blocked);
+  steps.push(q => applyColumnFilters(q, filters, TRANSFER_COLUMNS, access.blocked));
+
+  /** Replay every step onto a fresh builder. */
+  const scoped = (selectOpts) => steps.reduce(
+    (q, step) => step(q),
+    supabaseAdmin.from('transfers').select('*', selectOpts),
+  );
+
+  let query = applySort(
+    scoped({ count: 'exact' }),
+    sort_by, sort_dir, access.sortMap, { col: 'created_at', asc: false },
+  );
+  if (status) query = query.eq('status', status);
 
   const offset = (parseInt(page) - 1) * parseInt(limit);
   query = query.range(offset, offset + parseInt(limit) - 1);
 
   const { data, error, count } = await query;
   if (error) return res.status(500).json({ error: error.message });
+
+  // ── Clickable status dashboard ───────────────────────────────────────────
+  // Counted from `steps` minus status, so every box matches the list it filters
+  // under every combination of date range, agent, search and column filter.
+  //
+  // includeZero keeps the box SET stable: a box that disappears when its count
+  // hits 0 makes the dashboard look broken and shifts the other boxes under the
+  // cursor mid-click.
+  //
+  // Page 1 only. The totals do not change between pages of the same query, and
+  // every filter change resets to page 1 — so paging never pays for this. null
+  // on later pages means "unchanged", and the client keeps what it has.
+  let status_counts = null;
+  const statusCatalogList = await transferStatusCatalog(companyId);
+  if (parseInt(page) === 1) {
+    status_counts = await statusCountsExact(
+      () => scoped({ count: 'exact', head: true }),
+      statusCatalogList.map(c => c.key),
+      { includeZero: true },
+    );
+  }
 
   // Enrich with fronter + closer names via single profile query
   const creatorIds = [...new Set((data || []).map(t => t.created_by).filter(Boolean))];
@@ -283,7 +323,13 @@ router.get('/', asyncHandler(async (req, res) => {
     };
   });
 
-  res.json({ transfers, total: count || 0, page: parseInt(page), limit: parseInt(limit), columns: access.catalog });
+  res.json({
+    transfers, total: count || 0, page: parseInt(page), limit: parseInt(limit),
+    columns: access.catalog,
+    // The strip and the vocabulary that built it travel together, so the client
+    // renders the labels that were actually counted rather than its own copy.
+    status_counts, status_catalog: statusCatalogList,
+  });
 }));
 
 // ============================================================================

@@ -6,6 +6,7 @@ const { getConfig } = require('../utils/businessConfig');
 const { isCloserSideScope, getCompanyType } = require('../models/helpers');
 const { safeUuid } = require('../utils/searchSanitize');
 const { excludePostDate } = require('../utils/postDate');
+const { transferStatusCatalog, saleStatusCatalog } = require('../utils/statusCatalog');
 const logger = require('../utils/logger');
 
 // Every window in this file is cut in Eastern Time (etDateToUtcStart/End), but
@@ -447,40 +448,6 @@ router.get(
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 const cleanDay = (v) => (ISO_DAY.test(String(v || '')) ? String(v) : null);
 
-// Fallbacks mirror the frontend hooks (useTransferStatuses / useComplianceStatuses)
-// so an unconfigured deployment still renders the full lifecycle.
-const TRANSFER_STATUS_FALLBACK = [
-  { key: 'pending',   label: 'Pending',   badge: 'warning'   },
-  { key: 'assigned',  label: 'Assigned',  badge: 'info'      },
-  { key: 'completed', label: 'Completed', badge: 'success'   },
-  { key: 'rejected',  label: 'Rejected',  badge: 'error'     },
-  { key: 'cancelled', label: 'Cancelled', badge: 'secondary' },
-];
-const SALE_STATUS_FALLBACK = [
-  { key: 'open',           label: 'Open',           badge: 'info'    },
-  { key: 'closed_won',     label: 'Approved',       badge: 'success' },
-  { key: 'pending_review', label: 'Pending Review', badge: 'warning' },
-  { key: 'needs_revision', label: 'Needs Revision', badge: 'error'   },
-  { key: 'cancelled',      label: 'Cancelled',      badge: 'error'   },
-];
-
-const titleCase = (k) => String(k).replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-
-// Enabled entries of a config catalog, in the catalog's own order. `enabled`
-// absent means enabled — a hand-written catalog row should not vanish for
-// omitting a flag.
-function resolveStatCatalog(raw, fallback) {
-  if (!Array.isArray(raw) || !raw.length) return fallback;
-  const out = raw
-    .filter((s) => s && s.key && s.enabled !== false)
-    .map((s) => ({
-      key:   String(s.key),
-      label: (typeof s.label === 'string' && s.label.trim()) ? s.label.trim() : titleCase(s.key),
-      badge: s.badge || 'secondary',
-    }));
-  return out.length ? out : fallback;
-}
-
 router.get('/overview', asyncHandler(async (req, res) => {
   const userId    = req.user.id;
   const companyId = req.user.company_id;
@@ -533,10 +500,7 @@ router.get('/overview', asyncHandler(async (req, res) => {
       return q;
     };
 
-    const catalog = resolveStatCatalog(
-      await getConfig(companyId, 'transfer.status_catalog', null),
-      TRANSFER_STATUS_FALLBACK,
-    );
+    const catalog = await transferStatusCatalog(companyId);
 
     const [totalRes, ...statusRes] = await Promise.all([
       xferCount(null),
@@ -631,13 +595,7 @@ router.get('/overview', asyncHandler(async (req, res) => {
     return q;
   };
 
-  let rawCatalog = await getConfig(companyId, 'compliance.status_catalog', null);
-  if (!Array.isArray(rawCatalog) || !rawCatalog.length) {
-    // Older deployments configured a flat key list instead of a catalog.
-    const allowed = await getConfig(companyId, 'compliance.allowed_statuses', null);
-    if (Array.isArray(allowed) && allowed.length) rawCatalog = allowed.map((k) => ({ key: k }));
-  }
-  const catalog = resolveStatCatalog(rawCatalog, SALE_STATUS_FALLBACK);
+  const catalog = await saleStatusCatalog(companyId);
 
   const [totalRes, resellRes, ...statusRes] = await Promise.all([
     saleCount(null),

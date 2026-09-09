@@ -11,6 +11,8 @@ const { escapeOrValue, safeUuid } = require('../utils/searchSanitize');
 const { applySort } = require('../utils/sortHelper');
 const { applyColumnFilters, resolveColumnAccess } = require('../utils/columnFilter');
 const { SALE_COLUMNS } = require('../config/recordColumns');
+const { saleStatusCatalog } = require('../utils/statusCatalog');
+const { statusCountsExact } = require('../utils/statusCounts');
 const { excludePostDate, isPostDateDispo } = require('../utils/postDate');
 const { titleCase, titleCaseFormData } = require('../utils/titleCase');
 const { expandStateInFormData } = require('../utils/stateMap');
@@ -223,10 +225,21 @@ router.get(
     // Which columns THIS caller may sort/filter on (narrowed for a masked RO).
     const access = await resolveColumnAccess(req, SALE_COLUMNS);
 
-    let query = applySort(
-      supabaseAdmin.from('sales').select(`*, transfers(id, status, created_by)`, { count: 'exact' }),
-      sort_by, sort_dir, access.sortMap, { col: 'created_at', asc: false },
-    );
+    // ── Scope, expressed as REPLAYABLE STEPS ───────────────────────────────
+    // Each filter is pushed as a closure instead of mutating one builder, so
+    // the identical chain can be rebuilt from scratch. That is what makes the
+    // status count strip trustworthy: the boxes are counted from these same
+    // steps minus `status`, so a box and the list it filters cannot disagree.
+    // Supabase builders are single-use, so sharing one object would let the
+    // first status consume it and return nothing for the rest.
+    //
+    // Every early return answers with the same shape the success path does, or
+    // the client reads `status_counts` off undefined.
+    const steps = [];
+    const emptyPage = () => res.json({
+      sales: [], total: 0, page: parseInt(page), limit: parseInt(limit),
+      status_counts: {}, status_catalog: [],
+    });
 
     if (['superadmin', 'readonly_admin'].includes(userRole)) {
       // Apply company filter only when admin explicitly passes company_id param
@@ -234,32 +247,28 @@ router.get(
         const { data: co } = await supabaseAdmin
           .from('companies').select('company_type').eq('id', req.query.company_id).single();
         if (co?.company_type === 'fronter') {
-          query = query.eq('company_id', req.query.company_id);
+          const cid = req.query.company_id;
+          steps.push(q => q.eq('company_id', cid));
         } else {
           const { data: coUsers } = await supabaseAdmin
             .from('user_company_roles').select('user_id')
             .eq('company_id', req.query.company_id).eq('is_active', true);
           const closerUserIds = (coUsers || []).map(u => u.user_id);
-          if (closerUserIds.length > 0) {
-            query = query.in('closer_id', closerUserIds);
-          } else {
-            return res.json({ sales: [], total: 0, page: parseInt(page), limit: parseInt(limit) });
-          }
+          if (!closerUserIds.length) return emptyPage();
+          steps.push(q => q.in('closer_id', closerUserIds));
         }
       }
       // else: no filter — global view
     } else if (userRole === 'closer') {
       // Closer: their own sales only, regardless of which company_id the sale has
-      query = query.eq('closer_id', userId);
+      steps.push(q => q.eq('closer_id', userId));
     } else if (userRole === 'fronter') {
       // Individual FRONTER: only the sales they are CREDITED for (fronter_id),
       // NOT the whole fronter company — matches how stats + transfers scope a
-      // fronter. (Previously this fell into the company branch below and leaked
-      // every closer's sales in the company.) Resells belong to the closer's
-      // company, so hide them per config.
-      query = query.eq('fronter_id', userId);
+      // fronter. Resells belong to the closer company, so hide them per config.
+      steps.push(q => q.eq('fronter_id', userId));
       if (await shouldHideResellsForUser(userRole, companyId, 'fronter')) {
-        query = query.eq('is_resell', false);
+        steps.push(q => q.eq('is_resell', false));
       }
     } else if (companyId) {
       // Detect company type to determine scoping strategy
@@ -268,10 +277,10 @@ router.get(
 
       if (co?.company_type === 'fronter') {
         // Fronter-side MANAGERS (fronter_manager / ops / company_admin): the whole
-        // fronter company's downstream sales (inherit its company_id).
-        query = query.eq('company_id', companyId);
+        // fronter company downstream sales (they inherit its company_id).
+        steps.push(q => q.eq('company_id', companyId));
         if (await shouldHideResellsForUser(userRole, companyId, 'fronter')) {
-          query = query.eq('is_resell', false);
+          steps.push(q => q.eq('is_resell', false));
         }
       } else {
         // Closer-side (closer_manager, ops_manager, company_admin, compliance_manager):
@@ -280,29 +289,20 @@ router.get(
           .from('user_company_roles').select('user_id')
           .eq('company_id', companyId).eq('is_active', true);
         const closerUserIds = (coUsers || []).map(u => u.user_id);
-        if (closerUserIds.length > 0) {
-          query = query.in('closer_id', closerUserIds);
-        } else {
-          return res.json({ sales: [], total: 0, page: parseInt(page), limit: parseInt(limit) });
-        }
+        if (!closerUserIds.length) return emptyPage();
+        steps.push(q => q.in('closer_id', closerUserIds));
       }
     } else {
       // Non-privileged user with no resolvable company → never fall through to an
       // unscoped (global) query. Return nothing.
-      return res.json({ sales: [], total: 0, page: parseInt(page), limit: parseInt(limit) });
+      return emptyPage();
     }
 
     // Agent filter: managers can scope to a specific closer
     const isManagerRole = !['closer', 'fronter'].includes(userRole);
     const safeCloserId = safeUuid(user_id);
-    if (safeCloserId && isManagerRole) query = query.eq('closer_id', safeCloserId);
+    if (safeCloserId && isManagerRole) steps.push(q => q.eq('closer_id', safeCloserId));
 
-    if (status) {
-      // Closer's own "My Sales" filter bar picks several at once (MultiFilterSelect);
-      // a single value keeps the plain .eq() it always had.
-      const statusList = status.split(',').filter(Boolean);
-      query = statusList.length > 1 ? query.in('status', statusList) : query.eq('status', statusList[0] || status);
-    }
     // Closer-facing "incentive status" — a derived read of two payout columns
     // (mig 244/246), not a column of its own. Mirrors incentivePill() in
     // StaffShell.jsx exactly: no payout_confirmed row (NULL) reads as pending.
@@ -313,40 +313,60 @@ router.get(
       if (vals.includes('pending'))      orParts.push('payout_confirmed.eq.pending', 'payout_confirmed.is.null');
       if (vals.includes('eligible'))     orParts.push('and(payout_confirmed.eq.yes,paid_to_closer.eq.false)');
       if (vals.includes('paid'))         orParts.push('and(payout_confirmed.eq.yes,paid_to_closer.eq.true)');
-      if (orParts.length) query = query.or(orParts.join(','));
+      if (orParts.length) steps.push(q => q.or(orParts.join(',')));
     }
     // Disposition tab filter (closer_disposition) — drives the dynamic per-
     // disposition tabs (e.g. "Post Date"). Generic: the frontend resolves which
     // value is the post-date one from the live form-field options and passes it.
-    if (disposition) query = query.eq('closer_disposition', disposition);
+    if (disposition) steps.push(q => q.eq('closer_disposition', disposition));
     // …and its inverse: every OTHER section hides un-charged post-dates, so the
     // list agrees with the stat counters (which now exclude them unconditionally
     // — utils/postDate.js). Opt-in rather than automatic because this endpoint
     // also backs exports and admin tooling, which must still be able to see
     // every row; the closer/manager shells pass the flag, those callers don't.
     // Same clause compliance.js uses. NULL-safe.
-    else if (exclude_post_date === 'true' || exclude_post_date === true) query = excludePostDate(query);
+    else if (exclude_post_date === 'true' || exclude_post_date === true) steps.push(q => excludePostDate(q));
     // Charge-date window (post-dated sales) — closer + compliance Post Date tabs.
-    if (charge_from) query = query.gte('charge_at', charge_from);
-    if (charge_to)   query = query.lte('charge_at', charge_to);
+    if (charge_from) steps.push(q => q.gte('charge_at', charge_from));
+    if (charge_to)   steps.push(q => q.lte('charge_at', charge_to));
     // Date filter keys on sale_date (the business day the sale happened) so the
     // "Today" preset and any custom range match what the UI Date column shows.
     // Bulk-uploaded April sales no longer count as "Today" just because they
     // were inserted today. sale_date is a DATE column → string compare works.
-    if (date_from) query = query.gte('sale_date', date_from);
-    if (date_to)   query = query.lte('sale_date', date_to);
+    if (date_from) steps.push(q => q.gte('sale_date', date_from));
+    if (date_to)   steps.push(q => q.lte('sale_date', date_to));
     if (search) {
       const s = escapeOrValue(search);
-      query = query.or(
+      steps.push(q => q.or(
         `customer_name.ilike.%${s}%,` +
         `customer_phone.ilike.%${s}%,` +
         `reference_no.ilike.%${s}%,` +
         `client_name.ilike.%${s}%`
-      );
+      ));
     }
     // Per-column header filters LAST, so they narrow inside the role/company
     // scope established above rather than around it.
-    query = applyColumnFilters(query, filters, SALE_COLUMNS, access.blocked);
+    steps.push(q => applyColumnFilters(q, filters, SALE_COLUMNS, access.blocked));
+
+    /**
+     * Replay every step onto a fresh builder. The count strip passes a lighter
+     * select: it needs no rows and no embedded transfer, only the count.
+     */
+    const scoped = (selectCols, selectOpts) => steps.reduce(
+      (q, step) => step(q),
+      supabaseAdmin.from('sales').select(selectCols, selectOpts),
+    );
+
+    let query = applySort(
+      scoped(`*, transfers(id, status, created_by)`, { count: 'exact' }),
+      sort_by, sort_dir, access.sortMap, { col: 'created_at', asc: false },
+    );
+    if (status) {
+      // A closer's own "My Sales" filter bar picks several at once
+      // (MultiFilterSelect); a single value keeps the plain .eq() it always had.
+      const statusList = status.split(',').filter(Boolean);
+      query = statusList.length > 1 ? query.in('status', statusList) : query.eq('status', statusList[0] || status);
+    }
 
     const offset = (page - 1) * limit;
     query = query.range(offset, offset + parseInt(limit) - 1);
@@ -356,6 +376,30 @@ router.get(
     if (error) {
       logger.error('GET_SALES', 'Query failed', error);
       return res.status(500).json({ error: error.message });
+    }
+
+    // ── Clickable status dashboard ─────────────────────────────────────────
+    // Counted from `steps` minus status, so every box matches the list it
+    // filters under every combination of date range, agent, disposition,
+    // search and column filter. The statuses come from the company's own
+    // catalog, so this strip shows the same five the Overview's Sales section
+    // does rather than the eleven-key legacy list.
+    //
+    // includeZero keeps the box SET stable: a box that disappears when its
+    // count hits 0 makes the dashboard look broken and shifts the other boxes
+    // under the cursor mid-click.
+    //
+    // Page 1 only — the totals do not change between pages of the same query,
+    // and every filter change resets to page 1. null on later pages means
+    // "unchanged", and the client keeps what it has.
+    let status_counts = null;
+    const statusCatalogList = await saleStatusCatalog(companyId);
+    if (parseInt(page) === 1) {
+      status_counts = await statusCountsExact(
+        () => scoped('id', { count: 'exact', head: true }),
+        statusCatalogList.map(c => c.key),
+        { includeZero: true },
+      );
     }
 
     // Enrich with closer AND fronter names.
@@ -424,6 +468,10 @@ router.get(
       limit: parseInt(limit),
       // What the header menu may offer — resolved server-side per caller.
       columns: access.catalog,
+      // The clickable status strip, and the vocabulary that produced it. They
+      // travel together so the client renders the labels that were actually
+      // counted rather than its own copy of the catalog.
+      status_counts, status_catalog: statusCatalogList,
     });
   })
 );

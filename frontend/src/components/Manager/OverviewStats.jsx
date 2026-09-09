@@ -38,19 +38,10 @@ import client from '../../api/client';
 import { Panel, SectionHeader, KpiTile, Loading, accent } from '../UI/kit';
 import DateRangePicker, { getPresetRange } from '../UI/DateRangePicker';
 import { useAbortable, isCanceled } from '../../hooks/useTableQuery';
-
-// Catalog `badge` vocabulary → kit accent tones. The kit uses warn/danger where
-// the catalog says warning/error, so this map is required, not decorative — a
-// missing key falls through to the muted default and loses the signal.
-const TONE_BY_BADGE = {
-  success:   'success',
-  error:     'danger',
-  warning:   'warn',
-  info:      'info',
-  secondary: 'muted',
-  primary:   'primary',
-};
-const toneOf = (badge) => TONE_BY_BADGE[badge] || 'muted';
+// Shared with StatusStrip and TopAgents: the catalog says warning/error where
+// the kit says warn/danger, and one copy of that map is what keeps 'cancelled'
+// the same colour on every surface that reads these catalogs.
+import { toneOfBadge as toneOf } from '../../utils/statusTone';
 
 const fmt = (n) => (typeof n === 'number' ? n.toLocaleString() : '—');
 
