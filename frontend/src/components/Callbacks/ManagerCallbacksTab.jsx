@@ -219,33 +219,13 @@ const AgentStatsModal = ({ userId, userName, companyId, onClose }) => {
   );
 };
 
-const PriorityStatsBar = ({ callbacks }) => {
-  const high   = callbacks.filter(c => c.priority === 'High').length;
-  const medium = callbacks.filter(c => c.priority === 'Medium').length;
-  const low    = callbacks.filter(c => c.priority === 'Low').length;
-  const total  = callbacks.length;
-  if (!total) return null;
-  return (
-    <div className="flex items-center gap-3 flex-wrap mb-4">
-      <span className="text-xs font-bold text-text-secondary uppercase tracking-wide">Priority</span>
-      {[
-        { label: 'High',   count: high,   ...PRIORITY_CFG.High   },
-        { label: 'Medium', count: medium, ...PRIORITY_CFG.Medium },
-        { label: 'Low',    count: low,    ...PRIORITY_CFG.Low    },
-      ].map(p => (
-        <span key={p.label} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border"
-          style={{ backgroundColor: p.bg, color: p.text, borderColor: p.border }}>
-          <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: p.dot }} />
-          {p.label}: {p.count}
-          <span className="opacity-60 text-[11px] sm:text-[10px]">({total > 0 ? Math.round(p.count / total * 100) : 0}%)</span>
-        </span>
-      ))}
-      <span className="text-xs text-text-secondary ml-auto">
-        {callbacks.filter(c => c.status === 'pending' && c.callback_at && new Date(c.callback_at) < new Date()).length} overdue
-      </span>
-    </div>
-  );
-};
+// PriorityStatsBar lived here: a High/Medium/Low count strip with percentages
+// and an overdue tally. Removed at the operator's request — and it was
+// misleading anyway. Every figure was computed from the `callbacks` state,
+// which holds only the CURRENT PAGE, so those counts and percentages described
+// 50 rows while the pagination beside them reported the real filtered total.
+// A per-status count strip here would have to be counted server-side, the way
+// the Team Transfers / Team Sales strips are.
 
 const ManagerCallbacksTab = ({ user }) => {
   // null = unconfigured → this tab keeps its own default column set.
@@ -419,8 +399,6 @@ const ManagerCallbacksTab = ({ user }) => {
         <FInput label="Crt. From" type="date" value={createdFrom} onChange={e => { setCreatedFrom(e.target.value); }} />
         <FInput label="Crt. To"   type="date" value={createdTo}   onChange={e => { setCreatedTo(e.target.value); }} />
       </Filters>
-
-      {callbacks.length > 0 && <PriorityStatsBar callbacks={callbacks} />}
 
       <div className="rounded-xl overflow-hidden"
         style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>

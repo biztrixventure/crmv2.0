@@ -404,23 +404,45 @@ export const headerFor = (col, mode) => (mode === 'key' ? (col.headerKey || col.
 // so the server's egressAudit middleware enforces the limits and WRITES THE
 // AUDIT ROW (the row cap is checked against `total` before the drain). A blocked
 // export returns 429 on page 1 → surfaced as a typed EgressBlockedError.
-// `opts.pageSize` matters: the drain stops on a SHORT page, so asking for more
-// rows than an endpoint will return truncates the export silently. The
-// compliance endpoints serve 5,000; the manager /sales and /transfers lists cap
-// near 1,000 and /callbacks at 200, so those callers pass their real page size.
+// `opts.pageSize` is only a REQUEST size now. It used to be load-bearing: the
+// drain stopped on any short page, so a caller asking for more rows than its
+// endpoint would serve truncated the export silently, and every caller had to
+// know its endpoint's internal cap. That footgun duly fired — GET /callbacks
+// clamps to 200, ManagerCallbacksTab asked for 5,000, and a 638-row Team
+// Callbacks export downloaded 200 rows with no error and nothing in the file to
+// say so. The drain now follows the server's own `total` instead.
 export async function fetchAllForExport(endpoint, params = {}, dataKey, onProgress, dataset, opts = {}) {
   const PAGE = opts.pageSize || 5000;
   const out = [];
   const egressMarker = { __egress: 'csv_export', __dataset: dataset || dataKey };
   try {
+    // TRUST THE SERVER'S `total`, NOT THE REQUESTED PAGE SIZE. A clamping
+    // endpoint recomputes its own offset from the clamped limit
+    // ((page-1) * limit), so continuing to ask for pages walks the whole set at
+    // whatever size the server chose to serve.
+    //
+    // An empty page and the page cap are the real stop conditions, so an
+    // endpoint that pages differently than expected still terminates.
+    let total = null;
     for (let page = 1; page <= 4000; page++) {   // safety cap (~20M rows)
       const res = await client.get(endpoint, { params: { ...params, ...egressMarker, limit: PAGE, page } });
       const rows = res.data?.[dataKey] || [];
       out.push(...rows);
-      const total = res.data?.total;
-      if (onProgress) onProgress(out.length, typeof total === 'number' ? total : out.length);
-      if (rows.length < PAGE) break;                        // last (short) page
-      if (typeof total === 'number' && out.length >= total) break;
+      if (typeof res.data?.total === 'number') total = res.data.total;
+      if (onProgress) onProgress(out.length, total ?? out.length);
+
+      if (!rows.length) break;                              // nothing came back
+      if (total !== null) {
+        if (out.length >= total) break;                     // have the whole set
+        continue;                                           // keep going, however short that page was
+      }
+      if (rows.length < PAGE) break;                        // no total to trust — fall back to the short-page test
+    }
+    // A shortfall means the endpoint paged in a way this drain could not
+    // follow. Say so, because the alternative is handing someone a CSV that
+    // looks complete and is not.
+    if (total !== null && out.length < total) {
+      console.warn(`[export] ${endpoint}: collected ${out.length} of ${total} rows — export is incomplete`);
     }
   } catch (err) {
     if (err?.response?.status === 429 && err.response.data?.code === 'EGRESS_LIMIT') {

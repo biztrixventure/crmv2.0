@@ -52,7 +52,13 @@ router.get('/', asyncHandler(async (req, res) => {
   const created_from  = req.query.created_from; // filter on created_at
   const created_to    = req.query.created_to;
   const page      = Math.max(1, parseInt(req.query.page)  || 1);
-  const limit     = Math.min(200, parseInt(req.query.limit) || 50);
+  // 1000, not 200. The page size the UI asks for is still 50; this ceiling only
+  // matters to the CSV drain, which used to be truncated BY it (fetchAllForExport
+  // asked for 5,000, got 200, and treated the short page as the last one). The
+  // drain now follows , so this is about round trips rather than
+  // correctness -- 638 rows in one request instead of seven. Matches the ceiling
+  // the other list endpoints already allow (blacklist 1000, compliance 300).
+  const limit     = Math.min(1000, parseInt(req.query.limit) || 50);
   const offset    = (page - 1) * limit;
   const { sort_by, sort_dir } = req.query;
 
