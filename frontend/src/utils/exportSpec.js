@@ -283,9 +283,13 @@ export const DATASETS = {
       { key: 'converted', label: 'Converted', get: r => r.converted },
       { key: 'rejected',  label: 'Rejected',  get: r => r.rejected },
       { key: 'conv_pct',  label: 'Conv %',    get: r => (r.total > 0 ? `${Math.round((r.converted / r.total) * 100)}%` : '0%') },
+      // Blank, never 0, for someone never reviewed — the export has to preserve
+      // that distinction as faithfully as the screen does.
+      { key: 'qa_score',  label: 'QA Score',  get: r => (r.qa ? `${r.qa.score}%` : '') },
+      { key: 'qa_reviews', label: 'QA Reviews', get: r => (r.qa ? r.qa.reviews : '') },
     ],
     surfaces: {
-      reports_fronters: { columns: ['rank', 'name', 'total', 'completed', 'converted', 'rejected', 'conv_pct'] },
+      reports_fronters: { columns: ['rank', 'name', 'total', 'completed', 'converted', 'rejected', 'conv_pct', 'qa_score', 'qa_reviews'] },
     },
   },
 
@@ -299,9 +303,11 @@ export const DATASETS = {
       { key: 'won',      label: 'Won',              get: r => r.won },
       { key: 'win_rate', label: 'Win Rate',         get: r => (r.total > 0 ? `${Math.round((r.won / r.total) * 100)}%` : '0%') },
       { key: 'revenue',  label: 'Down Payment Rev', get: r => `$${Number(r.revenue || 0).toLocaleString()}` },
+      { key: 'qa_score',   label: 'QA Score',   get: r => (r.qa ? `${r.qa.score}%` : '') },
+      { key: 'qa_reviews', label: 'QA Reviews', get: r => (r.qa ? r.qa.reviews : '') },
     ],
     surfaces: {
-      reports_closers: { columns: ['rank', 'name', 'total', 'won', 'win_rate', 'revenue'] },
+      reports_closers: { columns: ['rank', 'name', 'total', 'won', 'win_rate', 'revenue', 'qa_score', 'qa_reviews'] },
     },
   },
 };

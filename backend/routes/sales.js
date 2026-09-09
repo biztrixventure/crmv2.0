@@ -14,6 +14,7 @@ const { SALE_COLUMNS } = require('../config/recordColumns');
 const { saleStatusCatalog } = require('../utils/statusCatalog');
 const { statusCountsExact } = require('../utils/statusCounts');
 const { excludePostDate, isPostDateDispo } = require('../utils/postDate');
+const { shouldHideResellsForUser } = require('../utils/resellPrivacy');
 const { titleCase, titleCaseFormData } = require('../utils/titleCase');
 const { expandStateInFormData } = require('../utils/stateMap');
 const { stampActor } = require('../utils/auditColumnGuard');
@@ -79,25 +80,9 @@ async function loadSaleForAccess(req, res, saleId, columns = 'id, company_id, cr
   return sale;
 }
 
-// ============================================================================
-// Resell privacy resolver — returns true when the caller should NOT see
-// is_resell=true sale rows. Looked up per request because the company config
-// can flip on/off independently of the user's role/company.
-// ============================================================================
-async function shouldHideResellsForUser(userRole, companyId, companyType) {
-  if (userRole === 'superadmin' || userRole === 'readonly_admin') return false;
-  if (userRole === 'closer' || userRole === 'closer_manager') return false;
-  if (userRole === 'compliance_manager') {
-    return !!(await getConfig(companyId, 'resell.hide_from_compliance', false));
-  }
-  if (userRole === 'fronter_manager') {
-    return !!(await getConfig(companyId, 'resell.hide_from_fronter_manager', true));
-  }
-  if (userRole === 'fronter' || companyType === 'fronter') {
-    return !!(await getConfig(companyId, 'resell.hide_from_fronter', true));
-  }
-  return false;
-}
+// Resell privacy moved to utils/resellPrivacy.js — the Reports leaderboards now
+// count sales server-side and have to apply the identical rule (see the note in
+// that file). Imported below, not redefined.
 
 // Client sort key -> real column lives in the shared catalog now
 // (config/recordColumns.js SALE_COLUMNS). resolveColumnAccess derives the map

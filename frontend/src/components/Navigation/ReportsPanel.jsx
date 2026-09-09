@@ -1,9 +1,10 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import {
   BarChart3, Users, TrendingUp, Send, DollarSign,
-  CheckCircle, Clock, Download, ArrowRight,
+  CheckCircle, Clock, Download, ArrowRight, Award, AlertTriangle,
 } from 'lucide-react';
 import { Card } from '../UI';
+import { accent } from '../UI/kit';
 import DateRangePicker, { getPresetRange } from '../UI/DateRangePicker';
 import client from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
@@ -28,6 +29,17 @@ const METRIC_TIP = {
   won: 'Sales this closer got approved',
   'down rev': 'Sum of upfront down payments on their won sales',
   'win rate': 'Won ÷ total sales — closer close rate',
+  QA: 'Mean QA score across their evaluations in this window. Blank means never reviewed, which is not the same as scoring zero.',
+  'company QA': 'Mean over every QA review in the window, not over agents — one heavily-sampled agent should not weigh the same as one sampled once.',
+};
+
+// Which board is this company's own team, and which is the partner side. Both
+// are worth seeing: a fronter company wants to know which closers convert its
+// leads, a closer company which fronters send workable ones. Saying so beats
+// leaving a manager to guess whose staff a table lists.
+const BOARD_NOTE = {
+  fronter: { fronters: 'your fronters',            closers: 'closers who worked your leads' },
+  closer:  { fronters: 'fronters who sent you leads', closers: 'your closers' },
 };
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -40,6 +52,32 @@ const avatarClr  = n => AVATAR_PAL[(n?.charCodeAt(0) || 0) % AVATAR_PAL.length];
 // four). The only thing this copy did differently was prepend a UTF-8 BOM for
 // Excel; the shared writer declares charset=utf-8 on the blob instead.
 
+
+// Every <p> in here carries m-0. global.css sets `p { margin: var(--spacing-md) 0 }`
+// and, being loaded after Tailwind's preflight, wins — so an unqualified <p> in
+// a compact row silently adds 12px above and below its own line. These cells
+// were paying that twice over.
+//
+// Colour comes from accent(tone), never a `text-${tone}-600` template: Tailwind
+// never emits a class built from a template string, and dark mode inverts the
+// -600 scales, which the CSS variables behind accent() already account for.
+const StatCell = ({ value, label, tone = 'default', tip }) => (
+  <div>
+    <p className="text-xs font-bold m-0" style={{ color: accent(tone).fg }}>{value}</p>
+    <Tooltip text={tip}>
+      <p className="text-[11px] sm:text-[10px] cursor-help m-0" style={{ color: 'var(--color-text-tertiary)' }}>{label}</p>
+    </Tooltip>
+  </div>
+);
+
+// A QA score is null, never 0, when nobody has reviewed that person — a manager
+// has to be able to tell "scored badly" from "never assessed", and on the
+// largest company only 26 of 62 active agents have ever been reviewed.
+const qaText = q => (q ? `${q.score}%` : '—');
+const qaTone = q => (!q ? 'muted' : q.score >= 90 ? 'success' : q.score >= 75 ? 'warn' : 'danger');
+const qaTip  = q => (q
+  ? `${q.score}% mean over ${q.reviews} QA review${q.reviews === 1 ? '' : 's'} · ${q.pass_rate}% passed`
+  : METRIC_TIP.QA);
 
 const SkeletonRow = () => (
   <div className="flex items-center gap-3 p-3 rounded-xl" style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
@@ -74,68 +112,36 @@ const ReportsPanel = ({ companyId }) => {
   const [activeTab,  setActiveTab]  = useState('fronters');
   const [dateRange,  setDateRange]  = useState(() => getPresetRange('30d'));
   const { date_from, date_to } = dateRange;
+  // Which side this company is (fronter / closer), the company QA figure, and
+  // whether the window was so large the server had to stop counting.
+  const [meta, setMeta] = useState({ side: null, qa: null, truncated: false });
+  // Once someone picks a tab themselves, stop moving it under them on reload.
+  const tabPicked = useRef(false);
 
   const load = useCallback(async () => {
     if (!companyId) return;
     setLoading(true);
     try {
-      const [tRes, sRes, soldRes, wonRes, pendRes] = await Promise.all([
-        client.get('transfers', { params: { company_id: companyId, limit: 1000, date_from, date_to } }),
-        // exclude_post_date — reports must not count a card nobody has charged.
-        client.get('sales',     { params: { company_id: companyId, limit: 1000, date_from, date_to, exclude_post_date: true } }),
-        client.get('sales',     { params: { company_id: companyId, limit: 1, page: 1, date_from, date_to, status: 'sold',           exclude_post_date: true } }),
-        client.get('sales',     { params: { company_id: companyId, limit: 1, page: 1, date_from, date_to, status: 'closed_won',     exclude_post_date: true } }),
-        client.get('sales',     { params: { company_id: companyId, limit: 1, page: 1, date_from, date_to, status: 'pending_review', exclude_post_date: true } }),
-      ]);
+      // ONE request, counted server-side.
+      //
+      // WAS: 1,000 transfers and 1,000 sales pulled to the browser and tallied
+      // here, while the summary strip above used the server's exact COUNT. Past
+      // the thousandth row those disagree — the strip reported 2,907 transfers
+      // and the table under it ranked the first 1,000, with the headline
+      // looking perfectly right. /stats/leaderboards drains both queries and
+      // returns the boards AND the strip from the same tally, so they cannot
+      // contradict each other, and it adds the QA score per person on the way.
+      const { data } = await client.get('stats/leaderboards', { params: { date_from, date_to } });
 
-      const allT = tRes.data.transfers || [];
-      const allS = sRes.data.sales     || [];
+      setSummary(data.summary || { transfers: 0, sales: 0, won: 0, pending: 0, revenue: 0 });
+      setFronters(data.fronters || []);
+      setClosers(data.closers || []);
+      setMeta({ side: data.side || null, qa: data.qa || null, truncated: !!data.truncated });
 
-      // Sale lookup by transfer_id — gives accurate fronter conversion count
-      const saleByXfer = {};
-      allS.forEach(s => { if (s.transfer_id) saleByXfer[s.transfer_id] = s; });
-
-      // Summary stats (use server totals for accuracy).
-      // Revenue = sum of down_payment on closed-won/sold sales. Monthly fees
-      // are recurring future income, not money the closer has actually brought
-      // in during the window, so the dashboard counts the upfront down payment
-      // only.
-      const revenue = allS
-        .filter(s => ['sold', 'closed_won'].includes(s.status))
-        .reduce((sum, s) => sum + Number(s.down_payment || 0), 0);
-      setSummary({
-        transfers: tRes.data.total || 0,
-        sales:     sRes.data.total || 0,
-        won:       (soldRes.data.total || 0) + (wonRes.data.total || 0),
-        pending:   pendRes.data.total || 0,
-        revenue,
-      });
-
-      // Fronter stats — sort by converted, then total
-      const fm = {};
-      allT.forEach(t => {
-        const k = t.created_by; if (!k) return;
-        if (!fm[k]) fm[k] = { id: k, name: t.fronter_name || 'Unknown', total: 0, completed: 0, rejected: 0, converted: 0 };
-        fm[k].total++;
-        if (t.status === 'completed') fm[k].completed++;
-        if (t.status === 'rejected')  fm[k].rejected++;
-        const linked = saleByXfer[t.id];
-        if (linked && ['sold', 'closed_won'].includes(linked.status)) fm[k].converted++;
-      });
-      setFronters(Object.values(fm).sort((a, b) => b.converted - a.converted || b.total - a.total));
-
-      // Closer stats — revenue = sum of down_payment on closed-won/sold sales.
-      const cm = {};
-      allS.forEach(s => {
-        const k = s.closer_id; if (!k) return;
-        if (!cm[k]) cm[k] = { id: k, name: s.closer_name || k.slice(0, 8), total: 0, won: 0, revenue: 0 };
-        cm[k].total++;
-        if (['sold', 'closed_won'].includes(s.status)) {
-          cm[k].won++;
-          cm[k].revenue += Number(s.down_payment || 0);
-        }
-      });
-      setClosers(Object.values(cm).sort((a, b) => b.won - a.won));
+      // Open on the board holding this company's own team. An ops manager at a
+      // closer company landing on the fronters tab is looking at someone
+      // else's staff first.
+      if (!tabPicked.current && data.side) setActiveTab(data.side === 'closer' ? 'closers' : 'fronters');
     } catch { /* non-critical */ } finally { setLoading(false); }
   }, [companyId, date_from, date_to]);
 
@@ -184,22 +190,40 @@ const ReportsPanel = ({ companyId }) => {
           { label: 'Transfers', value: summary.transfers, icon: Send,        color: 'info'    },
           { label: 'Sales',     value: summary.sales,     icon: DollarSign,  color: 'success' },
           { label: 'Won',       value: summary.won,       icon: CheckCircle, color: 'success' },
-          { label: 'In Review', value: summary.pending,   icon: Clock,       color: 'warning' },
+          { label: 'In Review', value: summary.pending,   icon: Clock,       color: 'warn'    },
         ].map(({ label, value, icon: Icon, color }) => (
           <Card key={label} className="p-4">
             <div className="flex items-center justify-between mb-2">
               <Tooltip text={METRIC_TIP[label]}><p className="text-xs font-semibold uppercase tracking-wide cursor-help" style={{ color: 'var(--color-text-secondary)' }}>{label}</p></Tooltip>
-              <div className={`p-1.5 rounded-lg bg-${color}-100 dark:bg-${color}-900`}>
-                <Icon size={13} className={`text-${color}-600`} />
+              {/* accent(color), not `bg-${color}-100`: Tailwind never emits a
+                  class built from a template string. These rendered only
+                  because literal siblings elsewhere in the app happened to
+                  produce the same names — and dark:bg-primary-900 is genuinely
+                  absent from the built CSS, so one chip had no dark-mode
+                  background at all. */}
+              <div className="p-1.5 rounded-lg" style={{ background: accent(color).soft }}>
+                <Icon size={13} style={{ color: accent(color).fg }} />
               </div>
             </div>
             {loading
               ? <div className="h-7 w-12 rounded animate-pulse" style={{ backgroundColor: 'var(--color-border)' }} />
-              : <p className={`text-2xl font-bold text-${color}-600`} style={{ letterSpacing: '-0.03em' }}>{value}</p>
+              : <p className="text-2xl font-bold m-0" style={{ color: accent(color).fg, letterSpacing: '-0.03em' }}>{value}</p>
             }
           </Card>
         ))}
       </div>
+
+      {/* A window big enough to hit the server's 40k-row ceiling is reported,
+          not quietly presented as a complete tally — the whole point of moving
+          this counting server-side. */}
+      {meta.truncated && (
+        <Card className="px-5 py-3 flex items-start gap-2">
+          <AlertTriangle size={15} className="flex-shrink-0 mt-0.5" style={{ color: accent('warn').fg }} />
+          <p className="text-xs m-0" style={{ color: 'var(--color-text-secondary)' }}>
+            This range holds more records than one report can count. Narrow the dates for exact figures.
+          </p>
+        </Card>
+      )}
 
       {/* ── Conversion / Revenue banner ── */}
       {!loading && summary.transfers > 0 && (
@@ -220,6 +244,20 @@ const ReportsPanel = ({ companyId }) => {
                 <span className="text-sm font-bold text-success-600">${summary.revenue.toLocaleString()}</span>
               </div>
             )}
+            {/* Company QA, with the coverage it rests on. The score alone would
+                imply the whole roster had been assessed; most of it has not. */}
+            {meta.qa?.score != null && (
+              <div className="flex items-center gap-2">
+                <Award size={14} style={{ color: accent(qaTone(meta.qa)).fg }} />
+                <Tooltip text={METRIC_TIP['company QA']}>
+                  <span className="text-sm text-text-secondary cursor-help">QA score:</span>
+                </Tooltip>
+                <span className="text-sm font-bold" style={{ color: accent(qaTone(meta.qa)).fg }}>{meta.qa.score}%</span>
+                <span className="text-xs text-text-tertiary">
+                  ({meta.qa.reviews} review{meta.qa.reviews === 1 ? '' : 's'} across {meta.qa.reviewed_agents} agent{meta.qa.reviewed_agents === 1 ? '' : 's'})
+                </span>
+              </div>
+            )}
           </div>
         </Card>
       )}
@@ -235,7 +273,7 @@ const ReportsPanel = ({ companyId }) => {
             { key: 'fronters', label: 'Fronters', icon: Users,      count: fronters.length },
             { key: 'closers',  label: 'Closers',  icon: TrendingUp, count: closers.length  },
           ].map(({ key, label, icon: Icon, count }) => (
-            <button key={key} onClick={() => setActiveTab(key)}
+            <button key={key} onClick={() => { tabPicked.current = true; setActiveTab(key); }}
               className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-150 whitespace-nowrap"
               style={{
                 background: activeTab === key ? 'var(--gradient-sidebar)' : 'transparent',
@@ -273,6 +311,9 @@ const ReportsPanel = ({ companyId }) => {
           <div className="flex items-center justify-between mb-5">
             <h3 className="text-base font-bold text-text flex items-center gap-2">
               <Users size={16} /> Fronter Performance
+              {meta.side && (
+                <span className="text-xs font-normal text-text-secondary">— {BOARD_NOTE[meta.side].fronters}</span>
+              )}
             </h3>
             {!loading && fronters.length > 0 && (
               <span className="text-xs text-text-tertiary">{fronters.length} agents</span>
@@ -328,18 +369,13 @@ const ReportsPanel = ({ companyId }) => {
                     </div>
                     {/* Stats columns */}
                     <div className="hidden sm:flex items-center gap-4 flex-shrink-0 text-right">
-                      <div>
-                        <p className="text-xs font-bold text-info-600">{f.completed}</p>
-                        <Tooltip text={METRIC_TIP.connected}><p className="text-[11px] sm:text-[10px] cursor-help" style={{ color: 'var(--color-text-tertiary)' }}>connected</p></Tooltip>
-                      </div>
-                      <div>
-                        <p className="text-xs font-bold text-success-600">{f.converted}</p>
-                        <Tooltip text={METRIC_TIP.converted}><p className="text-[11px] sm:text-[10px] cursor-help" style={{ color: 'var(--color-text-tertiary)' }}>converted</p></Tooltip>
-                      </div>
-                      <div>
-                        <p className="text-xs font-bold text-error-600">{f.rejected}</p>
-                        <Tooltip text={METRIC_TIP.rejected}><p className="text-[11px] sm:text-[10px] cursor-help" style={{ color: 'var(--color-text-tertiary)' }}>rejected</p></Tooltip>
-                      </div>
+                      <StatCell value={f.completed} label="connected" tone="info"    tip={METRIC_TIP.connected} />
+                      <StatCell value={f.converted} label="converted" tone="success" tip={METRIC_TIP.converted} />
+                      <StatCell value={f.rejected}  label="rejected"  tone="danger"  tip={METRIC_TIP.rejected} />
+                      {/* QA belongs beside the funnel, not only inside the QA
+                          shell: it is the number a coaching conversation
+                          actually opens with. */}
+                      <StatCell value={qaText(f.qa)} label="QA" tone={qaTone(f.qa)} tip={qaTip(f.qa)} />
                     </div>
                     {/* Conv rate */}
                     <div className="text-right flex-shrink-0 min-w-[48px]">
@@ -360,6 +396,9 @@ const ReportsPanel = ({ companyId }) => {
           <div className="flex items-center justify-between mb-5">
             <h3 className="text-base font-bold text-text flex items-center gap-2">
               <TrendingUp size={16} /> Closer Performance
+              {meta.side && (
+                <span className="text-xs font-normal text-text-secondary">— {BOARD_NOTE[meta.side].closers}</span>
+              )}
             </h3>
             {!loading && closers.length > 0 && (
               <span className="text-xs text-text-tertiary">{closers.length} closers</span>
@@ -415,16 +454,11 @@ const ReportsPanel = ({ companyId }) => {
                     </div>
                     {/* Stats */}
                     <div className="hidden sm:flex items-center gap-4 flex-shrink-0 text-right">
-                      <div>
-                        <p className="text-xs font-bold text-success-600">{c.won}</p>
-                        <Tooltip text={METRIC_TIP.won}><p className="text-[11px] sm:text-[10px] cursor-help" style={{ color: 'var(--color-text-tertiary)' }}>won</p></Tooltip>
-                      </div>
+                      <StatCell value={c.won} label="won" tone="success" tip={METRIC_TIP.won} />
                       {hasPermission('view_financial_data') && (
-                        <div>
-                          <p className="text-xs font-bold text-primary-600">${c.revenue.toLocaleString()}</p>
-                          <Tooltip text={METRIC_TIP['down rev']}><p className="text-[11px] sm:text-[10px] cursor-help" style={{ color: 'var(--color-text-tertiary)' }}>down rev</p></Tooltip>
-                        </div>
+                        <StatCell value={`$${Number(c.revenue || 0).toLocaleString()}`} label="down rev" tone="primary" tip={METRIC_TIP['down rev']} />
                       )}
+                      <StatCell value={qaText(c.qa)} label="QA" tone={qaTone(c.qa)} tip={qaTip(c.qa)} />
                     </div>
                     {/* Win rate */}
                     <div className="text-right flex-shrink-0 min-w-[48px]">

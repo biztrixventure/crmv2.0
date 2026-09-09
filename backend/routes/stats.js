@@ -6,6 +6,7 @@ const { getConfig } = require('../utils/businessConfig');
 const { isCloserSideScope, getCompanyType } = require('../models/helpers');
 const { safeUuid } = require('../utils/searchSanitize');
 const { excludePostDate } = require('../utils/postDate');
+const { shouldHideResellsForUser } = require('../utils/resellPrivacy');
 const { transferStatusCatalog, saleStatusCatalog } = require('../utils/statusCatalog');
 const logger = require('../utils/logger');
 
@@ -914,7 +915,7 @@ router.get('/agent-performance', asyncHandler(async (req, res) => {
 
   const sales = await fetchAll(() => {
     let q = supabaseAdmin.from('sales')
-      .select('fronter_id, closer_id, status, monthly_payment, sale_date, created_at')
+      .select('fronter_id, closer_id, status, monthly_payment, down_payment, sale_date, created_at')
       .order('created_at', { ascending: true });
     if (closerSide) q = q.in('closer_id', memberIds);
     else if (companyId) q = q.eq('company_id', companyId);
@@ -924,7 +925,7 @@ router.get('/agent-performance', asyncHandler(async (req, res) => {
   });
 
   // ── Group ────────────────────────────────────────────────────────────────
-  const row = () => ({ transfers: 0, sales: 0, approved: 0, cancelled: 0, pending: 0, revenue: 0 });
+  const row = () => ({ transfers: 0, sales: 0, approved: 0, cancelled: 0, pending: 0, revenue: 0, down_revenue: 0 });
   const byAgent = {};
   const bucket = (id) => { if (!id) return null; byAgent[id] = byAgent[id] || row(); return byAgent[id]; };
 
@@ -936,7 +937,12 @@ router.get('/agent-performance', asyncHandler(async (req, res) => {
     const b = bucket(s[sKey]);
     if (!b) return;
     b.sales++;
-    if (s.status === 'closed_won')     { b.approved++; b.revenue += Number(s.monthly_payment || 0); }
+    // TWO money figures, deliberately not one. revenue = recurring monthly
+    // premium; down_revenue = the upfront down payment, which is what the
+    // Reports leaderboard has always meant by 'revenue' -- money actually
+    // collected in the window rather than future income. Collapsing them
+    // would silently change what that column reports.
+    if (s.status === 'closed_won')     { b.approved++; b.revenue += Number(s.monthly_payment || 0); b.down_revenue += Number(s.down_payment || 0); }
     else if (s.status === 'cancelled')   b.cancelled++;
     else if (s.status === 'pending_review') b.pending++;
   });
@@ -1020,6 +1026,7 @@ router.get('/agent-performance', asyncHandler(async (req, res) => {
       cancelled: a.cancelled,
       pending: a.pending,
       revenue: Math.round(a.revenue * 100) / 100,
+      down_revenue: Math.round(a.down_revenue * 100) / 100,
       conversion: rate(a.sales, a.transfers),
       approval:   rate(a.approved, a.sales),
       qa: qaOf(id),
@@ -1056,7 +1063,7 @@ router.get('/agent-performance', asyncHandler(async (req, res) => {
         user_id: focusId,
         ...(agents.find(a => a.user_id === focusId) || {
           name: 'Unknown', transfers: 0, sales: 0, approved: 0, cancelled: 0,
-          pending: 0, revenue: 0, conversion: null, approval: null, qa: null,
+          pending: 0, revenue: 0, down_revenue: 0, conversion: null, approval: null, qa: null,
         }),
       }
     : null;
@@ -1136,6 +1143,7 @@ router.get('/agent-performance', asyncHandler(async (req, res) => {
       cancelled: sales.filter(s => s.status === 'cancelled').length,
       pending:   sales.filter(s => s.status === 'pending_review').length,
       revenue: Math.round(sum('revenue') * 100) / 100,
+      down_revenue: Math.round(sum('down_revenue') * 100) / 100,
       conversion: rate(scopeS, scopeT),
       approval:   rate(scopeA, scopeS),
       // what the rows above actually add up to, and the gap
@@ -1154,6 +1162,261 @@ router.get('/agent-performance', asyncHandler(async (req, res) => {
       qa_reviews: Object.values(qaByAgent).reduce((t, x) => t + x.n, 0),
       qa_reviewed_agents: agents.filter(a => a.qa).length,
     },
+  });
+}));
+
+// ============================================================================
+// GET /stats/leaderboards?date_from=YYYY-MM-DD&date_to=YYYY-MM-DD
+//
+// The two Reports leaderboards — fronters and closers — plus the summary strip
+// above them, from ONE pair of queries.
+//
+// WHY THIS EXISTS. ReportsPanel asked for 1,000 transfers and 1,000 sales and
+// tallied them in the browser, while its summary strip used the server's exact
+// COUNT. Past the thousandth row those two disagree: the strip reported 2,907
+// transfers and the table beneath it ranked the first 1,000, with the headline
+// looking perfectly right. Counting both here means the strip and the tables
+// are literally the same tally and cannot diverge.
+//
+// It is NOT /stats/agent-performance. That endpoint is side-aware and answers
+// for ONE side: on a fronter company it groups transfers by created_by and
+// credits sales by fronter_id, and its SCOPING flips too, not just its keys.
+// Reports needs both boards at once, and both are meaningful to an ops manager:
+// a fronter company wants to know which closers convert its leads, a closer
+// company which fronters send workable ones.
+//
+// Scoping mirrors GET /transfers and GET /sales step for step — same company
+// type rule, same dialer-ghost and pending guards, same resell privacy, same
+// post-date exclusion — because a number here that cannot be reproduced by
+// opening the Records tab is worse than no number.
+// ============================================================================
+router.get('/leaderboards', asyncHandler(async (req, res) => {
+  const companyId = req.user.company_id, userRole = req.user.role;
+  const isGlobal = ['superadmin', 'readonly_admin'].includes(userRole);
+  const { date_from, date_to } = req.query;
+
+  const empty = (side) => res.json({
+    side, range: { from: date_from || null, to: date_to || null },
+    summary: { transfers: 0, sales: 0, won: 0, pending: 0, revenue: 0 },
+    qa: { score: null, reviews: 0, reviewed_agents: 0 },
+    fronters: [], closers: [], truncated: false,
+  });
+
+  // Which company are we reporting on, and is it a closer-side company?
+  const targetCompany = isGlobal ? (safeUuid(req.query.company_id) || null) : companyId;
+  if (!isGlobal && !targetCompany) return empty(null);
+
+  let closerSide;
+  if (isGlobal) {
+    // Global view with no company named stays unscoped, exactly as the two list
+    // endpoints do for an admin who passed no company_id.
+    closerSide = targetCompany ? (await getCompanyType(targetCompany)) !== 'fronter' : false;
+  } else {
+    closerSide = await isCloserSideScope(userRole, targetCompany);
+  }
+  const side = closerSide ? 'closer' : 'fronter';
+
+  // Closer-side scoping keys on the company's members, because transfers and
+  // sales are both stored under the FRONTER company's company_id.
+  //
+  // .in() over that id list is the same call GET /transfers, GET /sales and
+  // /stats/agent-performance already make. PostgREST returns an EMPTY result
+  // once an .in() carries more than ~100-150 uuids, so this holds only while a
+  // company's roster stays that size (largest today: 62). Kept identical rather
+  // than "improved", so this endpoint's scope cannot drift from the lists it
+  // exists to reconcile with.
+  let memberIds = [];
+  if (targetCompany && closerSide) {
+    const { data: mem } = await supabaseAdmin
+      .from('user_company_roles').select('user_id')
+      .eq('company_id', targetCompany).eq('is_active', true);
+    memberIds = [...new Set((mem || []).map(m => m.user_id))];
+    if (!memberIds.length) return empty(side);
+  }
+
+  const tFrom = date_from ? etDateToUtcStart(date_from) : null;
+  const tTo   = date_to   ? etDateToUtcEnd(date_to)     : null;
+
+  // PostgREST caps a page at 1000 — the very bug this replaces — so drain.
+  const PAGE = 1000, MAX_PAGES = 40;        // 40k rows is far past any real window
+  let truncated = false;
+  const fetchAll = async (build) => {
+    const out = [];
+    for (let p = 0; p < MAX_PAGES; p++) {
+      const { data, error } = await build().range(p * PAGE, p * PAGE + PAGE - 1);
+      if (error) { logger.warn('LEADERBOARDS', error.message); break; }
+      out.push(...(data || []));
+      if (!data || data.length < PAGE) return out;
+      if (p === MAX_PAGES - 1) truncated = true;   // say so rather than imply completeness
+    }
+    return out;
+  };
+
+  const transfers = await fetchAll(() => {
+    let q = supabaseAdmin.from('transfers')
+      .select('id, created_by, status, created_at')
+      // Same two guards GET /transfers applies: an untouched dialer-pending row
+      // is not a transfer yet, and a ghost never is.
+      .or('vicidial_pending.is.null,vicidial_pending.eq.false,assigned_closer_id.not.is.null,vicidial_dispo.not.is.null')
+      .eq('dialer_ghost', false)
+      .order('created_at', { ascending: true });
+    if (closerSide) q = q.in('assigned_closer_id', memberIds);
+    else if (targetCompany) q = q.eq('company_id', targetCompany);
+    if (tFrom) q = q.gte('created_at', tFrom);
+    if (tTo)   q = q.lte('created_at', tTo);
+    return q;
+  });
+
+  const hideResells = targetCompany && !closerSide
+    ? await shouldHideResellsForUser(userRole, targetCompany, 'fronter')
+    : false;
+
+  const sales = await fetchAll(() => {
+    let q = supabaseAdmin.from('sales')
+      .select('transfer_id, closer_id, fronter_id, status, down_payment, sale_date, closer_disposition, is_resell')
+      .order('created_at', { ascending: true });
+    if (closerSide) q = q.in('closer_id', memberIds);
+    else if (targetCompany) q = q.eq('company_id', targetCompany);
+    if (hideResells) q = q.eq('is_resell', false);
+    if (date_from) q = q.gte('sale_date', date_from);
+    if (date_to)   q = q.lte('sale_date', date_to);
+    // A post-date is a reminder, not a sale — nobody has charged the card.
+    // NULL-safe: the naive .not(ilike) drops every NULL disposition.
+    return excludePostDate(q);
+  });
+
+  // ── Fronter board: transfers by creator, credited with the sales they made ──
+  // A transfer "converted" when the sale it produced was approved. Deliberately
+  // not the completed/total ratio the old client code called "conv rate":
+  // completed is a TRANSFER STATUS, so a fronter whose leads never sold could
+  // still show 90%.
+  const APPROVED = new Set(['sold', 'closed_won']);
+  const saleByXfer = {};
+  sales.forEach(s => { if (s.transfer_id) saleByXfer[s.transfer_id] = s; });
+
+  const fm = {};
+  transfers.forEach(t => {
+    const k = t.created_by; if (!k) return;
+    const b = fm[k] || (fm[k] = { id: k, total: 0, completed: 0, rejected: 0, converted: 0 });
+    b.total++;
+    if (t.status === 'completed') b.completed++;
+    if (t.status === 'rejected')  b.rejected++;
+    const linked = saleByXfer[t.id];
+    if (linked && APPROVED.has(linked.status)) b.converted++;
+  });
+
+  // ── Closer board: sales closed, and the money actually collected ───────────
+  // revenue = down_payment, the upfront sum. The monthly premium is recurring
+  // FUTURE income, not what this closer brought in during the window.
+  const cm = {};
+  sales.forEach(s => {
+    const k = s.closer_id; if (!k) return;
+    const b = cm[k] || (cm[k] = { id: k, total: 0, won: 0, revenue: 0 });
+    b.total++;
+    if (APPROVED.has(s.status)) { b.won++; b.revenue += Number(s.down_payment || 0); }
+  });
+
+  // ── Names + QA, for whoever appears on either board ───────────────────────
+  const ids = [...new Set([...Object.keys(fm), ...Object.keys(cm)])];
+  const names = {};
+  // Chunked: an .in() past ~100-150 uuids comes back EMPTY with no error, and
+  // both boards together can exceed that on a big company.
+  for (let i = 0; i < ids.length; i += 100) {
+    const { data } = await supabaseAdmin
+      .from('user_profiles').select('user_id, first_name, last_name')
+      .in('user_id', ids.slice(i, i + 100));
+    (data || []).forEach(p => { names[p.user_id] = [p.first_name, p.last_name].filter(Boolean).join(' ') || null; });
+  }
+
+  // QA score per person — the number a coaching conversation actually opens
+  // with. Company-scoped paginated read grouped in memory, for the .in() reason
+  // above. null, never 0, for someone never reviewed: on the largest company
+  // only 26 of 62 active agents have ever been.
+  const qaByAgent = {};
+  if (targetCompany) {
+    try {
+      const reviews = await fetchAll(() => {
+        let q = supabaseAdmin.from('qa_reviews')
+          .select('subject_user_id, final_score, total_score, max_score, passed, created_at')
+          .eq('company_id', targetCompany)
+          .not('subject_user_id', 'is', null)
+          .in('status', ['submitted', 'finalized'])
+          .order('created_at', { ascending: true });
+        if (tFrom) q = q.gte('created_at', tFrom);
+        if (tTo)   q = q.lte('created_at', tTo);
+        return q;
+      });
+      reviews.forEach(r => {
+        // final_score is the post-penalty number the scorecard settled on;
+        // total_score/max_score is the pre-penalty raw. Prefer the former and
+        // fall back rather than dropping a review that carries only the raw.
+        const score = r.final_score != null
+          ? Number(r.final_score)
+          : (Number(r.max_score) > 0 ? (Number(r.total_score) / Number(r.max_score)) * 100 : null);
+        if (score === null || !Number.isFinite(score)) return;
+        const b = qaByAgent[r.subject_user_id] || (qaByAgent[r.subject_user_id] = { sum: 0, n: 0, passed: 0 });
+        b.sum += score; b.n += 1; if (r.passed) b.passed += 1;
+      });
+    } catch (e) {
+      // QA is an optional module — a missing table leaves the boards working
+      // with the QA column simply empty.
+      logger.warn('LEADERBOARDS', `QA scores unavailable: ${e.message}`);
+    }
+  }
+  const qaOf = (id) => {
+    const b = qaByAgent[id];
+    if (!b || !b.n) return null;
+    return {
+      score:     Math.round((b.sum / b.n) * 10) / 10,
+      reviews:   b.n,
+      pass_rate: Math.round((b.passed / b.n) * 1000) / 10,
+    };
+  };
+
+  // A rate with a zero denominator is undefined, not 0 — the UI shows "—".
+  // Reporting 0% for a fronter who sent no leads reads as failure.
+  const rate = (num, den) => (den > 0 ? Math.round((num / den) * 1000) / 10 : null);
+  const named = (b) => ({ ...b, name: names[b.id] || 'Unknown', qa: qaOf(b.id) });
+
+  const fronters = Object.values(fm)
+    .map(b => ({ ...named(b), conversion: rate(b.converted, b.total) }))
+    .sort((a, z) => z.converted - a.converted || z.total - a.total);
+  const closers = Object.values(cm)
+    .map(b => ({ ...named(b), revenue: Math.round(b.revenue * 100) / 100, win_rate: rate(b.won, b.total) }))
+    .sort((a, z) => z.won - a.won || z.revenue - a.revenue);
+
+  const wonRows = sales.filter(s => APPROVED.has(s.status));
+
+  res.json({
+    side,
+    range: { from: date_from || null, to: date_to || null },
+    // Counted from the SAME rows the boards are built from, so the strip and
+    // the table can never contradict each other.
+    summary: {
+      transfers: transfers.length,
+      sales:     sales.length,
+      won:       wonRows.length,
+      pending:   sales.filter(s => s.status === 'pending_review').length,
+      revenue:   Math.round(wonRows.reduce((n, s) => n + Number(s.down_payment || 0), 0) * 100) / 100,
+    },
+    // Company QA: the mean over REVIEWS in the window, not over agents, so one
+    // heavily-sampled agent does not weigh the same as one sampled once.
+    // reviewed_agents says how much of the roster the score covers — the score
+    // alone would imply the whole company had been assessed.
+    qa: (() => {
+      const b = Object.values(qaByAgent);
+      const n = b.reduce((t, x) => t + x.n, 0);
+      return {
+        score: n ? Math.round((b.reduce((t, x) => t + x.sum, 0) / n) * 10) / 10 : null,
+        reviews: n,
+        reviewed_agents: b.length,
+      };
+    })(),
+    fronters,
+    closers,
+    // True only if the window really held 40k+ rows. The UI says so rather than
+    // presenting a partial tally as complete — which is the whole point here.
+    truncated,
   });
 }));
 
