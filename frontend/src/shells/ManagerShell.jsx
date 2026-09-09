@@ -16,9 +16,9 @@ import { useFeatureFlags } from "../contexts/FeatureFlagsContext";
 import { useNavigate } from "react-router-dom";
 import {
   Users, DollarSign, Send, Phone, BarChart3, TrendingUp,
-  CheckCircle, XCircle, Clock, Hash, Car, User, ArrowRight,
-  Search, Star, Shield, FileText, RefreshCw, AlertCircle, Plus,
-  MessageSquare, Trash2, Activity, ChevronLeft, ChevronRight, CalendarDays, HelpCircle, FileSpreadsheet, Trophy, Copy,
+  CheckCircle, XCircle, Hash, Car, User, ArrowRight,
+  Search, Star, Shield, FileText, RefreshCw, Plus,
+  MessageSquare, Trash2, Activity, ChevronLeft, ChevronRight, CalendarDays, HelpCircle, FileSpreadsheet, Trophy,
   UserCircle, Database, Settings2, Zap, Building2, CreditCard,
   LayoutGrid, ChevronUp, ChevronDown, ChevronsUpDown, Target, ClipboardList,
 } from "lucide-react";
@@ -52,9 +52,12 @@ import { useTransfers } from "../hooks/useTransfers";
 import { useNotifications } from "../hooks/useNotifications";
 import { useNavFocus } from "../contexts/FocusContext";
 import { useSaleDeepLink } from "../hooks/useSaleDeepLink";
-import { useDashboardStats } from "../hooks/useDashboardStats";
 import { useShellLayout } from "../hooks/useShellLayout";
-import StatCardTriple from "../components/UI/StatCardTriple";
+// The Overview's two stat sections (Transfers / Sales), each with its own date
+// filter. Replaced the StatCardTriple strip + /stats/dashboard: that endpoint
+// answers three fixed windows and never counted rejected or cancelled
+// transfers, so a full lifecycle breakdown was impossible at any config.
+import OverviewStats from "../components/Manager/OverviewStats";
 import Tooltip from "../components/UI/Tooltip";
 
 // Column-header explanations — hover any header to learn what it means.
@@ -171,21 +174,6 @@ const Pagination = ({ page, total, pageSize, onChange }) => {
   );
 };
 
-// Per-card visual meta (icon + color tints). The label / description / which
-// numbers each card shows now come from the KPI catalog + SuperAdmin overrides
-// (resolved via useShellLayout.cardConfig); only the look lives here.
-const MGR_CARD_META = {
-  transfers:       { icon: Send,        color: 'info' },
-  sales:           { icon: DollarSign,  color: 'success' },
-  approved:        { icon: CheckCircle, color: 'success' },
-  awaiting_review: { icon: Clock,       color: 'warning' },
-  returned:        { icon: AlertCircle, color: 'error', accent: '#f97316', gradientFrom: '#fff7ed' },
-  cancelled:       { icon: XCircle,     color: 'error' },
-  resells:         { icon: RefreshCw,   color: 'primary', accent: '#8b5cf6', gradientFrom: '#ede9fe' },
-  dup_attempts:    { icon: Copy,        color: 'warning' },
-};
-const MGR_CARD_ORDER = ['transfers', 'sales', 'approved', 'awaiting_review', 'returned', 'cancelled', 'resells', 'dup_attempts'];
-
 // ── Record-table header cells, matching the Compliance record tabs ──────────
 // Function declarations, not const arrows: this file sits in an import cycle
 // through Compliance/shared (via ManagerCallbacksTab), and a const in a cycle
@@ -213,18 +201,6 @@ function SortTh({ col, sort, onSort, children }) {
   );
 }
 
-// A company_admin's KPI strip leads with the metric their room is judged on and
-// drops the cards belonging to the other side of the pipeline:
-//   dup_attempts counts duplicate TRANSFER submissions, and /stats only computes
-//     it for fronter-side callers — a closer company's admin read a hard 0.
-//   returned + resells are closer-desk states. Resells belong to the closer's
-//     company and are hidden from fronters by resell.hide_from_fronter anyway,
-//     so a fronter admin's card was 0 by construction too.
-// Both lists are subsets of MGR_CARD_ORDER — no new card keys, so the
-// superadmin card config keeps deciding visibility and content of each one.
-const FRONTER_CARD_ORDER = ['transfers', 'sales', 'approved', 'awaiting_review', 'cancelled', 'dup_attempts'];
-const CLOSER_CARD_ORDER  = ['sales', 'approved', 'awaiting_review', 'returned', 'cancelled', 'resells', 'transfers'];
-
 const ManagerShell = ({ workspaceMode = false }) => {
   const { user, logout, updateUser, hasPermission, canExport } = useAuth();
   const { theme, toggleTheme } = useTheme();
@@ -234,8 +210,6 @@ const ManagerShell = ({ workspaceMode = false }) => {
   const { pageSize: PAGE_SIZE } = useListLayout('manager', { pageSize: DEFAULT_PAGE_SIZE });
   const navigate = useNavigate();
   const notifHook = useNotifications();
-  const { stats, fetchStats } = useDashboardStats();
-  useEffect(() => { fetchStats(); }, [fetchStats]);
   const updateAvailable = useVersionCheck();
 
   const { sales, loading: salesLoading, fetchSales, createSale, updateSale, deleteSale } = useSales(user?.company_id);
@@ -334,13 +308,16 @@ const ManagerShell = ({ workspaceMode = false }) => {
     ...(isEnabledStrict('tool_feature_admin')     ? [{ key: 'tool_feature_admin',     label: 'Feature Flags',     icon: Zap           }] : []),
     ...(isEnabledStrict('tool_company_admin')     ? [{ key: 'tool_company_admin',     label: 'Companies',         icon: Building2     }] : []),
   ];
+  // isCardVisible / cardConfig are deliberately NOT destructured any more: the
+  // Overview's numbers come from GET /stats/overview and its own catalogs now.
+  // The hook, the kpiCatalog and the shell.layout.manager.stat_cards keys are
+  // all left in place — StaffShell still drives its cards off them, and the
+  // saved config stays readable if per-card control comes back.
   const {
     applyTabs: applyManagerLayout,
     defaultTab: managerDefaultTab,
-    isCardVisible: isMgrCardVisible,
     isFilterVisible: isMgrFilterVisible,
     isActionVisible: isMgrActionVisible,
-    cardConfig: mgrCardConfig,
   } = useShellLayout('manager');
   // ── Which side of the pipeline is this company_admin on? ──────────────────
   // A fronter company's admin and a closer company's admin were handed the
@@ -370,12 +347,12 @@ const ManagerShell = ({ workspaceMode = false }) => {
   // fronter company's admin with Rate / Dispo buttons on every transfer row.
   const isFronterSideViewer = user?.role === 'fronter_manager' || (isCoAdmin && coType === 'fronter');
 
-  // Same rule for the KPI strip. Any role other than company_admin — and an
-  // admin whose company_type hasn't loaded — keeps the full default order.
-  const cardOrder = (!isCoAdmin || !coType)
-    ? MGR_CARD_ORDER
-    : (coType === 'fronter' ? FRONTER_CARD_ORDER : CLOSER_CARD_ORDER);
-  const closerBoardFirst = isCoAdmin && coType === 'closer';
+  // Same rule for the Overview's two stat sections: put the side this company
+  // is judged on FIRST. A closer company's admin opens on Sales; everyone else
+  // opens on Transfers, which is where the pipeline starts. Both sections are
+  // always shown — a closer company still receives transfers, and a fronter
+  // company's leads still become sales — only the reading order changes.
+  const salesSectionFirst = isCoAdmin && coType === 'closer';
 
   const TABS = useMemo(
     () => applyManagerLayout(CODE_TABS).filter(t => sideAllowsTab(t.key)),
@@ -445,10 +422,10 @@ const ManagerShell = ({ workspaceMode = false }) => {
   useEffect(() => { window.crmAssistant?.setSection?.(activeNav !== 'dashboard' ? activeNav : activeTab); }, [activeTab, activeNav]);
 
   // ── Overview data ─────────────────────────────────────────────────────────
-  const [fronterLb, setFronterLb]       = useState([]);
-  const [closerLb, setCloserLb]         = useState([]);
-  const [loading, setLoading]           = useState(false);
-  const [overviewTotals, setOverviewTotals] = useState({ transfers: 0, sales: 0, approved: 0, pendingReview: 0 });
+  // Bumped by the Refresh button. OverviewStats owns its own two date ranges
+  // (they are independent of the shell's list-tab picker on purpose), so the
+  // shell cannot re-fetch by changing a range — it asks, via this token.
+  const [overviewRefresh, setOverviewRefresh] = useState(0);
 
   // ── Pagination ────────────────────────────────────────────────────────────
   const [xferPage, setXferPage]           = useState(1);
@@ -604,54 +581,13 @@ const ManagerShell = ({ workspaceMode = false }) => {
     } catch {} finally { setSalesTabLoading(false); }
   }, [companyId, salesPage, salesStatus, salesAgent, salesSearch, date_from, date_to, salesSort]);
 
-  const loadOverview = useCallback(async () => {
-    if (!companyId) return;
-    setLoading(true);
-    try {
-      // Leaderboard data + accurate total counts — all parallel
-      const [tRes, sRes, soldRes, wonRes, pendingRes] = await Promise.all([
-        client.get('transfers', { params: { company_id: companyId, limit: 1000, date_from, date_to } }),
-        client.get('sales',     { params: { company_id: companyId, limit: 1000, date_from, date_to, exclude_post_date: true } }),
-        client.get('sales',     { params: { company_id: companyId, limit: 1, page: 1, date_from, date_to, status: 'sold',           exclude_post_date: true } }),
-        client.get('sales',     { params: { company_id: companyId, limit: 1, page: 1, date_from, date_to, status: 'closed_won',     exclude_post_date: true } }),
-        client.get('sales',     { params: { company_id: companyId, limit: 1, page: 1, date_from, date_to, status: 'pending_review', exclude_post_date: true } }),
-      ]);
+  // loadOverview is gone. It pulled `limit: 1000` of transfers AND of sales on
+  // every date change — two full row payloads — to derive four totals and two
+  // leaderboards. The totals are now COUNT queries in GET /stats/overview
+  // (uncapped; the 1000 limit silently truncated every figure on a company
+  // holding more than that), and the leaderboards were already dead code:
+  // CompanyPerformance replaced them, and nothing rendered fronterLb/closerLb.
 
-      const allT = tRes.data.transfers || [];
-      const allS = sRes.data.sales     || [];
-
-      setOverviewTotals({
-        transfers:     tRes.data.total || 0,
-        sales:         sRes.data.total || 0,
-        approved:      (soldRes.data.total || 0) + (wonRes.data.total || 0),
-        pendingReview: pendingRes.data.total || 0,
-      });
-
-      // Fronter leaderboard
-      const fronterMap = {};
-      allT.forEach(t => {
-        const id = t.created_by; if (!id) return;
-        if (!fronterMap[id]) fronterMap[id] = { id, name: t.fronter_name || id.slice(0, 8), transfers: 0, completed: 0 };
-        fronterMap[id].transfers++;
-        if (t.status === 'completed') fronterMap[id].completed++;
-      });
-      setFronterLb(Object.values(fronterMap).sort((a, b) => b.completed - a.completed));
-
-      // Closer leaderboard
-      const closerMap = {};
-      allS.forEach(s => {
-        const id = s.closer_id; if (!id) return;
-        if (!closerMap[id]) closerMap[id] = { id, name: s.closer_name || id.slice(0, 8), sales: 0, won: 0, monthly: 0 };
-        closerMap[id].sales++;
-        if (['sold', 'closed_won'].includes(s.status)) { closerMap[id].won++; closerMap[id].monthly += Number(s.monthly_payment || 0); }
-      });
-      setCloserLb(Object.values(closerMap).sort((a, b) => b.won - a.won));
-    } catch { /* non-critical */ } finally {
-      setLoading(false);
-    }
-  }, [companyId, date_from, date_to]);
-
-  useEffect(() => { loadOverview(); }, [loadOverview]);
   useEffect(() => { fetchTransfers({ date_from, date_to }); }, [fetchTransfers, date_from, date_to]);
   useEffect(() => { fetchSales({ date_from, date_to }); },     [fetchSales, date_from, date_to]);
   useEffect(() => { if (activeTab === 'activity_log') fetchActivityLogs(); }, [activeTab, fetchActivityLogs]);
@@ -705,65 +641,29 @@ const ManagerShell = ({ workspaceMode = false }) => {
   const pagedTransfers    = transfers.slice((xferPage - 1) * PAGE_SIZE, xferPage * PAGE_SIZE);
   const pagedSales        = sales.slice((salesPage - 1) * PAGE_SIZE, salesPage * PAGE_SIZE);
 
-  // ── KPI metric map ──────────────────────────────────────────────────────
-  // Every data point a manager KPI card can display, keyed to match the
-  // kpiCatalog metric keys. The SuperAdmin builder decides which of these land
-  // in which card / slot; here we just supply each one's value + drill-down.
-  const goSales = (status, range) => () => {
-    setSalesStatus(status); setSalesAgent?.(''); setSalesPage(1);
-    setDateRange(getPresetRange(range)); setActiveTab('team_sales');
+  // ── Overview drill-down ─────────────────────────────────────────────────
+  // Clicking a stat box opens the matching list tab with the SAME status filter
+  // AND the SAME date range the box was counted over. Carrying the range is the
+  // whole point: a box that says 26 and a list that then shows 4,111 teaches
+  // people to stop trusting the box. It also means the section's own picker —
+  // which is independent of the list picker while you are reading stats — hands
+  // its range over at exactly the moment the two views have to agree.
+  const drillTransfers = ({ status, range }) => {
+    setXferStatus?.(status || '');
+    setXferAgent?.('');
+    setXferSearch?.('');
+    setXferTodayOnly?.(false);   // a stale Today chip would re-narrow the range we just set
+    setXferPage?.(1);
+    setDateRange(range);
+    setActiveTab('transfers');
   };
-  const goXfer = (range) => () => {
-    setXferStatus?.(''); setXferPage?.(1);
-    setDateRange(getPresetRange(range)); setActiveTab('transfers');
-  };
-  const mgrMetrics = {
-    transfers_today: { value: stats?.todayTransfers || 0, onClick: goXfer('today'), title: 'Transfers today' },
-    transfers_month: { value: stats?.monthTransfers || 0, onClick: goXfer('month'), title: 'Transfers this month' },
-    // ── "Total" means ALL TIME, not "whatever the date picker says" ─────────
-    // overviewTotals comes from loadOverview, which passes date_from/date_to,
-    // so with the default "Today" preset the segment labelled Total showed the
-    // same number as the Today segment beside it — measured live as Transfers
-    // Today 0 / Total 0 on a company holding 17,459, and Sales Today 1 /
-    // Total 1 on 6,474. /stats/dashboard is already all-time AND role-scoped
-    // server-side, so read the totals from there and keep overviewTotals for
-    // the funnel + leaderboards, which SHOULD follow the picker.
-    transfers_total: { value: stats?.totalTransfers ?? overviewTotals.transfers, onClick: goXfer('all'),   title: 'All transfers' },
-    sales_today:     { value: stats?.todaySales || 0,     onClick: goSales('', 'today'),  title: 'Sales today' },
-    sales_month:     { value: stats?.monthSales || 0,     onClick: goSales('', 'month'),  title: 'Sales this month' },
-    sales_total:     { value: stats?.totalSales ?? overviewTotals.sales, onClick: goSales('', 'all'),    title: 'All sales' },
-    approved_today:  { value: stats?.todayClosedWon || 0, onClick: goSales('closed_won', 'today') },
-    approved_month:  { value: stats?.monthClosedWon || 0, onClick: goSales('closed_won', 'month') },
-    // closedWon only: overviewTotals.approved summed status 'sold' + 'closed_won',
-    // and 'sold' is 0 in every company in this database — the extra term bought
-    // nothing but a second round-trip and a number that moved with the picker.
-    approved_total:  { value: stats?.closedWon ?? overviewTotals.approved,    onClick: goSales('closed_won', 'all') },
-    pending_total:   { value: stats?.awaitingCompliance ?? overviewTotals.pendingReview, onClick: () => { setSalesStatus('pending_review'); setSalesPage(1); setActiveTab('team_sales'); }, title: 'Show pending-review sales' },
-    returned:        { value: stats?.needsRevision || 0, onClick: () => { setSalesStatus('needs_revision'); setSalesPage(1); setActiveTab('team_sales'); }, title: 'Sales compliance returned for revision' },
-    cancelled_today: { value: stats?.todayCancelled || 0, onClick: goSales('cancelled', 'today') },
-    cancelled_month: { value: stats?.monthCancelled || 0, onClick: goSales('cancelled', 'month') },
-    cancelled_total: { value: stats?.cancelledSales || 0, onClick: goSales('cancelled', 'all') },
-    resells_month:   { value: stats?.resellsThisMonth || 0, onClick: goSales('', 'month'), title: 'Resells this month' },
-    resells_total:   { value: stats?.resellsTotal || 0,     onClick: goSales('', 'all'),   title: 'All resells' },
-    dup_today:       { value: stats?.dupToday || 0, onClick: () => setDupOpen(true), title: 'View duplicate records (today)' },
-    dup_month:       { value: stats?.dupMonth || 0, onClick: () => setDupOpen(true), title: 'View duplicate records (this month)' },
-    dup_total:       { value: stats?.dupTotal || 0, onClick: () => setDupOpen(true), title: 'View all duplicate records' },
-  };
-
-  const renderMgrCard = (key) => {
-    if (!isMgrCardVisible(key)) return null;
-    const meta = MGR_CARD_META[key] || {};
-    const cfg  = mgrCardConfig(key);
-    const segments = (cfg.segments || [])
-      .map(s => { const m = mgrMetrics[s.metric]; return m ? { key: s.metric, label: s.label, value: m.value, onClick: m.onClick, title: m.title, isPrimary: s.primary } : null; })
-      .filter(Boolean);
-    if (!segments.length) return null;
-    return (
-      <StatCardTriple key={key} label={cfg.label} icon={meta.icon} color={meta.color}
-        accent={meta.accent} gradientFrom={meta.gradientFrom}
-        loading={loading || !stats} segments={segments}
-        caption={cfg.description || undefined} />
-    );
+  const drillSales = ({ status, range }) => {
+    setSalesStatus(status || '');
+    setSalesAgent?.('');
+    setSalesSearch?.('');
+    setSalesPage(1);
+    setDateRange(range);
+    setActiveTab('team_sales');
   };
 
   return (
@@ -822,7 +722,10 @@ const ManagerShell = ({ workspaceMode = false }) => {
                 <FileSpreadsheet size={16} /> Export
               </button>
             )}
-            <button onClick={loadOverview} className="flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-semibold transition-all hover:bg-bg-secondary"
+            {/* Refreshes the Overview's two stat sections in place — each
+                re-fetches on its OWN range, so a refresh never resets a range
+                somebody just picked. */}
+            <button onClick={() => setOverviewRefresh(n => n + 1)} className="flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-semibold transition-all hover:bg-bg-secondary"
               style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
               <RefreshCw size={16} /> Refresh
             </button>
@@ -868,20 +771,24 @@ const ManagerShell = ({ workspaceMode = false }) => {
 
             <TargetsStrip />
 
-            {/* ── Stat cards ── */}
-            {/* Drill-down: each card's onClick now ALSO synchronizes the
-                destination tab's filter so the list count matches the card's
-                number. Total Sales clears any residual status filter; Approved
-                and Awaiting Review pre-apply the matching status. Previously a
-                stale filter from the last visit could hide records the user
-                expected to see. */}
-            {/* Triple-segment cards — Today / MTD / Total each clickable.
-                Today + Month come from useDashboardStats; Total uses the
-                pre-existing overviewTotals so the manager's company-scoped
-                aggregate stays correct even before stats hook loads. */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-              {cardOrder.map(renderMgrCard)}
-            </div>
+            {/* ── Two stat sections: Transfers, then Sales ──
+                Separate panels, separate date filters, each defaulting to this
+                calendar month. They are two different questions — how many
+                leads came in, and how many of them became approved policies —
+                and a manager routinely needs different windows on each, so one
+                shared picker would have been the wrong control.
+
+                Every box is clickable and carries its status AND its range into
+                the matching list tab, so the number you clicked is the number
+                the list then counts. The order flips for a closer company's
+                admin, whose room is judged on sales. */}
+            <OverviewStats
+              refreshToken={overviewRefresh}
+              salesFirst={salesSectionFirst}
+              onDrillTransfers={drillTransfers}
+              onDrillSales={drillSales}
+              onDuplicates={() => setDupOpen(true)}
+            />
 
             {/* ── One performance surface ──
                 Five stacked panels used to live here: Team Performance, the

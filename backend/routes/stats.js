@@ -410,6 +410,263 @@ router.get(
 );
 
 // ============================================================================
+// GET /stats/overview?entity=transfers|sales&date_from=&date_to=
+//
+// The Manager Overview's two stat sections. One entity per call, because the
+// two sections carry INDEPENDENT date pickers — a manager comparing last
+// month's transfers against this month's sales is the normal case, and a single
+// shared range would make that impossible.
+//
+// Why not /dashboard: that endpoint answers three fixed windows (all-time,
+// today, MTD) and cannot answer "this range". It also never counted rejected or
+// cancelled transfers at all, so the Overview could not show a full lifecycle
+// breakdown no matter how the cards were configured.
+//
+// THE BREAKDOWN ALWAYS SUMS TO THE TOTAL. That is the property that makes a
+// dashboard trustworthy, and it is why:
+//   • every counter here shares ONE date anchor per entity (transfers on
+//     created_at, sales on sale_date). /dashboard deliberately anchors its
+//     cancelled counters on cancellation_date instead, which answers a
+//     different question ("cancels FILED in May") and by construction cannot
+//     add up against a total. Both are legitimate; only one belongs in a
+//     breakdown.
+//   • an `other` bucket absorbs rows whose status is not in the catalog, so a
+//     legacy or newly-added status can never make the parts disagree with the
+//     whole silently.
+//
+// Statuses come from the SAME config catalogs the filter pills and badges read
+// (transfer.status_catalog / compliance.status_catalog), so adding a status in
+// Business Rules adds a box here with no deploy. The response carries each
+// status's label + badge so the client cannot drift from what was counted.
+//
+// Counts only — `head: true` COUNT queries, never a row fetch. The overview
+// this replaces pulled limit:1000 twice and counted in JavaScript, which capped
+// every figure at 1000 on a company holding 17,459 transfers.
+// ============================================================================
+
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+const cleanDay = (v) => (ISO_DAY.test(String(v || '')) ? String(v) : null);
+
+// Fallbacks mirror the frontend hooks (useTransferStatuses / useComplianceStatuses)
+// so an unconfigured deployment still renders the full lifecycle.
+const TRANSFER_STATUS_FALLBACK = [
+  { key: 'pending',   label: 'Pending',   badge: 'warning'   },
+  { key: 'assigned',  label: 'Assigned',  badge: 'info'      },
+  { key: 'completed', label: 'Completed', badge: 'success'   },
+  { key: 'rejected',  label: 'Rejected',  badge: 'error'     },
+  { key: 'cancelled', label: 'Cancelled', badge: 'secondary' },
+];
+const SALE_STATUS_FALLBACK = [
+  { key: 'open',           label: 'Open',           badge: 'info'    },
+  { key: 'closed_won',     label: 'Approved',       badge: 'success' },
+  { key: 'pending_review', label: 'Pending Review', badge: 'warning' },
+  { key: 'needs_revision', label: 'Needs Revision', badge: 'error'   },
+  { key: 'cancelled',      label: 'Cancelled',      badge: 'error'   },
+];
+
+const titleCase = (k) => String(k).replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+
+// Enabled entries of a config catalog, in the catalog's own order. `enabled`
+// absent means enabled — a hand-written catalog row should not vanish for
+// omitting a flag.
+function resolveStatCatalog(raw, fallback) {
+  if (!Array.isArray(raw) || !raw.length) return fallback;
+  const out = raw
+    .filter((s) => s && s.key && s.enabled !== false)
+    .map((s) => ({
+      key:   String(s.key),
+      label: (typeof s.label === 'string' && s.label.trim()) ? s.label.trim() : titleCase(s.key),
+      badge: s.badge || 'secondary',
+    }));
+  return out.length ? out : fallback;
+}
+
+router.get('/overview', asyncHandler(async (req, res) => {
+  const userId    = req.user.id;
+  const companyId = req.user.company_id;
+  const userRole  = req.user.role;
+  const entity    = req.query.entity === 'sales' ? 'sales' : 'transfers';
+  const from      = cleanDay(req.query.date_from);
+  const to        = cleanDay(req.query.date_to);
+
+  const ZERO_UUID = '00000000-0000-0000-0000-000000000000';
+  // Same side resolution as /dashboard: a company_admin's side comes from the
+  // COMPANY TYPE, not the role name, so a closer company's admin counts the
+  // rows their own Team tabs list.
+  const isCloserSide = await isCloserSideScope(userRole, companyId);
+
+  let coUserIds = [];
+  if (isCloserSide && companyId && userRole !== 'closer') {
+    const { data: coUsers } = await supabaseAdmin
+      .from('user_company_roles').select('user_id').eq('company_id', companyId).eq('is_active', true);
+    coUserIds = (coUsers || []).map((u) => u.user_id);
+  }
+
+  if (entity === 'transfers') {
+    // Scope mirrors /dashboard's scopeTransfers, deliberately identical — two
+    // endpoints feeding one screen must not disagree about who owns a row.
+    const scopeTransfers = (q) => {
+      q = q.neq('vicidial_pending', true);   // not a real transfer yet
+      q = q.eq('dialer_ghost', false);       // mig 271 re-arm ghosts
+      if (isCloserSide && companyId) {
+        if (userRole === 'closer') return q.eq('assigned_closer_id', userId);
+        if (coUserIds.length) return q.in('assigned_closer_id', coUserIds);
+        return q.eq('id', ZERO_UUID);
+      }
+      if (companyId) q = q.eq('company_id', companyId);
+      if (userRole === 'fronter') q = q.eq('created_by', userId);
+      return q;
+    };
+
+    // created_at is a timestamp, so an ET calendar range has to be converted to
+    // UTC bounds — comparing against a bare date string would cut the window
+    // five hours off and drop the 00:00–05:00 ET rows.
+    const windowed = (q) => {
+      if (from) q = q.gte('created_at', etDateToUtcStart(from));
+      if (to)   q = q.lte('created_at', etDateToUtcEnd(to));
+      return q;
+    };
+    const xferCount = (status) => {
+      let q = windowed(scopeTransfers(
+        supabaseAdmin.from('transfers').select('id', { count: 'exact', head: true })));
+      if (status) q = q.eq('status', status);
+      return q;
+    };
+
+    const catalog = resolveStatCatalog(
+      await getConfig(companyId, 'transfer.status_catalog', null),
+      TRANSFER_STATUS_FALLBACK,
+    );
+
+    const [totalRes, ...statusRes] = await Promise.all([
+      xferCount(null),
+      ...catalog.map((s) => xferCount(s.key)),
+    ]);
+
+    const total = totalRes.count || 0;
+    const by_status = catalog.map((s, i) => ({ ...s, count: statusRes[i].count || 0 }));
+    const counted = by_status.reduce((n, s) => n + s.count, 0);
+    if (total - counted > 0) {
+      by_status.push({ key: '__other', label: 'Other', badge: 'secondary', count: total - counted });
+    }
+
+    const completed = by_status.find((s) => s.key === 'completed')?.count || 0;
+
+    // Duplicate submission attempts (transfer_dedup_events) — a transfer
+    // statistic that never became a transfer row, and the ONLY entry point to
+    // the Duplicate Records modal now that the KPI cards are gone. Fronter-side
+    // company scope only; /dashboard reports 0 for closer-side for the same
+    // reason (the events are logged against the fronter's company).
+    let duplicates = null;
+    if (companyId && !isCloserSide) {
+      try {
+        let dq = supabaseAdmin.from('transfer_dedup_events')
+          .select('id', { count: 'exact', head: true }).eq('company_id', companyId);
+        if (userRole === 'fronter') dq = dq.eq('fronter_id', userId);
+        if (from) dq = dq.gte('created_at', etDateToUtcStart(from));
+        if (to)   dq = dq.lte('created_at', etDateToUtcEnd(to));
+        const dRes = await dq;
+        duplicates = dRes.count || 0;
+      } catch { duplicates = null; }   // table missing (pre-mig 072)
+    }
+
+    return res.json({
+      entity: 'transfers', date_from: from, date_to: to, anchor: 'created_at',
+      total, by_status, duplicates,
+      // Completed / total, in whole percent. Named for what it measures rather
+      // than "conversion" — /dashboard's conversionRate is a CONFIGURABLE
+      // sale-side ratio (kpi.conversion_numerator), and reusing the word for a
+      // different fraction is how two numbers on one screen start contradicting.
+      completion_rate: total > 0 ? Math.round((completed / total) * 100) : 0,
+    });
+  }
+
+  // ── sales ────────────────────────────────────────────────────────────────
+  // Resell privacy, resolved exactly as /dashboard resolves it.
+  let hideResells = false;
+  if (userRole === 'fronter') {
+    hideResells = !!(await getConfig(companyId, 'resell.hide_from_fronter', true));
+  } else if (userRole === 'fronter_manager') {
+    hideResells = !!(await getConfig(companyId, 'resell.hide_from_fronter_manager', true));
+  } else if (userRole === 'compliance_manager') {
+    hideResells = !!(await getConfig(companyId, 'resell.hide_from_compliance', false));
+  }
+
+  const roleScopeSales = (q) => {
+    if (['superadmin', 'readonly_admin'].includes(userRole)) return q;
+    if (userRole === 'closer') return q.eq('closer_id', userId);
+    if (userRole === 'fronter') {
+      q = q.eq('fronter_id', userId);
+      if (hideResells) q = q.eq('is_resell', false);
+      return q;
+    }
+    if (isCloserSide && companyId) {
+      return coUserIds.length ? q.in('closer_id', coUserIds) : q.eq('id', ZERO_UUID);
+    }
+    if (companyId) {
+      q = q.eq('company_id', companyId);
+      if (hideResells) q = q.eq('is_resell', false);
+      return q;
+    }
+    return q.eq('id', ZERO_UUID);
+  };
+  // An un-charged post-date is a reminder, not a sale — excluded from every
+  // counter here, the same rule /sales?exclude_post_date and the compliance
+  // aggregates apply. excludePostDate is NULL-safe; a naive .not(ilike) drops
+  // rows with a NULL disposition instead of keeping them.
+  const scopeSales = (q) => excludePostDate(roleScopeSales(q));
+
+  // sale_date is a DATE column — the business day the sale happened, not the
+  // row's insert time. Anchoring on created_at would make a bulk upload of an
+  // old workbook land entirely in the range it was uploaded in.
+  const windowedSales = (q) => {
+    if (from) q = q.gte('sale_date', from);
+    if (to)   q = q.lte('sale_date', to);
+    return q;
+  };
+  const saleCount = (status) => {
+    let q = windowedSales(scopeSales(
+      supabaseAdmin.from('sales').select('id', { count: 'exact', head: true })));
+    if (status) q = q.eq('status', status);
+    return q;
+  };
+
+  let rawCatalog = await getConfig(companyId, 'compliance.status_catalog', null);
+  if (!Array.isArray(rawCatalog) || !rawCatalog.length) {
+    // Older deployments configured a flat key list instead of a catalog.
+    const allowed = await getConfig(companyId, 'compliance.allowed_statuses', null);
+    if (Array.isArray(allowed) && allowed.length) rawCatalog = allowed.map((k) => ({ key: k }));
+  }
+  const catalog = resolveStatCatalog(rawCatalog, SALE_STATUS_FALLBACK);
+
+  const [totalRes, resellRes, ...statusRes] = await Promise.all([
+    saleCount(null),
+    windowedSales(scopeSales(
+      supabaseAdmin.from('sales').select('id', { count: 'exact', head: true }))).eq('is_resell', true),
+    ...catalog.map((s) => saleCount(s.key)),
+  ]);
+
+  const total = totalRes.count || 0;
+  const by_status = catalog.map((s, i) => ({ ...s, count: statusRes[i].count || 0 }));
+  const counted = by_status.reduce((n, s) => n + s.count, 0);
+  if (total - counted > 0) {
+    by_status.push({ key: '__other', label: 'Other', badge: 'secondary', count: total - counted });
+  }
+
+  const approved = by_status.find((s) => s.key === 'closed_won')?.count || 0;
+
+  return res.json({
+    entity: 'sales', date_from: from, date_to: to, anchor: 'sale_date',
+    total, by_status,
+    // Resells are a sale statistic, not a status — a resold policy still
+    // carries its own status. Reported alongside rather than inside by_status
+    // so the breakdown keeps summing to the total.
+    resells: hideResells ? null : (resellRes.count || 0),
+    approval_rate: total > 0 ? Math.round((approved / total) * 100) : 0,
+  });
+}));
+
+// ============================================================================
 // GET /stats/team-trends?days=14 — daily activity + agent leaderboard for the
 // manager's team. Scoped exactly like /dashboard (company / closer-side). Feeds
 // the Team Performance charts in the Manager overview.
