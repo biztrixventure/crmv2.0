@@ -109,7 +109,7 @@ const DedupRules = ({ config, scope, onSave }) => {
 
       <div className="mb-6">
         <h2 className="text-xl font-bold text-text mb-1 flex items-center gap-2" style={{ fontFamily: 'var(--font-display)' }}>
-          <Search size={20} className="text-primary-600" /> Dedup &amp; Search
+          <Search size={20} className="text-primary-600" /> Duplicate Handling
         </h2>
         <p className="text-sm text-text-secondary max-w-2xl leading-relaxed">
           Controls how the same phone number is handled across calls — within a fronter, across fronters in one company, and across companies. Also tunes how the closer's PhoneSearch sorts results.
