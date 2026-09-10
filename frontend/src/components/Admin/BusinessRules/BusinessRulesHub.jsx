@@ -3,6 +3,7 @@ import { Settings2, RefreshCw, Search, BarChart3, ShieldCheck, Bell, Building2, 
 import client from '../../../api/client';
 import ResellRules from './ResellRules';
 import DedupRules from './DedupRules';
+import CloserSearchRules from './CloserSearchRules';
 import KpiRules from './KpiRules';
 import ComplianceRules from './ComplianceRules';
 import TransferStatusRules from './TransferStatusRules';
@@ -27,7 +28,10 @@ import { useAuth } from '../../../contexts/AuthContext';
 // roadmap without confusion.
 const PAGES = [
   { id: 'resell',       label: 'Resell & Re-engagement', icon: RefreshCw,   Component: ResellRules },
-  { id: 'dedup',        label: 'Dedup & Search',         icon: Search,      Component: DedupRules },
+  { id: 'dedup',        label: 'Duplicate Handling',     icon: Search,      Component: DedupRules },
+  // Own tab on purpose: the dedup panel disables its whole body when duplicate
+  // handling is off, and that must not take the closer's search settings with it.
+  { id: 'closer_search', label: 'Closer Search',         icon: Search,      Component: CloserSearchRules },
   { id: 'kpi',          label: 'Stats & KPIs',           icon: BarChart3,   Component: KpiRules },
   { id: 'compliance',   label: 'Compliance Workflow',    icon: ShieldCheck, Component: ComplianceRules },
   { id: 'sale_highlight', label: 'Sale Highlight',       icon: Highlighter, Component: SaleHighlightRules },

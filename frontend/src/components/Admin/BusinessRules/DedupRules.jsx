@@ -92,9 +92,6 @@ const DedupRules = ({ config, scope, onSave }) => {
   const dedupDays      = cfg(config, 'dedup.window_days', 30);
   const sameCo         = cfg(config, 'dedup.different_fronter_same_co', 'new_transfer');
   const crossCo        = cfg(config, 'dedup.cross_company', 'new_transfer');
-  const sortBy         = cfg(config, 'search.sort_by', 'updated_at');
-  const maxAgeDays     = cfg(config, 'search.max_age_days', 0);
-  const showHidden     = cfg(config, 'search.show_hidden_count', true);
   const applyToBulk    = cfg(config, 'dedup.apply_to_bulk_upload', true);
 
   return (
@@ -161,32 +158,6 @@ const DedupRules = ({ config, scope, onSave }) => {
         desc="Same phone seen across DIFFERENT companies. Warranty leads frequently exist across clients — usually they're fresh contacts that should not link.">
         <RadioGroup name="cross-co" value={crossCo}
           onChange={(v) => onSave('dedup.cross_company', v)} options={CROSS_OPTS} />
-      </Section>
-
-      <Section accent="info"
-        title="Closer PhoneSearch — sort priority"
-        desc="When closer searches a phone number, which transfer floats to the top of the result list.">
-        <RadioGroup name="search-sort" value={sortBy}
-          onChange={(v) => onSave('search.sort_by', v)} options={SORT_OPTS} />
-        <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--color-border)' }}>
-          <p className="text-sm font-semibold mb-1" style={{ color: 'var(--color-text)' }}>
-            How far back the search reaches
-          </p>
-          <p className="text-xs mb-2" style={{ color: 'var(--color-text-secondary)' }}>
-            Counted from when the transfer was MADE, not when it was last touched — so a
-            disposition on an old lead does not pull it back into range. A re-transfer of the
-            same customer is its own transfer, so a genuine new call always shows.
-            Compliance and superadmin are exempt, because an investigation that stops at N days
-            is worse than useless.
-          </p>
-          <NumberInput value={maxAgeDays} onChange={(v) => onSave('search.max_age_days', v)}
-            unit="days" helper="0 = no limit (default). Set 7 to show only transfers created in the last week." />
-          <div className="mt-3">
-            <CheckboxRow checked={showHidden} onChange={(v) => onSave('search.show_hidden_count', v)}
-              label="Tell the closer how many older transfers were hidden"
-              sub="Shows a count only, never the records — so they can tell a brand-new customer from one whose earlier calls are out of range. No effect while the limit is 0." />
-          </div>
-        </div>
       </Section>
 
       <Section accent="success"
