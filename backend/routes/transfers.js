@@ -589,6 +589,22 @@ router.get('/search-by-phone', asyncHandler(async (req, res) => {
 
   if (error) return res.status(500).json({ error: error.message });
 
+  // How many matches the age cutoff removed. A silently shortened list is worse
+  // than no list: the closer cannot tell "this customer is new to us" from "the
+  // older calls are out of range". Same filters, minus the cutoff, counted only
+  // — no rows and no PII cross the boundary, just the number.
+  let hiddenOlder = 0;
+  if (ageCutoff && await getConfig(companyId, 'search.show_hidden_count', true)) {
+    const { count } = await supabaseAdmin
+      .from('transfers')
+      .select('id', { count: 'exact', head: true })
+      .in('company_id', fronterCompanyIds)
+      .or(`form_data->>customer_phone.ilike.%${q}%,form_data->>Phone.ilike.%${q}%`)
+      .lt('created_at', ageCutoff);
+    hiddenOlder = count || 0;
+  }
+  const ageMeta = ageCutoff ? { hidden_older: hiddenOlder, max_age_days: maxAgeDays } : {};
+
   // ── Cross-company warning for fronter-side callers ────────────────────────
   // "This customer is already with another company" is exactly what a fronter
   // needs before working a lead, but WHO holds it is not theirs to see. Return
@@ -623,7 +639,7 @@ router.get('/search-by-phone', asyncHandler(async (req, res) => {
   }
   // No local match is precisely when the cross-company warning matters most —
   // the fronter is about to work a customer another company already holds.
-  if (!data?.length) return res.json({ transfers: [], elsewhere });
+  if (!data?.length) return res.json({ transfers: [], elsewhere, ...ageMeta });
 
   // Fetch company names + slugs in one query
   const companyIds = [...new Set(data.map(t => t.company_id).filter(Boolean))];
@@ -734,7 +750,7 @@ router.get('/search-by-phone', asyncHandler(async (req, res) => {
     };
   });
 
-  res.json({ transfers, elsewhere });
+  res.json({ transfers, elsewhere, ...ageMeta });
 }));
 
 // ============================================================================

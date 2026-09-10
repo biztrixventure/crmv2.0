@@ -94,6 +94,7 @@ const DedupRules = ({ config, scope, onSave }) => {
   const crossCo        = cfg(config, 'dedup.cross_company', 'new_transfer');
   const sortBy         = cfg(config, 'search.sort_by', 'updated_at');
   const maxAgeDays     = cfg(config, 'search.max_age_days', 0);
+  const showHidden     = cfg(config, 'search.show_hidden_count', true);
   const applyToBulk    = cfg(config, 'dedup.apply_to_bulk_upload', true);
 
   return (
@@ -180,6 +181,11 @@ const DedupRules = ({ config, scope, onSave }) => {
           </p>
           <NumberInput value={maxAgeDays} onChange={(v) => onSave('search.max_age_days', v)}
             unit="days" helper="0 = no limit (default). Set 7 to show only transfers created in the last week." />
+          <div className="mt-3">
+            <CheckboxRow checked={showHidden} onChange={(v) => onSave('search.show_hidden_count', v)}
+              label="Tell the closer how many older transfers were hidden"
+              sub="Shows a count only, never the records — so they can tell a brand-new customer from one whose earlier calls are out of range. No effect while the limit is 0." />
+          </div>
         </div>
       </Section>
 

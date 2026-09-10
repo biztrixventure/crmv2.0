@@ -577,6 +577,7 @@ const PhoneSearch = ({ onCreateSale, companyTimezone, refreshTrigger = 0, onRese
   const [manualEntryOpen,    setManualEntryOpen]    = useState(false);
   const [searchedPhone,      setSearchedPhone]      = useState('');     // drives the history banner (only after a search)
   const [elsewhere,          setElsewhere]          = useState(null);   // { leads, sold, companies } — counts only, no other-tenant data
+  const [hiddenOlder,        setHiddenOlder]        = useState(null);   // { count, days } outside the search window
 
   // Pull eligible statuses once so the "New on lead" button only appears for
   // sales the closer can actually resell per business_config.
@@ -605,7 +606,13 @@ const PhoneSearch = ({ onCreateSale, companyTimezone, refreshTrigger = 0, onRese
       // Counts only — the server never sends another company's record, just the
       // fact that one exists, so this warning can't leak a competitor's lead.
       setElsewhere(res.data.elsewhere || null);
+      // Counts only again: how many matches fell outside the search window the
+      // superadmin set. The closer learns the calls exist without seeing them.
+      setHiddenOlder(res.data.hidden_older > 0
+        ? { count: res.data.hidden_older, days: res.data.max_age_days }
+        : null);
     } catch (err) {
+      setHiddenOlder(null);
       setError(err.response?.data?.error || 'Search failed. Try again.');
     } finally {
       setLoading(false);
@@ -742,6 +749,19 @@ const PhoneSearch = ({ onCreateSale, companyTimezone, refreshTrigger = 0, onRese
                   {elsewhere.leads > 0 && elsewhere.sold ? ' · ' : ''}
                   {elsewhere.sold && 'sale recorded'}
                 </span>
+              </p>
+            </div>
+          )}
+
+          {hiddenOlder && (
+            <div className="mt-3 rounded-xl px-3 py-2 flex items-start gap-2"
+              style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
+              <Clock size={13} className="flex-shrink-0 mt-0.5" style={{ color: 'var(--color-text-tertiary)' }} />
+              <p className="m-0 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                <strong style={{ color: 'var(--color-text)' }}>
+                  {hiddenOlder.count} older transfer{hiddenOlder.count !== 1 ? 's' : ''}
+                </strong>{' '}
+                not shown — this customer was transferred before the last {hiddenOlder.days} day{hiddenOlder.days !== 1 ? 's' : ''}.
               </p>
             </div>
           )}
