@@ -93,6 +93,7 @@ const DedupRules = ({ config, scope, onSave }) => {
   const sameCo         = cfg(config, 'dedup.different_fronter_same_co', 'new_transfer');
   const crossCo        = cfg(config, 'dedup.cross_company', 'new_transfer');
   const sortBy         = cfg(config, 'search.sort_by', 'updated_at');
+  const maxAgeDays     = cfg(config, 'search.max_age_days', 0);
   const showStale      = cfg(config, 'search.show_stale', true);
   const applyToBulk    = cfg(config, 'dedup.apply_to_bulk_upload', true);
 
@@ -168,9 +169,23 @@ const DedupRules = ({ config, scope, onSave }) => {
         <RadioGroup name="search-sort" value={sortBy}
           onChange={(v) => onSave('search.sort_by', v)} options={SORT_OPTS} />
         <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--color-border)' }}>
+          <p className="text-sm font-semibold mb-1" style={{ color: 'var(--color-text)' }}>
+            How far back the search reaches
+          </p>
+          <p className="text-xs mb-2" style={{ color: 'var(--color-text-secondary)' }}>
+            Counted from when the transfer was MADE, not when it was last touched — so a
+            disposition on an old lead does not pull it back into range. A re-transfer of the
+            same customer is its own transfer, so a genuine new call always shows.
+            Compliance and superadmin are exempt, because an investigation that stops at N days
+            is worse than useless.
+          </p>
+          <NumberInput value={maxAgeDays} onChange={(v) => onSave('search.max_age_days', v)}
+            unit="days" helper="0 = no limit (default). Set 7 to show only transfers created in the last week." />
+        </div>
+        <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--color-border)' }}>
           <CheckboxRow checked={showStale} onChange={(v) => onSave('search.show_stale', v)}
             label="Show stale transfers in search"
-            sub="Older transfers from other fronters/companies still appear below the priority result" />
+            sub="Not currently enforced anywhere — use the day limit above instead" />
         </div>
       </Section>
 

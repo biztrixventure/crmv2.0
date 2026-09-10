@@ -558,12 +558,32 @@ router.get('/search-by-phone', asyncHandler(async (req, res) => {
   const sortBy = await getConfig(companyId, 'search.sort_by', 'updated_at');
   const sortCol = sortBy === 'created_at' ? 'created_at' : 'updated_at';
 
+  // How far back the closer's search may reach (Business Rules -> Dedup &
+  // Search). A lead that came in months ago is rarely still workable, and
+  // surfacing it invites a closer to work a stale transfer. 0 = no limit,
+  // which is the default, so nothing changes until somebody sets a number.
+  //
+  // Measured on created_at, not the sort column: the question is when the
+  // TRANSFER WAS MADE. A re-transfer of the same customer creates its own row
+  // (mig 291), so a genuinely fresh call always has a fresh created_at, while
+  // updated_at can be bumped by a disposition on an ancient lead.
+  //
+  // Global roles are exempt: compliance and superadmin search this endpoint to
+  // investigate, and an investigation that silently stops at N days is worse
+  // than useless. The rule is for the people working leads.
+  const maxAgeDays = parseInt(await getConfig(companyId, 'search.max_age_days', 0), 10) || 0;
+  const ageCutoff = (!globalView && maxAgeDays > 0)
+    ? new Date(Date.now() - maxAgeDays * 86400000).toISOString()
+    : null;
+
   // PostgREST JSONB text-extraction: ->>key (no SQL quotes). Covers both naming conventions.
-  const { data, error } = await supabaseAdmin
+  let query = supabaseAdmin
     .from('transfers')
     .select('*')
     .in('company_id', fronterCompanyIds)
-    .or(`form_data->>customer_phone.ilike.%${q}%,form_data->>Phone.ilike.%${q}%`)
+    .or(`form_data->>customer_phone.ilike.%${q}%,form_data->>Phone.ilike.%${q}%`);
+  if (ageCutoff) query = query.gte('created_at', ageCutoff);
+  const { data, error } = await query
     .order(sortCol, { ascending: false, nullsFirst: false })
     .limit(50);
 
