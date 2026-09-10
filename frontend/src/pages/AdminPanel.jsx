@@ -19,6 +19,7 @@ import AdminAnalyticsDashboard from "../components/Admin/AdminAnalyticsDashboard
 import LeadIntelligence from "../components/Admin/LeadIntelligence";
 import CustomerProfile from "../components/Admin/CustomerProfile/CustomerProfile";
 const FormBuilder = lazy(() => import("../components/Admin/FormBuilder/FormBuilder"));
+const CustomerLookupPanel = lazy(() => import("../components/Shared/CustomerLookupPanel"));
 import FeatureFlagsManager from "../components/Admin/FeatureFlagsManager";
 import FAQManager from "../components/Admin/FAQManager/FAQManager";
 import ScriptManager from "../components/Admin/ScriptManager/ScriptManager";
@@ -167,6 +168,10 @@ const AdminPanel = () => {
     ...(isSAorRO && hasPermission('manage_forms')      ? [{ id: "forms",          label: "Form Builder"         }] : []),
     ...(hasPermission('search_sales')                  ? [{ id: "sale-search",    label: "Lead Search"          }] : []),
     ...(isSAorRO                                       ? [{ id: "customer-profiles", label: "Customer Profiles"  }] : []),
+    // Superadmin only: access is implicit for them server-side, so the tab
+    // always works. A readonly admin has no implicit grant and would only
+    // meet a 403, so they do not get the row.
+    ...(user?.role === 'superadmin'                    ? [{ id: "customer-lookup",   label: "Customer Lookup"    }] : []),
     ...(isSAorRO                                       ? [{ id: "data-analyzer",  label: "Data Analyzer"        }] : []),
     // Numbers Intelligence / Assigned Numbers / Number Assignment are retired
     // from the nav: Batches is now the one place numbers are uploaded, assigned,
@@ -237,6 +242,7 @@ const AdminPanel = () => {
       case 'quota_report':      return <QuotaReport />;
       case 'sale-search':       return <LeadIntelligence />;
       case 'customer-profiles': return <CustomerProfile />;
+      case 'customer-lookup':   return <CustomerLookupPanel />;
       case 'data-analyzer':     return <DataAnalyzer />;
       case 'batches':           return <BatchInbox />;
       case 'note-shortcodes':   return <NoteShortcodesManager />;

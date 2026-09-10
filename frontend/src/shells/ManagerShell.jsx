@@ -340,6 +340,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
     ...(isEnabledStrict('tool_chat_control')      ? [{ key: 'tool_chat_control',      label: 'Chat Control',      icon: MessageSquare }] : []),
     ...(isEnabledStrict('tool_blacklist_lookup')  ? [{ key: 'dnc',                    label: 'DNC Check',         icon: Shield        }] : []),
     ...(isEnabledStrict('tool_card_validator')    ? [{ key: 'card_validator',         label: 'Card Validator',    icon: CreditCard    }] : []),
+    ...(lookupAccess?.any                        ? [{ key: 'customer_lookup',        label: 'Customer Lookup',   icon: Search        }] : []),
     ...(isEnabledStrict('tool_compliance_review') ? [{ key: 'tool_compliance_review', label: 'Compliance Review', icon: Shield        }] : []),
     ...(isEnabledStrict('tool_business_rules')    ? [{ key: 'tool_business_rules',    label: 'Business Rules',    icon: Settings2     }] : []),
     ...(isEnabledStrict('tool_feature_admin')     ? [{ key: 'tool_feature_admin',     label: 'Feature Flags',     icon: Zap           }] : []),
@@ -421,6 +422,18 @@ const ManagerShell = ({ workspaceMode = false }) => {
   // back a tab instead of falling through and dismissing the installed app.
   const [activeTab, setActiveTab] = useHistoryTab(mgrTabKey, 'overview');
   const [activeNav, setActiveNav] = useHistoryTab(mgrNavKey, 'dashboard', { param: 'nav' });
+
+  // Customer Lookup is granted PER USER (User Control Center → Customer
+  // Lookup), never by role or company flag, so the shell has to ask. Null until
+  // the answer lands, which keeps the tab hidden rather than flashing it.
+  const [lookupAccess, setLookupAccess] = useState(null);
+  useEffect(() => {
+    let dead = false;
+    client.get('customer-lookup/my-access')
+      .then(r => { if (!dead) setLookupAccess(r.data); })
+      .catch(() => { if (!dead) setLookupAccess({ any: false }); });
+    return () => { dead = true; };
+  }, []);
 
   // A nav section this user cannot reach must not stay open.
   //
