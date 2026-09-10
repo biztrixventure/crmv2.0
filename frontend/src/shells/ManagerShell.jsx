@@ -222,6 +222,18 @@ const ManagerShell = ({ workspaceMode = false }) => {
   const [dateRange, setDateRange] = useState(() => getPresetRange('today'));
   const { date_from, date_to } = dateRange;
 
+  // Customer Lookup is granted PER USER (User Control Center → Customer
+  // Lookup), never by role or company flag, so the shell has to ask. Null until
+  // the answer lands, which keeps the tab hidden rather than flashing it.
+  const [lookupAccess, setLookupAccess] = useState(null);
+  useEffect(() => {
+    let dead = false;
+    client.get('customer-lookup/my-access')
+      .then(r => { if (!dead) setLookupAccess(r.data); })
+      .catch(() => { if (!dead) setLookupAccess({ any: false }); });
+    return () => { dead = true; };
+  }, []);
+
   // ── Cross-role top nav (matches StaffShell pattern) ───────────────────────
   // These sit in the AppHeader top-nav row alongside Dashboard. Selecting one
   // hides the dashboard content area and renders <CrossRoleContent> instead.
@@ -422,18 +434,6 @@ const ManagerShell = ({ workspaceMode = false }) => {
   // back a tab instead of falling through and dismissing the installed app.
   const [activeTab, setActiveTab] = useHistoryTab(mgrTabKey, 'overview');
   const [activeNav, setActiveNav] = useHistoryTab(mgrNavKey, 'dashboard', { param: 'nav' });
-
-  // Customer Lookup is granted PER USER (User Control Center → Customer
-  // Lookup), never by role or company flag, so the shell has to ask. Null until
-  // the answer lands, which keeps the tab hidden rather than flashing it.
-  const [lookupAccess, setLookupAccess] = useState(null);
-  useEffect(() => {
-    let dead = false;
-    client.get('customer-lookup/my-access')
-      .then(r => { if (!dead) setLookupAccess(r.data); })
-      .catch(() => { if (!dead) setLookupAccess({ any: false }); });
-    return () => { dead = true; };
-  }, []);
 
   // A nav section this user cannot reach must not stay open.
   //

@@ -242,7 +242,13 @@ const AdminPanel = () => {
       case 'quota_report':      return <QuotaReport />;
       case 'sale-search':       return <LeadIntelligence />;
       case 'customer-profiles': return <CustomerProfile />;
-      case 'customer-lookup':   return <CustomerLookupPanel />;
+      // Its own boundary, like the form builder: without one the lazy chunk
+      // suspends up to the router and the whole admin page blinks to a spinner.
+      case 'customer-lookup':   return (
+        <Suspense fallback={<Loading variant="rows" rows={6} label="Loading customer lookup…" />}>
+          <CustomerLookupPanel />
+        </Suspense>
+      );
       case 'data-analyzer':     return <DataAnalyzer />;
       case 'batches':           return <BatchInbox />;
       case 'note-shortcodes':   return <NoteShortcodesManager />;
