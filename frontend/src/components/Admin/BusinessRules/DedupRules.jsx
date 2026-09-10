@@ -94,7 +94,6 @@ const DedupRules = ({ config, scope, onSave }) => {
   const crossCo        = cfg(config, 'dedup.cross_company', 'new_transfer');
   const sortBy         = cfg(config, 'search.sort_by', 'updated_at');
   const maxAgeDays     = cfg(config, 'search.max_age_days', 0);
-  const showStale      = cfg(config, 'search.show_stale', true);
   const applyToBulk    = cfg(config, 'dedup.apply_to_bulk_upload', true);
 
   return (
@@ -181,11 +180,6 @@ const DedupRules = ({ config, scope, onSave }) => {
           </p>
           <NumberInput value={maxAgeDays} onChange={(v) => onSave('search.max_age_days', v)}
             unit="days" helper="0 = no limit (default). Set 7 to show only transfers created in the last week." />
-        </div>
-        <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--color-border)' }}>
-          <CheckboxRow checked={showStale} onChange={(v) => onSave('search.show_stale', v)}
-            label="Show stale transfers in search"
-            sub="Not currently enforced anywhere — use the day limit above instead" />
         </div>
       </Section>
 
