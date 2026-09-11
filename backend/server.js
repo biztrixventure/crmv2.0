@@ -236,6 +236,14 @@ const PORT = process.env.PORT || 3001;
 // ============================================================================
 
 // Security headers
+// The Supabase project origin, for the CSP directives that have to name it.
+// Derived from SUPABASE_URL so a project move needs no code change; the wildcard
+// is the fallback and matches what connectSrc has always used.
+const SUPABASE_ORIGIN = (() => {
+  try { return new URL(process.env.SUPABASE_URL).origin; }
+  catch { return 'https://*.supabase.co'; }
+})();
+
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
@@ -243,7 +251,11 @@ app.use(helmet({
       scriptSrc:   ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
       styleSrc:    ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
       imgSrc:      ["'self'", "data:", "blob:", "https:"],
-      mediaSrc:    ["'self'", "blob:"],   // client portal plays proxied recordings as blob: audio
+      // Training call recordings (mig 311) are <audio src> straight off the
+      // public training-media bucket, so the bucket origin has to be here --
+      // "'self' blob:" alone silently refuses to play them. The client portal's
+      // proxied recordings are still blob:, hence both.
+      mediaSrc:    ["'self'", "blob:", SUPABASE_ORIGIN],
       fontSrc:     ["'self'", "data:", "https://fonts.gstatic.com"],
       connectSrc:  [
         "'self'",
@@ -251,7 +263,12 @@ app.use(helmet({
         "wss://*.supabase.co",
         process.env.CORS_ORIGIN || "http://localhost:5173",
       ],
-      frameSrc:    ["'none'"],
+      // The training portal reads its PDFs in an <iframe> pointed at the same
+      // bucket. 'none' blocked that outright ("Framing ... violates ...
+      // frame-src 'none'"), and the fallback is a new tab, which loses the
+      // reader and the "mark as read" button. Scoped to our own storage origin
+      // -- nothing else may be framed.
+      frameSrc:    ["'self'", SUPABASE_ORIGIN],
       objectSrc:   ["'none'"],
     },
   },

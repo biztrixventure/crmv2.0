@@ -76,6 +76,11 @@ const AppHeader = ({
   onLogout = () => {},
   actions = [],
   navItems = [],
+  // Default true -- every shell that has a dashboard keeps the tab it always
+  // had. A trainee has no dashboard worth opening (no create_transfer, no
+  // create_sale), so StaffShell passes false rather than offering a tab that
+  // leads to an empty screen.
+  showDashboardTab = true,
   activeNav = 'dashboard',
   onNavChange = () => {},
   onBrandClick = null,
@@ -271,8 +276,10 @@ const AppHeader = ({
                 no flex-shrink-0) were squeezed until their padding collapsed
                 and the labels ran together — "CalendarTeam Roles" at 390. */}
             <div className="max-w-7xl w-max min-w-full mx-auto flex items-center gap-0.5">
-              <NavTab active={activeNav === 'dashboard'} onClick={() => onNavChange('dashboard')} icon={LayoutGrid} label="My Dashboard" />
-              <div className="w-px h-5 mx-1.5 flex-shrink-0" style={{ backgroundColor: 'var(--color-border)' }} />
+              {showDashboardTab && <>
+                <NavTab active={activeNav === 'dashboard'} onClick={() => onNavChange('dashboard')} icon={LayoutGrid} label="My Dashboard" />
+                <div className="w-px h-5 mx-1.5 flex-shrink-0" style={{ backgroundColor: 'var(--color-border)' }} />
+              </>}
               {navItems.map(item => (
                 <NavTab key={item.key} active={activeNav === item.key} onClick={() => onNavChange(item.key)} icon={item.icon} label={item.label} />
               ))}

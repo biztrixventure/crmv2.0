@@ -202,6 +202,11 @@ const StaffShell = () => {
   const navigate = useNavigate();
   const updateAvailable = useVersionCheck();
 
+  // A trainee has not been signed off yet: no create_transfer, no create_sale,
+  // nothing on the dashboard and no business in the tools. They get Training and
+  // only Training -- see effectiveNav below, which pins them there even if a
+  // stale ?nav= in the URL says otherwise.
+  const isTrainee  = user?.role === 'trainee';
   const isFronter  = user?.role === 'fronter' || (!hasPermission('create_sale') && hasPermission('create_transfer'));
   const isCloser   = user?.role === 'closer'  || hasPermission('create_sale');
 
@@ -296,6 +301,19 @@ const StaffShell = () => {
     // fronter promoted out of trainee keeps the same tab in the same place.
     { key: 'training', label: 'Training', icon: GraduationCap },
   ];
+
+  // For a trainee the list IS the training tab. Building the full list above and
+  // filtering here (rather than branching earlier) keeps one definition of every
+  // item, so a tool added later cannot accidentally reach a trainee.
+  const navItems = isTrainee
+    ? crossNavItems.filter(i => i.key === 'training')
+    : crossNavItems;
+
+  // What the shell actually renders. A trainee is pinned to Training: hiding the
+  // tab is not enough on its own, because ?nav=dashboard survives in a bookmark,
+  // a back button and a restored session, and would drop them onto a dashboard
+  // they are not meant to have.
+  const effectiveNav = isTrainee ? 'training' : activeNav;
 
   // Sale modal
   const [modalOpen, setModalOpen]               = useState(false);
@@ -457,11 +475,11 @@ const StaffShell = () => {
   // dashboard tab (callbacks, transfers, faqs, …) — so guidance is tab-specific.
   useEffect(() => {
     let sec;
-    if (activeNav !== 'dashboard') sec = activeNav;
+    if (effectiveNav !== 'dashboard') sec = effectiveNav;
     else if (activeTab === 'sales') sec = closerSection === 'assigned' ? 'closer_assigned' : 'my_sales';
     else sec = activeTab;
     window.crmAssistant?.setSection?.(sec);
-  }, [activeNav, activeTab, closerSection]);
+  }, [effectiveNav, activeTab, closerSection]);
   const [transfersPage, setTransfersPage]   = useState(1);  // fronter My Leads + closer Assigned
   // Status filter for the fronter My Leads list — set when a KPI card is clicked
   // (e.g. "Completed" → only completed leads). '' = all. Drives fetchTransfers.
@@ -1090,8 +1108,12 @@ const StaffShell = () => {
         notifications={notifHook.notifications} unreadCount={notifHook.unreadCount}
         onMarkRead={notifHook.markRead} onMarkAllRead={notifHook.markAllRead}
         onDeleteNotification={notifHook.deleteNotification} onClearNotifications={notifHook.clearAll}
-        navItems={crossNavItems} activeNav={activeNav} onNavChange={setActiveNav}
-        onBrandClick={() => user?.role === 'superadmin' ? navigate('/admin') : setActiveNav('dashboard')}
+        navItems={navItems} activeNav={effectiveNav} onNavChange={setActiveNav}
+        showDashboardTab={!isTrainee}
+        onBrandClick={() => {
+          if (user?.role === 'superadmin') return navigate('/admin');
+          setActiveNav(isTrainee ? 'training' : 'dashboard');
+        }}
       />
 
       {/* Accounting / People. Renders nothing unless the server says this
@@ -1103,9 +1125,9 @@ const StaffShell = () => {
       <ModuleNavLinks className="px-4 sm:px-6 lg:px-8 pt-3 relative z-10" />
 
       <EngagementBanners />
-      {activeNav !== 'dashboard' && <CrossRoleContent section={activeNav} user={user} />}
+      {effectiveNav !== 'dashboard' && <CrossRoleContent section={effectiveNav} user={user} />}
       <main className="w-full px-4 sm:px-6 lg:px-8 py-6 relative z-10"
-        style={{ display: activeNav !== 'dashboard' ? 'none' : undefined }}>
+        style={{ display: effectiveNav !== 'dashboard' ? 'none' : undefined }}>
         <TargetsStrip />
 
         {/* VICIdial: transfers captured from the dialer on XFER, awaiting confirm.

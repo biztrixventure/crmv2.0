@@ -6,12 +6,15 @@
 // the form actually offers; customer names come from an uploaded list. Both
 // render as the same card, because the skill being practised is the same one.
 //
-// THE HIGHLIGHT is the point of the screen. The browser's speech engine fires
-// `onboundary` as it reaches each word, and useSpeech turns that into an index;
-// the card lights that word. For a single-word term there is only ever one
-// boundary, so the card lights the whole word for the utterance instead of
-// blinking a lone highlight on and off -- the feedback has to read the same
-// either way.
+// THE HIGHLIGHT is the point of the screen, and it runs on the SYLLABLE line,
+// not the plain name. Lighting "Volkswagen" whole says nothing an agent can use;
+// lighting Volk, then swa, then gen while the voice says them is the thing that
+// teaches the word. The plain name stays unhighlighted above it so the card is
+// still readable as "what am I looking at".
+//
+// The browser only reports WORD boundaries, so useSpeech steps the syllables
+// inside a word on a self-calibrating timer and re-syncs on every boundary --
+// see the SYLLABLE TIMING note there.
 // ============================================================================
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -22,45 +25,53 @@ import { Panel, PillTabs, EmptyState, Loading, IconButton, accent } from '../UI/
 import Select from '../UI/Select';
 import useSpeech, { syllabify } from './useSpeech';
 
-// ── one term, lit word by word while the voice moves through it ──────────────
-function SpokenText({ text, active, wordIndex }) {
-  const parts = useMemo(() => String(text || '').split(/(\s+)/), [text]);
-  const wordCount = useMemo(() => parts.filter(p => !/^\s+$/.test(p)).length, [parts]);
-  let wi = -1;
+// ── the syllable line: the thing that actually lights up ─────────────────────
+function SyllableLine({ term, active, wordIndex, syllableIndex }) {
+  // Same split useSpeech walks, so the highlight index always names the
+  // syllable the viewer is looking at.
+  const words = useMemo(
+    () => String(term || '').trim().split(/\s+/).filter(Boolean).map(w => syllabify(w)),
+    [term],
+  );
   return (
-    <span>
-      {parts.map((w, i) => {
-        if (/^\s+$/.test(w)) return <span key={i}>{w}</span>;
-        wi += 1;
-        // A one-word term produces exactly one boundary event, so "the word
-        // being spoken" and "this card is speaking" are the same thing.
-        const lit = active && (wordCount === 1 || wordIndex === wi);
-        return (
-          <span key={i}
-            style={{
-              borderRadius: 4,
-              padding: lit ? '0 3px' : 0,
-              margin: lit ? '0 -3px' : 0,
-              background: lit ? 'var(--color-primary-100)' : 'transparent',
-              color: lit ? 'var(--color-primary-700)' : 'inherit',
-              transition: 'background 120ms linear, color 120ms linear',
-            }}>
-            {w}
-          </span>
-        );
-      })}
+    <span className="font-mono tracking-wide">
+      {words.map((syls, wi) => (
+        <span key={wi}>
+          {wi > 0 && <span className="px-1.5" style={{ opacity: 0.4 }}>·</span>}
+          {syls.map((sy, si) => {
+            const lit = active && wi === wordIndex && si === syllableIndex;
+            return (
+              <span key={si}>
+                {si > 0 && <span style={{ opacity: 0.35 }}>-</span>}
+                <span
+                  style={{
+                    borderRadius: 4,
+                    padding: lit ? '1px 3px' : '1px 0',
+                    background: lit ? 'var(--color-primary-600)' : 'transparent',
+                    color: lit ? '#fff' : 'inherit',
+                    fontWeight: lit ? 700 : 400,
+                    transition: 'background 90ms linear, color 90ms linear',
+                  }}>
+                  {sy}
+                </span>
+              </span>
+            );
+          })}
+        </span>
+      ))}
     </span>
   );
 }
 
 // ── the dictionary card ──────────────────────────────────────────────────────
-function PronounceCard({ id, term, sub, phonetic, speech, onPlayed }) {
+//
+// `footer` renders INSIDE the card. It used to be a sibling underneath it, and
+// because the card carried h-full it filled the grid cell and pushed the footer
+// out past the row -- the "Drill its models" link ended up drawn behind the card
+// on the next row. Anything belonging to a card lives in the card.
+function PronounceCard({ id, term, sub, phonetic, speech, onPlayed, footer }) {
   const active = speech.speakingId === id;
   const a = accent('primary');
-
-  // A manager's own phonetic hint always wins. The generated syllable split is
-  // a fallback so an unfamiliar name still shows someone where to break it.
-  const guide = phonetic || syllabify(term).join('-');
 
   const play = (rate) => {
     speech.speak(term, { id, rate });
@@ -69,7 +80,7 @@ function PronounceCard({ id, term, sub, phonetic, speech, onPlayed }) {
 
   return (
     <div
-      className="rounded-2xl p-4 transition-all h-full"
+      className="rounded-2xl p-4 transition-all h-full flex flex-col"
       style={{
         background: 'var(--color-surface)',
         border: `1px solid ${active ? 'var(--color-primary-400, #818cf8)' : 'var(--color-border)'}`,
@@ -77,12 +88,22 @@ function PronounceCard({ id, term, sub, phonetic, speech, onPlayed }) {
       }}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
+          {/* The name, read but never lit -- the highlight belongs to the line
+              below it, which is the one an agent is meant to follow. */}
           <p className="text-lg font-bold m-0 leading-tight" style={{ color: 'var(--color-text)' }}>
-            <SpokenText text={term} active={active} wordIndex={speech.wordIndex} />
+            {term}
           </p>
-          {guide && guide.toLowerCase() !== term.toLowerCase() && (
-            <p className="text-xs m-0 mt-0.5 font-mono tracking-wide"
-              style={{ color: 'var(--color-text-tertiary)' }}>{guide}</p>
+          <p className="text-sm m-0 mt-1" style={{ color: 'var(--color-text-secondary)' }}>
+            <SyllableLine term={term} active={active}
+              wordIndex={speech.wordIndex} syllableIndex={speech.syllableIndex} />
+          </p>
+          {/* A manager's hand-typed hint, when there is one. Shown as well as
+              the syllables, not instead: nothing maps it to what the voice is
+              saying, so it cannot be highlighted -- but it is the better guide. */}
+          {phonetic && (
+            <p className="text-[11px] m-0 mt-1 font-mono" style={{ color: 'var(--color-text-tertiary)' }}>
+              say it: {phonetic}
+            </p>
           )}
           {sub && (
             <p className="text-[11px] m-0 mt-1 truncate" style={{ color: 'var(--color-text-secondary)' }}>{sub}</p>
@@ -102,6 +123,8 @@ function PronounceCard({ id, term, sub, phonetic, speech, onPlayed }) {
           </button>
         </div>
       </div>
+      {/* mt-auto pins it to the bottom so every card in a row lines up. */}
+      {footer && <div className="mt-auto pt-3">{footer}</div>}
     </div>
   );
 }
@@ -311,18 +334,19 @@ export default function ToolKitPanel({ companyId, onProgress }) {
               </p>
             )}
             <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))' }}>
+              {/* The card IS the grid cell -- no wrapper. The drill link goes in
+                  as a footer, because a sibling under an h-full card overflows
+                  the row and paints behind the next one. */}
               {cards.map(c => (
-                <div key={c.id}>
-                  <PronounceCard id={c.id} term={c.term} sub={c.sub} phonetic={c.phonetic}
-                    speech={speech} onPlayed={onProgress} />
-                  {showDrillLink && c.id.startsWith('make-') && (
+                <PronounceCard key={c.id} id={c.id} term={c.term} sub={c.sub} phonetic={c.phonetic}
+                  speech={speech} onPlayed={onProgress}
+                  footer={showDrillLink && c.id.startsWith('make-') ? (
                     <button onClick={() => setMakeId(c.id.slice(5))}
-                      className="text-[11px] font-semibold mt-1 ml-1"
+                      className="text-[11px] font-semibold"
                       style={{ color: 'var(--color-primary-600)' }}>
                       Drill its models →
                     </button>
-                  )}
-                </div>
+                  ) : null} />
               ))}
             </div>
           </>
