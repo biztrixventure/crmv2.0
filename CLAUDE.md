@@ -119,6 +119,8 @@ Current highest: `223_compliance_manager_qa_scoring.sql` — **pending**. 221 an
 
 Accounting + HR (283-290) are **applied** (SQL-verified 2026-08-23: 24 tables, 25 permissions, 365 role grants, 17 triggers, 3 new role_level values). Trigger functions are search_path-pinned.
 
+311 is **applied** (SQL-verified 2026-09-11: trainee enum value present, 6 training_* tables, 3 permissions, 64 role grants). See "Training portal" below.
+
 291 + 292 are **applied** (SQL-verified 2026-08-23). 291 = `transfers.xfer_seq`, uniqueness moved to `(vicidial_vendor_code, created_by, xfer_seq)` so a re-transferred recycled lead creates a NEW transfer instead of overwriting the fronter's earlier one — see "Re-transferred leads" below. 292 = repaired 926 transfers whose customer name had been blanked (originals in `transfers_name_backfill_292`, reversible).
 
 ### Re-transferred leads (mig 291)
@@ -134,6 +136,33 @@ A post-date is a **reminder, not a sale** — the card has not been charged, so 
 - `GET /sales` takes `exclude_post_date=true` (opt-in, so exports and admin tooling still see every row).
 - `post_dated_at` / `post_date_converted_at` are trigger-stamped and survive the charge — they drive the compliance `P → S` pill. Do **not** try to derive this from `policy_events`: its `charged` event fires on the scheduler's reminder stamp, not on the charge, and it never writes `post_dated` at all.
 - Failed charge → `POST /sales/:id/charge-failed` (reason + new date, re-arms the reminder); history in `post_date_attempts`; reason catalog in `business_config.post_date_fail_reasons`.
+
+### Training portal + trainee role (mig 311)
+A trainee is a **fronter who has not been signed off yet** — so promoting one
+changes their role and NOTHING else. Every training table keys on `company_id`,
+never on the role, and the portal is ONE component
+(`frontend/src/components/Training/TrainingPortal.jsx`) mounted by StaffShell,
+ManagerShell, ComplianceShell and AdminPanel. The old "My Quizzes" nav item in
+the staff/manager shells is now a TAB inside it; `MyQuizzes.jsx` is unchanged and
+ComplianceShell still lists it separately.
+- `trainee` sits at the **same** hierarchy rung as `fronter` (8 frontend / 6
+  backend), not one below — `hasRoleAccess` tests `userLevel <= requiredLevel`,
+  so a lower rung locks them out of the `/fronter` route they are routed to.
+- Access is the mig 290 **two-door** rule: `training.manage` on the role (seeded
+  for fronter_manager and up) OR a superadmin designation naming companies
+  (`module_designations`, `module='training'`, User Control Center → Modules).
+  Gate every handler with `can()`/`deny()` from `utils/moduleAccess.js` —
+  calling `hasPermission` directly makes the designation invisible.
+- **Pronunciation is free and must stay free**: `components/Training/useSpeech.js`
+  uses the browser Web Speech API (en-US voices only). It is the only free option
+  that emits `onboundary`, which is what lights each word in time with the audio.
+- Car makes/models are read **live** from `vehicle_makes`/`vehicle_models`;
+  `training_terms` holds only manager-added extras and uploaded name lists.
+  Copying the catalog would fork it the moment an admin edits the real one.
+- `GET /scenarios` strips `is_correct` for non-managers; the verdict comes from
+  `POST /scenarios/:id/answer`. No option marked correct ⇒ `graded:false`.
+- Files: `backend/routes/training.js`, storage bucket `training-media` (created
+  lazily, like `branding.js`).
 
 ### QA department (two-tier org — mig 208)
 Compliance wires the org chart only (assign companies + agents to a quality **manager**); the manager owns all the work (per-agent methods, task assignment, per-company review-type config), scoped to their companies + team. One company → one manager; one agent → one manager (`qa_manager_companies`, `qa_team_members`). `resolveAgent` (transfer→company attribution) is now deterministic. See memory: qa_two_tier_org, qa_ux_reporting_2026_07, vicidial_agent_attribution.
