@@ -1,7 +1,7 @@
 ﻿import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useHistoryTab } from '../hooks/useHistoryTab';
 import { useShellLayout } from '../hooks/useShellLayout';
-import { Shield, Building2, Clock, FileText, ArrowRight, PhoneCall, Star, Hash, CalendarDays, Info, ListChecks, ScrollText, HelpCircle, ClipboardCheck, CreditCard, Headphones, ClipboardList } from 'lucide-react';
+import { Shield, Building2, Clock, FileText, ArrowRight, PhoneCall, Star, Hash, CalendarDays, Info, ListChecks, ScrollText, HelpCircle, ClipboardCheck, CreditCard, Headphones, ClipboardList , GraduationCap } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useVersionCheck } from '../hooks/useVersionCheck';
 import UpdateBanner from '../components/UI/UpdateBanner';
@@ -43,6 +43,9 @@ import DoubleSoldTab       from '../components/Compliance/DoubleSoldTab';
 import BatchInbox          from '../components/Distribution/BatchInbox';
 import QuizManager         from '../components/Quiz/QuizManager';
 import MyQuizzes           from '../components/Quiz/MyQuizzes';
+// Training portal (mig 311) -- the same component the staff and manager shells
+// mount. Compliance is usually who runs it, via the superadmin designation.
+import TrainingPortal      from '../components/Training/TrainingPortal';
 
 const CODE_TABS = [
   { key: 'companies',   label: 'Companies',          icon: Building2 },
@@ -66,6 +69,10 @@ const CODE_TABS = [
   { key: 'qa_admin',    label: 'QA Department',      icon: ClipboardCheck, perm: 'manage_qa_department' },
   { key: 'quizzes',     label: 'Quizzes',            icon: ClipboardList },
   { key: 'my_quizzes',  label: 'My Quizzes',         icon: ClipboardList },
+  // Training (mig 311). Compliance is who the portal is usually run by -- the
+  // superadmin designation (User Control Center -> Modules -> Training) points
+  // one compliance manager at named companies, and this tab is where they do it.
+  { key: 'training',    label: 'Training',           icon: GraduationCap },
 ];
 
 // ── Two-tier navigation (UX cleanup) ─────────────────────────────────────────
@@ -81,7 +88,7 @@ const TAB_GROUPS = [
   // Batches owns upload → assign → dispositions; Assigned Numbers / Number
   // Assignment are retired from the nav (their keys still render if deep-linked).
   { id: 'numbers',  label: 'Numbers',         icon: Hash,           keys: ['batches', 'numbers'] },
-  { id: 'quality',  label: 'Quality',         icon: Star,           keys: ['reviews', 'qa_admin', 'questions', 'scripts', 'faqs', 'quizzes', 'my_quizzes'] },
+  { id: 'quality',  label: 'Quality',         icon: Star,           keys: ['reviews', 'qa_admin', 'questions', 'scripts', 'faqs', 'quizzes', 'my_quizzes', 'training'] },
   { id: 'tools',    label: 'Tools',           icon: Shield,         keys: ['dnc', 'card_validator'] },
 ];
 
@@ -340,6 +347,7 @@ const ComplianceShell = () => {
         {activeTab === 'questions' && <CallQuestionsManager />}
         {activeTab === 'quizzes'    && <QuizManager />}
         {activeTab === 'my_quizzes' && <MyQuizzes />}
+        {activeTab === 'training'   && <TrainingPortal />}
         <DevCredit />
       </main>
     </div>

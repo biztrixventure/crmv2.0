@@ -76,6 +76,7 @@ const { qa2IngestHook }         = require('./middleware/qa2VicidialIngestHook');
 const qa1ReadonlyGate           = require('./middleware/qa1ReadonlyGate');
 const kanbanRoutes              = require('./routes/kanban');
 const quizRoutes                = require('./routes/quiz');
+const trainingRoutes            = require('./routes/training');
 // Accounting + HR (migs 283-290). Each is a MODULE router: the sub-routers
 // (accounts/journal/invoices/expenses/reports, employees/attendance/leave/
 // payroll/reviews) hang off it, so the module mounts in one line instead of ten.
@@ -268,6 +269,10 @@ app.use('/api/kanban', express.json({ limit: '14mb' }));
 // The client chunks them so no single request is large, but a wide file — 40
 // columns kept verbatim per row — still outgrows the global limit.
 app.use('/api/distribution-batches', express.json({ limit: '16mb' }));
+// Training PDFs and call recordings arrive base64-encoded (≤25MB binary ≈
+// 33MB encoded) through POST /api/training/upload. Scoped to that one path so
+// the rest of /api/training keeps the global limit.
+app.use('/api/training/upload', express.json({ limit: '36mb' }));
 
 // Body parser — raised from the 100kb default so announcements (and other
 // payloads) can carry embedded base64 images.
@@ -429,6 +434,10 @@ app.use('/api/users', authMiddleware, readonlyGuard, egressAudit, usersRoutes);
 app.use('/api/readonly-admins', authMiddleware, readonlyGuard, readonlyAdminsRoutes);
 app.use('/api/teams', authMiddleware, readonlyGuard, teamsRoutes);
 app.use('/api/quiz',  authMiddleware, readonlyGuard, quizRoutes);
+// Training portal (mig 311). Reach is granted by a permission OR a superadmin
+// designation (module_designations, module='training'), so this is deliberately
+// NOT role-guarded -- every handler re-checks through utils/moduleAccess.js.
+app.use('/api/training', authMiddleware, readonlyGuard, trainingRoutes);
 // Two-tier team quotas (mig 216) — admin sets the team target, the lead splits it.
 app.use('/api/quotas', authMiddleware, readonlyGuard, quotasRoutes);
 // Daily performance review + finalise (mig 310). readonlyGuard blocks the

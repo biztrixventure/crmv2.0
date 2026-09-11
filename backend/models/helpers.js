@@ -21,6 +21,11 @@ const ROLE_HIERARCHY = {
   qa_agent:            5,   // QA reviewer — same tier as closer
   employee:            6,   // HR-only self-service rung
   fronter:             6,
+  // Trainee (mig 311) -- a fronter who has not been signed off yet. Same rung as
+  // fronter: canAssignRole is STRICT (source must be strictly above target), so
+  // anyone who may hire a fronter may hire a trainee, and a fronter may not
+  // promote one sideways into their own rank.
+  trainee:             6,
 };
 
 // ============================================================================
@@ -192,7 +197,11 @@ const ASSIGNABLE_LEVELS = {
   // fronter + fronter_manager, 1-Vertex exactly closer + closer_manager), and
   // roles.js `for_assignment` already filters to the company's own roles. The
   // effective offer stays "Agent and Team Lead", whichever side you are on.
-  operations_manager: ['fronter', 'closer', 'fronter_manager', 'closer_manager'],
+  //
+  // 'trainee' is on the list because hiring one is the same act as hiring an
+  // agent -- leaving it off would let an operations_manager create the fronter
+  // but not the trainee who becomes that fronter.
+  operations_manager: ['fronter', 'closer', 'fronter_manager', 'closer_manager', 'trainee'],
 };
 
 /** The levels `sourceLevelName` may assign, or null for "hierarchy only". */
@@ -369,10 +378,13 @@ const getTeamMembers = async (managerId, companyId) => {
 // org may cover a fronter company AND a closer company. Since role is granted
 // per-company (one user_company_roles row each), the qa levels must be valid on
 // whichever company the QA user is being attached to — so both lists include them.
+// 'trainee' (mig 311) is on BOTH sides deliberately: the ask was a trainee role
+// "for all the companies", and a closer floor trains new hires exactly the way a
+// fronter floor does.
 const getCompanyTypeLevels = (companyType) =>
   companyType === 'fronter'
-    ? ['fronter', 'fronter_manager', 'operations_manager', 'company_admin', 'qa_manager', 'qa_agent']
-    : ['closer', 'closer_manager', 'compliance_manager', 'operations_manager', 'company_admin', 'qa_manager', 'qa_agent'];
+    ? ['fronter', 'fronter_manager', 'operations_manager', 'company_admin', 'qa_manager', 'qa_agent', 'trainee']
+    : ['closer', 'closer_manager', 'compliance_manager', 'operations_manager', 'company_admin', 'qa_manager', 'qa_agent', 'trainee'];
 
 // ============================================================================
 // Company type, cached. Every list route used to re-query companies.company_type

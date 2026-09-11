@@ -21,7 +21,7 @@
 // Superadmin only. A non-superadmin viewer gets a 403 from the endpoint, and
 // the section simply does not render its switches rather than showing dead ones.
 import { useState, useEffect, useCallback } from 'react';
-import { Scale, IdCard, Layers, Building2 } from 'lucide-react';
+import { Scale, IdCard, Layers, Building2, GraduationCap } from 'lucide-react';
 import client from '../../../api/client';
 import { Alert } from '../../../components/UI';
 import { Panel, SectionHeader, Loading, Toggle, CheckRow, useFlash } from '../../UI/kit';
@@ -40,6 +40,13 @@ const MODULES = [
     title: 'HR',
     label: 'This user also works as the HR manager',
     hint: 'Opens /hr in full -- people, attendance, leave, payroll and performance reviews -- without changing their role, their shell or any permission they already have.',
+  },
+  {
+    key: 'training',
+    icon: GraduationCap,
+    title: 'Training',
+    label: 'This user also runs training for new hires',
+    hint: 'Lets them upload the training PDFs and recordings, write scenarios, manage the pronunciation lists and see how far each trainee has got -- for the companies picked below, including ones they do not belong to. Their role, shell and permissions are untouched. A fronter manager already manages their own floor without needing this.',
   },
 ];
 
@@ -113,7 +120,7 @@ export default function ModulesSection({ account }) {
       <div className="max-w-2xl">
         <SectionHeader icon={Layers} title="Modules" />
         <Alert type="info" dismissible={false}>
-          Only a superadmin can grant Accounting or HR module access.
+          Only a superadmin can grant Accounting, HR or Training module access.
         </Alert>
       </div>
     );

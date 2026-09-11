@@ -61,6 +61,10 @@ export const ADMIN_TAB_CATALOG = [
   // Superadmin-only here (never a readonly_admin) — quiz creation/assignment is
   // a management action, not a read surface.
   { id: 'quizzes',          label: 'Quizzes',              group: 'content',       roEligible: false, defaultForRo: false, gate: null },
+  // Training portal (mig 311). Read-only eligible: a readonly_admin looking at
+  // what a company teaches its new hires is reading, and every write inside the
+  // portal is refused by readonlyGuard on /api/training anyway.
+  { id: 'training',         label: 'Training',             group: 'content',       roEligible: true,  defaultForRo: false, gate: null },
 
   // Engagement
   { id: 'announcements',    label: 'Announcements',        group: 'engagement',    roEligible: true,  defaultForRo: false, gate: null },

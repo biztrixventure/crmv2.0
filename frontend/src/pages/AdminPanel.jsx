@@ -24,6 +24,9 @@ import FeatureFlagsManager from "../components/Admin/FeatureFlagsManager";
 import FAQManager from "../components/Admin/FAQManager/FAQManager";
 import ScriptManager from "../components/Admin/ScriptManager/ScriptManager";
 import QuizManager from "../components/Quiz/QuizManager";
+// Training portal (mig 311) -- one component, every shell. See
+// components/Training/TrainingPortal.jsx.
+import TrainingPortal from "../components/Training/TrainingPortal";
 import BulkUploadHub from "../components/Admin/BulkUploader/BulkUploadHub";
 import AnnouncementsManager from "../components/Admin/Engagement/AnnouncementsManager";
 import MarqueeManager from "../components/Admin/Engagement/MarqueeManager";
@@ -186,6 +189,7 @@ const AdminPanel = () => {
     ...((isSAorRO || hasPermission('manage_faqs'))     ? [{ id: "faqs",           label: "FAQs"                 }] : []),
     ...((isSAorRO || hasPermission('manage_faqs'))     ? [{ id: "scripts",        label: "Scripts"              }] : []),
     ...(user?.role === 'superadmin'                    ? [{ id: "quizzes",        label: "Quizzes"              }] : []),
+    ...(isSAorRO                                       ? [{ id: "training",       label: "Training"             }] : []),
     ...(isSAorRO                                       ? [{ id: "bulk-upload",    label: "Bulk Upload"          }] : []),
     ...(isSAorRO                                       ? [{ id: "announcements",  label: "Announcements"        }] : []),
     ...(isSAorRO                                       ? [{ id: "marquee",        label: "Marquee"              }] : []),
@@ -260,6 +264,9 @@ const AdminPanel = () => {
       case 'faqs':              return <FAQManager />;
       case 'scripts':           return <ScriptManager />;
       case 'quizzes':           return <QuizManager />;
+      // The same portal every shell mounts -- a superadmin manages the material
+      // for any company from the one company picker inside it.
+      case 'training':          return <TrainingPortal />;
       case 'bulk-upload':       return <BulkUploadHub />;
       case 'announcements':     return <AnnouncementsManager />;
       case 'marquee':           return <MarqueeManager />;

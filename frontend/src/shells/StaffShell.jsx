@@ -25,7 +25,7 @@ import {
   CheckCircle, XCircle, Plus, User, Car, Star, MessageSquare,
   Users, Shield, FileText, BarChart3, AlertTriangle, RefreshCw, CalendarPlus, Pencil, Trash2, Download,
   ChevronLeft, ChevronRight, HelpCircle, CalendarDays, Copy, UserCircle, Database, CreditCard, Award,
-  LayoutGrid, List as ListIcon, ClipboardList,
+  LayoutGrid, List as ListIcon, GraduationCap,
 } from "lucide-react";
 
 const PAGE_SIZE = 25;
@@ -216,7 +216,14 @@ const StaffShell = () => {
   // closerSection below stays on usePersistedState deliberately: it is a toggle
   // INSIDE a tab, not a navigation step, so it should not be a back target.
   const [activeTab, setActiveTab] = useHistoryTab(tabKey, defaultTab);
-  const [activeNav, setActiveNav] = useHistoryTab(navKey, 'dashboard', { param: 'nav' });
+  // A trainee lands ON the training portal, not on an empty dashboard. They hold
+  // no create_transfer / create_sale permission yet, so isFronter and isCloser
+  // are both false for them and the dashboard tabs have nothing to show --
+  // opening there would greet a new hire with a blank screen on the one day it
+  // has to work. Everything else about the shell is unchanged, and the moment
+  // they are promoted the default goes back to 'dashboard' on its own.
+  const [activeNav, setActiveNav] = useHistoryTab(
+    navKey, user?.role === 'trainee' ? 'training' : 'dashboard', { param: 'nav' });
 
   const { stats, loading: statsLoading, fetchStats } = useDashboardStats();
   const { transfers, total: transferTotal, loading: tLoading, fetchTransfers, createTransfer, deleteTransfer } = useTransfers(user?.company_id);
@@ -283,9 +290,11 @@ const StaffShell = () => {
     ...(isEnabledStrict('tool_blacklist_lookup')  ? [{ key: 'dnc',                    label: 'DNC Check',         icon: Shield        }] : []),
     ...(isEnabledStrict('tool_card_validator')    ? [{ key: 'card_validator',         label: 'Card Validator',    icon: CreditCard    }] : []),
     ...(lookupAccess?.any                        ? [{ key: 'customer_lookup',        label: 'Customer Lookup',   icon: Search        }] : []),
-    // Quiz system (mig 273) — anyone can be assigned a quiz; a team lead also
-    // sees their team's progress inline here.
-    { key: 'my_quizzes', label: 'My Quizzes', icon: ClipboardList },
+    // Training (mig 311). This one item replaced "My Quizzes": a quiz IS
+    // training, so the quiz runner became a tab inside the portal rather than a
+    // sibling of it. Always shown — a trainee needs it on day one, and a
+    // fronter promoted out of trainee keeps the same tab in the same place.
+    { key: 'training', label: 'Training', icon: GraduationCap },
   ];
 
   // Sale modal

@@ -39,6 +39,13 @@ export const ROLE_ROUTES = {
   closer:              '/closer',
   fronter:             '/fronter',
 
+  // Trainee (mig 311) -- a fronter who has not been signed off yet. Deliberately
+  // the SAME shell and the SAME URL as a fronter: promoting someone changes
+  // their role and nothing else, so the training tab they have been living in
+  // stays exactly where it was. StaffShell opens them on it (they hold no
+  // create_transfer yet, so the dashboard tabs would be empty).
+  trainee:             '/fronter',
+
   // External recording-portal client — isolated, no CRM surface.
   // Accounting + HR (mig 290). Real role levels exist, but in practice the job
   // is done by a DESIGNATION on an existing role (module_designations), so these
@@ -69,6 +76,10 @@ const ROLE_HIERARCHY = {
   qa_agent:            7, // QA reviewer — isolated shell, gated in hasRoleAccess
   employee:            8, // HR-only self-service rung
   fronter:             8,
+  // Same rung as fronter, NOT one below. hasRoleAccess compares userLevel <=
+  // requiredLevel, so a 9 here would lock a trainee out of the /fronter route
+  // their own ROLE_ROUTES entry sends them to.
+  trainee:             8,
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

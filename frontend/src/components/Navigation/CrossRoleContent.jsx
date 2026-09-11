@@ -22,6 +22,12 @@ const MyQuizzes             = lazy(() => import('../Quiz/MyQuizzes'));
 // them. QuizManager filters every read on `created_by === me`, so pointing an
 // operations_manager at it shows an empty list however many quizzes QA has run.
 const QuizOversight         = lazy(() => import('../Quiz/QuizOversight'));
+// Training portal (mig 311). One component for every shell: a trainee reads it,
+// and a fronter promoted out of trainee keeps the same tab. The quiz runner is
+// a tab INSIDE it now, which is why the staff shells no longer carry a separate
+// "My Quizzes" item -- MyQuizzes itself is unchanged and still mounted below
+// for the shells that list it on its own.
+const TrainingPortal        = lazy(() => import('../Training/TrainingPortal'));
 // Engagement: company-wide incentive programmes. SPIFF Campaigns moved here
 // from the manager shell's Team tab group -- an incentive programme is
 // engagement, not team structure.
@@ -68,6 +74,7 @@ const CrossRoleContent = ({ section, user }) => {
     );
   }
   if (section === 'my_quizzes')              return <Suspense fallback={<ToolFallback />}><MyQuizzes /></Suspense>;
+  if (section === 'training')                return <Suspense fallback={<ToolFallback />}><TrainingPortal /></Suspense>;
   if (section === 'engagement')              return <Suspense fallback={<ToolFallback />}><SpiffManager /></Suspense>;
 
   return null;

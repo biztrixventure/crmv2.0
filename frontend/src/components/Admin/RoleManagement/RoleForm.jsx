@@ -22,6 +22,19 @@ const BLP_TEMPLATES = [
     ],
   },
   {
+    id: 'trainee',
+    label: 'Trainee',
+    level: 'trainee',
+    desc: 'New hire in training — reads the training material and nothing else until they are signed off',
+    // Deliberately tiny. A trainee has not been signed off, so they hold no
+    // create_transfer and no create_sale; promoting them to Fronter is what
+    // grants those. training.view is what opens the portal (mig 311).
+    permissions: [
+      'training.view',
+      'view_notifications',
+    ],
+  },
+  {
     id: 'closer',
     label: 'Closer',
     level: 'closer',
@@ -124,6 +137,7 @@ const BLP_TEMPLATES = [
 ];
 
 const LEVEL_COLORS = {
+  trainee: '#14b8a6',
   fronter: '#10b981',
   fronter_manager: '#f59e0b',
   closer: '#6366f1',
@@ -285,6 +299,7 @@ const RoleForm = ({ role = null, onSubmit, isLoading = false }) => {
           <option value="fronter_manager">Fronter Manager</option>
           <option value="closer">Closer</option>
           <option value="fronter">Fronter</option>
+          <option value="trainee">Trainee</option>
         </ThemedSelect>
         {!role && (
           <p className="text-[11px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>

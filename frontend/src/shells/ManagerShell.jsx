@@ -19,7 +19,7 @@ import {
   Search, Star, Shield, FileText, RefreshCw, Plus,
   MessageSquare, Trash2, Activity, ChevronLeft, ChevronRight, CalendarDays, HelpCircle, FileSpreadsheet, Trophy,
   UserCircle, Database, Settings2, Zap, Building2, CreditCard,
-  LayoutGrid, ChevronUp, ChevronDown, ChevronsUpDown, Target, ClipboardList,
+  LayoutGrid, ChevronUp, ChevronDown, ChevronsUpDown, Target, ClipboardList, GraduationCap,
 } from "lucide-react";
 import { Badge, Alert } from "../components/UI";
 import { Panel, TableScroll, Loading, EmptyState, SectionHeader } from "../components/UI/kit";
@@ -286,7 +286,11 @@ const ManagerShell = ({ workspaceMode = false }) => {
     // near-duplicate tab.
     ...(hasPermission('quiz.manage') || user?.role === 'operations_manager'
       ? [{ key: 'quizzes', label: 'Quizzes', icon: ClipboardList }] : []),
-    { key: 'my_quizzes', label: 'My Quizzes', icon: ClipboardList },
+    // Training (mig 311) replaced "My Quizzes" here for the same reason it did
+    // in the staff shell: the quiz runner is a tab inside the portal now. A
+    // fronter_manager also MANAGES their floor's training from this one item --
+    // the Manage tab appears inside it when the API says they may.
+    { key: 'training', label: 'Training', icon: GraduationCap },
   ];
 
   // ── Tab logic ─────────────────────────────────────────────────────────────

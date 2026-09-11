@@ -1,5 +1,6 @@
 ﻿// ============================================================================
-// utils/moduleAccess.js -- the one gate for the Accounting and HR modules.
+// utils/moduleAccess.js -- the one gate for the Accounting, HR and Training
+// modules.
 //
 // Two ways in, and only two:
 //
@@ -39,7 +40,12 @@ const { supabaseAdmin } = require('../config/database');
 const { hasPermission, isSuperAdmin, isCompanyMember, getUserCompanies } = require('../models/helpers');
 const cache = require('./cache');
 
-const MODULES = ['accounting', 'hr'];
+// 'training' (mig 311) joins the same list on purpose. The Training portal hit
+// the identical wall: the person who owns a company's new hires is already a
+// compliance_manager or a fronter_manager, and moving their role to run it
+// would move their shell. One more entry here gives it the designation, the
+// company scope, the cache and the User Control Center switch for free.
+const MODULES = ['accounting', 'hr', 'training'];
 const DESIG_TTL_MS = 30_000;          // same TTL as the permission cache
 
 // 'accounting.invoices.manage' -> 'accounting'
