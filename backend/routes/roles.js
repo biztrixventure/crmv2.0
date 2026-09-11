@@ -508,8 +508,9 @@ router.delete(
 // ============================================================================
 // POST /roles/seed-defaults?company_id=... — Create BLP default roles
 // Seeds roles based on company_type: 'fronter' or 'closer'.
-// Fronter companies get: Fronter, Fronter Manager, Operations Manager, Company Admin
-// Closer companies get:  Closer, Closer Manager, Compliance Manager, Operations Manager, Company Admin
+// Fronter companies get: Fronter, Fronter Manager, Trainee, Operations Manager, Company Admin
+// Closer companies get:  Closer, Closer Manager, Compliance Manager, Trainee, Operations Manager, Company Admin
+// Trainee is on both sides (mig 311) — every floor trains new hires.
 // Skips any role whose name already exists for the company.
 // SuperAdmin only.
 // ============================================================================
@@ -531,6 +532,25 @@ const COMPANY_ADMIN_ROLE = {
     'submit_call_review', 'submit_call_dispo',
     'view_call_reviews', 'view_all_call_reviews',
     'view_fronter_stats', 'view_closer_stats', 'view_company_reports', 'view_reports',
+    'view_notifications',
+  ],
+};
+
+// Seeded for BOTH company types (mig 311/312). A trainee is a new hire who has
+// not been signed off yet -- a fronter floor and a closer floor both have them,
+// which is why this sits beside OPS_MANAGER_ROLE and COMPANY_ADMIN_ROLE rather
+// than inside one side's list.
+//
+// The permission set is deliberately TINY, and that is the whole point: no
+// create_transfer, no create_sale. Promotion to Fronter or Closer is what grants
+// those, so a trainee cannot touch live leads before someone says they are
+// ready. training.view is what opens the portal.
+const TRAINEE_ROLE = {
+  name: 'Trainee',
+  description: 'New hire in training — works through the training material, no live leads yet',
+  level: 'trainee',
+  permissions: [
+    'training.view',
     'view_notifications',
   ],
 };
@@ -597,6 +617,7 @@ const FRONTER_DEFAULTS = [
       'view_notifications',
     ],
   },
+  TRAINEE_ROLE,
   OPS_MANAGER_ROLE,
   COMPANY_ADMIN_ROLE,
 ];
@@ -663,6 +684,7 @@ const CLOSER_DEFAULTS = [
       'view_notifications',
     ],
   },
+  TRAINEE_ROLE,
   OPS_MANAGER_ROLE,
   COMPANY_ADMIN_ROLE,
 ];
