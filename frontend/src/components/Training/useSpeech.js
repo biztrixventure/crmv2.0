@@ -1,359 +1,466 @@
 // ============================================================================
-// useSpeech -- pronunciation for the Tool Kit, using the browser's own voice.
+// useSpeech -- the pronunciation engine behind the Tool Kit.
 //
-// WHY THE BROWSER AND NOT AN API: the ask was for this to cost nothing. The Web
-// Speech API ships in every browser this CRM already supports, runs on the
-// agent's own machine, needs no key, no quota and no network round trip -- and
-// it is the only free option that emits `onboundary`, which is what makes the
-// text light up in time with the audio. A hosted TTS would return one audio
-// blob with no timings, so the highlight would have to be faked.
+// Free and local: the browser's own Web Speech voice, American voices only.
+// No key, no quota, no network for the voices Windows ships.
 //
-// AMERICAN VOICES ONLY. These are US warranty calls; an en-GB voice teaching an
-// agent to say "Nissan" or "Hyundai" teaches the wrong thing. The voice list is
-// filtered to en-US and ranked by the local voices that are actually good,
-// falling back to plain en-* only if a machine has no US voice at all -- an
-// accented pronunciation beats silence.
+// HOW THE HIGHLIGHT STAYS IN TIME -- and why the first two versions did not.
+// This was rebuilt from measurements, not guesses (Chrome 152, Windows, the
+// Microsoft David/Mark/Zira voices, ~250 names from the live catalog, timed
+// silently from the engine's own events on 2026-09-11). Three facts drive it:
 //
-// SYLLABLE TIMING -- the part that is not simply "read the event".
-// `onboundary` fires once per WORD; no browser reports syllables. But a card
-// showing "Volk-swa-gen" has to light Volk, then swa, then gen, so the syllables
-// inside a word are STEPPED on a timer between two word boundaries. The step is
-// self-calibrating: each boundary measures how long the previous word actually
-// took and divides by its syllable count, so the pace follows the chosen voice
-// and rate instead of a guess that drifts. The first word uses an estimate; by
-// the second it is measuring the real thing. A word boundary always snaps the
-// highlight back into sync, so an estimate can never accumulate error.
+//   1. `onstart` is NOT when the voice starts. The first word began 120 ms to
+//      2.5 s after it. Starting the highlight on onstart -- which the old code
+//      did -- swept through the whole word in silence.
+//   2. `onend` is NOT when the voice stops. It fired 700-900 ms after the last
+//      sound. Holding the highlight until onend left the last syllable lit for
+//      most of a second after the word was over.
+//   3. The word-boundary event IS exact, and it fires for more than words:
+//      "CX-90" fires one for CX and one for ninety; "RAM 3500" fires five. The
+//      speechUnits model predicted the event count for 229 of 229 measured
+//      names across three voices and five speeds.
 //
-// TWO BROWSER QUIRKS ARE HANDLED HERE, NOT BY CALLERS:
-//   1. getVoices() is empty on first call in Chrome until `voiceschanged`
-//      fires. Reading it once at mount gives you an empty picker forever.
-//   2. speechSynthesis keeps speaking after the component unmounts, and after
-//      a route change you get a disembodied voice with no way to stop it. The
-//      cleanup cancels.
+// So every unit that STARTS with an event is pinned to that event, exactly.
+// What no event reports is where inside a word one syllable ends and the next
+// begins, and when the LAST word ends. Those come from a duration model that
+// was fitted to the same measurements and then corrected, live, from every
+// event gap this trainee's own voice produces -- per voice AND per speed,
+// because SAPI's speed steps are not smooth (0.8x, 1x and 1.25x measured
+// almost identical). A name spoken once is remembered exactly after that.
+//
+// Voices that report no boundaries at all (Chrome's network "Google" voices)
+// fall back to the same timeline run from the clock. It is approximate, and
+// the voice picker says so instead of pretending.
+//
+// PERFORMANCE: the clock ticks on requestAnimationFrame and publishes to a tiny
+// external store. A card subscribes to ITS OWN cursor, so only the card being
+// spoken re-renders -- not every card in a 300-name grid, every frame.
 // ============================================================================
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
+import { segment } from './speechUnits';
 
 const synth = typeof window !== 'undefined' ? window.speechSynthesis : null;
+const SUPPORTED = !!synth && typeof window !== 'undefined' && 'SpeechSynthesisUtterance' in window;
+const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
-// Voices that actually sound like a person, best first. Matched loosely on the
-// name because the same voice is labelled differently across platforms.
-const PREFERRED = [
-  'google us english', 'samantha', 'aria', 'jenny', 'ava', 'allison',
-  'microsoft zira', 'microsoft david', 'microsoft mark', 'alex', 'nicky',
-];
-
-const rank = (v) => {
-  const n = (v.name || '').toLowerCase();
-  const i = PREFERRED.findIndex(p => n.includes(p));
-  return i === -1 ? PREFERRED.length : i;
+// ── remembered measurements ──────────────────────────────────────────────────
+const MEM_KEY = 'training.tts.v2';
+const MAX_TOKENS = 3000;
+let mem = { scale: {}, tok: {}, caps: {} };
+try {
+  const raw = JSON.parse(localStorage.getItem(MEM_KEY) || 'null');
+  if (raw && typeof raw === 'object') mem = { scale: raw.scale || {}, tok: raw.tok || {}, caps: raw.caps || {} };
+} catch { /* private window: learn per session only */ }
+let saveTimer = null;
+const saveMem = () => {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    try {
+      const keys = Object.keys(mem.tok);
+      if (keys.length > MAX_TOKENS) for (const k of keys.slice(0, keys.length - MAX_TOKENS)) delete mem.tok[k];
+      localStorage.setItem(MEM_KEY, JSON.stringify(mem));
+    } catch { /* quota or private window */ }
+  }, 500);
 };
 
+// Duration vs speed, measured on SAPI (David): 0.6x -> 1.19, 0.8x -> 1.035,
+// 1x -> 1, 1.25x -> ~1, 1.5x -> 0.86. Only a starting point -- the learned
+// scale for a voice+speed replaces it after the first measured gap.
+const RATE_PRIOR = [[0.5, 1.28], [0.6, 1.19], [0.8, 1.035], [1.0, 1.0], [1.25, 1.0], [1.5, 0.862], [2.0, 0.72]];
+function ratePrior(r) {
+  if (r <= RATE_PRIOR[0][0]) return RATE_PRIOR[0][1];
+  for (let i = 1; i < RATE_PRIOR.length; i++) {
+    const [r1, f1] = RATE_PRIOR[i];
+    if (r <= r1) {
+      const [r0, f0] = RATE_PRIOR[i - 1];
+      return f0 + ((r - r0) / (r1 - r0)) * (f1 - f0);
+    }
+  }
+  return RATE_PRIOR[RATE_PRIOR.length - 1][1];
+}
+const rateKey = (r) => (Math.round(r * 20) / 20).toFixed(2);
+const scaleOf = (voiceKey, r) => {
+  const own = mem.scale[`${voiceKey}|${rateKey(r)}`];
+  if (own) return own;
+  const base = mem.scale[`${voiceKey}|1.00`] || 1;
+  return ratePrior(r) * base;
+};
+const tokKey = (voiceKey, r, text) => `${voiceKey}|${rateKey(r)}|${text.toLowerCase()}`;
+
+// ── voices ───────────────────────────────────────────────────────────────────
 const isUS = (v) => /^en[-_]US$/i.test(v.lang || '');
 const isEn = (v) => /^en([-_]|$)/i.test(v.lang || '');
-
-// A syllable may START with these; anything else in a consonant cluster belongs
-// to the syllable before it. This is the single rule that turns "vol-kswa-gen"
-// into "volk-swa-gen" and keeps "at-las" from becoming "a-tlas".
-const ONSETS = new Set([
-  'bl', 'br', 'ch', 'cl', 'cr', 'dr', 'fl', 'fr', 'gl', 'gr', 'ph', 'pl', 'pr',
-  'qu', 'sc', 'sh', 'sk', 'sl', 'sm', 'sn', 'sp', 'st', 'sw', 'th', 'tr', 'tw',
-  'wh', 'wr',
-]);
-
-/**
- * Split text into the words a boundary event can land on, keeping each word's
- * character offsets. `onboundary` reports a charIndex into the ORIGINAL string,
- * so the offsets are what turn that number back into "which word is it saying".
- */
-export function tokenize(text) {
-  const out = [];
-  const re = /\S+/g;
-  let m;
-  while ((m = re.exec(String(text || '')))) {
-    out.push({ word: m[0], start: m.index, end: m.index + m[0].length });
-  }
-  return out;
-}
-
-/**
- * Break a word into readable syllables: "Volkswagen" -> ["Volk","swa","gen"].
- *
- * A display aid, not a phonetic transcription -- English spelling does not
- * support one of those without a dictionary, and where a manager has typed a
- * real phonetic hint the card shows that instead and never calls this. What it
- * has to get right is chunking an unfamiliar name so an agent can say it, and
- * that comes down to two rules:
- *
- *   1. 'y' is a vowel EXCEPT straight after another vowel, where it opens the
- *      next syllable -- "toyota" is to-yo-ta, not toyo-ta.
- *   2. A consonant cluster between two vowels splits so the next syllable
- *      starts with at most a real English onset. One consonant moves on whole
- *      ("sa-turn"); "tl" is not an onset so it splits ("at-las"); "sw" is, so
- *      "volkswagen" breaks volk-swa-gen.
- */
-export function syllabify(word) {
-  const w = String(word || '').trim();
-  if (!w) return [];
-  const lower = w.toLowerCase();
-  if (lower.length < 3) return [w];
-
-  // Rule 1 -- vowel map, with 'y' demoted after a vowel.
-  const isV = [];
-  for (let i = 0; i < lower.length; i++) {
-    const ch = lower[i];
-    let v = 'aeiou'.includes(ch);
-    if (!v && ch === 'y') v = !(i > 0 && 'aeiou'.includes(lower[i - 1]));
-    isV.push(v);
-  }
-
-  // Vowel groups -- one nucleus each, so one syllable each.
-  const groups = [];
-  for (let i = 0; i < lower.length;) {
-    if (!isV[i]) { i += 1; continue; }
-    const start = i;
-    while (i < lower.length && isV[i]) i += 1;
-    groups.push([start, i - 1]);
-  }
-  if (groups.length <= 1) return [w];
-
-  // Rule 2 -- one cut per gap between nuclei.
-  const cuts = [];
-  for (let g = 0; g < groups.length - 1; g++) {
-    const from = groups[g][1] + 1;      // first consonant after this nucleus
-    const to   = groups[g + 1][0];      // first letter of the next nucleus
-    const n    = to - from;             // consonants between them
-    let cut;
-    if (n <= 0)       cut = to;                     // nuclei touch
-    else if (n === 1) cut = from;                   // V-CV: consonant moves on
-    else {
-      const two = lower.slice(to - 2, to);
-      cut = ONSETS.has(two) ? to - 2 : to - 1;
-      if (cut < from) cut = from;
-    }
-    cuts.push(cut);
-  }
-
-  const parts = [];
-  let start = 0;
-  for (const c of cuts) {
-    if (c > start) { parts.push(w.slice(start, c)); start = c; }
-  }
-  parts.push(w.slice(start));
-  return parts.filter(Boolean);
-}
-
-/** Every word of a phrase with its syllables — what the card renders. */
-export function syllableMap(text) {
-  return tokenize(text).map(t => ({ ...t, syllables: syllabify(t.word) }));
-}
-
-// Starting guess for one syllable at rate 1.0, before any measurement. Roughly
-// a natural speaking pace; the calibration below replaces it after one word.
-const BASE_SYLLABLE_MS = 230;
-
-export default function useSpeech() {
-  const supported = !!synth && typeof window !== 'undefined' && 'SpeechSynthesisUtterance' in window;
-
-  const [voices, setVoices] = useState([]);
-  const [voiceURI, setVoiceURI] = useState(() => {
-    try { return localStorage.getItem('training.voice') || ''; } catch { return ''; }
-  });
-  const [rate, setRateState] = useState(() => {
-    try { return parseFloat(localStorage.getItem('training.rate')) || 1; } catch { return 1; }
-  });
-
-  // What is being said right now: which card, which word of it, which syllable
-  // of that word.
-  const [speakingId, setSpeakingId]       = useState(null);
-  const [wordIndex, setWordIndex]         = useState(-1);
-  const [syllableIndex, setSyllableIndex] = useState(-1);
-
-  const tokensRef   = useRef([]);
-  const utterRef    = useRef(null);
-  const stepRef     = useRef(null);   // interval walking syllables inside a word
-  const msPerSylRef = useRef(BASE_SYLLABLE_MS);
-  const lastAtRef   = useRef(0);      // when the previous boundary fired
-  const lastWordRef = useRef(-1);
-
-  // Quirk 1: the list arrives asynchronously. Read it now AND on voiceschanged.
-  useEffect(() => {
-    if (!supported) return undefined;
-    const load = () => {
-      const all = synth.getVoices() || [];
-      const us = all.filter(isUS);
-      const pool = us.length ? us : all.filter(isEn);
-      setVoices(pool.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name)));
-    };
-    load();
-    synth.addEventListener?.('voiceschanged', load);
-    return () => synth.removeEventListener?.('voiceschanged', load);
-  }, [supported]);
-
-  const clearStep = () => {
-    if (stepRef.current) { clearInterval(stepRef.current); stepRef.current = null; }
+// Ranking: voices that REPORT word timing first (the highlight is exact on
+// them), then by how human they sound. Edge's "Online (Natural)" voices do
+// both; Chrome's network "Google" voices report nothing, so they go last.
+const PREFERRED = ['aria', 'jenny', 'guy', 'ava', 'andrew', 'emma', 'brian', 'zira', 'david', 'mark', 'samantha', 'alex', 'allison'];
+export const reportsTiming = (v) => {
+  if (!v) return false;
+  const known = mem.caps[v.voiceURI];
+  if (known) return known.b;
+  if (/^google/i.test(v.name)) return false;
+  return v.localService || /natural|online/i.test(v.name);
+};
+function rankVoices(pool) {
+  const pref = (v) => {
+    const n = (v.name || '').toLowerCase();
+    const i = PREFERRED.findIndex(p => n.includes(p));
+    return i === -1 ? PREFERRED.length : i;
   };
+  return [...pool].sort((a, b) =>
+    (Number(reportsTiming(b)) - Number(reportsTiming(a)))
+    || (Number(/natural/i.test(b.name)) - Number(/natural/i.test(a.name)))
+    || pref(a) - pref(b)
+    || a.name.localeCompare(b.name));
+}
 
-  // Quirk 2: stop talking when the portal closes, and take the timer with it.
-  useEffect(() => () => {
-    clearStep();
-    try { synth?.cancel(); } catch { /* nothing to cancel */ }
-  }, []);
+// ── the store: controls (rarely change) and cursor (every unit) ──────────────
+const IDLE = Object.freeze({ id: null, phase: 'idle', token: -1, unit: -1 });
+let cursor = IDLE;
+let controls = {
+  voices: [],
+  voiceURI: (() => { try { return localStorage.getItem('training.voice') || ''; } catch { return ''; } })(),
+  rate: (() => { try { return parseFloat(localStorage.getItem('training.rate')) || 1; } catch { return 1; } })(),
+  speakingId: null,
+};
+const cursorSubs = new Set();
+const controlSubs = new Set();
+const setCursor = (next) => {
+  if (next.id === cursor.id && next.phase === cursor.phase && next.token === cursor.token && next.unit === cursor.unit) return;
+  cursor = next;
+  cursorSubs.forEach(f => f());
+};
+const setControls = (patch) => {
+  controls = { ...controls, ...patch };
+  controlSubs.forEach(f => f());
+};
 
-  const stop = useCallback(() => {
-    clearStep();
-    try { synth?.cancel(); } catch { /* already stopped */ }
-    utterRef.current = null;
-    setSpeakingId(null);
-    setWordIndex(-1);
-    setSyllableIndex(-1);
-  }, []);
+function loadVoices() {
+  const all = synth.getVoices() || [];
+  const us = all.filter(isUS);
+  setControls({ voices: rankVoices(us.length ? us : all.filter(isEn)) });
+}
+// getVoices() is empty until `voiceschanged` in Chrome -- read now AND later,
+// or the picker stays empty forever.
+if (SUPPORTED) {
+  loadVoices();
+  synth.addEventListener?.('voiceschanged', loadVoices);
+}
+const pickVoice = () => controls.voices.find(v => v.voiceURI === controls.voiceURI) || controls.voices[0] || null;
 
-  const setVoice = useCallback((uri) => {
-    setVoiceURI(uri);
-    try { localStorage.setItem('training.voice', uri); } catch { /* private window */ }
-  }, []);
+// ── the timeline for one utterance ───────────────────────────────────────────
+// events[]: every boundary event we expect, in order, with the units it starts
+// and its share of their time (a number word shares one unit with its
+// siblings: "3500" is one unit, four events).
+function buildPlan(text) {
+  const { tokens } = segment(text);
+  const events = [];
+  tokens.forEach((tok, ti) => {
+    const ub = tok.unitBoundary;
+    const count = {};
+    ub.forEach(u => { count[u] = (count[u] || 0) + 1; });
+    ub.forEach((u0, k) => {
+      const next = k + 1 < ub.length ? ub[k + 1] : tok.units.length;
+      const shared = count[u0] > 1;
+      events.push({ ti, k, u0, u1: shared ? u0 + 1 : Math.max(next, u0 + 1), frac: shared ? 1 / count[u0] : 1 });
+    });
+  });
+  const firstEvent = [];          // token -> index of its first event
+  const lastEvent = [];           // token -> index of its last event
+  events.forEach((e, i) => { if (e.k === 0) firstEvent[e.ti] = i; lastEvent[e.ti] = i; });
+  return { tokens, events, firstEvent, lastEvent };
+}
 
-  const setRate = useCallback((r) => {
-    setRateState(r);
-    try { localStorage.setItem('training.rate', String(r)); } catch { /* private window */ }
-  }, []);
+// Raw (rate 1, unscaled) ms of one event's span.
+const rawSpan = (plan, e) => {
+  const units = plan.tokens[e.ti].units;
+  let ms = 0;
+  for (let u = e.u0; u < e.u1; u++) ms += units[u].ms;
+  return ms * e.frac;
+};
 
-  /**
-   * Say something.
-   *   speak('Volkswagen Atlas', { id: 'model-42' })
-   *   speak(term, { id, rate: 0.6 })       // the Slow button
-   *
-   * `id` is how a card knows the highlight belongs to it. Speaking always
-   * cancels whatever was already playing -- two voices at once is never what
-   * someone clicking a second card meant.
-   */
-  const speak = useCallback((text, { id = null, rate: rateOverride, onDone } = {}) => {
-    if (!supported) return;
-    const body = String(text || '').trim();
-    if (!body) return;
+// Scaled ms of one unit for this run: the exact remembered length of the token
+// when we have one, otherwise the model times the learned pace.
+function unitMs(run, ti, u) {
+  const tok = run.plan.tokens[ti];
+  const exact = mem.tok[tokKey(run.voiceKey, run.rate, tok.text)];
+  if (exact && tok.ms > 0) return tok.units[u].ms * (exact / tok.ms);
+  return tok.units[u].ms * run.scale;
+}
+const spanMs = (run, e) => {
+  let ms = 0;
+  for (let u = e.u0; u < e.u1; u++) ms += unitMs(run, e.ti, u);
+  return ms * e.frac;
+};
 
-    stop();
-    const tokens = syllableMap(body);
-    tokensRef.current = tokens;
-
-    const u = new SpeechSynthesisUtterance(body);
-    const picked = voices.find(v => v.voiceURI === voiceURI) || voices[0];
-    if (picked) { u.voice = picked; u.lang = picked.lang; }
-    else u.lang = 'en-US';
-    const used = Math.min(2, Math.max(0.4, rateOverride ?? rate));
-    u.rate = used;
-
-    // Reset the pace model for this utterance -- a slow replay of the same word
-    // must not inherit the fast run's measurement.
-    msPerSylRef.current = BASE_SYLLABLE_MS / used;
-    lastAtRef.current = 0;
-    lastWordRef.current = -1;
-
-    const nowMs = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
-
-    // Walk the syllables of one word until the next boundary snaps us straight.
-    const stepThrough = (count) => {
-      clearStep();
-      if (count <= 1) return;
-      let k = 0;
-      stepRef.current = setInterval(() => {
-        k += 1;
-        if (k >= count) { clearStep(); return; }
-        setSyllableIndex(k);
-      }, Math.max(70, msPerSylRef.current));
-    };
-
-    u.onstart = () => {
-      setSpeakingId(id);
-      if (!tokens.length) return;
-      setWordIndex(0);
-      setSyllableIndex(0);
-      lastAtRef.current = nowMs();
-      lastWordRef.current = 0;
-      stepThrough(tokens[0].syllables.length);
-    };
-
-    u.onboundary = (e) => {
-      if (e.name && e.name !== 'word') return;
-      const at = e.charIndex ?? 0;
-      // The boundary lands ON or just before a word; take the last token that
-      // has started, so a mid-word event does not skip the highlight ahead.
-      let idx = -1;
-      for (let i = 0; i < tokens.length; i++) { if (tokens[i].start <= at) idx = i; else break; }
-      if (idx < 0) return;
-
-      const now = nowMs();
-      // Calibrate from the word we just finished: how long it really took,
-      // divided by how many syllables it had. Bounded so one hiccup (a tab
-      // going to the background, say) cannot poison the pace.
-      const prev = lastWordRef.current;
-      if (lastAtRef.current && prev >= 0 && prev !== idx) {
-        const sylCount = tokens[prev]?.syllables.length || 1;
-        const measured = (now - lastAtRef.current) / sylCount;
-        if (measured > 60 && measured < 700) {
-          msPerSylRef.current = msPerSylRef.current * 0.5 + measured * 0.5;
-        }
+// Where is the voice now? Walk forward from the last real event by predicted
+// spans. While the NEXT event is still expected, hold on the current span's
+// last unit (the model was short) -- but only for so long: if an event never
+// comes (a different engine that skips one), carry on by the clock.
+const HOLD = 1.6;
+function locate(run, t) {
+  const { events } = run.plan;
+  let idx = Math.max(run.ev, 0);
+  let rem = t - run.anchor;
+  for (;;) {
+    const e = events[idx];
+    const span = spanMs(run, e);
+    if (rem < span) {
+      let acc = 0;
+      for (let u = e.u0; u < e.u1; u++) {
+        acc += unitMs(run, e.ti, u) * e.frac;
+        if (rem < acc) return { ti: e.ti, ui: u };
       }
-      lastAtRef.current = now;
-      lastWordRef.current = idx;
+      return { ti: e.ti, ui: e.u1 - 1 };
+    }
+    if (idx === events.length - 1) return { done: true };
+    const waitingForEvent = run.mode === 'events' && idx === run.ev;
+    if (waitingForEvent && rem < span * HOLD) return { ti: e.ti, ui: e.u1 - 1 };
+    rem -= span;
+    idx += 1;
+  }
+}
 
-      setWordIndex(idx);
-      setSyllableIndex(0);
-      stepThrough(tokens[idx].syllables.length);
-    };
+// ── the engine ───────────────────────────────────────────────────────────────
+let gen = 0;
+let run = null;
+let raf = 0;
+let keepAlive = null;    // Chrome GCs an unreferenced utterance and drops its events
+let sequence = null;
+const LEAD_MS = 150;     // clock-only voices: a guess at the silence before speech
 
-    const finish = () => {
-      clearStep();
-      setSpeakingId(null);
-      setWordIndex(-1);
-      setSyllableIndex(-1);
-      utterRef.current = null;
-      onDone?.();
-    };
-    u.onend = finish;
-    u.onerror = finish;
+function tick() {
+  raf = 0;
+  const r = run;
+  if (!r || r.gen !== gen) return;
+  if (r.mode) {
+    const t = now();
+    // Clock-only voices anchor a little after onstart (the silence before the
+    // first word). Until then nothing is being said, so nothing is lit.
+    if (t < r.anchor) {
+      setCursor({ id: r.id, phase: 'wait', token: -1, unit: -1 });
+      raf = requestAnimationFrame(tick);
+      return;
+    }
+    const pos = locate(r, t);
+    if (pos.done) {
+      // The voice has finished even though onend is most of a second away:
+      // show the word as said, and stop drawing.
+      setCursor({ id: r.id, phase: 'done', token: -1, unit: -1 });
+      return;
+    }
+    setCursor({ id: r.id, phase: 'speak', token: pos.ti, unit: pos.ui });
+  }
+  raf = requestAnimationFrame(tick);
+}
+const startClock = () => { if (!raf) raf = requestAnimationFrame(tick); };
+const stopClock = () => { if (raf) cancelAnimationFrame(raf); raf = 0; };
 
-    utterRef.current = u;
-    // Chrome will not start a queued utterance while paused -- a stray pause
-    // from a previous session otherwise leaves the portal permanently mute.
-    try { synth.resume(); } catch { /* not paused */ }
-    synth.speak(u);
-  }, [supported, voices, voiceURI, rate, stop]);
+function learn(r, measured, raw) {
+  if (raw <= 0) return;
+  const ratio = measured / raw;
+  if (ratio < 0.45 || ratio > 2.4) return;          // a stall or a skipped event, not pace
+  const key = `${r.voiceKey}|${rateKey(r.rate)}`;
+  const prev = mem.scale[key] || r.scale;
+  const next = prev * 0.7 + ratio * 0.3;
+  mem.scale[key] = next;
+  r.scale = next;                                    // the rest of THIS name uses it too
+  saveMem();
+}
 
-  /**
-   * Read a list one item at a time, so a trainee can drill without clicking.
-   * Chains on each utterance's own `end` rather than a timer, because how long
-   * a word takes depends on the voice and the rate.
-   */
-  const speakSequence = useCallback((items, { rate: rateOverride, onItem, onDone } = {}) => {
-    if (!supported || !items?.length) return undefined;
-    let i = 0;
-    let cancelled = false;
-    const next = () => {
-      if (cancelled || i >= items.length) { onDone?.(); return; }
-      const item = items[i++];
-      onItem?.(item, i - 1);
-      speak(item.text, { id: item.id, rate: rateOverride, onDone: next });
-    };
-    next();
-    return () => { cancelled = true; stop(); };
-  }, [supported, speak, stop]);
+function onEvent(r, charIndex, t) {
+  // Events arriving after the clock fallback kicked in (a cold engine that took
+  // longer than the fallback wait): the real timing wins. Start over from them.
+  if (r.mode === 'time') { r.mode = null; r.ev = -1; }
+  const { tokens, events, firstEvent, lastEvent } = r.plan;
+  let ti = 0;
+  for (let i = 0; i < tokens.length; i++) { if (tokens[i].start <= charIndex) ti = i; else break; }
+  // The engine still says a token we cannot light ("&" -> "and"); that event
+  // belongs to no unit, so it moves nothing.
+  if (firstEvent[ti] == null) return;
+  const k = (r.tokCount[ti] = (r.tokCount[ti] ?? -1) + 1);
+  const idx = Math.min(firstEvent[ti] + k, lastEvent[ti]);
+  if (idx <= r.ev) return;        // an extra event this engine fires; never jump back
 
-  const activeVoice = voices.find(v => v.voiceURI === voiceURI)?.voiceURI || voices[0]?.voiceURI || '';
+  if (!mem.caps[r.voiceKey]?.b) { mem.caps[r.voiceKey] = { b: true }; saveMem(); }
+  if (r.mode === 'events' && r.ev >= 0) {
+    // The gap since the last event is a real measurement of what the model
+    // predicted for everything in between.
+    let raw = 0;
+    for (let i = r.ev; i < idx; i++) raw += rawSpan(r.plan, events[i]);
+    learn(r, t - r.anchor, raw);
+  }
+  if (k === 0 && ti > 0 && r.tokFirstAt[ti - 1] != null) {
+    // The previous name ended exactly now: remember its true length.
+    mem.tok[tokKey(r.voiceKey, r.rate, tokens[ti - 1].text)] = Math.round(t - r.tokFirstAt[ti - 1]);
+    saveMem();
+  }
+  if (k === 0) r.tokFirstAt[ti] = t;
+  r.mode = 'events';
+  r.ev = idx;
+  r.anchor = t;
+  clearTimeout(r.fallback);
+  startClock();
+}
 
+function beginClockOnly(r, anchor) {
+  if (r.mode) return;
+  r.mode = 'time';
+  r.ev = 0;
+  r.anchor = anchor;
+  startClock();
+}
+
+function finish(r, natural) {
+  clearTimeout(r.fallback);
+  stopClock();
+  if (natural && r.mode !== 'events' && now() - r.startAt > 500) {
+    // A whole utterance and not one timing event: this voice does not report
+    // them. Remember, so next time it goes straight to the clock.
+    mem.caps[r.voiceKey] = { b: false };
+    saveMem();
+  }
+  run = null;
+  setCursor(IDLE);
+  setControls({ speakingId: null });
+  if (natural && r.onDone) setTimeout(r.onDone, 0);
+}
+
+function stop() {
+  gen += 1;
+  sequence = null;
+  if (run) { clearTimeout(run.fallback); run = null; }
+  stopClock();
+  try { synth?.cancel(); } catch { /* nothing to cancel */ }
+  setCursor(IDLE);
+  if (controls.speakingId !== null) setControls({ speakingId: null });
+}
+
+/**
+ * Say something, and drive the highlight for the card with this `id`.
+ *   speak('Volkswagen Atlas', { id: 'model-42' })
+ *   speak(term, { id, rate: 0.6 })          // the Slow button
+ * Always replaces whatever was playing -- two voices at once is never what a
+ * second click meant.
+ */
+function speak(text, { id = null, rate, onDone, fromSequence = false } = {}) {
+  if (!SUPPORTED) return;
+  const body = String(text || '').trim();
+  if (!body) return;
+  const keepSequence = fromSequence ? sequence : null;
+  stop();
+  sequence = keepSequence;
+  const myGen = gen;
+
+  const voice = pickVoice();
+  const voiceKey = voice ? voice.voiceURI : 'default';
+  const useRate = Math.min(2, Math.max(0.5, rate ?? controls.rate));
+  const r = {
+    gen: myGen, id, voiceKey, rate: useRate, plan: buildPlan(body),
+    scale: scaleOf(voiceKey, useRate), mode: null, ev: -1, anchor: 0,
+    tokCount: [], tokFirstAt: [], startAt: now(), fallback: 0, onDone,
+  };
+  if (!r.plan.events.length) return;
+  run = r;
+  setControls({ speakingId: id });
+  // Before the first real sound: the card shows it is about to speak, and
+  // lights nothing yet.
+  setCursor({ id, phase: 'wait', token: -1, unit: -1 });
+
+  const u = new SpeechSynthesisUtterance(body);
+  if (voice) { u.voice = voice; u.lang = voice.lang; } else u.lang = 'en-US';
+  u.rate = useRate;
+
+  // Decided up front, not after a wait: a voice known (or named) not to report
+  // timing goes straight to the clock, or its FIRST play -- a name shorter than
+  // any sensible wait -- would never light at all. If it turns out to report
+  // events after all, onEvent takes over and the guess costs nothing.
+  const expectsEvents = reportsTiming(voice);
+
+  u.onstart = () => {
+    if (myGen !== gen) return;
+    r.startAt = now();
+    if (!expectsEvents) { beginClockOnly(r, r.startAt + LEAD_MS); return; }
+    // An event-reporting voice can still take 2.5 s to start from cold, so
+    // wait generously before deciding it never will.
+    r.fallback = setTimeout(() => {
+      if (myGen === gen && !r.mode) beginClockOnly(r, now());
+    }, mem.caps[voiceKey]?.b ? 4000 : 2500);
+  };
+  u.onboundary = (e) => {
+    if (myGen !== gen) return;
+    if (e.name && e.name !== 'word') return;
+    onEvent(r, e.charIndex ?? 0, now());
+  };
+  u.onend = () => { if (myGen === gen) finish(r, true); };
+  u.onerror = () => { if (myGen === gen) finish(r, false); };
+
+  keepAlive = u;
+  // A paused engine will not start a queued utterance.
+  try { synth.resume(); } catch { /* not paused */ }
+  synth.speak(u);
+}
+
+/**
+ * Read a list one name at a time. Each name waits for the previous one's own
+ * end event rather than a timer, because how long a name takes depends on the
+ * voice and the speed. Any other speak() or stop() ends the sequence.
+ */
+function speakSequence(items, { rate, onDone } = {}) {
+  if (!SUPPORTED || !items?.length) return () => {};
+  const token = {};
+  sequence = token;
+  let i = 0;
+  const next = () => {
+    if (sequence !== token) return;
+    if (i >= items.length) { sequence = null; onDone?.(); return; }
+    const it = items[i++];
+    speak(it.text, { id: it.id, rate, fromSequence: true, onDone: () => setTimeout(next, 120) });
+  };
+  next();
+  return () => { if (sequence === token) stop(); };
+}
+
+function setVoice(uri) {
+  setControls({ voiceURI: uri });
+  try { localStorage.setItem('training.voice', uri); } catch { /* private window */ }
+}
+function setRate(r) {
+  setControls({ rate: r });
+  try { localStorage.setItem('training.rate', String(r)); } catch { /* private window */ }
+}
+
+// ── React bindings ───────────────────────────────────────────────────────────
+const subscribeControls = (f) => { controlSubs.add(f); return () => controlSubs.delete(f); };
+const subscribeCursor   = (f) => { cursorSubs.add(f);  return () => cursorSubs.delete(f); };
+const getControls = () => controls;
+
+/** The panel's view: voices, speed, and the verbs. Re-renders on start/stop only. */
+export default function useSpeech() {
+  const c = useSyncExternalStore(subscribeControls, getControls);
+  // Stop talking when the panel goes away -- speechSynthesis outlives the
+  // component, and a voice with no screen behind it cannot be stopped.
+  useEffect(() => () => stop(), []);
+  const voice = c.voices.find(v => v.voiceURI === c.voiceURI) || c.voices[0] || null;
   return {
-    supported,
-    voices,
-    voiceURI: activeVoice,
+    supported: SUPPORTED,
+    voices: c.voices,
+    voiceURI: voice?.voiceURI || '',
+    voiceTimed: reportsTiming(voice),
     setVoice,
-    rate,
+    rate: c.rate,
     setRate,
+    speakingId: c.speakingId,
     speak,
     speakSequence,
     stop,
-    speakingId,
-    wordIndex,
-    syllableIndex,
-    tokens: tokensRef.current,
   };
+}
+
+/**
+ * One card's view of the cursor. Every other card gets the same frozen IDLE
+ * object back, so React skips re-rendering them entirely.
+ */
+export function useSpeechCursor(id) {
+  return useSyncExternalStore(subscribeCursor, () => (cursor.id === id ? cursor : IDLE));
 }
