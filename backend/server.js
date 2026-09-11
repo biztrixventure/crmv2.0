@@ -239,9 +239,16 @@ const PORT = process.env.PORT || 3001;
 // The Supabase project origin, for the CSP directives that have to name it.
 // Derived from SUPABASE_URL so a project move needs no code change; the wildcard
 // is the fallback and matches what connectSrc has always used.
+// VITE_SUPABASE_URL is the name this backend actually boots from -- see
+// config/database.js, which throws on it by that name. SUPABASE_URL is accepted
+// too because the docs and .env.example have used both. Getting the name wrong
+// is not fatal, it just silently widens the directive to the wildcard, so read
+// both rather than pin the tighter origin on a guess.
 const SUPABASE_ORIGIN = (() => {
-  try { return new URL(process.env.SUPABASE_URL).origin; }
-  catch { return 'https://*.supabase.co'; }
+  for (const v of [process.env.VITE_SUPABASE_URL, process.env.SUPABASE_URL]) {
+    try { if (v) return new URL(v).origin; } catch { /* try the next one */ }
+  }
+  return 'https://*.supabase.co';
 })();
 
 app.use(helmet({
