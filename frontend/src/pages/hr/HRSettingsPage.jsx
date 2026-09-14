@@ -6,6 +6,8 @@
 //   People from the CRM   (stage 2) who gets an HR record automatically, the
 //                         employee-number prefix, whether a switched-off login
 //                         opens a "confirm exit" case
+//   Attendance            (stage 4) the dialer-sync rules, holidays, re-sync
+//                         -- AttendanceRulesPanel.jsx
 // Every save lands in the change record (mig 313) with who changed it.
 // ============================================================================
 import { useEffect, useState } from 'react';
@@ -16,6 +18,7 @@ import { Alert } from '../../components/UI';
 import { Btn } from '../../components/Modules/ModuleUI';
 import { HistoryButton } from '../../components/Modules/RecordHistory';
 import { fmtDate } from '../../utils/money';
+import AttendanceRulesPanel from './AttendanceRulesPanel';
 
 const LEVEL_WORDS = {
   trainee: 'Trainees', fronter: 'Fronters', closer: 'Closers', fronter_manager: 'Fronter managers',
@@ -30,6 +33,20 @@ const ACTION_WORDS = {
 };
 
 export default function HRSettingsPage({ scope }) {
+  // Someone who runs attendance but not the employee records sees only the
+  // attendance section -- the people settings would 403 for them.
+  if (!scope?.permissions?.['hr.employees.view']) {
+    return (
+      <div className="space-y-4">
+        <SectionHeader level="page" icon={Settings} title="HR settings" subtitle="Attendance rules for this company." />
+        <AttendanceRulesPanel scope={scope} />
+      </div>
+    );
+  }
+  return <PeopleAndAttendanceSettings scope={scope} />;
+}
+
+function PeopleAndAttendanceSettings({ scope }) {
   const companyId = scope?.company_id || null;
   const [data, setData] = useState(null);
   const [form, setForm] = useState(null);
@@ -145,6 +162,10 @@ export default function HRSettingsPage({ scope }) {
           )}
         </div>
       </Panel>
+
+      {/* Attendance rules have their own permission (hr.attendance.*), so an
+          HR manager without employee-management rights still sees them. */}
+      {!!scope?.permissions?.['hr.attendance.view_team'] && <AttendanceRulesPanel scope={scope} />}
 
       {canManage && (
         <Panel>

@@ -73,7 +73,7 @@ export default function AccountingSettingsPage({ scope }) {
       {notice && <Alert type={notice.type} onDismiss={() => setNotice(null)}>{notice.text}</Alert>}
       {(rules.accounts || []).length === 0 && (
         <Alert type="info" dismissible={false}>
-          This company has no chart of accounts yet, so nothing is recorded in the books. Set one up from Books -> Chart of accounts
+          This company has no chart of accounts yet, so nothing is recorded in the books. Set one up under Books, Chart of accounts
           (one click adds a standard set).
         </Alert>
       )}

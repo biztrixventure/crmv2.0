@@ -19,6 +19,9 @@ const { supabaseAdmin } = require('../../config/database');
 const { asyncHandler } = require('../../middleware/errorHandler');
 const logger = require('../../utils/logger');
 const { can, deny, readCompanyId, writeCompanyId, selfEmployee, hrReadScope } = require('../../utils/moduleAccess');
+// An approved (or un-approved) leave changes what those days say in
+// attendance: on leave instead of absent. Re-sync them straight away (mig 316).
+const { resyncSoon } = require('../../utils/attendanceSync');
 
 const router = express.Router();
 
@@ -302,6 +305,7 @@ router.post('/requests/:id/approve', asyncHandler(async (req, res) => {
     .eq('leave_type_id', r.leave_type_id).eq('year', year).maybeSingle();
 
   logger.info('HR', 'leave ' + r.id + ' approved by ' + req.user.id + (overdraws ? ' (overdraw)' : ''));
+  resyncSoon(companyId, data.start_date, data.end_date, 'leave approved');
   res.json({ request: data, balance: after || null });
 }));
 
@@ -338,6 +342,7 @@ router.post('/requests/:id/reject', asyncHandler(async (req, res) => {
     .eq('company_id', companyId).eq('employee_id', r.employee_id)
     .eq('leave_type_id', r.leave_type_id).eq('year', yearOf(r.start_date)).maybeSingle();
 
+  if (r.status === 'approved') resyncSoon(companyId, data.start_date, data.end_date, 'leave rejected');
   res.json({ request: data, balance: after || null });
 }));
 
@@ -369,6 +374,7 @@ router.post('/requests/:id/cancel', asyncHandler(async (req, res) => {
     .eq('company_id', companyId).eq('employee_id', r.employee_id)
     .eq('leave_type_id', r.leave_type_id).eq('year', yearOf(r.start_date)).maybeSingle();
 
+  if (r.status === 'approved') resyncSoon(companyId, data.start_date, data.end_date, 'leave cancelled');
   res.json({ request: data, balance: after || null });
 }));
 

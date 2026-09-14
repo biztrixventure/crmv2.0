@@ -18,16 +18,60 @@ const DEFAULTS = {
   rules: {},
 };
 
+// rules.attendance -- read by fn_hr_attendance_sync (mig 316), whose SQL
+// defaults are these same values. Change one, change both.
+const ATTENDANCE_DEFAULTS = {
+  auto: true,                        // sync attendance from the dialer at all
+  timezone: 'Asia/Karachi',
+  day_starts_at: '12:00',            // shift-day boundary: a 20:00->05:00 shift is ONE day
+  shift_start: '',                   // '' = lateness is not judged
+  late_after_minutes: 15,
+  half_day_below_hours: 4,
+  work_days: [1, 2, 3, 4, 5, 6],     // ISO weekdays, Mon=1 .. Sun=7
+  absent_for: 'dialer_agents',       // dialer_agents | everyone | none
+};
+
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+// Validate + normalise an attendance section. Throws with a sentence a person
+// can act on; returns only known keys.
+function cleanAttendanceRules(input = {}) {
+  const r = { ...ATTENDANCE_DEFAULTS, ...(input || {}) };
+  try { new Intl.DateTimeFormat('en-US', { timeZone: r.timezone }); } catch {
+    throw new Error('Unknown time zone "' + r.timezone + '" -- use a name like Asia/Karachi');
+  }
+  if (!HHMM.test(r.day_starts_at)) throw new Error('"Day starts at" must be a time like 12:00');
+  if (r.shift_start && !HHMM.test(r.shift_start)) throw new Error('"Shift starts" must be a time like 20:00, or blank');
+  const late = Number(r.late_after_minutes);
+  if (!Number.isInteger(late) || late < 0 || late > 240) throw new Error('Grace minutes must be a whole number from 0 to 240');
+  const half = Number(r.half_day_below_hours);
+  if (!Number.isFinite(half) || half < 0 || half > 24) throw new Error('Half-day hours must be between 0 and 24');
+  const days = [...new Set((Array.isArray(r.work_days) ? r.work_days : []).map(Number))]
+    .filter(d => Number.isInteger(d) && d >= 1 && d <= 7).sort();
+  if (!['dialer_agents', 'everyone', 'none'].includes(r.absent_for)) throw new Error('Unknown absence rule');
+  return {
+    auto: !!r.auto,
+    timezone: r.timezone,
+    day_starts_at: r.day_starts_at,
+    shift_start: r.shift_start || '',
+    late_after_minutes: late,
+    half_day_below_hours: half,
+    work_days: days,
+    absent_for: r.absent_for,
+  };
+}
+
 async function getHrSettings(companyId) {
-  if (!companyId) return { company_id: null, ...DEFAULTS, is_default: true };
+  if (!companyId) return { company_id: null, ...DEFAULTS, attendance: { ...ATTENDANCE_DEFAULTS }, is_default: true };
   const { data } = await supabaseAdmin
     .from('hr_settings').select('*').eq('company_id', companyId).maybeSingle();
-  if (!data) return { company_id: companyId, ...DEFAULTS, is_default: true };
+  if (!data) return { company_id: companyId, ...DEFAULTS, attendance: { ...ATTENDANCE_DEFAULTS }, is_default: true };
   return {
     ...DEFAULTS,
     ...data,
     enroll_role_levels: data.enroll_role_levels || [],
     rules: { ...(data.rules || {}) },
+    attendance: { ...ATTENDANCE_DEFAULTS, ...(data.rules?.attendance || {}) },
     is_default: false,
   };
 }
@@ -55,7 +99,11 @@ async function saveHrSettings(companyId, patch, userId) {
   const { data, error } = await supabaseAdmin
     .from('hr_settings').upsert(row, { onConflict: 'company_id' }).select().single();
   if (error) throw new Error(error.message);
-  return { ...DEFAULTS, ...data, is_default: false };
+  return {
+    ...DEFAULTS, ...data,
+    attendance: { ...ATTENDANCE_DEFAULTS, ...(data.rules?.attendance || {}) },
+    is_default: false,
+  };
 }
 
-module.exports = { getHrSettings, saveHrSettings, HR_DEFAULTS: DEFAULTS };
+module.exports = { getHrSettings, saveHrSettings, cleanAttendanceRules, HR_DEFAULTS: DEFAULTS, ATTENDANCE_DEFAULTS };

@@ -110,7 +110,7 @@ export default function AccountingDashboard({ scope }) {
       {balanceSheet && balanceSheet.balanced === false && (
         <Alert type="error">
           <strong>The balance sheet does not balance.</strong> Assets minus liabilities and equity leaves{' '}
-          {fmtMoney(balanceSheet.difference, currency)} unaccounted for. Open Reports -> Trial balance to see which
+          {fmtMoney(balanceSheet.difference, currency)} unaccounted for. Open Reports, then Trial balance, to see which
           account -- this almost always means an entry was posted to the wrong account type.
         </Alert>
       )}

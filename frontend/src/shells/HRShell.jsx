@@ -35,7 +35,7 @@ const buildTabs = (p) => [
   { key: 'time',     label: 'Time',       icon: CalendarDays,  show: !!p['hr.attendance.view_own'] || !!p['hr.attendance.view_team'] || !!p['hr.leave.request'] || !!p['hr.leave.view_team'] },
   { key: 'pay',      label: 'Pay',        icon: Banknote,      show: !!p['hr.payroll.view_own'] || !!p['hr.payroll.view'] || !!p['hr.payroll.manage'] },
   { key: 'reviews',  label: 'Reviews',    icon: ClipboardList, show: !!p['hr.reviews.participate'] || !!p['hr.reviews.view_team'] || !!p['hr.reviews.manage'] },
-  { key: 'settings', label: 'Settings',   icon: Settings,      show: !!p['hr.employees.view'] },
+  { key: 'settings', label: 'Settings',   icon: Settings,      show: !!p['hr.employees.view'] || !!p['hr.attendance.view_team'] },
   { key: 'history',  label: 'Change log', icon: History,       show: !!p['hr.history.view'] },
 ];
 

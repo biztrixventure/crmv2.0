@@ -1,4 +1,4 @@
-﻿import { useState, useCallback } from 'react';
+﻿import { useState, useCallback, useRef } from 'react';
 import client from '../api/client';
 
 /**
@@ -22,11 +22,16 @@ export const useAttendance = (companyId = null) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const fetchAttendance = useCallback(async (filters = {}) => {
+  // A refresh after saving re-asks for the SAME window. Calling with no
+  // filters used to fall back to the whole month, so the team DAY view showed
+  // each person's status from some other day right after "Save".
+  const lastFilters = useRef({});
+  const fetchAttendance = useCallback(async (filters) => {
+    if (filters) lastFilters.current = filters;
     setLoading(true);
     setError(null);
     try {
-      const params = { company_id: companyId, ...filters };
+      const params = { company_id: companyId, ...lastFilters.current };
       const response = await client.get('hr/attendance', { params });
       setAttendance(response.data.attendance || []);
       setScope(response.data.scope || 'none');
@@ -112,9 +117,53 @@ export const useAttendance = (companyId = null) => {
     }
   }, [companyId, fetchAttendance]);
 
+  // Corrections to days that already exist: one reason for the whole batch
+  // (kept in the change log on every row), sent as PUTs so each day turns
+  // manual -- the dialer sync never overwrites a correction.
+  const correctDays = useCallback(async (changes, reason) => {
+    setError(null);
+    try {
+      for (const c of changes) {
+        await client.put(`hr/attendance/${c.id}`, { company_id: companyId, ...c.patch, change_reason: reason });
+      }
+      await fetchAttendance();
+      return changes.length;
+    } catch (err) {
+      setError(err.response?.data?.error || err.message || 'Failed to save the corrections');
+      throw err;
+    }
+  }, [companyId, fetchAttendance]);
+
+  // Hand a corrected day back to the dialer (the sync re-writes it).
+  const resetDay = useCallback(async (id, reason) => {
+    setError(null);
+    try {
+      const response = await client.post(`hr/attendance/${id}/reset`, { company_id: companyId, change_reason: reason });
+      await fetchAttendance();
+      return response.data;   // { attendance, removed }
+    } catch (err) {
+      setError(err.response?.data?.error || err.message || 'Failed to hand the day back');
+      throw err;
+    }
+  }, [companyId, fetchAttendance]);
+
+  // "Sync now" -- re-reads the dialer for a range and says what changed.
+  const syncNow = useCallback(async (range = {}) => {
+    setError(null);
+    try {
+      const response = await client.post('hr/attendance/sync', { company_id: companyId, ...range });
+      await fetchAttendance();
+      return response.data;   // { inserted, updated, removed, skipped? }
+    } catch (err) {
+      setError(err.response?.data?.error || err.message || 'Failed to sync from the dialer');
+      throw err;
+    }
+  }, [companyId, fetchAttendance]);
+
   return {
     attendance, scope, period, summary, canManage, myEmployeeId, loading, error,
     fetchAttendance, fetchMine, recordAttendance, updateAttendance, recordBulk, deleteAttendance,
+    correctDays, resetDay, syncNow,
   };
 };
 

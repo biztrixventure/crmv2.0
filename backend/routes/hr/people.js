@@ -69,7 +69,10 @@ router.put('/settings', asyncHandler(async (req, res) => {
   if (!companyId) return res.status(400).json({ error: 'No company scope for this user' });
   if (await deny(req, res, companyId, 'hr.employees.manage')) return;
 
-  const b = req.body || {};
+  const b = { ...(req.body || {}) };
+  // Attendance rules have their own validated route and permission
+  // (PUT /hr/attendance/rules, hr.attendance.manage) -- never written from here.
+  if (b.rules && typeof b.rules === 'object') { b.rules = { ...b.rules }; delete b.rules.attendance; }
   if (b.employee_no_prefix !== undefined && !/^[A-Za-z0-9._/-]{1,12}$/.test(String(b.employee_no_prefix).trim())) {
     return res.status(400).json({ error: 'The employee number prefix can use letters, numbers and . _ / - (up to 12 characters).' });
   }

@@ -18,6 +18,7 @@ const { sweepMilestones } = require('./quotaMilestoneWatcher');
 const { pollPendingRecordings } = require('./qa2RecordingPoller');
 const { runQa2AutoAssign, purgeStaleQa2Assignments, purgeParkedQa2Calls, parkDuplicateStarvedCalls, tidyUnclassified } = require('./qa2AutoAssign');
 const { runCrmDayForAllCompanies } = require('./qa2CrmDay');
+const { syncAllCompanies: syncAttendance } = require('./attendanceSync');
 
 const REFRESH_SEGMENTS_MS = 10 * 60 * 1000;     // every 10 min
 const CACHE_SWEEP_MS      = 5  * 60 * 1000;      // every 5 min
@@ -63,6 +64,12 @@ const QA2_RETENTION_INIT = 3 * 60 * 1000;
 // real cron. First run 4 min after boot.
 const QA2_CRMDAY_MS   = 2 * 60 * 60 * 1000;
 const QA2_CRMDAY_INIT = 4 * 60 * 1000;
+// HR attendance from the dialer (mig 316). Hourly over the last 8 shift days:
+// today's row fills in as the shift goes, and calls that reach qa2_call late
+// are caught on a later run. The SQL writes only changed rows, so the repeat
+// runs cost a read and nothing else.
+const ATTENDANCE_SYNC_MS   = 60 * 60 * 1000;
+const ATTENDANCE_SYNC_INIT = 5 * 60 * 1000;
 
 let _timers = [];
 
@@ -173,7 +180,12 @@ function startBackgroundJobs() {
   _timers.push(setTimeout(crmDay2, QA2_CRMDAY_INIT));
   _timers.push(setInterval(crmDay2, QA2_CRMDAY_MS));
 
-  logger.info('JOBS', `background jobs started — segments refresh ${REFRESH_SEGMENTS_MS / 60000}m, cache sweep ${CACHE_SWEEP_MS / 60000}m, payment scan ${PAYMENT_SCAN_MS / 3600000}h, qa materialize ${QA_MATERIALIZE_MS / 60000}m, milestone sweep ${MILESTONE_SWEEP_MS / 60000}m, qa2 recording poll ${QA2_REC_POLL_MS / 1000}s, qa2 TRA vendor-code backfill ${QA2_TRA_VENDOR_MS / 60000}m, qa2 auto-assign ${QA2_AUTOASSIGN_MS / 60000}m, qa2 retention ${QA2_RETENTION_MS / 3600000}h, qa2 crm-day ${QA2_CRMDAY_MS / 3600000}h`);
+  const attendance = () => Promise.resolve(syncAttendance({ days: 8 }))
+    .catch(e => logger.warn('JOBS', `attendance sync error: ${e.message}`));
+  _timers.push(setTimeout(attendance, ATTENDANCE_SYNC_INIT));
+  _timers.push(setInterval(attendance, ATTENDANCE_SYNC_MS));
+
+  logger.info('JOBS', `background jobs started — segments refresh ${REFRESH_SEGMENTS_MS / 60000}m, cache sweep ${CACHE_SWEEP_MS / 60000}m, payment scan ${PAYMENT_SCAN_MS / 3600000}h, qa materialize ${QA_MATERIALIZE_MS / 60000}m, milestone sweep ${MILESTONE_SWEEP_MS / 60000}m, qa2 recording poll ${QA2_REC_POLL_MS / 1000}s, qa2 TRA vendor-code backfill ${QA2_TRA_VENDOR_MS / 60000}m, qa2 auto-assign ${QA2_AUTOASSIGN_MS / 60000}m, qa2 retention ${QA2_RETENTION_MS / 3600000}h, qa2 crm-day ${QA2_CRMDAY_MS / 3600000}h, attendance ${ATTENDANCE_SYNC_MS / 3600000}h`);
 }
 
 function stopBackgroundJobs() {
