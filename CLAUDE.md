@@ -237,3 +237,30 @@ An `employee_id` from the client is never honoured on those paths.
 
 Payroll is MANUAL ENTRY in this phase -- no tax engine. See `TODO(tax)` in
 `backend/routes/hr/payroll.js` for the three attach points.
+
+### HR + Accounts overhaul (migs 313-318, applied 2026-09-14)
+- **313 change log**: `module_audit_log` (append-only) fed by `fn_module_audit` triggers.
+  Actor/reason/source travel as request headers stamped by `contextFetch`
+  (`utils/requestContext.js`). A change that needs a reason answers
+  `400 {needs_reason:true}`; `api/client.js` asks and resends. New audited tables
+  go in `routes/moduleHistory.js` TABLES + `RecordHistory.jsx` TABLE_LABEL.
+- **314 people sync**: CRM logins -> `hr_employees` via a `user_company_roles`
+  trigger; deactivation opens an `hr_exit_cases` row (never auto-terminates).
+- **315 ledger**: post ONLY through `createPostedEntry` / `reverseEntry`
+  (`fn_post_journal` / `fn_reverse_journal`), keyed (company, source_type,
+  source_id, source_event) -- idempotent. Posted entries are immutable; a
+  correction is a reversal. Accounts per event = `POSTING_EVENTS` defaults,
+  overridden per company in `accounting_posting_rules`; foreign amounts need an
+  `fx_rates` row (never guessed).
+- **316 attendance**: `fn_hr_attendance_sync` turns dialer calls (`qa2_call`)
+  into SHIFT days (12:00->12:00 local; a 20:00->05:00 shift is one day).
+  `hr_attendance.source` dialer/leave/holiday = the sync may rewrite;
+  manual/self = never. Lateness only once a company sets `shift_start`.
+  Absent only for people who dialed on >= `regular_days` of the last 30.
+  Hourly job in `utils/scheduler.js`; rules in `hr_settings.rules.attendance`.
+- **317 sales into the books**: `utils/revenueSync.js`, desired-state, OFF per
+  company until switched on (Accounts -> Sales); rate cards in `revenue_rates`.
+  A sale it cannot price is left alone, never reversed.
+- **318**: commission plans SUGGEST pay (HR applies per run); receipts live in
+  the PRIVATE `expense-receipts` bucket, shown by 2-minute signed links.
+- Every HR/Accounts CSV goes through `utils/moduleExport.js` (egress log).
