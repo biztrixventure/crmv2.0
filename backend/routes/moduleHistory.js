@@ -58,6 +58,7 @@ const TABLES = {
     user_company_roles:    { perms: ['hr.employees.view'] },
     hr_settings:           { perms: ['hr.employees.view'] },           // record id = company id (mig 314)
     hr_exit_cases:         { perms: ['hr.employees.view'] },
+    hr_holidays:           { perms: ['hr.attendance.view_team', 'hr.attendance.manage'] },
   },
   accounting: {
     chart_of_accounts:   { perms: ['accounting.accounts.view'] },
@@ -71,6 +72,8 @@ const TABLES = {
     expenses:            { perms: ['accounting.expenses.view', 'accounting.expenses.approve'] },
     accounting_posting_rules: { perms: ['accounting.accounts.view'] },
     fx_rates:            { perms: ['accounting.accounts.view'] },
+    revenue_settings:    { perms: ['accounting.accounts.view', 'accounting.reports.view'] },
+    revenue_rates:       { perms: ['accounting.accounts.view', 'accounting.reports.view'] },
   },
 };
 

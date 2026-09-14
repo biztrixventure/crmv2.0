@@ -105,6 +105,7 @@ router.get('/my-scope', asyncHandler(async (req, res) => {
 
 router.use('/history',  historyRouter('accounting'));
 router.use('/settings', require('./settings'));
+router.use('/revenue',  require('./revenue'));
 router.use('/accounts', require('./chartOfAccounts'));
 router.use('/opening-balances', require('./openingBalances'));
 router.use('/journal',  require('./journal'));

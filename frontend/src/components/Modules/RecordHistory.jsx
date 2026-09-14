@@ -34,6 +34,7 @@ export const TABLE_LABEL = {
   invoices: 'Invoice', invoice_line_items: 'Invoice line', invoice_payments: 'Payment',
   expense_categories: 'Expense category', expenses: 'Expense claim',
   accounting_posting_rules: 'Money rule', fx_rates: 'Exchange rate',
+  revenue_settings: 'Sales into the books', revenue_rates: 'Sale rate', hr_holidays: 'Holiday',
   module_designations: 'Designation', module_designation_companies: 'Designation company',
 };
 

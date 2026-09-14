@@ -74,6 +74,39 @@ const POSTING_EVENTS = {
     label: 'Exchange-rate difference when a foreign invoice is paid',
     credit: { code: '4900', words: 'Exchange-rate gains and losses' },
   },
+  // CRM sales (mig 317, utils/revenueSync.js). Closer company's books first:
+  // the client pays us for the sale; we owe the fronter company its cut.
+  'sale.earned': {
+    label: 'A CRM sale is approved (the client owes us for it)',
+    debit:  { code: '1100', words: 'The client owes us' },
+    credit: { code: '4000', words: 'Sales revenue' },
+  },
+  'sale.collected': {
+    label: 'The client pays for a sale (DP Status: paid)',
+    debit:  { code: '1000', words: 'Money received into' },
+    credit: { code: '1100', words: 'The client owes us' },
+  },
+  'partner.cost': {
+    label: "A partner company earns its cut of a sale we closed",
+    debit:  { code: '5100', words: 'Partner fees and commissions' },
+    credit: { code: '2000', words: 'We owe the partner company' },
+  },
+  'partner.paid': {
+    label: 'We pay a partner company (Paid to Partner)',
+    debit:  { code: '2000', words: 'We owe the partner company' },
+    credit: { code: '1000', words: 'Money paid out of' },
+  },
+  // ...and the fronter company's books: its fee from the closer company.
+  'partner.income': {
+    label: 'We earn our partner fee on a sale (fronter company)',
+    debit:  { code: '1100', words: 'The closer company owes us' },
+    credit: { code: '4100', words: 'Partner-fee revenue' },
+  },
+  'partner.received': {
+    label: 'The closer company pays our partner fee',
+    debit:  { code: '1000', words: 'Money received into' },
+    credit: { code: '1100', words: 'The closer company owes us' },
+  },
 };
 
 // -- Numbers --------------------------------------------------------------------
@@ -201,19 +234,24 @@ async function toBookLines(companyId, currency, lines, onDate) {
   const book = await companyCurrency(companyId);
   if (!currency || currency === book) return { lines, rate: null, bookCurrency: book };
   const fx = await fxRate(companyId, currency, onDate);
-  if (!fx) {
-    return { error: 'There is no ' + currency + ' to ' + book + ' exchange rate on or before ' + (onDate || 'today')
-      + '. Add one in Accounts -> Settings -> Exchange rates, then try again.' };
-  }
+  if (!fx) return { error: noRateMessage(currency, book, onDate) };
+  return { lines: convertLines(lines, currency, fx.rate), rate: fx.rate, bookCurrency: book };
+}
+
+const noRateMessage = (currency, book, onDate) => 'There is no ' + currency + ' to ' + book
+  + ' exchange rate on or before ' + (onDate || 'today') + '. Add one in Accounts -> Settings -> Exchange rates, then try again.';
+
+// The one conversion rule, shared by toBookLines and fxConverter.
+function convertLines(lines, currency, rate) {
   const converted = lines.map(l => {
     const d = cents(l.debit), c = cents(l.credit);
     return {
       ...l,
-      debit:  d ? money(Math.round(d * fx.rate)) : 0,
-      credit: c ? money(Math.round(c * fx.rate)) : 0,
+      debit:  d ? money(Math.round(d * rate)) : 0,
+      credit: c ? money(Math.round(c * rate)) : 0,
       orig_currency: currency,
       orig_amount: money(d || c),
-      fx_rate: fx.rate,
+      fx_rate: rate,
     };
   });
   const dr = converted.reduce((s, l) => s + cents(l.debit), 0);
@@ -223,7 +261,27 @@ async function toBookLines(companyId, currency, lines, onDate) {
     const target = converted.filter(l => cents(l[side]) > 0).sort((a, b) => cents(b[side]) - cents(a[side]))[0];
     if (target) target[side] = money(cents(target[side]) + Math.abs(dr - cr));
   }
-  return { lines: converted, rate: fx.rate, bookCurrency: book };
+  return converted;
+}
+
+// For batch posting (utils/revenueSync.js): load a company's rates for one
+// currency ONCE, then convert synchronously. Same rule as toBookLines -- the
+// rate in force on the day, never a guess.
+async function fxConverter(companyId, currency) {
+  const book = await companyCurrency(companyId);
+  if (!currency || currency === book) return { book, convert: (lines) => ({ lines }) };
+  const { data } = await supabaseAdmin.from('fx_rates').select('rate, effective_from')
+    .eq('company_id', companyId).eq('currency', currency).order('effective_from', { ascending: false });
+  const rates = (data || []).map(r => ({ rate: Number(r.rate), from: r.effective_from }));
+  return {
+    book,
+    convert: (lines, onDate) => {
+      const day = onDate || new Date().toISOString().slice(0, 10);
+      const fx = rates.find(r => r.from <= day);
+      if (!fx) return { error: noRateMessage(currency, book, day), missing_rate: day };
+      return { lines: convertLines(lines, currency, fx.rate), rate: fx.rate };
+    },
+  };
 }
 
 // -- Posting -----------------------------------------------------------------------
@@ -300,5 +358,5 @@ async function liveEntryFor(companyId, sourceType, sourceId, sourceEvent) {
 module.exports = {
   cents, money, nextEntryNo, balanceError, prepareLines, createPostedEntry, reverseEntry,
   accountByCode, postingRules, postingRule, POSTING_EVENTS, companyCurrency, fxRate, toBookLines,
-  liveEntryFor,
+  fxConverter, liveEntryFor,
 };
