@@ -48,6 +48,7 @@ import UpdateBanner from '../UI/UpdateBanner';
 import ThemedSelect from '../UI/Select';
 import { PillTabs, Loading, EmptyState } from '../UI/kit';
 import ReasonPromptHost from './ReasonPromptHost';
+import CompaniesOverview from './CompaniesOverview';
 
 export default function ModuleShell({
   moduleKey,          // 'accounting' | 'hr'
@@ -175,10 +176,14 @@ export default function ModuleShell({
         )}
 
         {scope && scope.has_any && blockedOnCompany && (
-          <EmptyState icon={Building2} title="Pick a company"
-            hint={scope.cross_company
-              ? 'You can reach every company, which means none is assumed. Choose one above and this module will scope to it.'
-              : 'You belong to more than one company. Choose which one to work in.'} />
+          <div className="space-y-4">
+            <EmptyState icon={Building2} title="Pick a company"
+              hint={scope.cross_company
+                ? 'You can reach every company, which means none is assumed. Choose one above, or open one from the list below.'
+                : 'You belong to more than one company. Choose which one to work in.'} />
+            {/* Every company at a glance before choosing one (stage 7). */}
+            <CompaniesOverview module={moduleKey} onOpen={pickCompany} />
+          </div>
         )}
 
         {scope && scope.has_any && !blockedOnCompany && (
@@ -187,7 +192,7 @@ export default function ModuleShell({
             {tabs.length === 0
               ? <EmptyState icon={Icon} title={`Nothing to show in ${title.toLowerCase()}`}
                   hint="You have access to the module but none of its sections." />
-              : render(activeTab, scope, setTab)}
+              : render(activeTab, scope, setTab, pickCompany)}
           </>
         )}
       </main>

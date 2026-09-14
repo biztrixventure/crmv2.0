@@ -95,6 +95,35 @@ router.get('/my-scope', asyncHandler(async (req, res) => {
   });
 }));
 
+// GET /api/hr/overview -- every company the caller can reach, one row each
+// (stage 7). The superadmin landing view, and the "all your companies" panel
+// on Home for anyone in more than one. Only companies where the caller may see
+// employees are listed; attendance / pay columns only where they may see those.
+router.get('/overview', asyncHandler(async (req, res) => {
+  const { companies } = await selectableCompanies(req);
+  const { lastShift, inProgressDay } = require('../../utils/hrSnapshot');
+  const rows = [];
+  for (const c of companies) {
+    if (!(await can(req, c.id, 'hr.employees.view'))) continue;
+    const [emp, exits, leave, seeTeam, seePay] = await Promise.all([
+      supabaseAdmin.from('hr_employees').select('id', { count: 'exact', head: true }).eq('company_id', c.id).eq('status', 'active'),
+      supabaseAdmin.from('hr_exit_cases').select('id', { count: 'exact', head: true }).eq('company_id', c.id).eq('status', 'open'),
+      supabaseAdmin.from('hr_leave_requests').select('id', { count: 'exact', head: true }).eq('company_id', c.id).eq('status', 'pending'),
+      can(req, c.id, 'hr.attendance.view_team'), can(req, c.id, 'hr.payroll.view'),
+    ]);
+    const row = { company_id: c.id, name: c.name, active: emp.count || 0, open_exits: exits.count || 0, pending_leave: leave.count || 0 };
+    if (seeTeam) row.last_shift = await lastShift(c.id, await inProgressDay(c.id));
+    if (seePay) {
+      const { data: runs } = await supabaseAdmin.from('hr_payroll_runs').select('status, paid_at').eq('company_id', c.id)
+        .in('status', ['draft', 'processing', 'finalized']);
+      row.payroll_open = (runs || []).filter(r => r.status !== 'finalized').length;
+      row.payroll_unpaid = (runs || []).filter(r => r.status === 'finalized' && !r.paid_at).length;
+    }
+    rows.push(row);
+  }
+  res.json({ companies: rows });
+}));
+
 router.use('/history',    historyRouter('hr'));
 router.use('/people',     require('./people'));
 router.use('/employees',  require('./employees'));

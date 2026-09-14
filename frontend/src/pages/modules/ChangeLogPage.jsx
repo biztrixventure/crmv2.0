@@ -18,14 +18,15 @@ import ThemedSelect from '../../components/UI/Select';
 import ThemedDate from '../../components/UI/ThemedDate';
 import { Btn } from '../../components/Modules/ModuleUI';
 import { HistoryEvent, TABLE_LABEL, fieldLabel, fmtValue } from '../../components/Modules/RecordHistory';
-import { downloadCSV } from '../../utils/recordFormat';
+import { auditedCSV } from '../../utils/moduleExport';
 
 const MODULE_TABLES = {
   hr: ['hr_employees', 'user_company_roles', 'hr_exit_cases', 'hr_settings', 'hr_departments', 'hr_positions', 'hr_attendance',
-       'hr_leave_requests', 'hr_leave_balances', 'hr_leave_types', 'hr_pay_periods', 'hr_payroll_runs',
-       'hr_payroll_entries', 'hr_payroll_deductions', 'hr_review_cycles', 'hr_reviews'],
+       'hr_holidays', 'hr_leave_requests', 'hr_leave_balances', 'hr_leave_types', 'hr_pay_periods', 'hr_payroll_runs',
+       'hr_payroll_entries', 'hr_payroll_deductions', 'hr_commission_plans', 'hr_review_cycles', 'hr_reviews'],
   accounting: ['chart_of_accounts', 'journal_entries', 'journal_entry_lines', 'invoices', 'invoice_line_items',
-               'invoice_payments', 'expenses', 'expense_categories'],
+               'invoice_payments', 'expenses', 'expense_categories', 'accounting_posting_rules', 'fx_rates',
+               'revenue_settings', 'revenue_rates'],
 };
 
 const OPS = [
@@ -83,7 +84,8 @@ export default function ChangeLogPage({ module, scope }) {
   const set = (k, v) => setFilters(f => ({ ...f, [k]: v }));
 
   // One row per changed field, so the file opens cleanly in a spreadsheet.
-  const exportCsv = () => {
+  // Goes through the export log like every other CSV (utils/moduleExport.js).
+  const exportCsv = async () => {
     const rows = [];
     for (const e of events) {
       const base = [new Date(e.changed_at).toLocaleString(), e.actor_name, TABLE_LABEL[e.table_name] || e.table_name,
@@ -94,8 +96,9 @@ export default function ChangeLogPage({ module, scope }) {
       if (!keys.length) rows.push([...base, '', '', '']);
       for (const k of keys) rows.push([...base, fieldLabel(k), fmtValue(c[k]?.old, refNames), fmtValue(c[k]?.new, refNames)]);
     }
-    downloadCSV(rows, ['When', 'Who', 'What', 'Record', 'Action', 'Reason', 'Field', 'Before', 'After'],
-      `${module}-change-log-${new Date().toISOString().slice(0, 10)}.csv`);
+    const r = await auditedCSV('module_change_log', rows, ['When', 'Who', 'What', 'Record', 'Action', 'Reason', 'Field', 'Before', 'After'],
+      `${module}-change-log-${new Date().toISOString().slice(0, 10)}.csv`, { module, ...params });
+    if (!r.ok) setError(r.error);
   };
 
   return (

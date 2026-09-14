@@ -29,6 +29,7 @@ const ATTENDANCE_DEFAULTS = {
   half_day_below_hours: 4,
   work_days: [1, 2, 3, 4, 5, 6],     // ISO weekdays, Mon=1 .. Sun=7
   absent_for: 'dialer_agents',       // dialer_agents | everyone | none
+  regular_days: 3,                   // dialer_agents = calls on at least this many of the previous 30 days
 };
 
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -49,6 +50,8 @@ function cleanAttendanceRules(input = {}) {
   const days = [...new Set((Array.isArray(r.work_days) ? r.work_days : []).map(Number))]
     .filter(d => Number.isInteger(d) && d >= 1 && d <= 7).sort();
   if (!['dialer_agents', 'everyone', 'none'].includes(r.absent_for)) throw new Error('Unknown absence rule');
+  const regular = Number(r.regular_days);
+  if (!Number.isInteger(regular) || regular < 1 || regular > 30) throw new Error('"Works the phones" must be 1 to 30 days');
   return {
     auto: !!r.auto,
     timezone: r.timezone,
@@ -58,6 +61,7 @@ function cleanAttendanceRules(input = {}) {
     half_day_below_hours: half,
     work_days: days,
     absent_for: r.absent_for,
+    regular_days: regular,
   };
 }
 

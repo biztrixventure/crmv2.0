@@ -30,10 +30,12 @@
 --   absent_for            dialer_agents | everyone | none
 --                                    who gets an "absent" on a working day with
 --                                    no calls, no leave and no holiday.
---                                    dialer_agents = people who have dialed
---                                    before (hr_employees.dialer_since) -- so
---                                    managers, HR and compliance staff who never
---                                    dial are not marked absent every day.
+--                                    dialer_agents = people who REGULARLY work
+--                                    the phones: calls on at least `regular_days`
+--                                    shift days in the 30 before (316d -- one
+--                                    call by a manager once made them "expected"
+--                                    every day after; 329 of 1,172 absences).
+--   regular_days          3          see above
 -- ============================================================================
 
 -- 1. Who wrote each day ----------------------------------------------------------
@@ -96,6 +98,7 @@ DECLARE
   v_half   numeric;
   v_days   int[];
   v_absent text;
+  v_regular int;
   v_today  date;
   v_since  int := 0;
   v_ins    int := 0;
@@ -116,6 +119,7 @@ BEGIN
   v_half   := COALESCE(NULLIF(cfg ->> 'half_day_below_hours', '')::numeric, 4);
   v_days   := COALESCE((SELECT array_agg(x::int) FROM jsonb_array_elements_text(cfg -> 'work_days') x), '{1,2,3,4,5,6}'::int[]);
   v_absent := COALESCE(NULLIF(cfg ->> 'absent_for', ''), 'dialer_agents');
+  v_regular := GREATEST(1, COALESCE(NULLIF(cfg ->> 'regular_days', '')::int, 3));
   -- The shift day still in progress: never judged absent or half-day yet.
   v_today  := ((now() AT TIME ZONE v_tz) - v_cut)::date;
 
@@ -137,14 +141,18 @@ BEGIN
   WITH emp AS (
     SELECT id, user_id, status, hire_date, termination_date, dialer_since
       FROM hr_employees WHERE company_id = p_company AND user_id IS NOT NULL
-  ), calls AS (
+  ), wide AS (
+    -- Per person per shift day, from 30 days before the range (the "works the
+    -- phones regularly" look-back) to its end.
     SELECT e.id AS employee_id, ((q.call_at AT TIME ZONE v_tz) - v_cut)::date AS d,
            count(*)::int AS n, COALESCE(sum(q.talk_sec), 0)::int AS talk,
            min(q.call_at) AS f, max(q.call_at) AS l
       FROM qa2_call q JOIN emp e ON e.user_id = q.agent_user_id
-     WHERE q.call_at >= ((p_from + v_cut) AT TIME ZONE v_tz)
+     WHERE q.call_at >= (((p_from - 30) + v_cut) AT TIME ZONE v_tz)
        AND q.call_at <  (((p_to + 1) + v_cut) AT TIME ZONE v_tz)
      GROUP BY 1, 2
+  ), calls AS (
+    SELECT * FROM wide WHERE d BETWEEN p_from AND p_to
   ), grid AS (
     SELECT e.id AS employee_id, gs::date AS d, e.status, e.dialer_since,
            (extract(isodow FROM gs)::int = ANY (v_days)) AS workday
@@ -167,7 +175,9 @@ BEGIN
            -- expected on the phones that day?
            (CASE v_absent
               WHEN 'everyone'      THEN g.status = 'active'
-              WHEN 'dialer_agents' THEN g.status = 'active' AND g.dialer_since IS NOT NULL AND g.d >= g.dialer_since
+              WHEN 'dialer_agents' THEN g.status = 'active'
+                AND (SELECT count(*) FROM wide w2
+                      WHERE w2.employee_id = g.employee_id AND w2.d BETWEEN g.d - 30 AND g.d - 1) >= v_regular
               ELSE false END) AS expected
       FROM grid g
       LEFT JOIN calls c     ON c.employee_id = g.employee_id AND c.d = g.d

@@ -64,9 +64,9 @@ export default function HRShell() {
       defaultTab="home"
       buildTabs={buildTabs}
       banner={banner}
-      render={(tab, scope, goTo) => (
+      render={(tab, scope, goTo, pickCompany) => (
         <>
-          {tab === 'home'     && <HRHome scope={scope} goTo={goTo} />}
+          {tab === 'home'     && <HRHome scope={scope} goTo={goTo} pickCompany={pickCompany} />}
           {tab === 'people'   && <EmployeeDirectory scope={scope} />}
           {tab === 'time'     && <TimePage scope={scope} />}
           {tab === 'pay'      && <PayrollPage scope={scope} />}

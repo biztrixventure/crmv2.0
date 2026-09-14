@@ -51,9 +51,9 @@ export default function AccountingShell() {
       icon={Scale}
       defaultTab="dashboard"
       buildTabs={buildTabs}
-      render={(tab, scope, goTo) => (
+      render={(tab, scope, goTo, pickCompany) => (
         <>
-          {tab === 'dashboard' && <AccountingDashboard scope={scope} goTo={goTo} />}
+          {tab === 'dashboard' && <AccountingDashboard scope={scope} goTo={goTo} pickCompany={pickCompany} />}
           {tab === 'invoices'  && <InvoicesPage scope={scope} />}
           {tab === 'expenses'  && <ExpensesPage scope={scope} />}
           {tab === 'sales'     && <SalesBooksPage scope={scope} />}

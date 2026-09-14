@@ -23,7 +23,7 @@ const WEEKDAYS = [[1, 'Monday'], [2, 'Tuesday'], [3, 'Wednesday'], [4, 'Thursday
 const HALF_HOURS = Array.from({ length: 48 }, (_, i) => `${String(Math.floor(i / 2)).padStart(2, '0')}:${i % 2 ? '30' : '00'}`);
 const QUARTERS = Array.from({ length: 96 }, (_, i) => `${String(Math.floor(i / 4)).padStart(2, '0')}:${String((i % 4) * 15).padStart(2, '0')}`);
 const ABSENT_WORDS = {
-  dialer_agents: 'People who work the phones (anyone who has dialed before)',
+  dialer_agents: 'People who work the phones regularly',
   everyone: 'Everyone with an active HR record',
   none: 'Nobody -- never mark anyone absent automatically',
 };
@@ -93,7 +93,7 @@ export default function AttendanceRulesPanel({ scope }) {
           <div className="p-3 rounded-xl mb-4 text-sm" style={{ background: 'color-mix(in srgb, var(--color-primary-600) 8%, transparent)', color: 'var(--color-text)' }}>
             Over the last 14 days ({t.people} people, {t.shift_days} shifts): the typical first call is at <strong>{t.median_first_call}</strong>
             {t.early_first_call ? ` (a quarter start by ${t.early_first_call})` : ''}, the last call around <strong>{t.median_last_call}</strong>,
-            about <strong>{t.avg_span_hours} hours</strong> on the phones. {data.dialer_agents} people count as dialer agents.
+            about <strong>{t.avg_span_hours} hours</strong> on the phones. {data.dialer_agents} people here have dialed at least once.
           </div>
         )}
 
@@ -137,11 +137,22 @@ export default function AttendanceRulesPanel({ scope }) {
             </div>
           </Field>
 
-          <Field label="Who is marked absent on a working day with no calls, no leave and no holiday">
-            <ThemedSelect value={form.absent_for} disabled={!canManage} onChange={e => set('absent_for', e.target.value)}>
-              {Object.entries(ABSENT_WORDS).map(([k, w]) => <option key={k} value={k}>{w}</option>)}
-            </ThemedSelect>
-          </Field>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <Field label="Who is marked absent on a working day with no calls, no leave and no holiday" className="sm:col-span-2">
+              <ThemedSelect value={form.absent_for} disabled={!canManage} onChange={e => set('absent_for', e.target.value)}>
+                {Object.entries(ABSENT_WORDS).map(([k, w]) => <option key={k} value={k}>{w}</option>)}
+              </ThemedSelect>
+            </Field>
+            {form.absent_for === 'dialer_agents' && (
+              <Field label="Works the phones = dialed on at least" hint="...of the previous 30 days. Stops a one-off call by a manager making them 'expected' every day.">
+                <div className="flex items-center gap-2">
+                  <input className="input w-20" type="number" min="1" max="30" disabled={!canManage}
+                    value={form.regular_days ?? 3} onChange={e => set('regular_days', e.target.value === '' ? '' : Number(e.target.value))} />
+                  <span className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>days</span>
+                </div>
+              </Field>
+            )}
+          </div>
 
           <Field label="Time zone" hint="The clock the shifts are worked in.">
             <input className="input w-full sm:w-64" disabled={!canManage} value={form.timezone} onChange={e => set('timezone', e.target.value)} />

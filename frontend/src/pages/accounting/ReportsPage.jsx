@@ -19,7 +19,7 @@ import ThemedDate from '../../components/UI/ThemedDate';
 import { Btn } from '../../components/Modules/ModuleUI';
 import { useAccountingReports } from '../../hooks/useAccountingReports';
 import { fmtMoney, todayISO } from '../../utils/money';
-import { downloadCSV } from '../../utils/recordFormat';
+import { auditedCSV } from '../../utils/moduleExport';
 
 const iso = (d) => d.toISOString().slice(0, 10);
 const PRESETS = {
@@ -39,6 +39,13 @@ export default function ReportsPage({ scope }) {
   const [preset, setPreset] = useState('this_month');
   const [range, setRange] = useState(PRESETS.this_month());
   const [asOf, setAsOf] = useState(todayISO());
+  const [exportError, setExportError] = useState(null);
+  // Every report CSV goes through the export log (utils/moduleExport.js).
+  const csv = async (rows, headers, filename, filters) => {
+    setExportError(null);
+    const r = await auditedCSV('accounting_reports', rows, headers, filename, { company_id: companyId, ...filters });
+    if (!r.ok) setExportError(r.error);
+  };
 
   useEffect(() => { if (preset !== 'custom') setRange(PRESETS[preset]()); }, [preset]);
   useEffect(() => { if (tab === 'pl') fetchProfitLoss({ date_from: range[0], date_to: range[1] }); }, [tab, range, fetchProfitLoss]);
@@ -54,19 +61,20 @@ export default function ReportsPage({ scope }) {
       ['Money spent', '', 'Total', profitLoss.expenses?.total],
       ['Profit', '', 'Net', profitLoss.net_income],
     ];
-    downloadCSV(rows, ['Section', 'Code', 'Account', 'Amount (' + currency + ')'], `profit-loss-${range[0]}-to-${range[1]}.csv`);
+    csv(rows, ['Section', 'Code', 'Account', 'Amount (' + currency + ')'], `profit-loss-${range[0]}-to-${range[1]}.csv`,
+      { report: 'profit_loss', date_from: range[0], date_to: range[1] });
   };
   const csvBS = () => {
     if (!balanceSheet) return;
     const sec = (label, g) => [...(g?.accounts || []).map(a => [label, a.code, a.name, a.amount]), [label, '', 'Total', g?.total]];
-    downloadCSV([...sec('Owns', balanceSheet.assets), ...sec('Owes', balanceSheet.liabilities), ...sec('Owners', balanceSheet.equity)],
-      ['Section', 'Code', 'Account', 'Amount (' + currency + ')'], `balance-sheet-${asOf}.csv`);
+    csv([...sec('Owns', balanceSheet.assets), ...sec('Owes', balanceSheet.liabilities), ...sec('Owners', balanceSheet.equity)],
+      ['Section', 'Code', 'Account', 'Amount (' + currency + ')'], `balance-sheet-${asOf}.csv`, { report: 'balance_sheet', as_of: asOf });
   };
   const csvTB = () => {
     if (!trialBalance) return;
-    downloadCSV([...(trialBalance.rows || []).map(r => [r.code, r.name, r.account_type, r.debit, r.credit]),
+    csv([...(trialBalance.rows || []).map(r => [r.code, r.name, r.account_type, r.debit, r.credit]),
       ['', 'Total', '', trialBalance.total_debit, trialBalance.total_credit]],
-      ['Code', 'Account', 'Type', 'Debit', 'Credit'], `trial-balance-${asOf}.csv`);
+      ['Code', 'Account', 'Type', 'Debit', 'Credit'], `trial-balance-${asOf}.csv`, { report: 'trial_balance', as_of: asOf });
   };
 
   return (
@@ -74,6 +82,7 @@ export default function ReportsPage({ scope }) {
       <SectionHeader level="page" icon={FileBarChart} title="Reports"
         subtitle={`${scope?.company_name || ''} -- in ${currency}. Built from posted entries only.`} />
       {error && <Alert type="error">{error}</Alert>}
+      {exportError && <Alert type="warning" onDismiss={() => setExportError(null)}>{exportError}</Alert>}
 
       <div className="flex items-end gap-3 flex-wrap">
         <PillTabs value={tab} onChange={setTab} items={[

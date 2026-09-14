@@ -103,6 +103,49 @@ router.get('/my-scope', asyncHandler(async (req, res) => {
   });
 }));
 
+// GET /api/accounting/overview -- every company the caller can reach, one row
+// each (stage 7): this month's money in / out / profit and what the books
+// hold today, in each company's own currency (never added across companies --
+// rupees and dollars do not sum). Only companies whose reports the caller may see.
+router.get('/overview', asyncHandler(async (req, res) => {
+  const { companies } = await selectableCompanies(req);
+  const { foldLines } = require('./reports');
+  const { money } = require('../../utils/ledger');
+  const today = new Date().toISOString().slice(0, 10);
+  const monthStart = today.slice(0, 8) + '01';
+  const rows = [];
+  for (const c of companies) {
+    if (!(await can(req, c.id, 'accounting.reports.view'))) continue;
+    const [{ data: co }, { count: accounts }] = await Promise.all([
+      supabaseAdmin.from('companies').select('currency').eq('id', c.id).maybeSingle(),
+      supabaseAdmin.from('chart_of_accounts').select('id', { count: 'exact', head: true }).eq('company_id', c.id),
+    ]);
+    const row = { company_id: c.id, name: c.name, currency: co?.currency || 'PKR', has_books: !!accounts };
+    if (accounts) {
+      const [mtd, toDate] = await Promise.all([foldLines(c.id, { from: monthStart, to: today }), foldLines(c.id, { to: today })]);
+      let rev = 0; let exp = 0; let cash = 0; let owed = 0; let owe = 0;
+      for (const { account, cents: v } of mtd.values()) {
+        if (account.account_type === 'revenue') rev += v;
+        if (account.account_type === 'expense') exp += v;
+      }
+      for (const { account, cents: v } of toDate.values()) {
+        if (account.code === '1000') cash += v;
+        if (account.code === '1100') owed += v;
+        if (account.account_type === 'liability') owe += v;
+      }
+      Object.assign(row, { revenue_mtd: money(rev), expenses_mtd: money(exp), profit_mtd: money(rev - exp), cash: money(cash), owed_to_us: money(owed), we_owe: money(owe) });
+    }
+    const [{ count: claims }, { count: overdue }] = await Promise.all([
+      supabaseAdmin.from('expenses').select('id', { count: 'exact', head: true }).eq('company_id', c.id).eq('status', 'submitted'),
+      supabaseAdmin.from('invoices').select('id', { count: 'exact', head: true }).eq('company_id', c.id).eq('status', 'overdue'),
+    ]);
+    row.claims_waiting = claims || 0;
+    row.invoices_overdue = overdue || 0;
+    rows.push(row);
+  }
+  res.json({ companies: rows });
+}));
+
 router.use('/history',  historyRouter('accounting'));
 router.use('/settings', require('./settings'));
 router.use('/revenue',  require('./revenue'));

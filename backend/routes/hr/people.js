@@ -23,6 +23,7 @@ const { asyncHandler } = require('../../middleware/errorHandler');
 const { can, deny, readCompanyId, writeCompanyId, selfEmployee } = require('../../utils/moduleAccess');
 const { setChangeReason } = require('../../utils/requestContext');
 const { getHrSettings, saveHrSettings } = require('../../utils/hrSettings');
+const { lastShift, notSeen, inProgressDay } = require('../../utils/hrSnapshot');
 
 const router = express.Router();
 
@@ -212,6 +213,26 @@ router.get('/summary', asyncHandler(async (req, res) => {
   const rows = emp.data || [];
   const linked = new Set(rows.map(r => r.user_id).filter(Boolean));
   const notYetInHr = (members.data || []).filter(m => !linked.has(m.user_id)).length;
+
+  // Attendance and pay facts only for people who may see them (stage 7).
+  const [seeTeam, seePay] = await Promise.all([
+    can(req, companyId, 'hr.attendance.view_team'), can(req, companyId, 'hr.payroll.view'),
+  ]);
+  let shift = null;
+  let quiet = [];
+  if (seeTeam) {
+    const today = await inProgressDay(companyId);
+    [shift, quiet] = await Promise.all([lastShift(companyId, today), notSeen(companyId, { inProgress: today })]);
+  }
+  let payroll = null;
+  if (seePay) {
+    const { data: runs } = await supabaseAdmin.from('hr_payroll_runs').select('status, paid_at, net_total')
+      .eq('company_id', companyId).in('status', ['draft', 'processing', 'finalized']);
+    payroll = {
+      open: (runs || []).filter(r => r.status !== 'finalized').length,
+      unpaid: (runs || []).filter(r => r.status === 'finalized' && !r.paid_at).length,
+    };
+  }
   res.json({
     ready: true,
     employees: {
@@ -223,6 +244,9 @@ router.get('/summary', asyncHandler(async (req, res) => {
     crm_members_not_in_hr: notYetInHr,
     open_exits: openExits.count || 0,
     pending_leave: pendingLeave.count || 0,
+    last_shift: shift,
+    not_seen: quiet,
+    payroll,
   });
 }));
 

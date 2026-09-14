@@ -21,7 +21,7 @@ import SearchSelect from '../../components/UI/SearchSelect';
 import ThemedDate from '../../components/UI/ThemedDate';
 import { Btn } from '../../components/Modules/ModuleUI';
 import AskDialog from '../../components/Modules/AskDialog';
-import { downloadCSV } from '../../utils/recordFormat';
+import { auditedCSV } from '../../utils/moduleExport';
 import { fmtMoney, fmtDate } from '../../utils/money';
 
 const EVENT_WORDS = {
@@ -439,11 +439,14 @@ function Statements({ companyId, data, onNotice }) {
       onNotice({ type: 'error', text: e.response?.data?.error || 'Could not build the statement' });
     } finally { setBusy(false); }
   };
-  const csv = () => downloadCSV(
-    st.rows.map(r => [r.reference_no || r.sale_id, r.sale_date, r.plan || '', r.down_payment, r.dp_status || '', r.amount ?? '']),
-    ['Reference', 'Sale date', 'Plan', 'Down payment', 'DP status', 'Amount (' + st.currency + ')'],
-    `statement-${st.client.replace(/[^A-Za-z0-9]+/g, '-')}-${st.month}.csv`,
-  );
+  const csv = async () => {
+    const r = await auditedCSV('accounting_statement',
+      st.rows.map(x => [x.reference_no || x.sale_id, x.sale_date, x.plan || '', x.down_payment, x.dp_status || '', x.amount ?? '']),
+      ['Reference', 'Sale date', 'Plan', 'Down payment', 'DP status', 'Amount (' + st.currency + ')'],
+      `statement-${st.client.replace(/[^A-Za-z0-9]+/g, '-')}-${st.month}.csv`,
+      { company_id: companyId, client: st.client, month: st.month });
+    if (!r.ok) onNotice({ type: 'warning', text: r.error });
+  };
 
   return (
     <Panel>

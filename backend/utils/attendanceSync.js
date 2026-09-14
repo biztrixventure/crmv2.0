@@ -86,4 +86,20 @@ async function syncAllCompanies({ days = 8 } = {}) {
   });
 }
 
-module.exports = { syncCompany, syncAllCompanies, resyncSoon, addDays, isDay };
+// The shift day still in progress in a time zone -- the JS twin of v_today in
+// fn_hr_attendance_sync. Anything before it is a finished shift.
+function shiftDayInProgress(tz = 'Asia/Karachi', startsAt = '12:00') {
+  let parts;
+  try {
+    parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+    }).formatToParts(new Date());
+  } catch { return isoDay(new Date()); }
+  const get = (t) => Number(parts.find(p => p.type === t)?.value || 0);
+  const local = new Date(Date.UTC(get('year'), get('month') - 1, get('day'), get('hour'), get('minute')));
+  const [h, m] = String(startsAt || '12:00').split(':').map(Number);
+  local.setUTCMinutes(local.getUTCMinutes() - ((h || 0) * 60 + (m || 0)));
+  return isoDay(local);
+}
+
+module.exports = { syncCompany, syncAllCompanies, resyncSoon, addDays, isDay, shiftDayInProgress };

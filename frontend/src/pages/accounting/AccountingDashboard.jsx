@@ -27,8 +27,9 @@ import { useAccountingReports } from '../../hooks/useAccountingReports';
 import { useChartOfAccounts } from '../../hooks/useChartOfAccounts';
 import { fmtMoney, fmtMoneyShort, fmtDate, todayISO, monthStartISO, DEFAULT_CURRENCY } from '../../utils/money';
 import { Btn } from '../../components/Modules/ModuleUI';
+import CompaniesOverview from '../../components/Modules/CompaniesOverview';
 
-export default function AccountingDashboard({ scope }) {
+export default function AccountingDashboard({ scope, goTo, pickCompany }) {
   const companyId = scope?.company_id || null;
   // The company's own currency (mig 295), never a constant. This line read
   // 'USD' and put US$ on every tile, the P&L and the balance sheet of a company
@@ -187,8 +188,36 @@ export default function AccountingDashboard({ scope }) {
         <KpiTile icon={Wallet} label="Collected" value={fmtMoneyShort(inv?.collected, currency)} tone="success" />
         <KpiTile icon={Receipt} label="Expense claims awaiting approval"
           value={exp?.pending_count || 0} sub={fmtMoneyShort(exp?.pending_amount, currency)}
-          tone={exp?.pending_count ? 'warning' : 'muted'} />
+          tone={exp?.pending_count ? 'warning' : 'muted'}
+          onClick={exp?.pending_count ? () => goTo?.('expenses') : undefined} />
       </div>
+
+      {/* Waiting for you: each line opens the tab where the work is done. */}
+      {(inv?.overdue_count > 0 || exp?.pending_count > 0) && (
+        <Panel>
+          <SectionHeader title="Waiting for you" />
+          <ul className="m-0 p-0 list-none space-y-2">
+            {inv?.overdue_count > 0 && (
+              <li className="flex items-center gap-3 flex-wrap text-sm" style={{ color: 'var(--color-text)' }}>
+                <AlertTriangle size={16} style={{ color: 'var(--color-error-600)' }} />
+                <span className="flex-1 min-w-[200px]">{inv.overdue_count} invoice{inv.overdue_count === 1 ? ' is' : 's are'} past due -- {fmtMoney(inv.overdue_amount, currency)} to chase.</span>
+                <Btn size="sm" onClick={() => goTo?.('invoices')}>Open invoices</Btn>
+              </li>
+            )}
+            {exp?.pending_count > 0 && (
+              <li className="flex items-center gap-3 flex-wrap text-sm" style={{ color: 'var(--color-text)' }}>
+                <Receipt size={16} style={{ color: 'var(--color-warning-600)' }} />
+                <span className="flex-1 min-w-[200px]">{exp.pending_count} expense claim{exp.pending_count === 1 ? ' is' : 's are'} waiting for approval.</span>
+                <Btn size="sm" onClick={() => goTo?.('expenses')}>Open expenses</Btn>
+              </li>
+            )}
+          </ul>
+        </Panel>
+      )}
+
+      {(scope?.companies?.length || 0) > 1 && (
+        <CompaniesOverview module="accounting" onOpen={pickCompany} currentId={scope.company_id} />
+      )}
     </div>
   );
 }
