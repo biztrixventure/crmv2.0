@@ -21,6 +21,7 @@ import ThemedSelect from '../../components/UI/Select';
 import SearchSelect from '../../components/UI/SearchSelect';
 import { Btn, StatusPill, ModuleModal } from '../../components/Modules/ModuleUI';
 import { useEmployees } from '../../hooks/useEmployees';
+import { HistoryButton } from '../../components/Modules/RecordHistory';
 import { fmtMoney, fmtDate, CURRENCIES, DEFAULT_CURRENCY } from '../../utils/money';
 
 const fullName = (e) => [e?.first_name, e?.last_name].filter(Boolean).join(' ') || 'Unnamed';
@@ -73,7 +74,7 @@ export default function EmployeeDirectory({ scope }) {
   const onLeave = employees.filter(e => e.status === 'on_leave').length;
 
   if (profile) {
-    return <EmployeeProfile data={profile} canManage={canManage} onBack={() => setProfile(null)}
+    return <EmployeeProfile data={profile} canManage={canManage} companyId={companyId} onBack={() => setProfile(null)}
       onEdit={() => { setEditing(profile.employee); setProfile(null); }} />;
   }
 
@@ -201,7 +202,7 @@ export default function EmployeeDirectory({ scope }) {
 
 // -- Profile -------------------------------------------------------------------
 
-function EmployeeProfile({ data, canManage, onBack, onEdit }) {
+function EmployeeProfile({ data, canManage, companyId, onBack, onEdit }) {
   const e = data.employee;
   const reports = data.direct_reports || [];
   // Salary is only in the payload when the viewer is allowed it -- see header.
@@ -214,6 +215,8 @@ function EmployeeProfile({ data, canManage, onBack, onEdit }) {
         actions={
           <div className="flex items-center gap-2">
             <Btn icon={ArrowLeft} onClick={onBack}>Back to directory</Btn>
+            <HistoryButton module="hr" table="hr_employees" id={e.id} companyId={companyId}
+              title={'History -- ' + fullName(e)} size="md" />
             {canManage && <Btn variant="primary" icon={Pencil} onClick={onEdit}>Edit</Btn>}
           </div>
         } />

@@ -1,6 +1,7 @@
 const { verifyToken } = require('../config/auth');
 const { supabaseAdmin } = require('../config/database');
 const logger = require('../utils/logger');
+const { runWithContext } = require('../utils/requestContext');
 
 const authMiddleware = async (req, res, next) => {
   try {
@@ -74,7 +75,10 @@ const authMiddleware = async (req, res, next) => {
       exp: token.exp,
     };
 
-    next();
+    // Everything downstream of here runs "as" this user: every database write
+    // made while serving the request carries their id to the mig 313 change
+    // record. The id comes from the verified token, never from the client.
+    runWithContext({ actorId: token.sub, source: 'api' }, next);
   } catch (error) {
     console.error('Auth middleware error:', error.message);
     return res.status(401).json({ error: 'Unauthorized' });

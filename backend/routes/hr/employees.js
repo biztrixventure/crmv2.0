@@ -18,8 +18,14 @@ const { asyncHandler } = require('../../middleware/errorHandler');
 const logger = require('../../utils/logger');
 const { can, deny, readCompanyId, writeCompanyId, selfEmployee } = require('../../utils/moduleAccess');
 const { getCompanyCurrency } = require('../../models/helpers');
+const { needReason } = require('../../utils/requestContext');
 
 const router = express.Router();
+
+// Changing any of these on an existing person needs a "why" (mig 313 keeps it
+// next to the old and new value). They are the fields someone later asks
+// about: pay, and the day they left.
+const REASON_FIELDS = ['base_salary', 'pay_frequency', 'currency', 'status', 'termination_date'];
 
 // Columns only an HR manager (or the person themselves) may see.
 const SENSITIVE = ['base_salary', 'pay_frequency', 'date_of_birth', 'address', 'emergency_contact', 'personal_email', 'notes'];
@@ -113,6 +119,7 @@ router.put('/departments/:id', asyncHandler(async (req, res) => {
 router.delete('/departments/:id', asyncHandler(async (req, res) => {
   const companyId = await writeCompanyId(req);
   if (await deny(req, res, companyId, 'hr.employees.manage')) return;
+  if (needReason(req, res, 'deleting this department')) return;
 
   const { count } = await supabaseAdmin
     .from('hr_employees').select('id', { count: 'exact', head: true })
@@ -178,6 +185,7 @@ router.put('/positions/:id', asyncHandler(async (req, res) => {
 router.delete('/positions/:id', asyncHandler(async (req, res) => {
   const companyId = await writeCompanyId(req);
   if (await deny(req, res, companyId, 'hr.employees.manage')) return;
+  if (needReason(req, res, 'deleting this position')) return;
 
   const { count } = await supabaseAdmin
     .from('hr_employees').select('id', { count: 'exact', head: true })
@@ -355,11 +363,24 @@ router.put('/:id', asyncHandler(async (req, res) => {
   if (await deny(req, res, companyId, 'hr.employees.manage')) return;
 
   const { data: existing } = await supabaseAdmin
-    .from('hr_employees').select('id, employee_no, status')
+    .from('hr_employees').select('id, employee_no, ' + REASON_FIELDS.join(', '))
     .eq('id', req.params.id).eq('company_id', companyId).maybeSingle();
   if (!existing) return res.status(404).json({ error: 'Employee not found' });
 
   const b = req.body || {};
+  // Only an ACTUAL change needs a reason -- the editor resends every field on
+  // save, and asking "why" about a salary nobody touched would be noise.
+  const same = (a, c) => {
+    const x = a ?? null;
+    const y = (c === '' ? null : c) ?? null;
+    if (x === null || y === null) return x === y;
+    const nx = Number(x), ny = Number(y);
+    if (Number.isFinite(nx) && Number.isFinite(ny)) return nx === ny;   // 60000 == "60000.00"
+    return String(x) === String(y);
+  };
+  const touched = REASON_FIELDS.filter(f => b[f] !== undefined && !same(existing[f], b[f]));
+  if (touched.length && needReason(req, res, 'changing ' + touched.map(f => f.replace(/_/g, ' ')).join(', '))) return;
+
   if (b.manager_employee_id && b.manager_employee_id === existing.id) {
     return res.status(400).json({ error: 'An employee cannot report to themselves' });
   }
@@ -398,6 +419,7 @@ router.put('/:id', asyncHandler(async (req, res) => {
 router.delete('/:id', asyncHandler(async (req, res) => {
   const companyId = await writeCompanyId(req);
   if (await deny(req, res, companyId, 'hr.employees.manage')) return;
+  if (needReason(req, res, 'deleting this employee record')) return;
 
   const { data: existing } = await supabaseAdmin
     .from('hr_employees').select('id, employee_no')

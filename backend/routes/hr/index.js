@@ -18,6 +18,8 @@ const { supabaseAdmin } = require('../../config/database');
 const { asyncHandler } = require('../../middleware/errorHandler');
 const { isSuperAdmin, getCompanyCurrency } = require('../../models/helpers');
 const { can, isDesignated, readCompanyId, selfEmployee, moduleCompanies } = require('../../utils/moduleAccess');
+const { setChangeReason } = require('../../utils/requestContext');
+const { historyRouter } = require('../moduleHistory');
 
 const router = express.Router();
 
@@ -25,6 +27,16 @@ const router = express.Router();
 // this to resolve a designation's COMPANY SCOPE (mig 293) without 119 call
 // sites having to thread an extra argument through.
 router.use((req, _res, next) => { req.moduleKey = 'hr'; next(); });
+
+// A "why" typed next to any change travels with every write this request
+// makes; the mig 313 change record stores it beside the change. Routes read
+// their fields from explicit allowlists, so change_reason never lands in a
+// business column.
+router.use((req, _res, next) => {
+  const why = req.body?.change_reason ?? req.query?.change_reason;
+  if (why) setChangeReason(why);
+  next();
+});
 
 // Same rule as the accounting module -- see routes/accounting/index.js.
 async function selectableCompanies(req) {
@@ -60,6 +72,7 @@ router.get('/my-scope', asyncHandler(async (req, res) => {
     'hr.leave.request', 'hr.leave.view_team', 'hr.leave.approve', 'hr.leave.manage',
     'hr.payroll.view_own', 'hr.payroll.view', 'hr.payroll.manage',
     'hr.reviews.participate', 'hr.reviews.view_team', 'hr.reviews.manage',
+    'hr.history.view',
   ];
   const entries = await Promise.all(keys.map(async k => [k, await can(req, companyId, k)]));
   const perms = Object.fromEntries(entries);
@@ -82,6 +95,7 @@ router.get('/my-scope', asyncHandler(async (req, res) => {
   });
 }));
 
+router.use('/history',    historyRouter('hr'));
 router.use('/employees',  require('./employees'));
 router.use('/attendance', require('./attendance'));
 router.use('/leave',      require('./leave'));

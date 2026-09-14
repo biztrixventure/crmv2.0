@@ -24,6 +24,7 @@ import ThemedSelect from '../../components/UI/Select';
 import { Btn, StatusPill, ModuleModal } from '../../components/Modules/ModuleUI';
 import { usePayroll } from '../../hooks/usePayroll';
 import { useEmployees } from '../../hooks/useEmployees';
+import { HistoryButton } from '../../components/Modules/RecordHistory';
 import { fmtMoney, fmtMoneyShort, fmtDate, todayISO, DEFAULT_CURRENCY } from '../../utils/money';
 
 const fullName = (e) => [e?.first_name, e?.last_name].filter(Boolean).join(' ') || 'Unnamed';
@@ -280,6 +281,8 @@ function RunDetail({ companyId, runId, onBack, scope }) {
         actions={
           <div className="flex items-center gap-2 flex-wrap">
             <Btn icon={ArrowLeft} onClick={onBack}>Back</Btn>
+            <HistoryButton module="hr" table="hr_payroll_runs" id={run.id} companyId={companyId}
+              title={'History -- ' + run.name} size="md" />
             {editable && <Btn icon={Plus} onClick={() => setAdding(true)}>Add employee</Btn>}
             {editable && (
               <Btn variant="primary" icon={CheckCircle2} busy={busy} disabled={entries.length === 0}

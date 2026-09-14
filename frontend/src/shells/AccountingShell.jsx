@@ -11,7 +11,8 @@
 // it -- a compliance manager who was made the accountant would see an empty
 // shell if this trusted the token. Same reason QA v2 asks for /qa2/my-scope.
 // ============================================================================
-import { Scale, FileText, Receipt, ListTree, BookOpen } from 'lucide-react';
+import { Scale, FileText, Receipt, ListTree, BookOpen, History } from 'lucide-react';
+import ChangeLogPage from '../pages/modules/ChangeLogPage';
 import ModuleShell from '../components/Modules/ModuleShell';
 import AccountingDashboard from '../pages/accounting/AccountingDashboard';
 import InvoicesPage from '../pages/accounting/InvoicesPage';
@@ -25,6 +26,7 @@ const buildTabs = (p) => [
   { key: 'expenses',  label: 'Expenses',  icon: Receipt,  show: !!p['accounting.expenses.submit'] || !!p['accounting.expenses.view'] || !!p['accounting.expenses.approve'] },
   { key: 'accounts',  label: 'Chart of accounts', icon: ListTree, show: !!p['accounting.accounts.view'] },
   { key: 'journal',   label: 'Journal',   icon: BookOpen, show: !!p['accounting.journal.view'] },
+  { key: 'history',   label: 'Change log', icon: History, show: !!p['accounting.history.view'] },
 ];
 
 export default function AccountingShell() {
@@ -42,6 +44,7 @@ export default function AccountingShell() {
           {tab === 'expenses'  && <ExpensesPage scope={scope} />}
           {tab === 'accounts'  && <ChartOfAccountsPage scope={scope} />}
           {tab === 'journal'   && <JournalPage scope={scope} />}
+          {tab === 'history'   && <ChangeLogPage module="accounting" scope={scope} />}
         </>
       )}
     />

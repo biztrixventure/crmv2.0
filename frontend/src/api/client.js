@@ -1,4 +1,5 @@
 import axios from "axios";
+import { askReason } from "../utils/reasonPrompt";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3001/api";
 
@@ -24,7 +25,26 @@ client.interceptors.request.use(
 // Response interceptor - handle errors
 client.interceptors.response.use(
   (response) => response,
-  (error) => {
+  async (error) => {
+    // HR / Accounting changes that must be explained (pay, a correction to
+    // someone else's attendance, a deletion) come back 400 needs_reason. Ask
+    // once, then resend the very same request with the reason attached. Only
+    // those module routes ever send needs_reason, so nothing else changes.
+    const nr = error.response?.data;
+    if (error.response?.status === 400 && nr?.needs_reason && error.config && !error.config.__reasonAsked) {
+      const reason = await askReason(nr.error);
+      if (reason) {
+        const cfg = { ...error.config, __reasonAsked: true };
+        if ((cfg.method || 'get').toLowerCase() === 'get') {
+          cfg.params = { ...(cfg.params || {}), change_reason: reason };
+        } else {
+          let body = cfg.data;
+          if (typeof body === 'string') { try { body = JSON.parse(body); } catch { body = {}; } }
+          cfg.data = { ...(body || {}), change_reason: reason };
+        }
+        return client(cfg);
+      }
+    }
     if (error.response?.status === 401) {
       // Token expired or invalid
       localStorage.removeItem("token");

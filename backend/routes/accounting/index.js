@@ -19,6 +19,8 @@ const { supabaseAdmin } = require('../../config/database');
 const { asyncHandler } = require('../../middleware/errorHandler');
 const { isSuperAdmin, getCompanyCurrency } = require('../../models/helpers');
 const { can, isDesignated, readCompanyId, moduleCompanies } = require('../../utils/moduleAccess');
+const { setChangeReason } = require('../../utils/requestContext');
+const { historyRouter } = require('../moduleHistory');
 
 const router = express.Router();
 
@@ -26,6 +28,14 @@ const router = express.Router();
 // this to resolve a designation's COMPANY SCOPE (mig 293) without 119 call
 // sites having to thread an extra argument through.
 router.use((req, _res, next) => { req.moduleKey = 'accounting'; next(); });
+
+// A "why" typed next to any change travels with every write this request
+// makes (mig 313 change record). Same rule as routes/hr/index.js.
+router.use((req, _res, next) => {
+  const why = req.body?.change_reason ?? req.query?.change_reason;
+  if (why) setChangeReason(why);
+  next();
+});
 
 // Companies this caller may point the module at.
 //   superadmin / readonly_admin -> every active company (they have none of
@@ -67,6 +77,7 @@ router.get('/my-scope', asyncHandler(async (req, res) => {
     'accounting.invoices.view', 'accounting.invoices.manage',
     'accounting.expenses.view', 'accounting.expenses.submit', 'accounting.expenses.approve',
     'accounting.reports.view',
+    'accounting.history.view',
   ];
   const entries = await Promise.all(keys.map(async k => [k, await can(req, companyId, k)]));
   const perms = Object.fromEntries(entries);
@@ -91,6 +102,7 @@ router.get('/my-scope', asyncHandler(async (req, res) => {
   });
 }));
 
+router.use('/history',  historyRouter('accounting'));
 router.use('/accounts', require('./chartOfAccounts'));
 router.use('/journal',  require('./journal'));
 router.use('/invoices', require('./invoices'));

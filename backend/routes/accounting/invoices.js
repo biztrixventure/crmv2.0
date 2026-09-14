@@ -23,6 +23,7 @@ const logger = require('../../utils/logger');
 const { deny, readCompanyId, writeCompanyId } = require('../../utils/moduleAccess');
 const { createPostedEntry, accountByCode } = require('../../utils/ledger');
 const { getCompanyCurrency } = require('../../models/helpers');
+const { needReason, setChangeReason } = require('../../utils/requestContext');
 
 const router = express.Router();
 
@@ -319,6 +320,7 @@ router.post('/:id/payments', asyncHandler(async (req, res) => {
 router.delete('/:id/payments/:paymentId', asyncHandler(async (req, res) => {
   const companyId = await writeCompanyId(req);
   if (await deny(req, res, companyId, 'accounting.invoices.manage')) return;
+  if (needReason(req, res, 'removing this payment')) return;
 
   const { data: payment } = await supabaseAdmin
     .from('invoice_payments').select('id, invoice_id, journal_entry_id')
@@ -349,6 +351,7 @@ router.post('/:id/void', asyncHandler(async (req, res) => {
     return res.status(409).json({ error: 'This invoice has payments against it. Remove the payments first, or issue a credit note.' });
   }
 
+  if (req.body?.reason) setChangeReason(req.body.reason);
   const note = req.body?.reason ? ('Voided: ' + req.body.reason) : 'Voided';
   const { error } = await supabaseAdmin.from('invoices')
     .update({ status: 'void', notes: note, updated_at: new Date().toISOString() }).eq('id', inv.id);

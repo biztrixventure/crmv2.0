@@ -20,6 +20,7 @@ import SearchSelect from '../../components/UI/SearchSelect';
 import { Btn, StatusPill, ModuleModal } from '../../components/Modules/ModuleUI';
 import { useInvoices } from '../../hooks/useInvoices';
 import { useChartOfAccounts } from '../../hooks/useChartOfAccounts';
+import { HistoryButton } from '../../components/Modules/RecordHistory';
 import { fmtMoney, fmtMoneyShort, fmtDate, todayISO, CURRENCIES, DEFAULT_CURRENCY } from '../../utils/money';
 
 const FILTERS = [
@@ -174,7 +175,7 @@ export default function InvoicesPage({ scope }) {
           }} />
       )}
 
-      {viewing && <InvoiceView invoice={viewing} onClose={() => setViewing(null)}
+      {viewing && <InvoiceView invoice={viewing} companyId={companyId} onClose={() => setViewing(null)}
         onEdit={canManage && viewing.status !== 'void' ? () => { setEditing(viewing); setViewing(null); } : null} />}
 
       {paying && (
@@ -355,11 +356,16 @@ const Row = ({ label, value, strong }) => (
 
 // -- View ------------------------------------------------------------------------
 
-function InvoiceView({ invoice, onClose, onEdit }) {
+function InvoiceView({ invoice, companyId, onClose, onEdit }) {
   const cur = invoice.currency;
   return (
     <ModuleModal wide title={invoice.invoice_no} subtitle={invoice.customer_name} onClose={onClose}
-      footer={<>{onEdit && <Btn onClick={onEdit}>Edit</Btn>}<Btn variant="primary" onClick={onClose}>Close</Btn></>}>
+      footer={<>
+        <HistoryButton module="accounting" table="invoices" id={invoice.id} companyId={companyId}
+          title={'History -- ' + invoice.invoice_no} size="md" />
+        {onEdit && <Btn onClick={onEdit}>Edit</Btn>}
+        <Btn variant="primary" onClick={onClose}>Close</Btn>
+      </>}>
       <div className="flex items-center gap-3 flex-wrap mb-4">
         <StatusPill status={invoice.status} />
         <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>Issued {fmtDate(invoice.issue_date)}</span>

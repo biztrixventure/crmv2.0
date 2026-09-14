@@ -20,6 +20,7 @@ const express = require('express');
 const { supabaseAdmin } = require('../../config/database');
 const { asyncHandler } = require('../../middleware/errorHandler');
 const { can, deny, readCompanyId, writeCompanyId, selfEmployee, hrReadScope } = require('../../utils/moduleAccess');
+const { needReason } = require('../../utils/requestContext');
 
 const router = express.Router();
 
@@ -164,6 +165,8 @@ router.put('/:id', asyncHandler(async (req, res) => {
   const self = await selfEmployee(companyId, req.user.id);
   const isSelf = self && existing.employee_id === self.id;
   if (await deny(req, res, companyId, isSelf ? 'hr.attendance.view_own' : 'hr.attendance.manage')) return;
+  // Changing SOMEONE ELSE's day is a correction, and a correction says why.
+  if (!isSelf && needReason(req, res, "correcting this person's attendance")) return;
 
   const b = req.body || {};
   const patch = { updated_at: new Date().toISOString(), recorded_by: req.user.id };
@@ -227,6 +230,7 @@ router.post('/bulk', asyncHandler(async (req, res) => {
 router.delete('/:id', asyncHandler(async (req, res) => {
   const companyId = await writeCompanyId(req);
   if (await deny(req, res, companyId, 'hr.attendance.manage')) return;
+  if (needReason(req, res, 'deleting this attendance day')) return;
 
   const { error } = await supabaseAdmin
     .from('hr_attendance').delete().eq('id', req.params.id).eq('company_id', companyId);

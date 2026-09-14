@@ -27,6 +27,7 @@ const logger = require('../../utils/logger');
 const { can, deny, readCompanyId, writeCompanyId, selfEmployee } = require('../../utils/moduleAccess');
 const { createPostedEntry, accountByCode, cents, money } = require('../../utils/ledger');
 const { getCompanyCurrency } = require('../../models/helpers');
+const { needReason, setChangeReason } = require('../../utils/requestContext');
 
 const router = express.Router();
 
@@ -285,6 +286,7 @@ router.put('/entries/:entryId', asyncHandler(async (req, res) => {
 router.delete('/entries/:entryId', asyncHandler(async (req, res) => {
   const companyId = await writeCompanyId(req);
   if (await deny(req, res, companyId, 'hr.payroll.manage')) return;
+  if (needReason(req, res, "removing this person's pay line")) return;
 
   const { error } = await supabaseAdmin
     .from('hr_payroll_entries').delete().eq('id', req.params.entryId).eq('company_id', companyId);
@@ -336,6 +338,7 @@ router.post('/entries/:entryId/deductions', asyncHandler(async (req, res) => {
 router.delete('/deductions/:deductionId', asyncHandler(async (req, res) => {
   const companyId = await writeCompanyId(req);
   if (await deny(req, res, companyId, 'hr.payroll.manage')) return;
+  if (needReason(req, res, 'removing this deduction')) return;
 
   const { data: d } = await supabaseAdmin
     .from('hr_payroll_deductions').select('id, entry_id, hr_payroll_entries(run_id, hr_payroll_runs(status))')
@@ -445,6 +448,7 @@ router.post('/runs/:id/void', asyncHandler(async (req, res) => {
 
   const reason = (req.body?.reason || '').trim();
   if (!reason) return res.status(400).json({ error: 'A void reason is required' });
+  setChangeReason(reason);
 
   const { data: run } = await supabaseAdmin
     .from('hr_payroll_runs').select('id, status, journal_entry_id')

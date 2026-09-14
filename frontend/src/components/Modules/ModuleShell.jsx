@@ -47,6 +47,7 @@ import DotGridBg from '../UI/DotGridBg';
 import UpdateBanner from '../UI/UpdateBanner';
 import ThemedSelect from '../UI/Select';
 import { PillTabs, Loading, EmptyState } from '../UI/kit';
+import ReasonPromptHost from './ReasonPromptHost';
 
 export default function ModuleShell({
   moduleKey,          // 'accounting' | 'hr'
@@ -160,6 +161,10 @@ export default function ModuleShell({
           <ArrowLeft size={14} />My dashboard
         </button>
       </div>
+
+      {/* "Please say why" -- opened by api/client.js when the server needs a
+          reason on record before it will make a change (mig 313). */}
+      <ReasonPromptHost />
 
       <main className="w-full px-4 sm:px-6 lg:px-8 xl:px-10 py-6 sm:py-8 relative z-10">
         {!scope && !loadError && <Loading variant="cards" />}

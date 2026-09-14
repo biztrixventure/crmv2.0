@@ -23,6 +23,7 @@ const { asyncHandler } = require('../../middleware/errorHandler');
 const logger = require('../../utils/logger');
 const { deny, readCompanyId, writeCompanyId } = require('../../utils/moduleAccess');
 const { cents, money, nextEntryNo, balanceError, prepareLines } = require('../../utils/ledger');
+const { setChangeReason } = require('../../utils/requestContext');
 
 const router = express.Router();
 
@@ -247,6 +248,7 @@ router.post('/:id/void', asyncHandler(async (req, res) => {
 
   const reason = (req.body?.reason || '').trim();
   if (!reason) return res.status(400).json({ error: 'A void reason is required' });
+  setChangeReason(reason);
 
   const { data: entry } = await supabaseAdmin
     .from('journal_entries')

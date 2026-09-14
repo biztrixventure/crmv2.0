@@ -20,6 +20,7 @@ import SearchSelect from '../../components/UI/SearchSelect';
 import { Btn, StatusPill, ModuleModal } from '../../components/Modules/ModuleUI';
 import { useJournalEntries } from '../../hooks/useJournalEntries';
 import { useChartOfAccounts } from '../../hooks/useChartOfAccounts';
+import { HistoryButton } from '../../components/Modules/RecordHistory';
 import { fmtMoney, fmtDate, todayISO } from '../../utils/money';
 
 const cents = (v) => Math.round(Number(v || 0) * 100);
@@ -153,7 +154,7 @@ export default function JournalPage({ scope }) {
           ) : (
             <div className="space-y-2">
               {entries.map(entry => (
-                <EntryCard key={entry.id} entry={entry} accounts={accounts} canManage={canManage}
+                <EntryCard key={entry.id} entry={entry} accounts={accounts} canManage={canManage} companyId={companyId}
                   onPost={() => act(() => postEntry(entry.id), `${entry.entry_no} posted.`)}
                   onVoid={() => {
                     const reason = window.prompt('Why is this entry being voided?');
@@ -183,7 +184,7 @@ export default function JournalPage({ scope }) {
   );
 }
 
-function EntryCard({ entry, accounts, canManage, onPost, onVoid, onDelete }) {
+function EntryCard({ entry, accounts, canManage, companyId, onPost, onVoid, onDelete }) {
   const nameOf = (id) => {
     const a = accounts.find(x => x.id === id);
     return a ? `${a.code} -- ${a.name}` : 'Unknown account';
@@ -205,6 +206,8 @@ function EntryCard({ entry, accounts, canManage, onPost, onVoid, onDelete }) {
         )}
         <span className="text-sm truncate" style={{ color: 'var(--color-text-secondary)' }}>{entry.memo}</span>
         <div className="ml-auto flex items-center gap-1.5">
+          <HistoryButton module="accounting" table="journal_entries" id={entry.id} companyId={companyId}
+            title={'History -- ' + entry.entry_no} />
           {canManage && entry.status === 'draft' && (
             <>
               <Btn size="sm" variant="primary" icon={CheckCircle2} disabled={!balanced} onClick={onPost}
