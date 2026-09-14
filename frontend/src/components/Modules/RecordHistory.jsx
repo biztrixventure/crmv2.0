@@ -29,7 +29,7 @@ export const TABLE_LABEL = {
   hr_leave_requests: 'Leave request', hr_pay_periods: 'Pay period', hr_payroll_runs: 'Payroll run',
   hr_payroll_entries: 'Pay line', hr_payroll_deductions: 'Deduction', hr_review_cycles: 'Review cycle',
   hr_reviews: 'Review', hr_review_goals: 'Review goal', hr_review_ratings: 'Review rating',
-  user_company_roles: 'CRM login & role',
+  user_company_roles: 'CRM login & role', hr_settings: 'HR settings', hr_exit_cases: 'Exit',
   chart_of_accounts: 'Account', journal_entries: 'Journal entry', journal_entry_lines: 'Entry line',
   invoices: 'Invoice', invoice_line_items: 'Invoice line', invoice_payments: 'Payment',
   expense_categories: 'Expense category', expenses: 'Expense claim',
@@ -75,6 +75,10 @@ const FIELD_LABEL = {
   signoff_comments: 'Sign-off comments', period_start: 'Period from', period_end: 'Period to',
   rating_scale_max: 'Rating scale', weight: 'Weight', target: 'Target', self_rating: 'Self rating',
   manager_rating: 'Manager rating', competency: 'Competency', comments: 'Comments', module: 'Module',
+  auto_enroll: 'Add CRM logins automatically', enroll_role_levels: 'Roles added', employee_no_prefix: 'Employee number start',
+  exit_prompt: 'Ask to confirm exits', rules: 'Rules', updated_by: 'Changed by', source: 'Came from',
+  exit_type: 'Left because', last_day: 'Last day', eligible_for_rehire: 'Can be rehired', opened_at: 'Opened',
+  handled_by: 'Handled by', handled_at: 'Handled on', trigger: 'Started by',
 };
 
 // Plumbing columns: kept in the record, not worth a line in the timeline.

@@ -161,6 +161,10 @@ const AdminPanel = () => {
       // The QA Department shortcut was listed in the sidebar but never here, so
       // the row was filtered out and rendered for nobody.
       { id: "cc-qa",        label: "QA Department" },
+      // HR and Accounts modules (their own shells, /hr and /accounting). The
+      // superadmin had no way in except typing the URL.
+      { id: "cc-hr",        label: "HR"            },
+      { id: "cc-accounts",  label: "Accounts"      },
     ] : []),
     ...(isSAorRO                                       ? [{ id: "companies",      label: "Companies"            }] : []),
     ...(isSAorRO                                       ? [{ id: "teams",          label: "Teams"                }] : []),

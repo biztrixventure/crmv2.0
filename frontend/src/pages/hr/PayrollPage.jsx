@@ -29,9 +29,10 @@ import { fmtMoney, fmtMoneyShort, fmtDate, todayISO, DEFAULT_CURRENCY } from '..
 
 const fullName = (e) => [e?.first_name, e?.last_name].filter(Boolean).join(' ') || 'Unnamed';
 
-export default function PayrollPage({ scope }) {
+// selfOnly: mounted by "My HR" -- the person's own payslips, never the runs.
+export default function PayrollPage({ scope, selfOnly = false }) {
   const companyId = scope?.company_id || null;
-  const canView = !!scope?.permissions?.['hr.payroll.view'] || !!scope?.permissions?.['hr.payroll.manage'];
+  const canView = !selfOnly && (!!scope?.permissions?.['hr.payroll.view'] || !!scope?.permissions?.['hr.payroll.manage']);
   const canViewOwn = !!scope?.permissions?.['hr.payroll.view_own'];
 
   const [tab, setTab] = useState(canView ? 'runs' : 'mine');

@@ -32,6 +32,7 @@ import { useVersionCheck } from '../hooks/useVersionCheck';
 import { getRoleRoute } from '../utils/roleRouting';
 import client from '../api/client';
 import { AppHeader } from '../components/Layout';
+import ModuleNavLinks from '../components/Modules/ModuleNavLinks';
 import DotGridBg from '../components/UI/DotGridBg';
 import UpdateBanner from '../components/UI/UpdateBanner';
 import { PillTabs, Loading } from '../components/UI/kit';
@@ -122,6 +123,9 @@ export default function QA2Shell() {
         {!scope && !loadError && <Loading variant="inline" size={16} />}
         {loadError && <span className="text-xs" style={{ color: 'var(--color-error-600)' }}>{loadError}</span>}
         {scope && tabs.length > 0 && <PillTabs items={tabs} value={activeTab} onChange={setTab} />}
+        {/* HR / Accounts, for QA managers who also run them. Renders nothing
+            for anyone whose only access is their own self-service. */}
+        <ModuleNavLinks className="ml-auto" />
       </div>
 
       <main className="w-full px-4 sm:px-6 lg:px-8 xl:px-10 py-6 sm:py-8 relative z-10">

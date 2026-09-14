@@ -46,6 +46,10 @@ import MyQuizzes           from '../components/Quiz/MyQuizzes';
 // Training portal (mig 311) -- the same component the staff and manager shells
 // mount. Compliance is usually who runs it, via the superadmin designation.
 import TrainingPortal      from '../components/Training/TrainingPortal';
+// My HR (stage 2): the compliance manager's own record, payslips, leave,
+// attendance and expense claims -- same component every shell mounts.
+import MyHR                from '../components/Modules/MyHR';
+import { IdCard }          from 'lucide-react';
 
 const CODE_TABS = [
   { key: 'companies',   label: 'Companies',          icon: Building2 },
@@ -73,6 +77,7 @@ const CODE_TABS = [
   // superadmin designation (User Control Center -> Modules -> Training) points
   // one compliance manager at named companies, and this tab is where they do it.
   { key: 'training',    label: 'Training',           icon: GraduationCap },
+  { key: 'my_hr',       label: 'My HR',              icon: IdCard },
 ];
 
 // ── Two-tier navigation (UX cleanup) ─────────────────────────────────────────
@@ -89,7 +94,7 @@ const TAB_GROUPS = [
   // Assignment are retired from the nav (their keys still render if deep-linked).
   { id: 'numbers',  label: 'Numbers',         icon: Hash,           keys: ['batches', 'numbers'] },
   { id: 'quality',  label: 'Quality',         icon: Star,           keys: ['reviews', 'qa_admin', 'questions', 'scripts', 'faqs', 'quizzes', 'my_quizzes', 'training'] },
-  { id: 'tools',    label: 'Tools',           icon: Shield,         keys: ['dnc', 'card_validator'] },
+  { id: 'tools',    label: 'Tools',           icon: Shield,         keys: ['dnc', 'card_validator', 'my_hr'] },
 ];
 
 const ComplianceShell = () => {
@@ -348,6 +353,7 @@ const ComplianceShell = () => {
         {activeTab === 'quizzes'    && <QuizManager />}
         {activeTab === 'my_quizzes' && <MyQuizzes />}
         {activeTab === 'training'   && <TrainingPortal />}
+        {activeTab === 'my_hr'      && <MyHR />}
         <DevCredit />
       </main>
     </div>

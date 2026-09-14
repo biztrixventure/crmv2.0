@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, BarChart3, Users, Shield, Building2, FileText, ChevronRight, Zap, Network, HelpCircle, MessageSquareText, UploadCloud, Megaphone, Radio, Trophy, MessagesSquare, CalendarDays, DollarSign, ArrowRight, PhoneCall, Database, Car, Tag, Settings2, Eye, Eraser, UserCircle, Download, ClipboardCheck, Palette, Paintbrush, Hash, Send, LayoutGrid, BookOpen, Lock, Target, X } from 'lucide-react';
+import { Search, BarChart3, Users, Shield, Building2, FileText, ChevronRight, Zap, Network, HelpCircle, MessageSquareText, UploadCloud, Megaphone, Radio, Trophy, MessagesSquare, CalendarDays, DollarSign, ArrowRight, PhoneCall, Database, Car, Tag, Settings2, Eye, Eraser, UserCircle, Download, ClipboardCheck, Palette, Paintbrush, Hash, Send, LayoutGrid, BookOpen, Lock, Target, X, IdCard, Scale } from 'lucide-react';
 import { useBranding } from '../../../contexts/BrandingContext';
 
 // Items with an `href` navigate to another shell instead of switching an
@@ -27,6 +27,9 @@ const NAV_SECTIONS = [
     items: [
       { id: 'cc-sales',     label: 'Records',       icon: DollarSign,     href: '/compliance', state: { tab: 'sales'    } },
       { id: 'cc-qa',        label: 'QA Department', icon: ClipboardCheck, href: '/compliance', state: { tab: 'qa_admin' } },
+      // The HR and Accounts modules (their own shells, company picker inside).
+      { id: 'cc-hr',        label: 'HR',            icon: IdCard,         href: '/hr' },
+      { id: 'cc-accounts',  label: 'Accounts',      icon: Scale,          href: '/accounting' },
     ],
   },
   {

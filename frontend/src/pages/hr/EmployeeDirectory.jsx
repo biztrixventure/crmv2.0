@@ -22,6 +22,8 @@ import SearchSelect from '../../components/UI/SearchSelect';
 import { Btn, StatusPill, ModuleModal } from '../../components/Modules/ModuleUI';
 import { useEmployees } from '../../hooks/useEmployees';
 import { HistoryButton } from '../../components/Modules/RecordHistory';
+import { PositionHistory } from '../../components/Modules/MyHR';
+import ExitCasesPanel from './ExitCasesPanel';
 import { fmtMoney, fmtDate, CURRENCIES, DEFAULT_CURRENCY } from '../../utils/money';
 
 const fullName = (e) => [e?.first_name, e?.last_name].filter(Boolean).join(' ') || 'Unnamed';
@@ -86,6 +88,10 @@ export default function EmployeeDirectory({ scope }) {
 
       {error && <Alert type="error">{error}</Alert>}
       {notice && <Alert type={notice.type} onDismiss={() => setNotice(null)}>{notice.text}</Alert>}
+
+      {/* CRM logins that were switched off or removed (mig 314). Nothing shows
+          when nobody is waiting. */}
+      <ExitCasesPanel companyId={companyId} onChanged={() => fetchEmployees()} />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <KpiTile icon={Users} label="Employees" value={employees.length} tone="primary" />
@@ -248,6 +254,12 @@ function EmployeeProfile({ data, canManage, companyId, onBack, onEdit }) {
               </div>
             </div>
           )}
+        </Panel>
+
+        <Panel className="lg:col-span-3 order-last">
+          <SectionHeader title="Moves and changes"
+            subtitle="Joined, CRM role changes (e.g. Trainee to Fronter), position and department moves, departures" />
+          <PositionHistory employeeId={e.id} companyId={companyId} />
         </Panel>
 
         <Panel>

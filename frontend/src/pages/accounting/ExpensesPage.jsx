@@ -21,7 +21,8 @@ import { Btn, StatusPill, ModuleModal } from '../../components/Modules/ModuleUI'
 import { useExpenses } from '../../hooks/useExpenses';
 import { fmtMoney, fmtMoneyShort, fmtDate, todayISO, CURRENCIES, DEFAULT_CURRENCY } from '../../utils/money';
 
-export default function ExpensesPage({ scope }) {
+// selfOnly: mounted by "My HR" -- the person's own claims, never the approval queue.
+export default function ExpensesPage({ scope, selfOnly = false }) {
   const companyId = scope?.company_id || null;
   const myUserId = scope?.user_id || null;
   const {
@@ -54,7 +55,7 @@ export default function ExpensesPage({ scope }) {
   };
 
   const tabs = [{ key: 'mine', label: 'My claims', icon: Receipt }];
-  if (canApprove) tabs.push({ key: 'queue', label: 'Approval queue', icon: Check });
+  if (canApprove && !selfOnly) tabs.push({ key: 'queue', label: 'Approval queue', icon: Check });
 
   const totals = expenses.reduce((a, e) => {
     a.count += 1;

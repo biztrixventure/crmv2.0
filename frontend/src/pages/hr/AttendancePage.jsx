@@ -31,7 +31,8 @@ const monthBounds = (year, month) => {
   return { from: `${year}-${pad(month + 1)}-01`, to: `${year}-${pad(month + 1)}-${pad(last)}`, days: last };
 };
 
-export default function AttendancePage({ scope }) {
+// selfOnly: mounted by "My HR" -- the person's own month only, never the team grid.
+export default function AttendancePage({ scope, selfOnly = false }) {
   const companyId = scope?.company_id || null;
   const { attendance, scope: serverScope, summary, canManage, myEmployeeId, loading, error,
     fetchAttendance, recordAttendance, recordBulk } = useAttendance(companyId);
@@ -45,7 +46,7 @@ export default function AttendancePage({ scope }) {
   const [saving, setSaving] = useState(false);
 
   const bounds = useMemo(() => monthBounds(cursor.y, cursor.m), [cursor]);
-  const teamAllowed = serverScope === 'all';
+  const teamAllowed = !selfOnly && serverScope === 'all';
 
   useEffect(() => {
     if (view === 'me') fetchAttendance({ date_from: bounds.from, date_to: bounds.to });

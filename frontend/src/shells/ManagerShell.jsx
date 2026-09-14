@@ -19,7 +19,7 @@ import {
   Search, Star, Shield, FileText, RefreshCw, Plus,
   MessageSquare, Trash2, Activity, ChevronLeft, ChevronRight, CalendarDays, HelpCircle, FileSpreadsheet, Trophy,
   UserCircle, Database, Settings2, Zap, Building2, CreditCard,
-  LayoutGrid, ChevronUp, ChevronDown, ChevronsUpDown, Target, ClipboardList, GraduationCap,
+  LayoutGrid, ChevronUp, ChevronDown, ChevronsUpDown, Target, ClipboardList, GraduationCap, IdCard,
 } from "lucide-react";
 import { Badge, Alert } from "../components/UI";
 import { Panel, TableScroll, Loading, EmptyState, SectionHeader } from "../components/UI/kit";
@@ -291,6 +291,9 @@ const ManagerShell = ({ workspaceMode = false }) => {
     // fronter_manager also MANAGES their floor's training from this one item --
     // the Manage tab appears inside it when the API says they may.
     { key: 'training', label: 'Training', icon: GraduationCap },
+    // My HR (stage 2): the manager's OWN record, payslips, leave, attendance and
+    // expense claims. Team HR stays in the HR module (the header link).
+    { key: 'my_hr', label: 'My HR', icon: IdCard },
   ];
 
   // ── Tab logic ─────────────────────────────────────────────────────────────

@@ -25,7 +25,7 @@ import {
   CheckCircle, XCircle, Plus, User, Car, Star, MessageSquare,
   Users, Shield, FileText, BarChart3, AlertTriangle, RefreshCw, CalendarPlus, Pencil, Trash2, Download,
   ChevronLeft, ChevronRight, HelpCircle, CalendarDays, Copy, UserCircle, Database, CreditCard, Award,
-  LayoutGrid, List as ListIcon, GraduationCap,
+  LayoutGrid, List as ListIcon, GraduationCap, IdCard,
 } from "lucide-react";
 
 const PAGE_SIZE = 25;
@@ -300,20 +300,25 @@ const StaffShell = () => {
     // sibling of it. Always shown — a trainee needs it on day one, and a
     // fronter promoted out of trainee keeps the same tab in the same place.
     { key: 'training', label: 'Training', icon: GraduationCap },
+    // My HR (stage 2): own record, payslips, leave, attendance, expense claims.
+    // Always listed -- every floor role holds the self-service grants, and the
+    // component says so plainly if a role does not.
+    { key: 'my_hr', label: 'My HR', icon: IdCard },
   ];
 
-  // For a trainee the list IS the training tab. Building the full list above and
-  // filtering here (rather than branching earlier) keeps one definition of every
-  // item, so a tool added later cannot accidentally reach a trainee.
+  // For a trainee the list is Training plus their own HR. Building the full list
+  // above and filtering here (rather than branching earlier) keeps one
+  // definition of every item, so a tool added later cannot accidentally reach a
+  // trainee. My HR is allowed because a trainee is already an employee (mig 314).
   const navItems = isTrainee
-    ? crossNavItems.filter(i => i.key === 'training')
+    ? crossNavItems.filter(i => i.key === 'training' || i.key === 'my_hr')
     : crossNavItems;
 
   // What the shell actually renders. A trainee is pinned to Training: hiding the
   // tab is not enough on its own, because ?nav=dashboard survives in a bookmark,
   // a back button and a restored session, and would drop them onto a dashboard
   // they are not meant to have.
-  const effectiveNav = isTrainee ? 'training' : activeNav;
+  const effectiveNav = isTrainee && !['training', 'my_hr'].includes(activeNav) ? 'training' : activeNav;
 
   // Sale modal
   const [modalOpen, setModalOpen]               = useState(false);

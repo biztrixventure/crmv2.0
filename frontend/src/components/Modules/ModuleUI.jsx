@@ -21,6 +21,20 @@ const TONE_VAR = {
   muted:   'var(--color-text-secondary)',
 };
 
+// A FILLED button carries white text, so its fill must stay dark in BOTH
+// themes. The -600 tokens invert in dark mode (error-600 is #FECACA there,
+// success-600 #86EFAC) -- white on those was unreadable, the kit's own rule
+// (docs/ui-design-system.md). primary-700 stays dark in both; the rest are
+// fixed shades that read the same either way.
+const FILL = {
+  primary: 'var(--color-primary-700)',
+  success: '#15803D',
+  error:   '#DC2626',
+  warning: '#B45309',
+  info:    '#1D4ED8',
+  muted:   'var(--color-primary-700)',
+};
+
 // variant: 'primary' (filled) | 'secondary' (bordered) | 'danger'
 export function Btn({
   children, onClick, type = 'button', variant = 'secondary', tone = 'primary',
@@ -29,7 +43,9 @@ export function Btn({
   const off = disabled || busy;
   const pad = size === 'sm' ? 'px-2.5 py-1.5 text-xs' : 'px-3 py-2 text-sm';
   const filled = variant === 'primary' || variant === 'danger';
-  const color = variant === 'danger' ? TONE_VAR.error : TONE_VAR[tone] || TONE_VAR.primary;
+  const color = filled
+    ? (variant === 'danger' ? FILL.error : FILL[tone] || FILL.primary)
+    : (variant === 'danger' ? TONE_VAR.error : TONE_VAR[tone] || TONE_VAR.primary);
 
   return (
     <button type={type} onClick={onClick} disabled={off}

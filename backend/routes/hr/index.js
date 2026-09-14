@@ -96,6 +96,7 @@ router.get('/my-scope', asyncHandler(async (req, res) => {
 }));
 
 router.use('/history',    historyRouter('hr'));
+router.use('/people',     require('./people'));
 router.use('/employees',  require('./employees'));
 router.use('/attendance', require('./attendance'));
 router.use('/leave',      require('./leave'));

@@ -21,7 +21,7 @@ import { HistoryEvent, TABLE_LABEL, fieldLabel, fmtValue } from '../../component
 import { downloadCSV } from '../../utils/recordFormat';
 
 const MODULE_TABLES = {
-  hr: ['hr_employees', 'user_company_roles', 'hr_departments', 'hr_positions', 'hr_attendance',
+  hr: ['hr_employees', 'user_company_roles', 'hr_exit_cases', 'hr_settings', 'hr_departments', 'hr_positions', 'hr_attendance',
        'hr_leave_requests', 'hr_leave_balances', 'hr_leave_types', 'hr_pay_periods', 'hr_payroll_runs',
        'hr_payroll_entries', 'hr_payroll_deductions', 'hr_review_cycles', 'hr_reviews'],
   accounting: ['chart_of_accounts', 'journal_entries', 'journal_entry_lines', 'invoices', 'invoice_line_items',

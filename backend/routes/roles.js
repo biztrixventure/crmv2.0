@@ -514,6 +514,42 @@ router.delete(
 // Skips any role whose name already exists for the company.
 // SuperAdmin only.
 // ============================================================================
+// ─── Module grants (HR, Accounting, Training) ────────────────────────────────
+// The migrations granted these to every EXISTING role (290 HR/Accounting, 311
+// Training, 313 change log, 314 trainee self-service). They must live in the
+// templates too: seed-defaults?reset=true, and ensureGlobalQaRoles() on every
+// seed, DELETE a role's permissions and re-insert the template list -- so a
+// template without them silently stripped every role's payslips, leave,
+// expense claims and training the first time anyone pressed "reset".
+const MODULE_SELF = [
+  'accounting.expenses.submit', 'hr.attendance.view_own', 'hr.leave.request',
+  'hr.payroll.view_own', 'hr.reviews.participate',
+];
+const MODULE_TEAM_LEAD = [
+  ...MODULE_SELF,
+  'hr.attendance.view_team', 'hr.leave.view_team', 'hr.leave.approve', 'hr.reviews.view_team',
+];
+const MODULE_OPS = [
+  'accounting.accounts.view', 'accounting.journal.view', 'accounting.invoices.view',
+  'accounting.expenses.view', 'accounting.expenses.submit', 'accounting.expenses.approve',
+  'accounting.reports.view', 'accounting.history.view',
+  'hr.employees.view', 'hr.attendance.view_own', 'hr.attendance.view_team',
+  'hr.leave.request', 'hr.leave.view_team', 'hr.leave.approve',
+  'hr.payroll.view_own', 'hr.payroll.view',
+  'hr.reviews.participate', 'hr.reviews.view_team', 'hr.reviews.manage', 'hr.history.view',
+];
+const MODULE_ADMIN = [
+  'accounting.accounts.view', 'accounting.accounts.manage', 'accounting.journal.view', 'accounting.journal.manage',
+  'accounting.invoices.view', 'accounting.invoices.manage', 'accounting.expenses.view',
+  'accounting.expenses.submit', 'accounting.expenses.approve', 'accounting.reports.view', 'accounting.history.view',
+  'hr.employees.view', 'hr.employees.manage', 'hr.attendance.view_own', 'hr.attendance.view_team',
+  'hr.attendance.manage', 'hr.leave.request', 'hr.leave.view_team', 'hr.leave.approve', 'hr.leave.manage',
+  'hr.payroll.view_own', 'hr.payroll.view', 'hr.payroll.manage',
+  'hr.reviews.participate', 'hr.reviews.view_team', 'hr.reviews.manage', 'hr.history.view',
+];
+const TRAINING_VIEW   = ['training.view'];
+const TRAINING_MANAGE = ['training.view', 'training.manage', 'training.progress'];
+
 const COMPANY_ADMIN_ROLE = {
   name: 'Company Admin',
   description: 'Full company access — manages users, roles, forms and all data',
@@ -533,6 +569,7 @@ const COMPANY_ADMIN_ROLE = {
     'view_call_reviews', 'view_all_call_reviews',
     'view_fronter_stats', 'view_closer_stats', 'view_company_reports', 'view_reports',
     'view_notifications',
+    ...MODULE_ADMIN, ...TRAINING_MANAGE,
   ],
 };
 
@@ -552,6 +589,9 @@ const TRAINEE_ROLE = {
   permissions: [
     'training.view',
     'view_notifications',
+    // Their own payslips, leave, attendance and expense claims (mig 314) --
+    // a trainee is already an employee. Still nothing about live leads.
+    ...MODULE_SELF,
   ],
 };
 
@@ -570,6 +610,7 @@ const OPS_MANAGER_ROLE = {
     'view_company_members', 'create_user', 'edit_user', 'delete_user',
     'manage_roles', 'manage_forms',
     'view_notifications',
+    ...MODULE_OPS, ...TRAINING_MANAGE,
   ],
 };
 
@@ -593,6 +634,8 @@ const FRONTER_DEFAULTS = [
       'manage_callbacks', 'view_callbacks', 'manage_callback_numbers',
       // Notifications
       'view_notifications',
+      // Own HR + expense claims, training
+      ...MODULE_SELF, ...TRAINING_VIEW,
     ],
   },
   {
@@ -615,6 +658,8 @@ const FRONTER_DEFAULTS = [
       'view_company_members', 'create_user', 'edit_user',
       // Notifications
       'view_notifications',
+      // Own HR + the team's attendance and leave, and the floor's training
+      ...MODULE_TEAM_LEAD, ...TRAINING_MANAGE,
     ],
   },
   TRAINEE_ROLE,
@@ -640,6 +685,8 @@ const CLOSER_DEFAULTS = [
       'submit_call_review', 'submit_call_dispo',
       // Notifications
       'view_notifications',
+      // Own HR + expense claims, training
+      ...MODULE_SELF, ...TRAINING_VIEW,
     ],
   },
   {
@@ -665,6 +712,8 @@ const CLOSER_DEFAULTS = [
       'view_company_members', 'create_user', 'edit_user',
       // Notifications
       'view_notifications',
+      // Own HR + the team's attendance and leave, training
+      ...MODULE_TEAM_LEAD, ...TRAINING_VIEW,
     ],
   },
   {
@@ -682,6 +731,8 @@ const CLOSER_DEFAULTS = [
       'view_all_call_reviews',
       // Notifications
       'view_notifications',
+      // Own HR + team visibility, training oversight
+      ...MODULE_TEAM_LEAD, ...TRAINING_MANAGE,
     ],
   },
   TRAINEE_ROLE,
@@ -702,12 +753,13 @@ const QA_GLOBAL_ROLES = [
     // NO view_all_qa_reviews: a QA manager is scoped to the companies compliance
     // assigns them (allowedCompanyIds → getUserCompanies). view_qa_reports still
     // gives the manager cross-agent report visibility WITHIN those companies.
-    permissions: ['view_qa_queue', 'submit_qa_review', 'assign_qa_tasks', 'manage_qa_config', 'override_qa_review', 'view_qa_reports'],
+    permissions: ['view_qa_queue', 'submit_qa_review', 'assign_qa_tasks', 'manage_qa_config', 'override_qa_review', 'view_qa_reports',
+      ...MODULE_TEAM_LEAD],
   },
   {
     name: 'QA Agent', level: 'qa_agent',
     description: 'Quality reviewer — listens to and scores the calls assigned to them',
-    permissions: ['view_qa_queue', 'submit_qa_review'],
+    permissions: ['view_qa_queue', 'submit_qa_review', ...MODULE_SELF],
   },
 ];
 
@@ -717,7 +769,7 @@ const QA_GLOBAL_ROLES = [
 async function ensureGlobalQaRoles(permMap) {
   const out = { created: [], reconciled: [] };
   for (const tpl of QA_GLOBAL_ROLES) {
-    const wantPermIds = tpl.permissions.map(p => permMap[p]).filter(Boolean);
+    const wantPermIds = [...new Set(tpl.permissions.map(p => permMap[p]).filter(Boolean))];
     // find by level among global roles (name may differ from an older seed)
     let { data: role } = await supabaseAdmin.from('custom_roles')
       .select('id').is('company_id', null).eq('level', tpl.level).limit(1).maybeSingle();
@@ -771,7 +823,9 @@ router.post('/seed-defaults', asyncHandler(async (req, res) => {
   const skipped = [];
 
   for (const tpl of defaults) {
-    const permIds = tpl.permissions.map(p => permMap[p]).filter(Boolean);
+    // Set: the module bundles overlap (training.view, expenses.submit), and
+    // role_permissions is UNIQUE(role_id, permission_id).
+    const permIds = [...new Set(tpl.permissions.map(p => permMap[p]).filter(Boolean))];
 
     if (existingMap[tpl.name]) {
       // Role already exists

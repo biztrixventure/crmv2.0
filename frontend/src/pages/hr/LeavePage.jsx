@@ -30,9 +30,12 @@ const dayCount = (from, to) => {
   return n > 0 ? n : 0;
 };
 
-export default function LeavePage({ scope }) {
+// selfOnly: the "My HR" surface (components/Modules/MyHR.jsx) mounts this page
+// for the signed-in person only -- no approval queue, no leave-type setup, even
+// for a manager who could reach those in the HR module itself.
+export default function LeavePage({ scope, selfOnly = false }) {
   const companyId = scope?.company_id || null;
-  const canManageTypes = !!scope?.permissions?.['hr.leave.manage'];
+  const canManageTypes = !selfOnly && !!scope?.permissions?.['hr.leave.manage'];
   const {
     requests, balances, types, scope: serverScope, canApprove, myEmployeeId, loading, error,
     fetchRequests, fetchBalances, fetchTypes, saveType, setEntitlement,
@@ -46,7 +49,7 @@ export default function LeavePage({ scope }) {
   const [notice, setNotice] = useState(null);
 
   const year = new Date().getFullYear();
-  const teamAllowed = serverScope === 'all';
+  const teamAllowed = !selfOnly && serverScope === 'all';
 
   useEffect(() => { fetchTypes(); }, [fetchTypes]);
   useEffect(() => { fetchRequests(); fetchBalances({ year }); }, [fetchRequests, fetchBalances, year]);

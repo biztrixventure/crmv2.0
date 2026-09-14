@@ -56,6 +56,8 @@ const TABLES = {
     hr_review_goals:       { perms: ['hr.reviews.view_team', 'hr.reviews.manage'] },
     hr_review_ratings:     { perms: ['hr.reviews.view_team', 'hr.reviews.manage'] },
     user_company_roles:    { perms: ['hr.employees.view'] },
+    hr_settings:           { perms: ['hr.employees.view'] },           // record id = company id (mig 314)
+    hr_exit_cases:         { perms: ['hr.employees.view'] },
   },
   accounting: {
     chart_of_accounts:   { perms: ['accounting.accounts.view'] },

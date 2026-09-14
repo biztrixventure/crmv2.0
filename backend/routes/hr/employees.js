@@ -40,7 +40,7 @@ const redact = (row, allowed) => {
 const full = 'id, company_id, user_id, employee_no, first_name, last_name, work_email, personal_email, '
   + 'phone, date_of_birth, address, emergency_contact, department_id, position_id, manager_employee_id, '
   + 'hire_date, termination_date, employment_type, status, base_salary, pay_frequency, currency, notes, '
-  + 'created_at, updated_at, '
+  + 'source, created_at, updated_at, '
   // hr_departments MUST be disambiguated by constraint name. There are TWO
   // foreign keys between these tables -- hr_employees.department_id -> department,
   // and hr_departments.head_employee_id -> employee (the department head) -- so a
@@ -426,13 +426,17 @@ router.delete('/:id', asyncHandler(async (req, res) => {
     .eq('id', req.params.id).eq('company_id', companyId).maybeSingle();
   if (!existing) return res.status(404).json({ error: 'Employee not found' });
 
-  const [att, pay, rev, lv] = await Promise.all([
+  // Position history (mig 314) counts too: someone who joined, changed role or
+  // left through the CRM has a working life on record, and deleting them would
+  // erase it. Set their status instead.
+  const [att, pay, rev, lv, pos] = await Promise.all([
     supabaseAdmin.from('hr_attendance').select('id', { count: 'exact', head: true }).eq('employee_id', existing.id),
     supabaseAdmin.from('hr_payroll_entries').select('id', { count: 'exact', head: true }).eq('employee_id', existing.id),
     supabaseAdmin.from('hr_reviews').select('id', { count: 'exact', head: true }).eq('employee_id', existing.id),
     supabaseAdmin.from('hr_leave_requests').select('id', { count: 'exact', head: true }).eq('employee_id', existing.id),
+    supabaseAdmin.from('hr_position_history').select('id', { count: 'exact', head: true }).eq('employee_id', existing.id),
   ]);
-  const history = (att.count || 0) + (pay.count || 0) + (rev.count || 0) + (lv.count || 0);
+  const history = (att.count || 0) + (pay.count || 0) + (rev.count || 0) + (lv.count || 0) + (pos.count || 0);
   if (history > 0) {
     return res.status(409).json({
       error: 'Employee ' + existing.employee_no + ' has ' + history + ' HR record(s) attached. Set their status to terminated instead of deleting.',

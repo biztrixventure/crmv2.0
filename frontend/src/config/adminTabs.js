@@ -39,6 +39,11 @@ export const ADMIN_TAB_CATALOG = [
   { id: 'cc-sales',         label: 'All Sales',            group: 'cross_company', roEligible: true,  defaultForRo: true,  gate: null },
   { id: 'cc-transfers',     label: 'All Transfers',        group: 'cross_company', roEligible: true,  defaultForRo: true,  gate: null },
   { id: 'cc-callbacks',     label: 'All Callbacks',        group: 'cross_company', roEligible: true,  defaultForRo: true,  gate: null },
+  // HR and Accounts modules. Read-only eligible (readonlyGuard refuses every
+  // write on /api/hr and /api/accounting) but OFF by default: salaries and the
+  // books are not something a readonly admin should see unless granted.
+  { id: 'cc-hr',            label: 'HR',                   group: 'cross_company', roEligible: true,  defaultForRo: false, gate: null },
+  { id: 'cc-accounts',      label: 'Accounts',             group: 'cross_company', roEligible: true,  defaultForRo: false, gate: null },
 
   // Admin surfaces
   { id: 'companies',        label: 'Companies',            group: 'admin',         roEligible: true,  defaultForRo: true,  gate: null },

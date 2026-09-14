@@ -28,6 +28,9 @@ const QuizOversight         = lazy(() => import('../Quiz/QuizOversight'));
 // "My Quizzes" item -- MyQuizzes itself is unchanged and still mounted below
 // for the shells that list it on its own.
 const TrainingPortal        = lazy(() => import('../Training/TrainingPortal'));
+// My HR (stage 2): the person's own record, payslips, leave, attendance and
+// expense claims -- one component for every shell, like TrainingPortal.
+const MyHR                  = lazy(() => import('../Modules/MyHR'));
 // Engagement: company-wide incentive programmes. SPIFF Campaigns moved here
 // from the manager shell's Team tab group -- an incentive programme is
 // engagement, not team structure.
@@ -75,6 +78,7 @@ const CrossRoleContent = ({ section, user }) => {
   }
   if (section === 'my_quizzes')              return <Suspense fallback={<ToolFallback />}><MyQuizzes /></Suspense>;
   if (section === 'training')                return <Suspense fallback={<ToolFallback />}><TrainingPortal /></Suspense>;
+  if (section === 'my_hr')                   return <Suspense fallback={<ToolFallback />}><MyHR /></Suspense>;
   if (section === 'engagement')              return <Suspense fallback={<ToolFallback />}><SpiffManager /></Suspense>;
 
   return null;

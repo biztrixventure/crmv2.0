@@ -54,7 +54,7 @@ export default function ModuleShell({
   title,
   icon: Icon,
   buildTabs,          // (permissions, scope) => [{ key, label, icon, show }]
-  render,             // (activeTab, scope) => node
+  render,             // (activeTab, scope, goTo) => node  -- goTo(tabKey) switches tab
   banner,             // optional (scope) => node, drawn above the content
   defaultTab,
 }) {
@@ -187,7 +187,7 @@ export default function ModuleShell({
             {tabs.length === 0
               ? <EmptyState icon={Icon} title={`Nothing to show in ${title.toLowerCase()}`}
                   hint="You have access to the module but none of its sections." />
-              : render(activeTab, scope)}
+              : render(activeTab, scope, setTab)}
           </>
         )}
       </main>
