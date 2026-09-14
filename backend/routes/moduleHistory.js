@@ -69,6 +69,8 @@ const TABLES = {
     invoice_payments:    { perms: ['accounting.invoices.view', 'accounting.invoices.manage'] },
     expense_categories:  { perms: ['accounting.expenses.view', 'accounting.expenses.approve'] },
     expenses:            { perms: ['accounting.expenses.view', 'accounting.expenses.approve'] },
+    accounting_posting_rules: { perms: ['accounting.accounts.view'] },
+    fx_rates:            { perms: ['accounting.accounts.view'] },
   },
 };
 

@@ -78,6 +78,7 @@ router.get('/my-scope', asyncHandler(async (req, res) => {
     'accounting.expenses.view', 'accounting.expenses.submit', 'accounting.expenses.approve',
     'accounting.reports.view',
     'accounting.history.view',
+    'accounting.settings.manage',
   ];
   const entries = await Promise.all(keys.map(async k => [k, await can(req, companyId, k)]));
   const perms = Object.fromEntries(entries);
@@ -103,7 +104,9 @@ router.get('/my-scope', asyncHandler(async (req, res) => {
 }));
 
 router.use('/history',  historyRouter('accounting'));
+router.use('/settings', require('./settings'));
 router.use('/accounts', require('./chartOfAccounts'));
+router.use('/opening-balances', require('./openingBalances'));
 router.use('/journal',  require('./journal'));
 router.use('/invoices', require('./invoices'));
 router.use('/expenses', require('./expenses'));

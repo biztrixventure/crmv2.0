@@ -542,6 +542,7 @@ const MODULE_ADMIN = [
   'accounting.accounts.view', 'accounting.accounts.manage', 'accounting.journal.view', 'accounting.journal.manage',
   'accounting.invoices.view', 'accounting.invoices.manage', 'accounting.expenses.view',
   'accounting.expenses.submit', 'accounting.expenses.approve', 'accounting.reports.view', 'accounting.history.view',
+  'accounting.settings.manage',
   'hr.employees.view', 'hr.employees.manage', 'hr.attendance.view_own', 'hr.attendance.view_team',
   'hr.attendance.manage', 'hr.leave.request', 'hr.leave.view_team', 'hr.leave.approve', 'hr.leave.manage',
   'hr.payroll.view_own', 'hr.payroll.view', 'hr.payroll.manage',

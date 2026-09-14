@@ -19,6 +19,8 @@ import { Alert } from '../../components/UI';
 import ThemedSelect from '../../components/UI/Select';
 import { Btn, StatusPill, ModuleModal } from '../../components/Modules/ModuleUI';
 import { useExpenses } from '../../hooks/useExpenses';
+import AskDialog from '../../components/Modules/AskDialog';
+import ThemedDate from '../../components/UI/ThemedDate';
 import { fmtMoney, fmtMoneyShort, fmtDate, todayISO, CURRENCIES, DEFAULT_CURRENCY } from '../../utils/money';
 
 // selfOnly: mounted by "My HR" -- the person's own claims, never the approval queue.
@@ -35,6 +37,8 @@ export default function ExpensesPage({ scope, selfOnly = false }) {
   const [status, setStatus] = useState('');
   const [editing, setEditing] = useState(null);
   const [notice, setNotice] = useState(null);
+  const [asking, setAsking] = useState(null);
+  const [payingBack, setPayingBack] = useState(null);
 
   useEffect(() => { fetchCategories(); }, [fetchCategories]);
   useEffect(() => {
@@ -44,15 +48,20 @@ export default function ExpensesPage({ scope, selfOnly = false }) {
     });
   }, [fetchExpenses, tab, status]);
 
+  // okText may be a function of the response, for the entry number.
   const act = async (fn, okText) => {
     setNotice(null);
     try {
       const r = await fn();
-      setNotice({ type: r?.journal_note ? 'warning' : 'success', text: r?.journal_note || okText });
+      const text = r?.journal_note || (typeof okText === 'function' ? okText(r) : okText);
+      setNotice({ type: r?.journal_note ? 'warning' : 'success', text });
+      return true;
     } catch (e) {
       setNotice({ type: 'error', text: e.response?.data?.error || 'That did not work.' });
+      return false;
     }
   };
+  const inBooks = (did) => (r) => r?.entry_no ? `${did} Recorded in the books as ${r.entry_no}.` : did;
 
   const tabs = [{ key: 'mine', label: 'My claims', icon: Receipt }];
   if (canApprove && !selfOnly) tabs.push({ key: 'queue', label: 'Approval queue', icon: Check });
@@ -133,7 +142,14 @@ export default function ExpensesPage({ scope, selfOnly = false }) {
                         <td className="td-p text-sm text-right tabular-nums font-semibold" style={{ color: 'var(--color-text)' }}>
                           {fmtMoney(e.amount, e.currency)}
                         </td>
-                        <td className="td-p"><StatusPill status={e.status} /></td>
+                        <td className="td-p">
+                          <StatusPill status={e.status} />
+                          {(e.journal_entry?.entry_no || e.reimbursement_entry?.entry_no) && (
+                            <span className="block text-[11px] mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>
+                              {[e.journal_entry?.entry_no, e.reimbursement_entry?.entry_no].filter(Boolean).join(' · ')}
+                            </span>
+                          )}
+                        </td>
                         <td className="td-p">
                           <div className="flex items-center gap-1.5 justify-end flex-wrap">
                             {mine && ['draft', 'rejected'].includes(e.status) && (
@@ -145,7 +161,12 @@ export default function ExpensesPage({ scope, selfOnly = false }) {
                             )}
                             {mine && e.status === 'draft' && (
                               <Btn size="sm" variant="danger" icon={Trash2}
-                                onClick={() => { if (window.confirm('Delete this claim?')) act(() => deleteExpense(e.id), 'Claim deleted.'); }}>
+                                onClick={() => setAsking({
+                                  title: 'Delete this draft claim?',
+                                  message: `${fmtMoney(e.amount, e.currency)}${e.description ? ' -- ' + e.description : ''}. A draft was never sent for approval, so it is removed completely.`,
+                                  confirmLabel: 'Delete draft', danger: true,
+                                  onConfirm: async () => { if (await act(() => deleteExpense(e.id), 'Claim deleted.')) setAsking(null); },
+                                })}>
                                 Delete
                               </Btn>
                             )}
@@ -158,17 +179,19 @@ export default function ExpensesPage({ scope, selfOnly = false }) {
                             {canApprove && !mine && e.status === 'submitted' && (
                               <>
                                 <Btn size="sm" variant="primary" icon={Check}
-                                  onClick={() => act(() => approveExpense(e.id), 'Claim approved.')}>Approve</Btn>
+                                  onClick={() => act(() => approveExpense(e.id), inBooks('Claim approved.'))}>Approve</Btn>
                                 <Btn size="sm" variant="danger" icon={X}
-                                  onClick={() => {
-                                    const reason = window.prompt('Why is this claim being rejected? The claimant will see this.');
-                                    if (reason) act(() => rejectExpense(e.id, reason), 'Claim rejected.');
-                                  }}>Reject</Btn>
+                                  onClick={() => setAsking({
+                                    title: 'Reject this claim?',
+                                    message: `${fmtMoney(e.amount, e.currency)}${e.description ? ' -- ' + e.description : ''}. It goes back to the claimant, who can fix it and send it again.`,
+                                    confirmLabel: 'Reject claim', reason: 'required', danger: true,
+                                    reasonLabel: 'What should they fix?', reasonHint: 'The claimant sees this.',
+                                    onConfirm: async (why) => { if (await act(() => rejectExpense(e.id, why), 'Claim rejected.')) setAsking(null); },
+                                  })}>Reject</Btn>
                               </>
                             )}
                             {canApprove && e.status === 'approved' && (
-                              <Btn size="sm" icon={Banknote}
-                                onClick={() => act(() => reimburseExpense(e.id), 'Marked as reimbursed.')}>Mark paid</Btn>
+                              <Btn size="sm" icon={Banknote} onClick={() => setPayingBack(e)}>Mark paid back</Btn>
                             )}
                           </div>
                         </td>
@@ -197,7 +220,36 @@ export default function ExpensesPage({ scope, selfOnly = false }) {
             }
           }} />
       )}
+
+      {payingBack && (
+        <PaidBackDialog expense={payingBack} onClose={() => setPayingBack(null)}
+          onSubmit={async (paidOn) => {
+            if (await act(() => reimburseExpense(payingBack.id, paidOn), inBooks('Marked as paid back.'))) setPayingBack(null);
+          }} />
+      )}
+
+      {asking && <AskDialog {...asking} onClose={() => setAsking(null)} />}
     </div>
+  );
+}
+
+// The claimant got their money back. paid_on dates the entry in the books.
+function PaidBackDialog({ expense, onClose, onSubmit }) {
+  const [paidOn, setPaidOn] = useState(todayISO());
+  const [busy, setBusy] = useState(false);
+  return (
+    <ModuleModal title="Mark this claim paid back"
+      subtitle={`${fmtMoney(expense.amount, expense.currency)}${expense.description ? ' -- ' + expense.description : ''}. Do this once the money has reached the person.`}
+      onClose={onClose}
+      footer={<>
+        <Btn onClick={onClose}>Cancel</Btn>
+        <Btn variant="primary" busy={busy} disabled={!paidOn}
+          onClick={async () => { setBusy(true); try { await onSubmit(paidOn); } finally { setBusy(false); } }}>Mark paid back</Btn>
+      </>}>
+      <Field label="Paid on" required>
+        <ThemedDate value={paidOn} onChange={e => setPaidOn(e.target.value)} />
+      </Field>
+    </ModuleModal>
   );
 }
 
@@ -233,7 +285,7 @@ function ExpenseEditor({ expense, categories, defaultCurrency, onClose, onSave }
       <form onSubmit={e => { e.preventDefault(); save(false); }} className="space-y-3">
         <div className="grid grid-cols-2 gap-3">
           <Field label="Date" required>
-            <input className="input w-full" type="date" required value={form.expense_date} onChange={e => set('expense_date', e.target.value)} />
+            <ThemedDate value={form.expense_date} onChange={e => set('expense_date', e.target.value)} />
           </Field>
           <Field label="Amount" required>
             <input className="input w-full" type="number" step="0.01" min="0.01" required

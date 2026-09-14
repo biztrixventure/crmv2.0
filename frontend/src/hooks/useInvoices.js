@@ -1,4 +1,4 @@
-﻿import { useState, useCallback } from 'react';
+﻿import { useState, useCallback, useRef } from 'react';
 import client from '../api/client';
 
 /**
@@ -19,11 +19,15 @@ export const useInvoices = (companyId = null) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const fetchInvoices = useCallback(async (filters = {}) => {
+  // A refresh after send/pay/void re-asks for the SAME list (status filter and
+  // search). Calling with no filters used to drop them.
+  const lastFilters = useRef({});
+  const fetchInvoices = useCallback(async (filters) => {
+    if (filters) lastFilters.current = filters;
     setLoading(true);
     setError(null);
     try {
-      const params = { company_id: companyId, ...filters };
+      const params = { company_id: companyId, ...lastFilters.current };
       const response = await client.get('accounting/invoices', { params });
       setInvoices(response.data.invoices || []);
       setTotal(response.data.total || 0);
@@ -53,7 +57,7 @@ export const useInvoices = (companyId = null) => {
     try {
       const response = await client.post('accounting/invoices', { company_id: companyId, ...payload });
       await fetchInvoices();
-      return response.data.invoice;
+      return response.data;   // { invoice, journal_note }
     } catch (err) {
       const msg = err.response?.data?.error || err.message || 'Failed to create the invoice';
       setError(msg);
@@ -66,7 +70,7 @@ export const useInvoices = (companyId = null) => {
     try {
       const response = await client.put(`accounting/invoices/${id}`, { company_id: companyId, ...updates });
       await fetchInvoices();
-      return response.data.invoice;
+      return response.data;   // { invoice, journal_note }
     } catch (err) {
       const msg = err.response?.data?.error || err.message || 'Failed to update the invoice';
       setError(msg);
@@ -79,7 +83,7 @@ export const useInvoices = (companyId = null) => {
     try {
       const response = await client.post(`accounting/invoices/${id}/send`, { company_id: companyId });
       await fetchInvoices();
-      return response.data.invoice;
+      return response.data;   // { invoice, journal_note, entry_no }
     } catch (err) {
       const msg = err.response?.data?.error || err.message || 'Failed to send the invoice';
       setError(msg);
@@ -102,11 +106,13 @@ export const useInvoices = (companyId = null) => {
     }
   }, [companyId, fetchInvoices]);
 
-  const deletePayment = useCallback(async (invoiceId, paymentId) => {
+  // The payment's entry in the books is reversed server-side; the reason is
+  // kept on the reversal and in the change log.
+  const deletePayment = useCallback(async (invoiceId, paymentId, reason) => {
     setError(null);
     try {
       const response = await client.delete(`accounting/invoices/${invoiceId}/payments/${paymentId}`, {
-        params: { company_id: companyId },
+        params: { company_id: companyId, change_reason: reason || undefined },
       });
       await fetchInvoices();
       return response.data;
@@ -121,7 +127,7 @@ export const useInvoices = (companyId = null) => {
     try {
       const response = await client.post(`accounting/invoices/${id}/void`, { company_id: companyId, reason });
       await fetchInvoices();
-      return response.data.invoice;
+      return response.data;   // { invoice, journal_note }
     } catch (err) {
       const msg = err.response?.data?.error || err.message || 'Failed to void the invoice';
       setError(msg);

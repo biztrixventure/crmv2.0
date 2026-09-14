@@ -240,3 +240,6 @@ router.get('/summary', asyncHandler(async (req, res) => {
 }));
 
 module.exports = router;
+// The chart of accounts shows each account's balance from the same fold, so
+// the two screens can never disagree.
+module.exports.foldLines = foldLines;

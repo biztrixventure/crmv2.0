@@ -111,6 +111,32 @@ export const useJournalEntries = (companyId = null) => {
     }
   }, [companyId, fetchEntries]);
 
+  // Posted entries are never edited (mig 315). Reverse posts a mirror image;
+  // Correct reverses AND posts the corrected version in one transaction.
+  const reverseEntry = useCallback(async (id, reason) => {
+    setError(null);
+    try {
+      const response = await client.post(`accounting/journal/${id}/reverse`, { company_id: companyId, reason });
+      await fetchEntries();
+      return response.data;
+    } catch (err) {
+      setError(err.response?.data?.error || err.message || 'Failed to reverse the entry');
+      throw err;
+    }
+  }, [companyId, fetchEntries]);
+
+  const correctEntry = useCallback(async (id, payload) => {
+    setError(null);
+    try {
+      const response = await client.post(`accounting/journal/${id}/correct`, { company_id: companyId, ...payload });
+      await fetchEntries();
+      return response.data;
+    } catch (err) {
+      setError(err.response?.data?.error || err.message || 'Failed to correct the entry');
+      throw err;
+    }
+  }, [companyId, fetchEntries]);
+
   const deleteEntry = useCallback(async (id) => {
     setError(null);
     try {
@@ -127,7 +153,7 @@ export const useJournalEntries = (companyId = null) => {
   return {
     entries, total, loading, error,
     fetchEntries, fetchEntry, fetchLedger,
-    createEntry, updateEntry, postEntry, voidEntry, deleteEntry,
+    createEntry, updateEntry, postEntry, voidEntry, deleteEntry, reverseEntry, correctEntry,
   };
 };
 

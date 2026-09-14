@@ -25,6 +25,8 @@ import { Btn, StatusPill, ModuleModal } from '../../components/Modules/ModuleUI'
 import { usePayroll } from '../../hooks/usePayroll';
 import { useEmployees } from '../../hooks/useEmployees';
 import { HistoryButton } from '../../components/Modules/RecordHistory';
+import AskDialog from '../../components/Modules/AskDialog';
+import ThemedDate from '../../components/UI/ThemedDate';
 import { fmtMoney, fmtMoneyShort, fmtDate, todayISO, DEFAULT_CURRENCY } from '../../utils/money';
 
 const fullName = (e) => [e?.first_name, e?.last_name].filter(Boolean).join(' ') || 'Unnamed';
@@ -72,11 +74,15 @@ function RunList({ companyId, scope, onOpen }) {
 
   useEffect(() => { fetchRuns(); fetchPeriods(); }, [fetchRuns, fetchPeriods]);
 
+  // "Paid" means the money left the bank (paid_at), not merely finalized.
   const totals = runs.reduce((a, r) => {
-    if (r.status === 'finalized') { a.paid += Number(r.net_total || 0); a.finalized += 1; }
+    if (r.status === 'finalized') {
+      a.finalized += 1;
+      if (r.paid_at) a.paid += Number(r.net_total || 0); else a.owed += Number(r.net_total || 0);
+    }
     if (['draft', 'processing'].includes(r.status)) a.open += 1;
     return a;
-  }, { paid: 0, finalized: 0, open: 0 });
+  }, { paid: 0, owed: 0, finalized: 0, open: 0 });
 
   return (
     <div className="space-y-4">
@@ -86,8 +92,10 @@ function RunList({ companyId, scope, onOpen }) {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <KpiTile label="Runs" value={runs.length} tone="info" />
         <KpiTile label="Open runs" value={totals.open} tone={totals.open ? 'warning' : 'muted'} />
-        <KpiTile label="Finalized" value={totals.finalized} tone="success" />
-        <KpiTile label="Net paid (finalized)" value={fmtMoneyShort(totals.paid)} tone="primary" />
+        <KpiTile label="Owed to staff" value={fmtMoneyShort(totals.owed, runs[0]?.currency)}
+          sub="Finalized, not paid yet" tone={totals.owed ? 'warning' : 'muted'} />
+        <KpiTile label="Paid out" value={fmtMoneyShort(totals.paid, runs[0]?.currency)}
+          sub={`${totals.finalized} finalized run${totals.finalized === 1 ? '' : 's'}`} tone="success" />
       </div>
 
       <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -127,7 +135,15 @@ function RunList({ companyId, scope, onOpen }) {
                       <td className="td-p text-sm text-right tabular-nums" style={{ color: 'var(--color-text)' }}>{fmtMoney(r.gross_total, r.currency)}</td>
                       <td className="td-p text-sm text-right tabular-nums" style={{ color: 'var(--color-warning-600)' }}>{fmtMoney(r.deduction_total, r.currency)}</td>
                       <td className="td-p text-sm text-right tabular-nums font-semibold" style={{ color: 'var(--color-text)' }}>{fmtMoney(r.net_total, r.currency)}</td>
-                      <td className="td-p"><StatusPill status={r.status} /></td>
+                      <td className="td-p">
+                        <StatusPill status={r.status} />
+                        {r.status === 'finalized' && (
+                          <span className="ml-1.5 text-[11px] font-semibold"
+                            style={{ color: r.paid_at ? 'var(--color-success-600)' : 'var(--color-warning-600)' }}>
+                            {r.paid_at ? 'paid ' + fmtDate(r.paid_at) : 'not paid'}
+                          </span>
+                        )}
+                      </td>
                       <td className="td-p text-right"><Btn size="sm" onClick={() => onOpen(r.id)}>Open</Btn></td>
                     </tr>
                   ))}
@@ -192,11 +208,11 @@ function NewRunDialog({ periods, onClose, onSubmit, onCreatePeriod }) {
               A run belongs to a pay period. Create one first.
             </p>
             <div className="grid grid-cols-3 gap-2">
-              <Field label="Start" required><input className="input w-full" type="date" value={newPeriod.start_date}
+              <Field label="Start" required><ThemedDate value={newPeriod.start_date}
                 onChange={e => setNewPeriod(p => ({ ...p, start_date: e.target.value }))} /></Field>
-              <Field label="End" required><input className="input w-full" type="date" value={newPeriod.end_date}
+              <Field label="End" required><ThemedDate value={newPeriod.end_date}
                 onChange={e => setNewPeriod(p => ({ ...p, end_date: e.target.value }))} /></Field>
-              <Field label="Pay date"><input className="input w-full" type="date" value={newPeriod.pay_date}
+              <Field label="Pay date"><ThemedDate value={newPeriod.pay_date}
                 onChange={e => setNewPeriod(p => ({ ...p, pay_date: e.target.value }))} /></Field>
             </div>
             <div className="flex gap-2">
@@ -243,7 +259,7 @@ function NewRunDialog({ periods, onClose, onSubmit, onCreatePeriod }) {
 
 function RunDetail({ companyId, runId, onBack, scope }) {
   const canManage = !!scope?.permissions?.['hr.payroll.manage'];
-  const { fetchRun, saveEntry, updateEntry, deleteEntry, addDeduction, deleteDeduction, finalizeRun, voidRun } =
+  const { fetchRun, saveEntry, updateEntry, deleteEntry, addDeduction, deleteDeduction, finalizeRun, voidRun, payRun } =
     usePayroll(companyId);
   const { employees, fetchEmployees } = useEmployees(companyId);
 
@@ -252,20 +268,28 @@ function RunDetail({ companyId, runId, onBack, scope }) {
   const [adding, setAdding] = useState(false);
   const [deducting, setDeducting] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [asking, setAsking] = useState(null);
+  const [paying, setPaying] = useState(false);
 
   const reload = useCallback(async () => { setData(await fetchRun(runId)); }, [fetchRun, runId]);
   useEffect(() => { reload(); }, [reload]);
   useEffect(() => { if (canManage) fetchEmployees({ status: 'active' }); }, [canManage, fetchEmployees]);
 
-  const guard = async (fn, ok) => {
+  // ok: a string, or a function of the response for messages that carry an
+  // entry number. A journal_note is a warning ("nothing was recorded") unless
+  // noteIsGood says it is the good news (a reversal done for you).
+  const guard = async (fn, ok, { noteIsGood = false } = {}) => {
     setBusy(true);
     setNotice(null);
     try {
       const r = await fn();
       await reload();
-      setNotice({ type: r?.journal_note ? 'warning' : 'success', text: r?.journal_note || ok });
+      const text = r?.journal_note || (typeof ok === 'function' ? ok(r) : ok);
+      setNotice({ type: r?.journal_note && !noteIsGood ? 'warning' : 'success', text });
+      return true;
     } catch (e) {
       setNotice({ type: 'error', text: e.response?.data?.error || 'That did not work.' });
+      return false;
     } finally { setBusy(false); }
   };
 
@@ -273,6 +297,7 @@ function RunDetail({ companyId, runId, onBack, scope }) {
 
   const { run, entries } = data;
   const editable = canManage && ['draft', 'processing'].includes(run.status);
+  const payable = canManage && run.status === 'finalized' && !run.paid_at;
   const inRun = new Set(entries.map(e => e.employee_id));
 
   return (
@@ -287,27 +312,42 @@ function RunDetail({ companyId, runId, onBack, scope }) {
             {editable && <Btn icon={Plus} onClick={() => setAdding(true)}>Add employee</Btn>}
             {editable && (
               <Btn variant="primary" icon={CheckCircle2} busy={busy} disabled={entries.length === 0}
-                onClick={() => {
-                  if (window.confirm(`Finalize ${run.name}? Entries and deductions become read-only, and a journal entry is posted.`)) {
-                    guard(() => finalizeRun(run.id), 'Payroll run finalized.');
-                  }
-                }}>Finalize</Btn>
+                onClick={() => setAsking({
+                  title: `Finalize ${run.name}?`,
+                  message: `Every line on this run is locked, and the salaries (${fmtMoney(run.gross_total, run.currency)} gross) are recorded in the books as owed to staff. To change a finalized run you void it and make a new one.`,
+                  confirmLabel: 'Finalize',
+                  onConfirm: async () => { if (await guard(() => finalizeRun(run.id), 'Payroll run finalized and recorded in the books.')) setAsking(null); },
+                })}>Finalize</Btn>
             )}
-            {canManage && run.status !== 'void' && (
-              <Btn icon={Ban} onClick={() => {
-                const reason = window.prompt('Why is this run being voided?');
-                if (reason) guard(() => voidRun(run.id, reason), 'Run voided.');
-              }}>Void</Btn>
+            {payable && (
+              <Btn variant="primary" tone="success" icon={Banknote} busy={busy} onClick={() => setPaying(true)}>Mark salaries paid</Btn>
+            )}
+            {canManage && run.status !== 'void' && !run.paid_at && (
+              <Btn icon={Ban} onClick={() => setAsking({
+                title: `Void ${run.name}?`,
+                message: run.status === 'finalized' && run.journal_entry_id
+                  ? 'The run is cancelled and its entry in the books is reversed automatically. Nothing is deleted.'
+                  : 'The run is cancelled. Nothing is deleted.',
+                confirmLabel: 'Void run', reason: 'required', danger: true,
+                reasonHint: 'Kept on the run and in its history.',
+                onConfirm: async (why) => { if (await guard(() => voidRun(run.id, why), 'Run voided.', { noteIsGood: true })) setAsking(null); },
+              })}>Void</Btn>
             )}
           </div>
         } />
 
       {notice && <Alert type={notice.type} onDismiss={() => setNotice(null)}>{notice.text}</Alert>}
       {run.status === 'finalized' && (
-        <Alert type="success" dismissible={false}>
-          Finalized {fmtDate(run.finalized_at)}. Entries are locked.
-          {run.journal_entry_id ? ' A journal entry was posted to the ledger.' : ' No journal entry was posted.'}
+        <Alert type={run.paid_at ? 'success' : 'info'} dismissible={false}>
+          Finalized {fmtDate(run.finalized_at)}. Lines are locked.
+          {run.journal_entry_id ? ' The salaries are recorded in the books.' : ' Nothing was recorded in the books.'}
+          {run.paid_at
+            ? ` Paid ${fmtDate(run.paid_at)}${run.payment_reference ? ` (ref ${run.payment_reference})` : ''}.`
+            : ' Not paid yet -- use "Mark salaries paid" once the money has left the bank.'}
         </Alert>
+      )}
+      {run.status === 'void' && run.note && (
+        <Alert type="warning" dismissible={false}>Voided {fmtDate(run.voided_at)}: {run.note}</Alert>
       )}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -381,7 +421,47 @@ function RunDetail({ companyId, runId, onBack, scope }) {
             setDeducting(null);
           }} />
       )}
+
+      {paying && (
+        <PayDialog run={run} onClose={() => setPaying(false)}
+          onSubmit={async (payload) => {
+            const ok = await guard(() => payRun(run.id, payload),
+              (r) => r?.entry_no ? `Marked paid. Recorded in the books as ${r.entry_no}.` : 'Marked paid.');
+            if (ok) setPaying(false);
+          }} />
+      )}
+
+      {asking && <AskDialog {...asking} onClose={() => setAsking(null)} />}
     </div>
+  );
+}
+
+// Salaries left the bank: the date they went and the bank's reference. The
+// entry that clears "salaries we owe staff" is dated on paid_on.
+function PayDialog({ run, onClose, onSubmit }) {
+  const [paidOn, setPaidOn] = useState(todayISO());
+  const [reference, setReference] = useState('');
+  const [busy, setBusy] = useState(false);
+  return (
+    <ModuleModal title={`Mark ${run.name} paid`}
+      subtitle={`${fmtMoney(run.net_total, run.currency)} take-home pay. Do this once the money has actually left the bank.`}
+      onClose={onClose}
+      footer={<>
+        <Btn onClick={onClose}>Cancel</Btn>
+        <Btn variant="primary" tone="success" busy={busy} disabled={!paidOn}
+          onClick={async () => { setBusy(true); try { await onSubmit({ paidOn, reference: reference.trim() || undefined }); } finally { setBusy(false); } }}>
+          Mark paid
+        </Btn>
+      </>}>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="Paid on" required>
+          <ThemedDate value={paidOn} onChange={e => setPaidOn(e.target.value)} />
+        </Field>
+        <Field label="Bank reference" hint="Optional -- the transfer or cheque number.">
+          <input className="input w-full" maxLength={120} value={reference} onChange={e => setReference(e.target.value)} />
+        </Field>
+      </div>
+    </ModuleModal>
   );
 }
 

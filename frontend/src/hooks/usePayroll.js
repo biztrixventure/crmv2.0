@@ -187,6 +187,21 @@ export const usePayroll = (companyId = null) => {
     }
   }, [companyId, fetchRuns]);
 
+  // Salaries left the bank. Books: "salaries we owe staff" -> money paid out.
+  const payRun = useCallback(async (id, { paidOn, reference } = {}) => {
+    setError(null);
+    try {
+      const response = await client.post(`hr/payroll/runs/${id}/pay`, {
+        company_id: companyId, paid_on: paidOn, reference,
+      });
+      await fetchRuns();
+      return response.data;   // { run, entry_no }
+    } catch (err) {
+      setError(err.response?.data?.error || err.message || 'Failed to mark the run paid');
+      throw err;
+    }
+  }, [companyId, fetchRuns]);
+
   const fetchMyPayslips = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -206,7 +221,7 @@ export const usePayroll = (companyId = null) => {
     fetchPeriods, createPeriod,
     fetchRuns, fetchRun, createRun, updateRun,
     saveEntry, updateEntry, deleteEntry, addDeduction, deleteDeduction,
-    finalizeRun, voidRun, fetchMyPayslips,
+    finalizeRun, voidRun, payRun, fetchMyPayslips,
   };
 };
 

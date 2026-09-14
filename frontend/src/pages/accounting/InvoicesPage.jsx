@@ -21,6 +21,8 @@ import { Btn, StatusPill, ModuleModal } from '../../components/Modules/ModuleUI'
 import { useInvoices } from '../../hooks/useInvoices';
 import { useChartOfAccounts } from '../../hooks/useChartOfAccounts';
 import { HistoryButton } from '../../components/Modules/RecordHistory';
+import AskDialog from '../../components/Modules/AskDialog';
+import ThemedDate from '../../components/UI/ThemedDate';
 import { fmtMoney, fmtMoneyShort, fmtDate, todayISO, CURRENCIES, DEFAULT_CURRENCY } from '../../utils/money';
 
 const FILTERS = [
@@ -38,7 +40,7 @@ export default function InvoicesPage({ scope }) {
   const {
     invoices, summary, loading, error,
     fetchInvoices, fetchInvoice, createInvoice, updateInvoice, sendInvoice,
-    recordPayment, voidInvoice, deleteInvoice,
+    recordPayment, deletePayment, voidInvoice, deleteInvoice,
   } = useInvoices(companyId);
   const { accounts, fetchAccounts } = useChartOfAccounts(companyId);
 
@@ -48,6 +50,7 @@ export default function InvoicesPage({ scope }) {
   const [viewing, setViewing] = useState(null);
   const [paying, setPaying] = useState(null);
   const [notice, setNotice] = useState(null);
+  const [asking, setAsking] = useState(null);
 
   useEffect(() => { fetchInvoices({ status: status || undefined, search: search || undefined }); }, [fetchInvoices, status, search]);
   useEffect(() => { fetchAccounts(); }, [fetchAccounts]);
@@ -60,15 +63,51 @@ export default function InvoicesPage({ scope }) {
     else setViewing(inv);
   };
 
-  const act = async (fn, okText) => {
+  // okText: a string, or a function of the response (for entry numbers). A
+  // journal_note is a warning ("nothing was recorded in the books") unless
+  // noteIsGood says it is the good news (a reversal done for you).
+  const act = async (fn, okText, { noteIsGood = false } = {}) => {
     setNotice(null);
     try {
       const r = await fn();
-      setNotice({ type: 'success', text: r?.journal_note || okText });
+      const text = r?.journal_note || (typeof okText === 'function' ? okText(r) : okText);
+      setNotice({ type: r?.journal_note && !noteIsGood ? 'warning' : 'success', text });
+      return r || true;
     } catch (e) {
       setNotice({ type: 'error', text: e.response?.data?.error || 'That did not work.' });
+      return null;
     }
   };
+  const inBooks = (r, did) => r?.entry_no ? `${did} Recorded in the books as ${r.entry_no}.` : did;
+
+  const askVoid = (inv) => setAsking({
+    title: `Void ${inv.invoice_no}?`,
+    message: inv.journal_entry_id
+      ? 'The invoice is cancelled and its entry in the books is reversed automatically. Nothing is deleted.'
+      : 'The invoice is cancelled. Nothing is deleted.',
+    confirmLabel: 'Void invoice', reason: 'required', danger: true,
+    reasonHint: 'Kept on the invoice and in its history.',
+    onConfirm: async (why) => {
+      if (await act(() => voidInvoice(inv.id, why), 'Invoice voided.', { noteIsGood: true })) { setAsking(null); setViewing(null); }
+    },
+  });
+  const askDelete = (inv) => setAsking({
+    title: `Delete draft ${inv.invoice_no}?`,
+    message: 'A draft was never in the books, so it is removed completely.',
+    confirmLabel: 'Delete draft', danger: true,
+    onConfirm: async () => { if (await act(() => deleteInvoice(inv.id), 'Draft deleted.')) setAsking(null); },
+  });
+  const askRemovePayment = (inv, p) => setAsking({
+    title: `Remove the ${fmtMoney(p.amount, inv.currency)} payment?`,
+    message: p.journal_entry_id
+      ? `Use this when the payment was entered by mistake or bounced. Its entry in the books${p.journal_entry?.entry_no ? ' (' + p.journal_entry.entry_no + ')' : ''} is reversed, and the invoice balance goes back up.`
+      : 'Use this when the payment was entered by mistake or bounced. The invoice balance goes back up.',
+    confirmLabel: 'Remove payment', reason: 'required', danger: true,
+    onConfirm: async (why) => {
+      const r = await act(() => deletePayment(inv.id, p.id, why), 'Payment removed.', { noteIsGood: true });
+      if (r) { setAsking(null); setViewing(r.invoice || null); }
+    },
+  });
 
   return (
     <div className="space-y-4">
@@ -130,23 +169,16 @@ export default function InvoicesPage({ scope }) {
                         <div className="flex items-center gap-1.5 justify-end">
                           <Btn size="sm" icon={Eye} onClick={() => open(inv.id, 'view')}>View</Btn>
                           {canManage && inv.status === 'draft' && (
-                            <Btn size="sm" icon={Send} onClick={() => act(() => sendInvoice(inv.id), 'Invoice marked as sent.')}>Send</Btn>
+                            <Btn size="sm" icon={Send} onClick={() => act(() => sendInvoice(inv.id), (r) => inBooks(r, 'Invoice sent.'))}>Send</Btn>
                           )}
                           {canManage && ['sent', 'partial', 'overdue'].includes(inv.status) && (
                             <Btn size="sm" variant="primary" icon={DollarSign} onClick={() => open(inv.id, 'pay')}>Payment</Btn>
                           )}
                           {canManage && inv.status === 'draft' && (
-                            <Btn size="sm" variant="danger" icon={Trash2}
-                              onClick={() => { if (window.confirm(`Delete ${inv.invoice_no}?`)) act(() => deleteInvoice(inv.id), 'Invoice deleted.'); }}>
-                              Delete
-                            </Btn>
+                            <Btn size="sm" variant="danger" icon={Trash2} onClick={() => askDelete(inv)}>Delete</Btn>
                           )}
                           {canManage && !['draft', 'void', 'paid'].includes(inv.status) && Number(inv.amount_paid) === 0 && (
-                            <Btn size="sm" icon={Ban}
-                              onClick={() => {
-                                const reason = window.prompt('Why is this invoice being voided?');
-                                if (reason) act(() => voidInvoice(inv.id, reason), 'Invoice voided.');
-                              }}>Void</Btn>
+                            <Btn size="sm" icon={Ban} onClick={() => askVoid(inv)}>Void</Btn>
                           )}
                         </div>
                       </td>
@@ -165,10 +197,9 @@ export default function InvoicesPage({ scope }) {
           onSave={async (payload) => {
             setNotice(null);
             try {
-              if (editing.id) await updateInvoice(editing.id, payload);
-              else await createInvoice(payload);
+              const r = editing.id ? await updateInvoice(editing.id, payload) : await createInvoice(payload);
               setEditing(null);
-              setNotice({ type: 'success', text: 'Invoice saved.' });
+              setNotice({ type: r?.journal_note ? 'warning' : 'success', text: r?.journal_note || 'Invoice saved.' });
             } catch (e) {
               setNotice({ type: 'error', text: e.response?.data?.error || 'Could not save the invoice.' });
             }
@@ -176,7 +207,8 @@ export default function InvoicesPage({ scope }) {
       )}
 
       {viewing && <InvoiceView invoice={viewing} companyId={companyId} onClose={() => setViewing(null)}
-        onEdit={canManage && viewing.status !== 'void' ? () => { setEditing(viewing); setViewing(null); } : null} />}
+        onEdit={canManage && viewing.status !== 'void' ? () => { setEditing(viewing); setViewing(null); } : null}
+        onRemovePayment={canManage && viewing.status !== 'void' ? (p) => askRemovePayment(viewing, p) : null} />}
 
       {paying && (
         <PaymentDialog invoice={paying} onClose={() => setPaying(null)}
@@ -192,6 +224,8 @@ export default function InvoicesPage({ scope }) {
             }
           }} />
       )}
+
+      {asking && <AskDialog {...asking} onClose={() => setAsking(null)} />}
     </div>
   );
 }
@@ -261,11 +295,11 @@ function InvoiceEditor({ invoice, accounts, defaultCurrency, onClose, onSave }) 
           </Field>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <Field label="Issue date">
-            <input className="input w-full" type="date" value={form.issue_date} onChange={e => set('issue_date', e.target.value)} />
+          <Field label="Issue date" hint="Dates the entry in the books.">
+            <ThemedDate value={form.issue_date} onChange={e => set('issue_date', e.target.value)} />
           </Field>
           <Field label="Due date" hint="Blank means no due date -- it will never go overdue.">
-            <input className="input w-full" type="date" value={form.due_date} onChange={e => set('due_date', e.target.value)} />
+            <ThemedDate value={form.due_date} onChange={e => set('due_date', e.target.value)} />
           </Field>
           <Field label="Currency">
             <ThemedSelect value={form.currency} onChange={e => set('currency', e.target.value)}>
@@ -356,8 +390,9 @@ const Row = ({ label, value, strong }) => (
 
 // -- View ------------------------------------------------------------------------
 
-function InvoiceView({ invoice, companyId, onClose, onEdit }) {
+function InvoiceView({ invoice, companyId, onClose, onEdit, onRemovePayment }) {
   const cur = invoice.currency;
+  const entryNo = invoice.journal_entry?.entry_no;
   return (
     <ModuleModal wide title={invoice.invoice_no} subtitle={invoice.customer_name} onClose={onClose}
       footer={<>
@@ -370,6 +405,11 @@ function InvoiceView({ invoice, companyId, onClose, onEdit }) {
         <StatusPill status={invoice.status} />
         <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>Issued {fmtDate(invoice.issue_date)}</span>
         {invoice.due_date && <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>Due {fmtDate(invoice.due_date)}</span>}
+        {invoice.status !== 'draft' && (
+          <span className="text-xs" style={{ color: entryNo ? 'var(--color-text-secondary)' : 'var(--color-warning-600)' }}>
+            {entryNo ? `In the books: ${entryNo}` : invoice.status === 'void' ? 'Reversed in the books' : 'Not recorded in the books'}
+          </span>
+        )}
       </div>
 
       <TableScroll>
@@ -412,8 +452,18 @@ function InvoiceView({ invoice, companyId, onClose, onEdit }) {
               style={{ borderBottom: '1px solid var(--color-border)' }}>
               <span style={{ color: 'var(--color-text-secondary)' }}>
                 {fmtDate(p.paid_at)}{p.method ? ` -- ${p.method}` : ''}{p.reference ? ` (${p.reference})` : ''}
+                {p.journal_entry?.entry_no && (
+                  <span className="ml-2 text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{p.journal_entry.entry_no}</span>
+                )}
               </span>
-              <span className="tabular-nums font-semibold" style={{ color: 'var(--color-success-600)' }}>{fmtMoney(p.amount, cur)}</span>
+              <span className="flex items-center gap-2">
+                <span className="tabular-nums font-semibold" style={{ color: 'var(--color-success-600)' }}>{fmtMoney(p.amount, cur)}</span>
+                {onRemovePayment && (
+                  <Btn size="sm" variant="danger" icon={Trash2} onClick={() => onRemovePayment(p)}>
+                    <span className="sr-only">Remove payment</span>
+                  </Btn>
+                )}
+              </span>
             </div>
           ))}
         </div>
@@ -426,15 +476,18 @@ function InvoiceView({ invoice, companyId, onClose, onEdit }) {
 
 function PaymentDialog({ invoice, onClose, onSubmit }) {
   const [amount, setAmount] = useState(invoice.balance_due ?? '');
+  const [paidOn, setPaidOn] = useState(todayISO());
   const [method, setMethod] = useState('card');
   const [reference, setReference] = useState('');
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
 
+  // paid_on dates the entry in the books too, so a payment keyed in a few
+  // days late still lands in the right month.
   const submit = async (e) => {
     e.preventDefault();
     setSaving(true);
-    await onSubmit({ amount: Number(amount), method, reference: reference || null, note: note || null });
+    await onSubmit({ amount: Number(amount), paid_at: paidOn || undefined, method, reference: reference || null, note: note || null });
     setSaving(false);
   };
 
@@ -443,10 +496,15 @@ function PaymentDialog({ invoice, onClose, onSubmit }) {
       subtitle={`${fmtMoney(invoice.balance_due, invoice.currency)} outstanding`} onClose={onClose}
       footer={<><Btn onClick={onClose}>Cancel</Btn><Btn variant="primary" busy={saving} onClick={submit}>Record payment</Btn></>}>
       <form onSubmit={submit} className="space-y-3">
-        <Field label="Amount" required hint="Cannot exceed the outstanding balance.">
-          <input className="input w-full" type="number" step="0.01" min="0.01" required
-            max={invoice.balance_due} value={amount} onChange={e => setAmount(e.target.value)} />
-        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Amount" required hint="Cannot exceed the outstanding balance.">
+            <input className="input w-full" type="number" step="0.01" min="0.01" required
+              max={invoice.balance_due} value={amount} onChange={e => setAmount(e.target.value)} />
+          </Field>
+          <Field label="Received on" hint="Dates the entry in the books.">
+            <ThemedDate value={paidOn} onChange={e => setPaidOn(e.target.value)} />
+          </Field>
+        </div>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Method">
             <ThemedSelect value={method} onChange={e => setMethod(e.target.value)}>

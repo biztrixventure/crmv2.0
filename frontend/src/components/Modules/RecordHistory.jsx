@@ -33,6 +33,7 @@ export const TABLE_LABEL = {
   chart_of_accounts: 'Account', journal_entries: 'Journal entry', journal_entry_lines: 'Entry line',
   invoices: 'Invoice', invoice_line_items: 'Invoice line', invoice_payments: 'Payment',
   expense_categories: 'Expense category', expenses: 'Expense claim',
+  accounting_posting_rules: 'Money rule', fx_rates: 'Exchange rate',
   module_designations: 'Designation', module_designation_companies: 'Designation company',
 };
 

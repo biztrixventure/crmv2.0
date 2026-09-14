@@ -14,7 +14,9 @@ const express = require('express');
 const { supabaseAdmin } = require('../../config/database');
 const { asyncHandler } = require('../../middleware/errorHandler');
 const logger = require('../../utils/logger');
-const { deny, readCompanyId, writeCompanyId } = require('../../utils/moduleAccess');
+const { can, deny, readCompanyId, writeCompanyId } = require('../../utils/moduleAccess');
+const { money } = require('../../utils/ledger');
+const { foldLines } = require('./reports');
 
 const router = express.Router();
 
@@ -63,7 +65,15 @@ router.get('/', asyncHandler(async (req, res) => {
   const { data, error } = await q;
   if (error) return res.status(500).json({ error: error.message });
 
-  const accounts = data || [];
+  // ?with_balances=true -- each account's balance to date in its own normal
+  // direction (the reports fold, so this can never disagree with Reports).
+  // Money, so it needs the journal or reports permission, not just accounts.view.
+  let accounts = data || [];
+  if (req.query.with_balances === 'true'
+      && (await can(req, companyId, 'accounting.journal.view') || await can(req, companyId, 'accounting.reports.view'))) {
+    const folded = await foldLines(companyId, { to: new Date().toISOString().slice(0, 10) });
+    accounts = accounts.map(a => ({ ...a, balance: money(folded.get(a.id)?.cents || 0) }));
+  }
   res.json({
     accounts,
     tree: req.query.tree === 'true' ? toTree(accounts) : undefined,
@@ -210,8 +220,14 @@ const DEFAULT_ACCOUNTS = [
   ['2200', 'Taxes Payable',         'liability', null],
   ['3000', 'Owner Equity',          'equity',    null],
   ['3100', 'Retained Earnings',     'equity',    null],
+  // Where the balancing figure of the opening balances lands
+  // (routes/accounting/openingBalances.js).
+  ['3900', 'Opening Balance Equity', 'equity',   null],
   ['4000', 'Sales Revenue',         'revenue',   null],
   ['4100', 'Service Revenue',       'revenue',   null],
+  // Money won or lost on the exchange rate between sending a foreign-currency
+  // invoice and being paid for it (utils/ledger.js 'fx.difference').
+  ['4900', 'Exchange Rate Differences', 'revenue', null],
   ['5000', 'Salaries and Wages',    'expense',   null],
   ['5100', 'Commissions',           'expense',   null],
   ['5200', 'Rent',                  'expense',   null],

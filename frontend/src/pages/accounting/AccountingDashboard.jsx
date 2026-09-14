@@ -26,6 +26,7 @@ import { Alert } from '../../components/UI';
 import { useAccountingReports } from '../../hooks/useAccountingReports';
 import { useChartOfAccounts } from '../../hooks/useChartOfAccounts';
 import { fmtMoney, fmtMoneyShort, fmtDate, todayISO, monthStartISO, DEFAULT_CURRENCY } from '../../utils/money';
+import { Btn } from '../../components/Modules/ModuleUI';
 
 export default function AccountingDashboard({ scope }) {
   const companyId = scope?.company_id || null;
@@ -71,7 +72,7 @@ export default function AccountingDashboard({ scope }) {
   if (summary && !summary.ready) {
     return (
       <div className="space-y-5">
-        <SectionHeader level="page" icon={Scale} title="Accounting"
+        <SectionHeader level="page" icon={Scale} title="Accounts"
           subtitle="Nothing has been set up for this company yet" />
         {seedMsg && <Alert type="info" onDismiss={() => setSeedMsg(null)}>{seedMsg}</Alert>}
         <EmptyState
@@ -79,11 +80,7 @@ export default function AccountingDashboard({ scope }) {
           title="This company has no chart of accounts"
           hint="Every report here is built from the ledger, and the ledger needs accounts to post to. Start from a conventional set of 20 -- you can rename, re-code and archive any of them afterwards."
           action={
-            <button onClick={onSeed} disabled={seeding}
-              className="px-4 py-2 rounded-lg text-sm font-semibold"
-              style={{ background: 'var(--color-primary-600)', color: '#fff', opacity: seeding ? 0.6 : 1 }}>
-              {seeding ? 'Setting up...' : 'Create a starter chart of accounts'}
-            </button>
+            <Btn variant="primary" busy={seeding} onClick={onSeed}>Create a starter chart of accounts</Btn>
           }
         />
       </div>
@@ -97,7 +94,7 @@ export default function AccountingDashboard({ scope }) {
 
   return (
     <div className="space-y-5">
-      <SectionHeader level="page" icon={Scale} title="Accounting"
+      <SectionHeader level="page" icon={Scale} title="Accounts"
         subtitle={scope?.company_name ? `${scope.company_name} -- as of ${fmtDate(todayISO())}` : `As of ${fmtDate(todayISO())}`}
         actions={
           <button onClick={load} className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold"
@@ -113,8 +110,8 @@ export default function AccountingDashboard({ scope }) {
       {balanceSheet && balanceSheet.balanced === false && (
         <Alert type="error">
           <strong>The balance sheet does not balance.</strong> Assets minus liabilities and equity leaves{' '}
-          {fmtMoney(balanceSheet.difference, currency)} unaccounted for. Check the trial balance in the Journal tab --
-          this almost always means an entry was posted to the wrong account type.
+          {fmtMoney(balanceSheet.difference, currency)} unaccounted for. Open Reports -> Trial balance to see which
+          account -- this almost always means an entry was posted to the wrong account type.
         </Alert>
       )}
 

@@ -25,7 +25,7 @@ const { supabaseAdmin } = require('../../config/database');
 const { asyncHandler } = require('../../middleware/errorHandler');
 const logger = require('../../utils/logger');
 const { can, deny, readCompanyId, writeCompanyId, selfEmployee } = require('../../utils/moduleAccess');
-const { createPostedEntry, accountByCode, cents, money } = require('../../utils/ledger');
+const { createPostedEntry, reverseEntry, postingRules, toBookLines, cents, money } = require('../../utils/ledger');
 const { getCompanyCurrency } = require('../../models/helpers');
 const { needReason, setChangeReason } = require('../../utils/requestContext');
 
@@ -33,6 +33,9 @@ const router = express.Router();
 
 const runFull = 'id, company_id, pay_period_id, name, status, currency, gross_total, deduction_total, '
   + 'net_total, finalized_at, finalized_by, voided_at, voided_by, journal_entry_id, note, created_by, '
+  + 'paid_at, paid_by, payment_reference, payment_journal_entry_id, '
+  + 'journal_entry:journal_entries!hr_payroll_runs_journal_entry_id_fkey(entry_no), '
+  + 'payment_entry:journal_entries!hr_payroll_runs_payment_journal_entry_id_fkey(entry_no), '
   + 'created_at, updated_at, hr_pay_periods(id, name, start_date, end_date, pay_date, status)';
 
 const entryFull = 'id, company_id, run_id, employee_id, base_amount, overtime_amount, bonus_amount, '
@@ -373,7 +376,7 @@ router.post('/runs/:id/finalize', asyncHandler(async (req, res) => {
   if (await deny(req, res, companyId, 'hr.payroll.manage')) return;
 
   const { data: run } = await supabaseAdmin
-    .from('hr_payroll_runs').select('id, name, status, gross_total, deduction_total, net_total, pay_period_id, hr_pay_periods(end_date, pay_date)')
+    .from('hr_payroll_runs').select('id, name, status, currency, gross_total, deduction_total, net_total, pay_period_id, hr_pay_periods(end_date, pay_date)')
     .eq('id', req.params.id).eq('company_id', companyId).maybeSingle();
   if (!run) return res.status(404).json({ error: 'Payroll run not found' });
   if (run.status === 'finalized') return res.status(409).json({ error: 'This run is already finalized' });
@@ -384,51 +387,57 @@ router.post('/runs/:id/finalize', asyncHandler(async (req, res) => {
   if (!count) return res.status(422).json({ error: 'This run has no entries' });
   if (Number(run.gross_total) <= 0) return res.status(422).json({ error: 'This run totals zero -- nothing to finalize' });
 
+  // Work out the books side BEFORE finalizing: a company with books never gets
+  // a finalized run with no salary expense recorded. post_journal:false opts
+  // out entirely (a run recorded elsewhere); no chart of accounts = nothing to
+  // record in, and the response says so.
+  let lines = null;
+  let journalNote = null;
+  const entryDate = run.hr_pay_periods?.pay_date || run.hr_pay_periods?.end_date || new Date().toISOString().slice(0, 10);
+  if (req.body?.post_journal !== false) {
+    const { count: accountCount } = await supabaseAdmin.from('chart_of_accounts')
+      .select('id', { count: 'exact', head: true }).eq('company_id', companyId);
+    if (accountCount) {
+      const rules = await postingRules(companyId, ['payroll.finalized', 'payroll.deductions']);
+      const salary = rules['payroll.finalized'].debit;
+      const owed = rules['payroll.finalized'].credit;
+      const held = rules['payroll.deductions'].credit;
+      if (!salary || !owed) {
+        return res.status(422).json({ error: 'Choose the accounts for "A payroll run is finalized" in Accounts -> Settings -> Money rules first.' });
+      }
+      const deducted = cents(run.deduction_total);
+      if (deducted > 0 && !held) {
+        return res.status(422).json({ error: 'This run has deductions: choose the "Deductions we hold" account in Money rules first.' });
+      }
+      const raw = [
+        { account_id: salary.id, debit: Number(run.gross_total), credit: 0, description: 'Gross pay' },
+        { account_id: owed.id, debit: 0, credit: Number(run.net_total), description: 'Take-home pay owed to staff' },
+      ];
+      if (deducted > 0) raw.push({ account_id: held.id, debit: 0, credit: money(deducted), description: 'Deductions held back' });
+      const conv = await toBookLines(companyId, run.currency, raw, entryDate);
+      if (conv.error) return res.status(422).json({ error: conv.error });
+      lines = conv.lines;
+    } else {
+      journalNote = 'Run finalized. This company has no chart of accounts yet, so nothing was recorded in the books.';
+    }
+  }
+
   const now = new Date().toISOString();
   const { data: finalized, error } = await supabaseAdmin.from('hr_payroll_runs').update({
     status: 'finalized', finalized_at: now, finalized_by: req.user.id, updated_at: now,
   }).eq('id', run.id).select(runFull).single();
   if (error) return res.status(500).json({ error: error.message });
 
-  // Ledger side. post_journal:false opts out entirely.
-  let journalNote = null;
-  if (req.body?.post_journal !== false) {
-    const [salary, liability, taxes] = await Promise.all([
-      accountByCode(companyId, '5000'),
-      accountByCode(companyId, '2100'),
-      accountByCode(companyId, '2200'),
-    ]);
-    if (salary && liability) {
-      const gross = Number(run.gross_total);
-      const deducted = Number(run.deduction_total);
-      const net = Number(run.net_total);
-
-      const lines = [{ account_id: salary.id, debit: gross, credit: 0, description: 'Gross pay' }];
-      lines.push({ account_id: liability.id, debit: 0, credit: net, description: 'Net pay owed' });
-      if (cents(deducted) > 0) {
-        // No taxes-payable account? The deductions still have to land somewhere
-        // or the entry will not balance -- fold them into payroll liabilities
-        // and say so, rather than posting a crooked entry.
-        const target = taxes || liability;
-        lines.push({ account_id: target.id, debit: 0, credit: deducted, description: 'Employee deductions' });
-        if (!taxes) journalNote = 'Deductions were posted to Payroll Liabilities -- create account 2200 (Taxes Payable) to separate them.';
-      }
-
-      const posted = await createPostedEntry({
-        companyId, userId: req.user.id,
-        entryDate: run.hr_pay_periods?.pay_date || run.hr_pay_periods?.end_date || now.slice(0, 10),
-        memo: run.name,
-        sourceType: 'payroll', sourceId: run.id,
-        lines,
-      });
-      if (posted.entry) {
-        await supabaseAdmin.from('hr_payroll_runs').update({ journal_entry_id: posted.entry.id }).eq('id', run.id);
-      } else {
-        journalNote = 'Run finalized, but the journal entry failed: ' + posted.error;
-        logger.warn('HR', 'payroll ' + run.id + ' journal failed: ' + posted.error);
-      }
+  if (lines) {
+    const posted = await createPostedEntry({
+      companyId, userId: req.user.id, entryDate, memo: run.name,
+      sourceType: 'payroll', sourceId: run.id, sourceEvent: 'finalize', lines,
+    });
+    if (posted.entry) {
+      await supabaseAdmin.from('hr_payroll_runs').update({ journal_entry_id: posted.entry.id }).eq('id', run.id);
     } else {
-      journalNote = 'Run finalized. No journal entry was written -- create accounts 5000 (Salaries and Wages) and 2100 (Payroll Liabilities) to post automatically.';
+      journalNote = 'Run finalized, but the entry in the books failed: ' + posted.error;
+      logger.warn('HR', 'payroll ' + run.id + ' journal failed: ' + posted.error);
     }
   }
 
@@ -437,11 +446,58 @@ router.post('/runs/:id/finalize', asyncHandler(async (req, res) => {
   res.json({ run: fresh || finalized, journal_note: journalNote });
 }));
 
+// POST /api/hr/payroll/runs/:id/pay { paid_on, reference }
+// Salaries leave the bank: "salaries we owe staff" / money paid out. This step
+// was missing -- every finalized run stayed owed in the books for ever.
+router.post('/runs/:id/pay', asyncHandler(async (req, res) => {
+  const companyId = await writeCompanyId(req);
+  if (await deny(req, res, companyId, 'hr.payroll.manage')) return;
+
+  const { data: run } = await supabaseAdmin
+    .from('hr_payroll_runs').select('id, name, status, currency, net_total, journal_entry_id, paid_at')
+    .eq('id', req.params.id).eq('company_id', companyId).maybeSingle();
+  if (!run) return res.status(404).json({ error: 'Payroll run not found' });
+  if (run.status !== 'finalized') return res.status(409).json({ error: 'Finalize the run before marking it paid' });
+  if (run.paid_at) return res.status(409).json({ error: 'This run is already marked paid' });
+
+  const paidOn = /^\d{4}-\d{2}-\d{2}$/.test(String(req.body?.paid_on || '')) ? req.body.paid_on : new Date().toISOString().slice(0, 10);
+  const reference = (req.body?.reference || '').trim() || null;
+
+  // Only a run that was recorded when finalized has anything to clear.
+  let entry = null;
+  if (run.journal_entry_id) {
+    const rule = (await postingRules(companyId, ['payroll.paid']))['payroll.paid'];
+    if (!rule.debit || !rule.credit) {
+      return res.status(422).json({ error: 'Choose the accounts for "Salaries are paid out" in Accounts -> Settings -> Money rules first.' });
+    }
+    const conv = await toBookLines(companyId, run.currency, [
+      { account_id: rule.debit.id, debit: Number(run.net_total), credit: 0, description: 'Salaries paid -- ' + run.name },
+      { account_id: rule.credit.id, debit: 0, credit: Number(run.net_total), description: 'Salaries paid' + (reference ? ' (' + reference + ')' : '') },
+    ], paidOn);
+    if (conv.error) return res.status(422).json({ error: conv.error });
+    const posted = await createPostedEntry({
+      companyId, userId: req.user.id, entryDate: paidOn, memo: 'Salaries paid -- ' + run.name,
+      sourceType: 'payroll', sourceId: run.id, sourceEvent: 'paid', lines: conv.lines,
+    });
+    if (posted.error) return res.status(422).json({ error: 'Could not record the payment in the books: ' + posted.error });
+    entry = posted.entry;
+  }
+
+  const now = new Date().toISOString();
+  const { data, error } = await supabaseAdmin.from('hr_payroll_runs').update({
+    paid_at: paidOn + 'T12:00:00Z', paid_by: req.user.id, payment_reference: reference,
+    payment_journal_entry_id: entry?.id || null, updated_at: now,
+  }).eq('id', run.id).select(runFull).single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ run: data, entry_no: entry?.entry_no || null });
+}));
+
 // POST /api/hr/payroll/runs/:id/void { reason }
-// The journal entry is NOT auto-reversed here: voiding a finalized run is rare
-// and consequential, and silently writing a reversing entry hides that. The
-// response names the entry so the operator voids it deliberately from the
-// journal, which is where reversals belong.
+// A finalized run's entry is REVERSED automatically (the old version left it
+// posted and told the operator to go and void it by hand, so the books kept
+// the salaries of a run that no longer existed). A run whose salaries were
+// already paid cannot be voided: money left the bank, and undoing that is a
+// correction with its own paperwork, not a click.
 router.post('/runs/:id/void', asyncHandler(async (req, res) => {
   const companyId = await writeCompanyId(req);
   if (await deny(req, res, companyId, 'hr.payroll.manage')) return;
@@ -451,10 +507,20 @@ router.post('/runs/:id/void', asyncHandler(async (req, res) => {
   setChangeReason(reason);
 
   const { data: run } = await supabaseAdmin
-    .from('hr_payroll_runs').select('id, status, journal_entry_id')
+    .from('hr_payroll_runs').select('id, name, status, journal_entry_id, paid_at')
     .eq('id', req.params.id).eq('company_id', companyId).maybeSingle();
   if (!run) return res.status(404).json({ error: 'Payroll run not found' });
   if (run.status === 'void') return res.status(409).json({ error: 'This run is already void' });
+  if (run.paid_at) {
+    return res.status(409).json({ error: 'The salaries on this run were already paid, so it cannot be voided. Record the correction as a new run or a journal adjustment.' });
+  }
+
+  let reversalNo = null;
+  if (run.journal_entry_id) {
+    const r = await reverseEntry({ entryId: run.journal_entry_id, reason: 'Payroll run voided -- ' + reason, companyId });
+    if (r.error) return res.status(422).json({ error: 'Could not reverse the run in the books: ' + r.error });
+    reversalNo = r.reversal?.entry_no || null;
+  }
 
   const now = new Date().toISOString();
   const { data, error } = await supabaseAdmin.from('hr_payroll_runs').update({
@@ -465,10 +531,7 @@ router.post('/runs/:id/void', asyncHandler(async (req, res) => {
 
   res.json({
     run: data,
-    journal_entry_id: run.journal_entry_id,
-    journal_note: run.journal_entry_id
-      ? 'This run had a posted journal entry. Void it from the journal to reverse the ledger.'
-      : null,
+    journal_note: reversalNo ? 'Its entry in the books was reversed as ' + reversalNo + '.' : null,
   });
 }));
 

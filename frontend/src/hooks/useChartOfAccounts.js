@@ -1,4 +1,4 @@
-﻿import { useState, useCallback } from 'react';
+﻿import { useState, useCallback, useRef } from 'react';
 import client from '../api/client';
 
 /**
@@ -15,11 +15,16 @@ export const useChartOfAccounts = (companyId = null) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const fetchAccounts = useCallback(async (filters = {}) => {
+  // A refresh after create/edit/archive re-asks for the SAME list. Calling with
+  // no filters used to drop include_inactive, so archiving an account with
+  // "Show archived" ticked made it vanish.
+  const lastFilters = useRef({});
+  const fetchAccounts = useCallback(async (filters) => {
+    if (filters) lastFilters.current = filters;
     setLoading(true);
     setError(null);
     try {
-      const params = { company_id: companyId, tree: true, ...filters };
+      const params = { company_id: companyId, tree: true, ...lastFilters.current };
       const response = await client.get('accounting/accounts', { params });
       setAccounts(response.data.accounts || []);
       setTree(response.data.tree || []);

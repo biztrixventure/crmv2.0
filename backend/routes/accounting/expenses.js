@@ -22,7 +22,7 @@ const { supabaseAdmin } = require('../../config/database');
 const { asyncHandler } = require('../../middleware/errorHandler');
 const logger = require('../../utils/logger');
 const { can, deny, readCompanyId, writeCompanyId, selfEmployee } = require('../../utils/moduleAccess');
-const { createPostedEntry, accountByCode } = require('../../utils/ledger');
+const { createPostedEntry, postingRules, toBookLines } = require('../../utils/ledger');
 const { getCompanyCurrency } = require('../../models/helpers');
 
 const router = express.Router();
@@ -30,7 +30,9 @@ const router = express.Router();
 const full = 'id, company_id, category_id, submitted_by, employee_id, expense_date, amount, currency, '
   + 'vendor, description, receipt_url, is_billable, invoice_id, status, submitted_at, approved_by, '
   + 'approved_at, rejected_by, rejected_at, rejection_reason, reimbursed_at, reimbursed_by, '
-  + 'journal_entry_id, created_at, updated_at, expense_categories(id, name, account_id)';
+  + 'journal_entry_id, reimbursement_journal_entry_id, created_at, updated_at, expense_categories(id, name, account_id), '
+  + 'journal_entry:journal_entries!expenses_journal_entry_id_fkey(entry_no), '
+  + 'reimbursement_entry:journal_entries!expenses_reimbursement_journal_entry_id_fkey(entry_no)';
 
 // -- Categories ---------------------------------------------------------------
 
@@ -265,22 +267,52 @@ router.post('/:id/withdraw', asyncHandler(async (req, res) => {
   res.json({ expense: data });
 }));
 
+// Does this company keep books at all? Without a chart of accounts an
+// expense can still be approved and paid back -- there is simply nothing to
+// record it in, and the response says so.
+async function hasBooks(companyId) {
+  const { count } = await supabaseAdmin.from('chart_of_accounts')
+    .select('id', { count: 'exact', head: true }).eq('company_id', companyId);
+  return (count || 0) > 0;
+}
+
 // POST /api/accounting/expenses/:id/approve
-// Posts to the ledger best-effort: debit the category expense account, credit
-// Payroll/other payables (2000 Accounts Payable). No accounts set up yet means
-// no journal entry, never a failed approval.
+// Records the cost: expense (the category's account, or the Money-rules
+// default) / "we owe the person who paid". A company WITH books never gets an
+// approved claim without its entry -- a missing account or exchange rate stops
+// the approval with a message that says what to set up.
 router.post('/:id/approve', asyncHandler(async (req, res) => {
   const companyId = await writeCompanyId(req);
   if (await deny(req, res, companyId, 'accounting.expenses.approve')) return;
 
   const { data: e } = await supabaseAdmin
     .from('expenses')
-    .select('id, submitted_by, status, amount, expense_date, description, category_id, expense_categories(account_id, name)')
+    .select('id, submitted_by, status, amount, currency, expense_date, description, vendor, category_id, expense_categories(account_id, name)')
     .eq('id', req.params.id).eq('company_id', companyId).maybeSingle();
   if (!e) return res.status(404).json({ error: 'Expense not found' });
   if (e.status !== 'submitted') return res.status(409).json({ error: 'Only a submitted claim can be approved (this one is ' + e.status + ')' });
   if (e.submitted_by === req.user.id) {
     return res.status(403).json({ error: 'You cannot approve your own expense claim' });
+  }
+
+  // Work out the entry BEFORE approving.
+  let lines = null;
+  let journalNote = null;
+  if (await hasBooks(companyId)) {
+    const rule = (await postingRules(companyId, ['expense.approved']))['expense.approved'];
+    const expenseAccountId = e.expense_categories?.account_id || rule.debit?.id;
+    if (!expenseAccountId || !rule.credit) {
+      return res.status(422).json({ error: 'Choose the accounts for "An expense claim is approved" in Accounts -> Settings -> Money rules (or give this category an account) before approving.' });
+    }
+    const label = e.description || e.vendor || 'Expense claim';
+    const conv = await toBookLines(companyId, e.currency, [
+      { account_id: expenseAccountId, debit: e.amount, credit: 0, description: label },
+      { account_id: rule.credit.id, debit: 0, credit: e.amount, description: 'Owed to the person who paid' },
+    ], e.expense_date);
+    if (conv.error) return res.status(422).json({ error: conv.error });
+    lines = conv.lines;
+  } else {
+    journalNote = 'Approved. This company has no chart of accounts yet, so nothing was recorded in the books.';
   }
 
   const now = new Date().toISOString();
@@ -289,28 +321,22 @@ router.post('/:id/approve', asyncHandler(async (req, res) => {
   }).eq('id', e.id).select(full).single();
   if (error) return res.status(500).json({ error: error.message });
 
-  let journalNote = null;
-  const expenseAccountId = e.expense_categories?.account_id || (await accountByCode(companyId, '5900'))?.id;
-  const payable = await accountByCode(companyId, '2000');
-  if (expenseAccountId && payable) {
+  let entryNo = null;
+  if (lines) {
     const posted = await createPostedEntry({
       companyId, userId: req.user.id,
       entryDate: e.expense_date,
-      memo: 'Expense claim ' + (e.expense_categories?.name || 'reimbursement') + (e.description ? ' -- ' + e.description : ''),
-      sourceType: 'expense', sourceId: e.id,
-      lines: [
-        { account_id: expenseAccountId, debit: e.amount, credit: 0, description: e.description || 'Expense claim' },
-        { account_id: payable.id, debit: 0, credit: e.amount, description: 'Owed to claimant' },
-      ],
+      memo: 'Expense claim ' + (e.expense_categories?.name || '') + (e.description ? ' -- ' + e.description : ''),
+      sourceType: 'expense', sourceId: e.id, sourceEvent: 'approval', lines,
     });
-    if (posted.entry) await supabaseAdmin.from('expenses').update({ journal_entry_id: posted.entry.id }).eq('id', e.id);
-    else { journalNote = 'Approved, but the journal entry failed: ' + posted.error; logger.warn('ACCOUNTING', journalNote); }
-  } else {
-    journalNote = 'Approved. No journal entry was written -- give this category a ledger account, or create account 2000 (Accounts Payable), to post automatically.';
+    if (posted.entry) {
+      await supabaseAdmin.from('expenses').update({ journal_entry_id: posted.entry.id }).eq('id', e.id);
+      entryNo = posted.entry.entry_no || null;
+    } else { journalNote = 'Approved, but the entry in the books failed: ' + posted.error; logger.warn('ACCOUNTING', journalNote); }
   }
 
   logger.info('ACCOUNTING', 'expense ' + e.id + ' approved by ' + req.user.id);
-  res.json({ expense: data, journal_note: journalNote });
+  res.json({ expense: data, journal_note: journalNote, entry_no: entryNo });
 }));
 
 // POST /api/accounting/expenses/:id/reject { reason }
@@ -336,22 +362,55 @@ router.post('/:id/reject', asyncHandler(async (req, res) => {
   res.json({ expense: data });
 }));
 
-// POST /api/accounting/expenses/:id/reimburse
+// POST /api/accounting/expenses/:id/reimburse { paid_on? }
+// The person is paid back: "we owe the person who paid" / money paid out.
+// This step was missing -- approved claims stayed owed in the books for ever.
 router.post('/:id/reimburse', asyncHandler(async (req, res) => {
   const companyId = await writeCompanyId(req);
   if (await deny(req, res, companyId, 'accounting.expenses.approve')) return;
 
   const { data: e } = await supabaseAdmin
-    .from('expenses').select('id, status').eq('id', req.params.id).eq('company_id', companyId).maybeSingle();
+    .from('expenses').select('id, status, amount, currency, description, vendor, journal_entry_id')
+    .eq('id', req.params.id).eq('company_id', companyId).maybeSingle();
   if (!e) return res.status(404).json({ error: 'Expense not found' });
   if (e.status !== 'approved') return res.status(409).json({ error: 'Only an approved claim can be marked reimbursed' });
+
+  const paidOn = /^\d{4}-\d{2}-\d{2}$/.test(String(req.body?.paid_on || '')) ? req.body.paid_on : new Date().toISOString().slice(0, 10);
+  let lines = null;
+  let journalNote = null;
+  // Only a claim that was recorded when approved has anything to clear.
+  if (e.journal_entry_id && await hasBooks(companyId)) {
+    const rule = (await postingRules(companyId, ['expense.reimbursed']))['expense.reimbursed'];
+    if (!rule.debit || !rule.credit) {
+      return res.status(422).json({ error: 'Choose the accounts for "An expense claim is paid back" in Accounts -> Settings -> Money rules first.' });
+    }
+    const label = 'Paid back: ' + (e.description || e.vendor || 'expense claim');
+    const conv = await toBookLines(companyId, e.currency, [
+      { account_id: rule.debit.id, debit: e.amount, credit: 0, description: label },
+      { account_id: rule.credit.id, debit: 0, credit: e.amount, description: label },
+    ], paidOn);
+    if (conv.error) return res.status(422).json({ error: conv.error });
+    lines = conv.lines;
+  }
 
   const now = new Date().toISOString();
   const { data, error } = await supabaseAdmin.from('expenses').update({
     status: 'reimbursed', reimbursed_by: req.user.id, reimbursed_at: now, updated_at: now,
   }).eq('id', e.id).select(full).single();
   if (error) return res.status(500).json({ error: error.message });
-  res.json({ expense: data });
+
+  let entryNo = null;
+  if (lines) {
+    const posted = await createPostedEntry({
+      companyId, userId: req.user.id, entryDate: paidOn,
+      memo: 'Expense claim paid back', sourceType: 'expense', sourceId: e.id, sourceEvent: 'reimbursement', lines,
+    });
+    if (posted.entry) {
+      await supabaseAdmin.from('expenses').update({ reimbursement_journal_entry_id: posted.entry.id }).eq('id', e.id);
+      entryNo = posted.entry.entry_no || null;
+    } else { journalNote = 'Marked paid back, but the entry in the books failed: ' + posted.error; logger.warn('ACCOUNTING', journalNote); }
+  }
+  res.json({ expense: data, journal_note: journalNote, entry_no: entryNo });
 }));
 
 // DELETE /api/accounting/expenses/:id -- drafts only, by the claimant.

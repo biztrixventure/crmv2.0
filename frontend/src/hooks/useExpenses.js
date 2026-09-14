@@ -1,4 +1,4 @@
-﻿import { useState, useCallback } from 'react';
+﻿import { useState, useCallback, useRef } from 'react';
 import client from '../api/client';
 
 /**
@@ -18,11 +18,16 @@ export const useExpenses = (companyId = null) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const fetchExpenses = useCallback(async (filters = {}) => {
+  // A refresh after approve/reject/pay re-asks for the SAME list. Calling with
+  // no filters used to drop them, so the approval queue jumped to a different
+  // list the moment you actioned a claim.
+  const lastFilters = useRef({});
+  const fetchExpenses = useCallback(async (filters) => {
+    if (filters) lastFilters.current = filters;
     setLoading(true);
     setError(null);
     try {
-      const params = { company_id: companyId, ...filters };
+      const params = { company_id: companyId, ...lastFilters.current };
       const response = await client.get('accounting/expenses', { params });
       setExpenses(response.data.expenses || []);
       setTotal(response.data.total || 0);
@@ -107,7 +112,7 @@ export const useExpenses = (companyId = null) => {
   const withdrawExpense  = useCallback((id) => act(id, 'withdraw'), [act]);
   const approveExpense   = useCallback((id) => act(id, 'approve'), [act]);
   const rejectExpense    = useCallback((id, reason) => act(id, 'reject', { reason }), [act]);
-  const reimburseExpense = useCallback((id) => act(id, 'reimburse'), [act]);
+  const reimburseExpense = useCallback((id, paidOn) => act(id, 'reimburse', paidOn ? { paid_on: paidOn } : {}), [act]);
 
   const deleteExpense = useCallback(async (id) => {
     setError(null);
