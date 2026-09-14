@@ -30,7 +30,7 @@ const router = express.Router();
 const full = 'id, company_id, category_id, submitted_by, employee_id, expense_date, amount, currency, '
   + 'vendor, description, receipt_url, is_billable, invoice_id, status, submitted_at, approved_by, '
   + 'approved_at, rejected_by, rejected_at, rejection_reason, reimbursed_at, reimbursed_by, '
-  + 'journal_entry_id, reimbursement_journal_entry_id, created_at, updated_at, expense_categories(id, name, account_id), '
+  + 'journal_entry_id, reimbursement_journal_entry_id, receipt_path, created_at, updated_at, expense_categories(id, name, account_id), '
   + 'journal_entry:journal_entries!expenses_journal_entry_id_fkey(entry_no), '
   + 'reimbursement_entry:journal_entries!expenses_reimbursement_journal_entry_id_fkey(entry_no)';
 
@@ -154,6 +154,92 @@ router.get('/:id', asyncHandler(async (req, res) => {
   const canSeeAll = await can(req, companyId, 'accounting.expenses.view')
                  || await can(req, companyId, 'accounting.expenses.approve');
   if (!mine && !canSeeAll) return res.status(403).json({ error: 'Forbidden' });
+  res.json({ expense: data });
+}));
+
+// -- Receipts (mig 318) ---------------------------------------------------------
+// A receipt is a personal financial document: PRIVATE bucket, created on first
+// use, and only ever shown through a signed link that expires in two minutes.
+// Base64 in JSON like routes/training.js -- no multipart dependency.
+const RECEIPT_BUCKET = 'expense-receipts';
+const RECEIPT_MAX = 5 * 1024 * 1024;
+const RECEIPT_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'application/pdf'];
+
+async function ensureReceiptBucket() {
+  try {
+    const { data } = await supabaseAdmin.storage.getBucket(RECEIPT_BUCKET);
+    if (data) return;
+  } catch { /* not found -> create */ }
+  const { error } = await supabaseAdmin.storage.createBucket(RECEIPT_BUCKET, { public: false, fileSizeLimit: String(RECEIPT_MAX) });
+  if (error && !/already exists/i.test(error.message || '')) throw new Error(error.message);
+}
+
+// Who may touch this claim's receipt: the claimant while the claim is still
+// theirs to edit, or an approver. Viewing: the claimant or anyone who sees all.
+async function receiptAccess(req, companyId, id) {
+  const { data: e } = await supabaseAdmin.from('expenses').select('id, submitted_by, status, receipt_path')
+    .eq('id', id).eq('company_id', companyId).maybeSingle();
+  if (!e) return { status: 404, error: 'Expense not found' };
+  const mine = e.submitted_by === req.user.id;
+  const approver = await can(req, companyId, 'accounting.expenses.approve');
+  const viewer = approver || await can(req, companyId, 'accounting.expenses.view');
+  return { e, mine, approver, viewer, editable: approver || (mine && ['draft', 'submitted', 'rejected'].includes(e.status)) };
+}
+
+// POST /api/accounting/expenses/:id/receipt { name, type, data (base64) }
+router.post('/:id/receipt', asyncHandler(async (req, res) => {
+  const companyId = await writeCompanyId(req);
+  const a = await receiptAccess(req, companyId, req.params.id);
+  if (a.error) return res.status(a.status).json({ error: a.error });
+  if (!a.editable) return res.status(403).json({ error: 'This claim can no longer take a receipt from you' });
+
+  const type = String(req.body?.type || '').toLowerCase();
+  if (!RECEIPT_TYPES.includes(type)) return res.status(400).json({ error: 'A receipt must be a photo (JPG, PNG, WEBP, HEIC) or a PDF' });
+  const raw = String(req.body?.data || '');
+  let buffer;
+  try { buffer = Buffer.from(raw.includes(',') ? raw.split(',').pop() : raw, 'base64'); } catch { buffer = null; }
+  if (!buffer || !buffer.length) return res.status(400).json({ error: 'The file is empty' });
+  if (buffer.length > RECEIPT_MAX) return res.status(400).json({ error: 'A receipt can be at most 5 MB' });
+
+  try { await ensureReceiptBucket(); } catch (e) { return res.status(500).json({ error: 'Storage error: ' + e.message }); }
+  const safe = String(req.body?.name || 'receipt').replace(/[^\w.\-]+/g, '_').slice(0, 100) || 'receipt';
+  const path = `${companyId}/${a.e.id}/${Date.now()}_${safe}`;
+  const { error: upErr } = await supabaseAdmin.storage.from(RECEIPT_BUCKET).upload(path, buffer, { contentType: type, upsert: false });
+  if (upErr) return res.status(500).json({ error: upErr.message });
+
+  const { data, error } = await supabaseAdmin.from('expenses')
+    .update({ receipt_path: path, updated_at: new Date().toISOString() }).eq('id', a.e.id).select(full).single();
+  if (error) return res.status(500).json({ error: error.message });
+  // The replaced file is removed; best-effort, never blocks the new one.
+  if (a.e.receipt_path && a.e.receipt_path !== path) {
+    supabaseAdmin.storage.from(RECEIPT_BUCKET).remove([a.e.receipt_path]).catch(() => {});
+  }
+  res.status(201).json({ expense: data });
+}));
+
+// GET /api/accounting/expenses/:id/receipt -> { url } (expires in 120 s)
+router.get('/:id/receipt', asyncHandler(async (req, res) => {
+  const companyId = await readCompanyId(req);
+  const a = await receiptAccess(req, companyId, req.params.id);
+  if (a.error) return res.status(a.status).json({ error: a.error });
+  if (!a.mine && !a.viewer) return res.status(403).json({ error: 'Forbidden' });
+  if (!a.e.receipt_path) return res.status(404).json({ error: 'No receipt attached' });
+  const { data, error } = await supabaseAdmin.storage.from(RECEIPT_BUCKET).createSignedUrl(a.e.receipt_path, 120);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ url: data.signedUrl, expires_in: 120 });
+}));
+
+// DELETE /api/accounting/expenses/:id/receipt
+router.delete('/:id/receipt', asyncHandler(async (req, res) => {
+  const companyId = await writeCompanyId(req);
+  const a = await receiptAccess(req, companyId, req.params.id);
+  if (a.error) return res.status(a.status).json({ error: a.error });
+  if (!a.editable) return res.status(403).json({ error: 'This claim can no longer be changed by you' });
+  if (!a.e.receipt_path) return res.json({ ok: true });
+  const { data, error } = await supabaseAdmin.from('expenses')
+    .update({ receipt_path: null, updated_at: new Date().toISOString() }).eq('id', a.e.id).select(full).single();
+  if (error) return res.status(500).json({ error: error.message });
+  supabaseAdmin.storage.from(RECEIPT_BUCKET).remove([a.e.receipt_path]).catch(() => {});
   res.json({ expense: data });
 }));
 

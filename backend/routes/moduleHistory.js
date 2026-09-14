@@ -59,6 +59,7 @@ const TABLES = {
     hr_settings:           { perms: ['hr.employees.view'] },           // record id = company id (mig 314)
     hr_exit_cases:         { perms: ['hr.employees.view'] },
     hr_holidays:           { perms: ['hr.attendance.view_team', 'hr.attendance.manage'] },
+    hr_commission_plans:   { perms: ['hr.payroll.view', 'hr.payroll.manage'] },
   },
   accounting: {
     chart_of_accounts:   { perms: ['accounting.accounts.view'] },

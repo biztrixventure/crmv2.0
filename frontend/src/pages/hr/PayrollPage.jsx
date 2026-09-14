@@ -16,7 +16,7 @@
 // ============================================================================
 import { useState, useEffect, useCallback } from 'react';
 import {
-  Banknote, Plus, ArrowLeft, CheckCircle2, Ban, Trash2, Users, User, CalendarRange,
+  Banknote, Plus, ArrowLeft, CheckCircle2, Ban, Trash2, Users, User, CalendarRange, Percent, Sparkles,
 } from 'lucide-react';
 import { Panel, SectionHeader, Loading, EmptyState, Field, KpiTile, TableScroll, PillTabs } from '../../components/UI/kit';
 import { Alert } from '../../components/UI';
@@ -27,6 +27,8 @@ import { useEmployees } from '../../hooks/useEmployees';
 import { HistoryButton } from '../../components/Modules/RecordHistory';
 import AskDialog from '../../components/Modules/AskDialog';
 import ThemedDate from '../../components/UI/ThemedDate';
+import CommissionPlansPanel from './CommissionPlansPanel';
+import PayrollSuggestions from './PayrollSuggestions';
 import { fmtMoney, fmtMoneyShort, fmtDate, todayISO, DEFAULT_CURRENCY } from '../../utils/money';
 
 const fullName = (e) => [e?.first_name, e?.last_name].filter(Boolean).join(' ') || 'Unnamed';
@@ -42,6 +44,7 @@ export default function PayrollPage({ scope, selfOnly = false }) {
 
   const tabs = [];
   if (canView) tabs.push({ key: 'runs', label: 'Payroll runs', icon: Users });
+  if (canView) tabs.push({ key: 'plans', label: 'Commission plans', icon: Percent });
   if (canViewOwn) tabs.push({ key: 'mine', label: 'My payslips', icon: User });
 
   if (tabs.length === 0) {
@@ -59,6 +62,7 @@ export default function PayrollPage({ scope, selfOnly = false }) {
           ? <RunDetail companyId={companyId} runId={openRun} onBack={() => setOpenRun(null)} scope={scope} />
           : <RunList companyId={companyId} scope={scope} onOpen={setOpenRun} />
       )}
+      {tab === 'plans' && canView && <CommissionPlansPanel companyId={companyId} scope={scope} />}
       {tab === 'mine' && canViewOwn && <MyPayslips companyId={companyId} />}
     </div>
   );
@@ -270,6 +274,7 @@ function RunDetail({ companyId, runId, onBack, scope }) {
   const [busy, setBusy] = useState(false);
   const [asking, setAsking] = useState(null);
   const [paying, setPaying] = useState(false);
+  const [suggesting, setSuggesting] = useState(false);
 
   const reload = useCallback(async () => { setData(await fetchRun(runId)); }, [fetchRun, runId]);
   useEffect(() => { reload(); }, [reload]);
@@ -310,6 +315,7 @@ function RunDetail({ companyId, runId, onBack, scope }) {
             <HistoryButton module="hr" table="hr_payroll_runs" id={run.id} companyId={companyId}
               title={'History -- ' + run.name} size="md" />
             {editable && <Btn icon={Plus} onClick={() => setAdding(true)}>Add employee</Btn>}
+            {entries.length > 0 && <Btn icon={Sparkles} onClick={() => setSuggesting(true)}>Commission &amp; SPIFF</Btn>}
             {editable && (
               <Btn variant="primary" icon={CheckCircle2} busy={busy} disabled={entries.length === 0}
                 onClick={() => setAsking({
@@ -428,6 +434,15 @@ function RunDetail({ companyId, runId, onBack, scope }) {
             const ok = await guard(() => payRun(run.id, payload),
               (r) => r?.entry_no ? `Marked paid. Recorded in the books as ${r.entry_no}.` : 'Marked paid.');
             if (ok) setPaying(false);
+          }} />
+      )}
+
+      {suggesting && (
+        <PayrollSuggestions companyId={companyId} runId={run.id} onClose={() => setSuggesting(false)}
+          onApplied={async (r) => {
+            setSuggesting(false);
+            await reload();
+            setNotice({ type: 'success', text: `Applied to ${r.changed} ${r.changed === 1 ? 'person' : 'people'}. Each payslip shows the plan and sales behind it.` });
           }} />
       )}
 
@@ -628,7 +643,17 @@ function MyPayslips({ companyId }) {
                 <Line label="Base" value={fmtMoney(p.base_amount, cur)} />
                 {Number(p.overtime_amount) > 0 && <Line label="Overtime" value={fmtMoney(p.overtime_amount, cur)} />}
                 {Number(p.bonus_amount) > 0 && <Line label="Bonus" value={fmtMoney(p.bonus_amount, cur)} />}
+                {(p.earnings_detail?.spiff?.lines || []).map(w => (
+                  <p key={w.campaign_id} className="text-[11px] m-0 pl-3" style={{ color: 'var(--color-text-tertiary)' }}>
+                    SPIFF: {w.campaign} ({w.value} of {w.target}) {fmtMoney(w.reward, cur)}
+                  </p>
+                ))}
                 {Number(p.commission_amount) > 0 && <Line label="Commission" value={fmtMoney(p.commission_amount, cur)} />}
+                {(p.earnings_detail?.commission?.lines || []).filter(l => Number(l.amount) > 0).map(l => (
+                  <p key={l.plan_id} className="text-[11px] m-0 pl-3" style={{ color: 'var(--color-text-tertiary)' }}>
+                    {l.plan}: {l.note || `${l.sales} sales`} = {fmtMoney(l.amount, cur)}
+                  </p>
+                ))}
                 {Number(p.allowance_amount) > 0 && <Line label="Allowances" value={fmtMoney(p.allowance_amount, cur)} />}
                 <Line label="Gross" value={fmtMoney(p.gross_amount, cur)} strong />
               </div>

@@ -28,6 +28,7 @@ const { can, deny, readCompanyId, writeCompanyId, selfEmployee } = require('../.
 const { createPostedEntry, reverseEntry, postingRules, toBookLines, cents, money } = require('../../utils/ledger');
 const { getCompanyCurrency } = require('../../models/helpers');
 const { needReason, setChangeReason } = require('../../utils/requestContext');
+const { suggestForRun, appliedValues } = require('../../utils/payrollSuggestions');
 
 const router = express.Router();
 
@@ -39,7 +40,7 @@ const runFull = 'id, company_id, pay_period_id, name, status, currency, gross_to
   + 'created_at, updated_at, hr_pay_periods(id, name, start_date, end_date, pay_date, status)';
 
 const entryFull = 'id, company_id, run_id, employee_id, base_amount, overtime_amount, bonus_amount, '
-  + 'commission_amount, allowance_amount, gross_amount, deduction_total, net_amount, note, created_at, '
+  + 'commission_amount, allowance_amount, gross_amount, deduction_total, net_amount, note, earnings_detail, created_at, '
   + 'hr_employees(id, first_name, last_name, employee_no, department_id), '
   + 'hr_payroll_deductions(id, kind, label, amount, is_employer_cost, note)';
 
@@ -284,6 +285,57 @@ router.put('/entries/:entryId', asyncHandler(async (req, res) => {
     return res.status(500).json({ error: error.message });
   }
   res.json({ entry: data });
+}));
+
+// -- Commission + SPIFF suggestions (mig 318, utils/payrollSuggestions.js) --------
+
+// GET /api/hr/payroll/runs/:id/suggestions -- what each person earned from
+// commission plans and SPIFF prizes in this run's period. Read-only.
+router.get('/runs/:id/suggestions', asyncHandler(async (req, res) => {
+  const companyId = await readCompanyId(req);
+  if (await deny(req, res, companyId, 'hr.payroll.view')) return;
+  const s = await suggestForRun(req.params.id, companyId);
+  if (s.error) return res.status(s.status || 422).json({ error: s.error });
+  res.json({ ...s, can_apply: ['draft', 'processing'].includes(s.run.status) && await can(req, companyId, 'hr.payroll.manage') });
+}));
+
+// POST /api/hr/payroll/runs/:id/apply-suggestions { entry_ids?, commission, spiff }
+// Pay changes only by a person's hand: HR presses this. The amounts are
+// recomputed here, never taken from the browser, and a manual adjustment on
+// top of an earlier apply survives (utils/payrollSuggestions.js appliedValues).
+router.post('/runs/:id/apply-suggestions', asyncHandler(async (req, res) => {
+  const companyId = await writeCompanyId(req);
+  if (await deny(req, res, companyId, 'hr.payroll.manage')) return;
+  const s = await suggestForRun(req.params.id, companyId);
+  if (s.error) return res.status(s.status || 422).json({ error: s.error });
+  if (!['draft', 'processing'].includes(s.run.status)) return res.status(409).json({ error: 'A ' + s.run.status + ' run can no longer be edited' });
+
+  const doCommission = req.body?.commission !== false;
+  const doSpiff = req.body?.spiff !== false;
+  const only = Array.isArray(req.body?.entry_ids) ? new Set(req.body.entry_ids) : null;
+  setChangeReason(req.body?.change_reason || 'Applied commission / SPIFF from the plans for ' + s.period.start_date + ' to ' + s.period.end_date);
+
+  const now = new Date().toISOString();
+  let changed = 0;
+  for (const row of s.rows) {
+    if (only && !only.has(row.entry_id)) continue;
+    const values = appliedValues(row, { commission: doCommission, spiff: doSpiff });
+    const detail = {
+      ...(doCommission ? { commission: { amount: row.commission.amount, lines: row.commission.lines, applied_at: now } } : {}),
+      ...(doSpiff ? { spiff: { amount: row.spiff.amount, lines: row.spiff.lines, applied_at: now } } : {}),
+    };
+    const { data: cur } = await supabaseAdmin.from('hr_payroll_entries').select('earnings_detail').eq('id', row.entry_id).single();
+    const { error } = await supabaseAdmin.from('hr_payroll_entries')
+      .update({ ...values, earnings_detail: { ...(cur?.earnings_detail || {}), ...detail }, updated_at: now })
+      .eq('id', row.entry_id).eq('company_id', companyId);
+    if (error) {
+      if (/no longer be edited/.test(error.message || '')) return res.status(409).json({ error: error.message });
+      return res.status(500).json({ error: error.message });
+    }
+    changed += 1;
+  }
+  const { data: fresh } = await supabaseAdmin.from('hr_payroll_runs').select(runFull).eq('id', s.run.id).single();
+  res.json({ run: fresh, changed, totals: s.totals });
 }));
 
 router.delete('/entries/:entryId', asyncHandler(async (req, res) => {

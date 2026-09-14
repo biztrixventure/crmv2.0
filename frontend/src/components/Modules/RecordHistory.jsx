@@ -35,6 +35,7 @@ export const TABLE_LABEL = {
   expense_categories: 'Expense category', expenses: 'Expense claim',
   accounting_posting_rules: 'Money rule', fx_rates: 'Exchange rate',
   revenue_settings: 'Sales into the books', revenue_rates: 'Sale rate', hr_holidays: 'Holiday',
+  hr_commission_plans: 'Commission plan',
   module_designations: 'Designation', module_designation_companies: 'Designation company',
 };
 

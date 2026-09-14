@@ -101,6 +101,7 @@ router.use('/employees',  require('./employees'));
 router.use('/attendance', require('./attendance'));
 router.use('/leave',      require('./leave'));
 router.use('/payroll',    require('./payroll'));
+router.use('/commissions', require('./commissions'));
 router.use('/reviews',    require('./reviews'));
 
 module.exports = router;

@@ -19,9 +19,19 @@ import { Alert } from '../../components/UI';
 import ThemedSelect from '../../components/UI/Select';
 import { Btn, StatusPill, ModuleModal } from '../../components/Modules/ModuleUI';
 import { useExpenses } from '../../hooks/useExpenses';
+import client from '../../api/client';
 import AskDialog from '../../components/Modules/AskDialog';
 import ThemedDate from '../../components/UI/ThemedDate';
 import { fmtMoney, fmtMoneyShort, fmtDate, todayISO, CURRENCIES, DEFAULT_CURRENCY } from '../../utils/money';
+
+// Receipts (mig 318): a private file, opened only through a two-minute link.
+const RECEIPT_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'application/pdf'];
+const asDataUrl = (file) => new Promise((resolve, reject) => {
+  const r = new FileReader();
+  r.onload = () => resolve(r.result);
+  r.onerror = () => reject(r.error);
+  r.readAsDataURL(file);
+});
 
 // selfOnly: mounted by "My HR" -- the person's own claims, never the approval queue.
 export default function ExpensesPage({ scope, selfOnly = false }) {
@@ -62,6 +72,18 @@ export default function ExpensesPage({ scope, selfOnly = false }) {
     }
   };
   const inBooks = (did) => (r) => r?.entry_no ? `${did} Recorded in the books as ${r.entry_no}.` : did;
+
+  // Opened in a new tab through a signed link that expires in two minutes.
+  const openReceipt = async (e) => {
+    const tab = window.open('', '_blank');
+    try {
+      const r = await client.get(`accounting/expenses/${e.id}/receipt`, { params: { company_id: companyId || undefined } });
+      if (tab) { tab.opener = null; tab.location.href = r.data.url; } else window.location.assign(r.data.url);
+    } catch (err) {
+      if (tab) tab.close();
+      setNotice({ type: 'error', text: err.response?.data?.error || 'Could not open the receipt.' });
+    }
+  };
 
   const tabs = [{ key: 'mine', label: 'My claims', icon: Receipt }];
   if (canApprove && !selfOnly) tabs.push({ key: 'queue', label: 'Approval queue', icon: Check });
@@ -131,6 +153,13 @@ export default function ExpensesPage({ scope, selfOnly = false }) {
                         <td className="td-p text-sm" style={{ color: 'var(--color-text)' }}>
                           {e.description || <span style={{ color: 'var(--color-text-tertiary)' }}>No description</span>}
                           {e.vendor && <span className="block text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{e.vendor}</span>}
+                          {e.receipt_path ? (
+                            <button type="button" onClick={() => openReceipt(e)} className="text-[11px] font-semibold"
+                              style={{ color: 'var(--color-primary-600)' }}>Receipt</button>
+                          ) : e.receipt_url ? (
+                            <a href={e.receipt_url} target="_blank" rel="noopener noreferrer" className="text-[11px] font-semibold"
+                              style={{ color: 'var(--color-primary-600)' }}>Receipt link</a>
+                          ) : null}
                           {e.status === 'rejected' && e.rejection_reason && (
                             <span className="block text-[11px] mt-0.5" style={{ color: 'var(--color-error-600)' }}>
                               Rejected: {e.rejection_reason}
@@ -208,13 +237,24 @@ export default function ExpensesPage({ scope, selfOnly = false }) {
       {editing && (
         <ExpenseEditor expense={editing} categories={categories} defaultCurrency={scope?.currency || DEFAULT_CURRENCY}
           onClose={() => setEditing(null)}
-          onSave={async (payload, submitNow) => {
+          onSave={async (payload, submitNow, file) => {
             setNotice(null);
             try {
-              if (editing.id) await updateExpense(editing.id, payload);
-              else await createExpense({ ...payload, submit: submitNow });
+              const saved = editing.id ? await updateExpense(editing.id, payload) : await createExpense({ ...payload, submit: submitNow });
+              let attached = '';
+              if (file && saved?.id) {
+                try {
+                  await client.post(`accounting/expenses/${saved.id}/receipt`, {
+                    company_id: companyId, name: file.name, type: file.type, data: await asDataUrl(file),
+                  });
+                  await fetchExpenses();
+                  attached = ' Receipt attached.';
+                } catch (e) {
+                  attached = ' The receipt could not be attached: ' + (e.response?.data?.error || 'upload failed') + '.';
+                }
+              }
               setEditing(null);
-              setNotice({ type: 'success', text: submitNow ? 'Claim submitted.' : 'Claim saved.' });
+              setNotice({ type: attached.includes('could not') ? 'warning' : 'success', text: (submitNow ? 'Claim submitted.' : 'Claim saved.') + attached });
             } catch (e) {
               setNotice({ type: 'error', text: e.response?.data?.error || 'Could not save the claim.' });
             }
@@ -265,11 +305,21 @@ function ExpenseEditor({ expense, categories, defaultCurrency, onClose, onSave }
     is_billable: !!expense.is_billable,
   });
   const [saving, setSaving] = useState(false);
+  const [file, setFile] = useState(null);
+  const [fileError, setFileError] = useState(null);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const pickFile = (f) => {
+    setFileError(null);
+    if (!f) { setFile(null); return; }
+    if (!RECEIPT_TYPES.includes(f.type)) { setFileError('A receipt must be a photo (JPG, PNG, WEBP, HEIC) or a PDF.'); return; }
+    if (f.size > 5 * 1024 * 1024) { setFileError('A receipt can be at most 5 MB.'); return; }
+    setFile(f);
+  };
 
   const save = async (submitNow) => {
     setSaving(true);
-    await onSave({ ...form, amount: Number(form.amount), category_id: form.category_id || null }, submitNow);
+    await onSave({ ...form, amount: Number(form.amount), category_id: form.category_id || null }, submitNow, file);
     setSaving(false);
   };
 
@@ -309,8 +359,14 @@ function ExpenseEditor({ expense, categories, defaultCurrency, onClose, onSave }
         <Field label="Description" hint="What this was for. An approver reads this first.">
           <textarea className="input w-full" rows={2} value={form.description} onChange={e => set('description', e.target.value)} />
         </Field>
-        <Field label="Receipt link" hint="A link to the receipt image or PDF.">
-          <input className="input w-full" value={form.receipt_url} onChange={e => set('receipt_url', e.target.value)} />
+        <Field as="div" label="Receipt" hint={expense.receipt_path ? 'A receipt is attached. Pick a new file to replace it.' : 'A photo or PDF, up to 5 MB. Kept private -- only you and approvers can open it.'}>
+          <input type="file" accept={RECEIPT_TYPES.join(',')} className="block text-sm w-full"
+            style={{ color: 'var(--color-text-secondary)' }} onChange={e => pickFile(e.target.files?.[0] || null)} />
+          {file && <span className="block text-[11px] mt-1" style={{ color: 'var(--color-text-secondary)' }}>{file.name} will be attached when you save.</span>}
+          {fileError && <span className="block text-[11px] mt-1" style={{ color: 'var(--color-error-600)' }}>{fileError}</span>}
+          {!expense.receipt_path && expense.receipt_url && (
+            <a href={expense.receipt_url} target="_blank" rel="noopener noreferrer" className="block text-[11px] mt-1" style={{ color: 'var(--color-primary-600)' }}>Earlier receipt link</a>
+          )}
         </Field>
         <label className="flex items-center gap-2 text-sm cursor-pointer" style={{ color: 'var(--color-text)' }}>
           <input type="checkbox" checked={form.is_billable} onChange={e => set('is_billable', e.target.checked)}
