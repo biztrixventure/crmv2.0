@@ -12,6 +12,8 @@ const { asyncHandler } = require('../middleware/errorHandler');
 const { authMiddleware } = require('../middleware/authMiddleware');
 const { isSuperAdmin } = require('../models/helpers');
 const { findSaleRecording, locationForRecording } = require('../utils/dialerBoxes');
+const { submitValidationForm } = require('../utils/validationPortal');
+const tlsChain = require('../utils/tlsChain');
 const { getConfig, setConfig } = require('../utils/businessConfig');
 const { getPseudoNames } = require('../utils/pseudonym');
 const logger = require('../utils/logger');
@@ -348,7 +350,7 @@ router.get('/admin/diag', authMiddleware, superOnly, asyncHandler(async (req, re
       sale = { customer: s.customer_name, phone: s.customer_phone, date: s.sale_date, code: tr?.vicidial_vendor_code || null, agents: p?.vicidial_agent_ids || [], found: !!rec, duration: rec?.duration || null };
     } else sale = { error: 'sale not found' };
   }
-  res.json({ server_ip, boxes, sale });
+  res.json({ server_ip, boxes, sale, tls: tlsChain.status() });
 }));
 
 // Validate THIS server's IP on the dialer by submitting the dialer's :81 "IP
@@ -356,58 +358,67 @@ router.get('/admin/diag', authMiddleware, superOnly, asyncHandler(async (req, re
 // IP). Then re-probe the API to confirm it opened. Per box.
 router.post('/admin/validate-ip', authMiddleware, superOnly, asyncHandler(async (req, res) => {
   const BOXES = require('../utils/dialerBoxes').getBoxes();
-  const qsBody = (o) => Object.entries(o).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
   const targets = req.body.box ? BOXES.filter(b => b.id === req.body.box) : BOXES;
 
   // Resolve the IP-validation portal URLs for a box. Priority:
   //   1. explicit body.validation_url  (ad-hoc test before saving a dialer)
   //   2. box.validationUrl             (saved per-box full URL, any scheme/port/path)
   //   3. legacy default                http://<host>:81/index.php
-  // getUrl = page that renders the login form (to read the password field name)
-  // postUrl = form action that whitelists the submitting (server) IP.
+  // getUrl = the page that renders the login form. Where the form POSTS is no
+  // longer guessed here: the page's own <form action> decides (index.php on the
+  // old boxes, valid8.php on the new one) -- see utils/validationPortal.js.
   const resolvePortal = (box) => {
     const custom = String(req.body.validation_url || box.validationUrl || '').trim();
     if (custom) {
       // Full URL as-is. If it ends at a directory (no file), append index.php.
-      const postUrl = /\/[^/?#]+\.[a-z0-9]+([?#]|$)/i.test(custom) ? custom : custom.replace(/\/*$/, '/') + 'index.php';
-      // GET the same page to read the form (works whether it's the file or dir).
-      return { getUrl: postUrl, postUrl, label: postUrl };
+      const page = /\/[^/?#]+\.[a-z0-9]+([?#]|$)/i.test(custom) ? custom : custom.replace(/\/*$/, '/') + 'index.php';
+      return { getUrl: page, label: page };
     }
     const host = box.base.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
     const portal = `http://${host}:81`;
-    return { getUrl: portal + '/', postUrl: portal + '/index.php', label: portal };
+    return { getUrl: portal + '/', label: portal };
   };
 
   const validate = async (box) => {
-    const { getUrl, postUrl, label } = resolvePortal(box);
+    const { getUrl, label } = resolvePortal(box);
     const portal = label;
     const userid = req.body.userid || box.user;
     const password = req.body.password || box.pass;
     try {
-      // 1. GET the form → read the (obfuscated) password field name
-      const g = await axios.get(getUrl, { timeout: 15000, responseType: 'text', validateStatus: () => true });
-      const pm = String(g.data || '').match(/<input[^>]*type="password"[^>]*>/i);
-      const field = (pm && pm[0].match(/name="([^"]+)"/)) ? pm[0].match(/name="([^"]+)"/)[1] : 'password';
-      // 2. POST credentials → the portal whitelists the submitting (server) IP
-      const post = await axios.post(postUrl,
-        qsBody({ userid, password: '', [field]: password, submit: 'SUBMIT' }),
-        { timeout: 15000, responseType: 'text', maxRedirects: 0, validateStatus: () => true, headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
-      const said = /success/i.test(String(post.data || ''));
-      // 3. confirm: does the API (443) answer now?
+      // 1+2. Fill and submit whatever form the page shows, like a browser --
+      // old index.php pages and the new valid8.php page alike. See
+      // utils/validationPortal.js for why it no longer hardcodes field names.
+      const v = await submitValidationForm({ url: getUrl, userid, password });
+
+      // 3. Confirm: does the API answer now? Say WHY when it does not -- a
+      // swallowed error here is how a certificate problem on the dialer hid
+      // behind "api_open: false" for a validation that had actually worked.
       let apiOpen = false;
+      let apiError = null;
       try {
         const t = await axios.get(`${box.base}/vicidial/non_agent_api.php`,
           { params: { source: 'crm', user: box.user, pass: box.pass, function: 'recording_lookup', stage: 'pipe', lead_id: '1' }, timeout: 12000, responseType: 'text' });
-        apiOpen = /NO RECORDINGS|^\d{4}-|PERMISSION/i.test(String(t.data || '').trim());
-      } catch { /* still blocked */ }
-      return { box: box.id, portal, submitted: post.status < 400, said_success: said, api_open: apiOpen };
+        const body = String(t.data || '').trim();
+        apiOpen = /NO RECORDINGS|^\d{4}-|PERMISSION/i.test(body);
+        if (!apiOpen) apiError = body.slice(0, 120) || `HTTP ${t.status}`;
+      } catch (e) { apiError = e.code || e.message; }
+
+      return {
+        box: box.id, portal,
+        submitted: !!v.submitted, said_success: !!v.said_success, said_failure: !!v.said_failure,
+        validated_ip: v.validated_ip || null, message: v.message || null,
+        form: v.form || null, error: v.error || undefined,
+        api_open: apiOpen, api_error: apiError || undefined,
+      };
     } catch (e) {
       return { box: box.id, portal, error: e.code || e.message };
     }
   };
 
   const results = await Promise.all(targets.map(validate));
-  res.json({ results });
+  // Which dialers are serving an incomplete certificate chain the CRM had to
+  // complete itself -- worth fixing on the dialer, see utils/tlsChain.js.
+  res.json({ results, tls: tlsChain.status() });
 }));
 
 // listen audit for one client

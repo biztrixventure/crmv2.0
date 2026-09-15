@@ -94,6 +94,39 @@ const Field = ({ label, v, onChange, ph, disabled, type = 'text' }) => (
   </div>
 );
 
+// What one validation attempt came to, in the dialer's own words where it gave
+// any. The old line said "submitted (re-test in a moment)" for every outcome
+// that was not a fully open API -- including a login the dialer had REFUSED,
+// and a validation that worked but whose API check hit a certificate error.
+function validationLine(r) {
+  if (r.error) return r.error;
+  const ip = r.validated_ip ? ` for ${r.validated_ip}` : '';
+  if (r.api_open) return `validated${ip} — API reachable ✓`;
+  if (r.said_failure) return `dialer refused the login: ${r.message || 'no reason given'}`;
+  if (r.said_success) return `dialer validated${ip}, but the API is not answering yet${r.api_error ? ` (${r.api_error})` : ''} — re-test in a moment`;
+  if (r.submitted) return `submitted, but the page did not confirm it${r.message ? `: "${r.message}"` : ''}${r.api_error ? ` · API: ${r.api_error}` : ''}`;
+  return 'could not reach the validation page';
+}
+
+// A dialer serving an incomplete certificate chain. The CRM completes it and
+// carries on (utils/tlsChain.js), but the fix belongs on the dialer, so say so
+// rather than hide it.
+const TlsNote = ({ tls }) => {
+  const hosts = Object.entries(tls?.repaired || {});
+  if (!hosts.length) return null;
+  return (
+    <div className="mt-2 pt-2 text-xs space-y-1" style={{ borderTop: '1px solid var(--color-border)', color: 'var(--color-warning-600)' }}>
+      {hosts.map(([host, h]) => (
+        <div key={host}>
+          <b>{host.replace(/:443$/, '')}</b> does not send its full certificate chain (missing
+          "{(h.chain || [])[1] || 'intermediate'}"). The CRM completed it automatically and
+          still verifies it — ask the dialer admin to install the full chain so it is fixed at the source.
+        </div>
+      ))}
+    </div>
+  );
+};
+
 // ── IP validation (moved here from Chat Control) ─────────────────────────────
 // Submits THIS server's IP to each dialer's IP-validation portal so the dialer
 // whitelists the CRM server (required before recording fetch works). Supports
@@ -203,14 +236,15 @@ const IPValidation = () => {
             <div className="space-y-1">
               <div className="text-[11px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>Submitted this server's IP to the dialer's validation portal</div>
               {(val.results || []).map(r => (
-                <div key={r.box} className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full shrink-0" style={{ background: r.api_open ? 'var(--color-success-500)' : r.submitted ? 'var(--color-warning-500)' : 'var(--color-error-500)' }} />
+                <div key={r.box} className="flex items-start gap-2">
+                  <span className="w-2 h-2 rounded-full shrink-0 mt-1.5" style={{ background: r.api_open ? 'var(--color-success-500)' : (r.said_success || r.submitted) && !r.said_failure ? 'var(--color-warning-500)' : 'var(--color-error-500)' }} />
                   <span className="font-semibold" style={{ color: 'var(--color-text)' }}>{r.box}</span>
-                  <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                    {r.error ? r.error : r.api_open ? 'validated — API reachable ✓' : r.submitted ? 'submitted (re-test in a moment)' : 'could not reach portal'}
+                  <span className="text-xs min-w-0" style={{ color: 'var(--color-text-secondary)' }}>
+                    {validationLine(r)}
                   </span>
                 </div>
               ))}
+              <TlsNote tls={val.tls} />
             </div>
           )}
         </div>
@@ -240,6 +274,7 @@ const IPValidation = () => {
                   </div>
                 );
               })}
+              <TlsNote tls={diag.tls} />
             </div>
           )}
         </div>

@@ -4,6 +4,13 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 require('dotenv').config({ path: '.env.local' });
 
+// Complete certificate chains that a server forgets to send, the way a browser
+// does, so a dialer serving only its own certificate stops failing with
+// UNABLE_TO_VERIFY_LEAF_SIGNATURE. Verification stays ON -- see the header of
+// utils/tlsChain.js for why this is safe. Installed before any route module so
+// every axios call in the process (dialerBoxes, portal, ...) goes through it.
+require('./utils/tlsChain').install(require('axios'));
+
 // Import middleware
 const { errorHandler } = require('./middleware/errorHandler');
 const { authMiddleware } = require('./middleware/authMiddleware');
