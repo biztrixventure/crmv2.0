@@ -36,7 +36,20 @@ const tls = require('tls');
 const https = require('https');
 const http = require('http');
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const logger = require('./logger');
+
+// Intermediates we ship, checked BEFORE going to the network. Measured
+// 2026-09-15: the first request to cert.ssl.com took 11.7 s, the next two
+// 0.5 s. A repair that depends on a slow third-party download at the moment a
+// dialer call is being made is fragile, so the intermediates of the dialers we
+// know about live in backend/certs/intermediates/*.pem. They are public
+// certificates, not secrets, and they are held to the same rules as a
+// downloaded one: they must have signed the certificate, and the chain must
+// still end at a root Node ships with. AIA download stays as the fallback for
+// any dialer whose issuer is not here yet.
+const SHIPPED_DIR = path.join(__dirname, '..', 'certs', 'intermediates');
 
 // Errors that mean "I could not find the certificate that signed this one" --
 // the only case this module touches. Everything else (expired, wrong host,
@@ -49,7 +62,12 @@ const CHAIN_ERRORS = new Set([
 
 const MAX_HOPS = 3;                 // leaf -> intermediate -> intermediate -> root
 const MAX_CERT_BYTES = 64 * 1024;   // an intermediate is ~2 KB; refuse anything silly
-const NET_TIMEOUT_MS = 8000;
+const NET_TIMEOUT_MS = 8000;        // reading the server's own certificate
+const DOWNLOAD_TIMEOUT_MS = 20000;  // cert.ssl.com measured 11.7 s cold
+const DOWNLOAD_ATTEMPTS = 2;
+// A network hiccup is retried soon; a chain that is structurally wrong (bad
+// signature, an untrusted root) is not going to fix itself in a minute.
+const RETRY_TRANSIENT_AFTER_MS = 60 * 1000;
 const RETRY_FAILED_AFTER_MS = 10 * 60 * 1000;
 
 const agents = new Map();      // "host:port" -> https.Agent with the completed chain
@@ -66,6 +84,24 @@ const roots = () => {
     }
   }
   return bundledRoots;
+};
+
+// Every intermediate this process knows: the shipped ones, plus any it has
+// downloaded since start -- so a second dialer with the same issuer, or the
+// same dialer after a restart of its agent, never downloads twice.
+let known = null;
+const knownIntermediates = () => {
+  if (!known) {
+    known = [];
+    try {
+      for (const f of fs.readdirSync(SHIPPED_DIR)) {
+        if (!/\.pem$/i.test(f)) continue;
+        try { known.push(new crypto.X509Certificate(fs.readFileSync(path.join(SHIPPED_DIR, f)))); }
+        catch (e) { logger.warn('TLS', `ignoring unreadable shipped certificate ${f}: ${e.message}`); }
+      }
+    } catch { /* no shipped directory: download only */ }
+  }
+  return known;
 };
 
 const cn = (cert) => (String(cert.subject || '').split('\n').find(l => l.startsWith('CN=')) || cert.subject || '').replace(/^CN=/, '');
@@ -95,10 +131,23 @@ function issuerUrl(cert) {
   return m ? m[1] : null;
 }
 
+// A failure worth retrying soon (the network), as opposed to a chain that is
+// simply wrong. Tagged on the error so repair() can pick the retry window.
+const transient = (e) => Object.assign(e, { transient: true });
+
+async function downloadIssuer(url) {
+  let last;
+  for (let i = 0; i < DOWNLOAD_ATTEMPTS; i += 1) {
+    try { return await download(url); }
+    catch (e) { last = e; }
+  }
+  throw transient(last);
+}
+
 function download(url, redirects = 2) {
   return new Promise((resolve, reject) => {
     const lib = url.startsWith('https:') ? https : http;
-    const req = lib.get(url, { timeout: NET_TIMEOUT_MS }, (res) => {
+    const req = lib.get(url, { timeout: DOWNLOAD_TIMEOUT_MS }, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && redirects > 0) {
         res.resume();
         return resolve(download(new URL(res.headers.location, url).toString(), redirects - 1));
@@ -121,17 +170,30 @@ async function buildAgent(host, port) {
   let cert = await peerCertificate(host, port);
   const intermediates = [];
   const names = [cn(cert)];
+  let downloaded = false;
 
   for (let hop = 0; hop < MAX_HOPS; hop += 1) {
     if (roots().some(r => signedBy(cert, r))) break;          // reached a bundled root
-    const url = issuerUrl(cert);
-    if (!url) throw new Error(`"${cn(cert)}" names no issuer to fetch`);
-    let issuer;
-    try { issuer = new crypto.X509Certificate(await download(url)); }
-    catch (e) { throw new Error(`could not load issuer from ${url}: ${e.message}`); }
-    if (!signedBy(cert, issuer)) throw new Error(`certificate at ${url} did not sign "${cn(cert)}"`);
-    // Never let the network hand us a root. Trust must come from Node's bundle.
-    if (isSelfSigned(issuer)) throw new Error(`issuer "${cn(issuer)}" is a root Node does not trust`);
+
+    // 1. One we already have -- shipped, or downloaded earlier. No network.
+    let issuer = knownIntermediates().find(k => signedBy(cert, k) && !isSelfSigned(k)) || null;
+
+    // 2. Otherwise the address the certificate itself names.
+    if (!issuer) {
+      const url = issuerUrl(cert);
+      if (!url) throw new Error(`"${cn(cert)}" names no issuer to fetch`);
+      let buf;
+      try { buf = await downloadIssuer(url); }
+      catch (e) { throw transient(new Error(`could not load issuer from ${url}: ${e.message}`)); }
+      try { issuer = new crypto.X509Certificate(buf); }
+      catch (e) { throw new Error(`issuer at ${url} is not a certificate: ${e.message}`); }
+      if (!signedBy(cert, issuer)) throw new Error(`certificate at ${url} did not sign "${cn(cert)}"`);
+      // Never let the network hand us a root. Trust must come from Node's bundle.
+      if (isSelfSigned(issuer)) throw new Error(`issuer "${cn(issuer)}" is a root Node does not trust`);
+      knownIntermediates().push(issuer);
+      downloaded = true;
+    }
+
     intermediates.push(issuer.toString());
     names.push(cn(issuer));
     cert = issuer;
@@ -141,7 +203,7 @@ async function buildAgent(host, port) {
   // Node still verifies everything: signatures, validity dates, hostname, and a
   // path to a bundled root. The intermediates only fill the missing link.
   const agent = new https.Agent({ keepAlive: true, ca: [...tls.rootCertificates, ...intermediates] });
-  return { agent, names };
+  return { agent, names, source: downloaded ? 'downloaded via AIA' : 'a certificate shipped with the CRM' };
 }
 
 /**
@@ -152,21 +214,22 @@ async function repair(host, port = 443) {
   const key = `${host}:${port}`;
   if (agents.has(key)) return agents.get(key);
   const f = failed.get(key);
-  if (f && Date.now() - f.at < RETRY_FAILED_AFTER_MS) return null;
+  if (f && Date.now() - f.at < (f.transient ? RETRY_TRANSIENT_AFTER_MS : RETRY_FAILED_AFTER_MS)) return null;
   if (inflight.has(key)) return inflight.get(key);
 
   const p = buildAgent(host, Number(port))
     .then((res) => {
       if (!res) { failed.set(key, { at: Date.now(), reason: 'chain already complete; the failure was something else' }); return null; }
       agents.set(key, res.agent);
-      repaired.set(key, { at: new Date().toISOString(), chain: res.names });
+      repaired.set(key, { at: new Date().toISOString(), chain: res.names, source: res.source });
       failed.delete(key);
-      logger.warn('TLS', `${key} sends an incomplete certificate chain; completed it via AIA (${res.names.join(' <- ')}). Fix on the server: serve the full chain.`);
+      logger.warn('TLS', `${key} sends an incomplete certificate chain; completed it from ${res.source} (${res.names.join(' <- ')}). Fix on the server: serve the full chain.`);
       return res.agent;
     })
     .catch((e) => {
-      failed.set(key, { at: Date.now(), reason: e.message });
-      logger.warn('TLS', `${key} chain could not be completed: ${e.message}`);
+      const isTransient = !!e.transient || /timed? ?out|ECONNRESET|ENOTFOUND|EAI_AGAIN|ETIMEDOUT/i.test(`${e.code || ''} ${e.message}`);
+      failed.set(key, { at: Date.now(), reason: e.message, transient: isTransient });
+      logger.warn('TLS', `${key} chain could not be completed${isTransient ? ' (will retry in a minute)' : ''}: ${e.message}`);
       return null;
     })
     .finally(() => inflight.delete(key));
