@@ -102,11 +102,13 @@ function describeClientIp(req, env = process.env) {
   const header = clientHeader(env);
 
   const warnings = [];
+  const peer = normalizeIp(peerAddress(req));
   if (!list.length && (xff || cf)) {
-    warnings.push('A forwarded-address header is arriving but IP_TRUSTED_PROXIES is not set, so it is ignored and every user will appear to come from the proxy. Set IP_TRUSTED_PROXIES before relying on IP rules.');
+    warnings.push(`A forwarded-address header is arriving but IP_TRUSTED_PROXIES is not set, so it is ignored and every user appears to come from the proxy (${peer || 'unknown'}). `
+      + `Set IP_TRUSTED_PROXIES=${peer || '<proxy address>'} (or "uniquelocal" to trust any private-network proxy) in the backend environment and restart before relying on IP rules.`);
   }
   if (list.length && !trusted && (xff || cf)) {
-    warnings.push('This request came from an address that is not in IP_TRUSTED_PROXIES, so its forwarded header was ignored.');
+    warnings.push(`This request came from ${peer || 'an address'}, which is not in IP_TRUSTED_PROXIES, so its forwarded header was ignored. If that is your proxy, add it to IP_TRUSTED_PROXIES.`);
   }
   if (header === 'cf-connecting-ip' && trusted && !cf) {
     warnings.push('IP_CLIENT_HEADER is cf-connecting-ip but this request carried no CF-Connecting-IP header; fell back to X-Forwarded-For.');

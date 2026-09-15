@@ -202,6 +202,16 @@ export default function IpAccessManager() {
             <dd className="m-0 font-mono truncate">{who?.peer_ip || '—'} {who ? (who.peer_trusted ? '(trusted proxy)' : '(not a trusted proxy)') : ''}</dd>
             <dt>Address header</dt>
             <dd className="m-0 font-mono">{env.client_header || who?.header || 'x-forwarded-for'}</dd>
+            {/* The raw values, so an admin can see the real address the proxy is
+                passing along BEFORE trusting it -- the value to expect above. */}
+            <dt>X-Forwarded-For</dt>
+            <dd className="m-0 font-mono truncate" title={who?.forwarded_for || ''}>{who?.forwarded_for || '— (not sent)'}</dd>
+            {who?.cf_connecting_ip && (
+              <>
+                <dt>CF-Connecting-IP</dt>
+                <dd className="m-0 font-mono truncate">{who.cf_connecting_ip}</dd>
+              </>
+            )}
             <dt>Trusted proxies</dt>
             <dd className="m-0 font-mono truncate">{(env.trusted_proxies || []).join(', ') || 'none (IP_TRUSTED_PROXIES not set)'}</dd>
           </dl>
