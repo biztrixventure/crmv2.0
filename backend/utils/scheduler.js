@@ -20,6 +20,7 @@ const { runQa2AutoAssign, purgeStaleQa2Assignments, purgeParkedQa2Calls, parkDup
 const { runCrmDayForAllCompanies } = require('./qa2CrmDay');
 const { syncAllCompanies: syncAttendance } = require('./attendanceSync');
 const { runAllEnabled: syncRevenue } = require('./revenueSync');
+const ipAccess = require('./ipAccess');
 
 const REFRESH_SEGMENTS_MS = 10 * 60 * 1000;     // every 10 min
 const CACHE_SWEEP_MS      = 5  * 60 * 1000;      // every 5 min
@@ -76,6 +77,13 @@ const ATTENDANCE_SYNC_INIT = 5 * 60 * 1000;
 // or a restart mid-run is simply finished by the next one.
 const REVENUE_SYNC_MS   = 60 * 60 * 1000;
 const REVENUE_SYNC_INIT = 7 * 60 * 1000;
+// IP access control (mig 319). The switch is held in memory for the request
+// path; re-reading it every minute is what lets the break-glass CLI (or a SQL
+// edit) turn it off without a restart. One tiny indexed read per minute.
+const IP_SWITCH_MS     = 60 * 1000;
+// Access-log pruning (security.ip_restriction.log_retention_days, default 90).
+const IP_LOG_PRUNE_MS   = 6 * 60 * 60 * 1000;
+const IP_LOG_PRUNE_INIT = 10 * 60 * 1000;
 
 let _timers = [];
 
@@ -196,7 +204,13 @@ function startBackgroundJobs() {
   _timers.push(setTimeout(revenue, REVENUE_SYNC_INIT));
   _timers.push(setInterval(revenue, REVENUE_SYNC_MS));
 
-  logger.info('JOBS', `background jobs started — segments refresh ${REFRESH_SEGMENTS_MS / 60000}m, cache sweep ${CACHE_SWEEP_MS / 60000}m, payment scan ${PAYMENT_SCAN_MS / 3600000}h, qa materialize ${QA_MATERIALIZE_MS / 60000}m, milestone sweep ${MILESTONE_SWEEP_MS / 60000}m, qa2 recording poll ${QA2_REC_POLL_MS / 1000}s, qa2 TRA vendor-code backfill ${QA2_TRA_VENDOR_MS / 60000}m, qa2 auto-assign ${QA2_AUTOASSIGN_MS / 60000}m, qa2 retention ${QA2_RETENTION_MS / 3600000}h, qa2 crm-day ${QA2_CRMDAY_MS / 3600000}h, attendance ${ATTENDANCE_SYNC_MS / 3600000}h, revenue ${REVENUE_SYNC_MS / 3600000}h`);
+  // refreshSettings never throws (it keeps the last known state and warns).
+  _timers.push(setInterval(() => { ipAccess.refreshSettings(); }, IP_SWITCH_MS));
+  const ipPrune = () => ipAccess.pruneLogs().catch(e => logger.warn('JOBS', `ip access-log prune error: ${e.message}`));
+  _timers.push(setTimeout(ipPrune, IP_LOG_PRUNE_INIT));
+  _timers.push(setInterval(ipPrune, IP_LOG_PRUNE_MS));
+
+  logger.info('JOBS', `background jobs started — segments refresh ${REFRESH_SEGMENTS_MS / 60000}m, cache sweep ${CACHE_SWEEP_MS / 60000}m, payment scan ${PAYMENT_SCAN_MS / 3600000}h, qa materialize ${QA_MATERIALIZE_MS / 60000}m, milestone sweep ${MILESTONE_SWEEP_MS / 60000}m, qa2 recording poll ${QA2_REC_POLL_MS / 1000}s, qa2 TRA vendor-code backfill ${QA2_TRA_VENDOR_MS / 60000}m, qa2 auto-assign ${QA2_AUTOASSIGN_MS / 60000}m, qa2 retention ${QA2_RETENTION_MS / 3600000}h, qa2 crm-day ${QA2_CRMDAY_MS / 3600000}h, attendance ${ATTENDANCE_SYNC_MS / 3600000}h, revenue ${REVENUE_SYNC_MS / 3600000}h, ip switch ${IP_SWITCH_MS / 1000}s, ip log prune ${IP_LOG_PRUNE_MS / 3600000}h`);
 }
 
 function stopBackgroundJobs() {

@@ -264,3 +264,22 @@ Payroll is MANUAL ENTRY in this phase -- no tax engine. See `TODO(tax)` in
 - **318**: commission plans SUGGEST pay (HR applies per run); receipts live in
   the PRIVATE `expense-receipts` bucket, shown by 2-minute signed links.
 - Every HR/Accounts CSV goes through `utils/moduleExport.js` (egress log).
+
+### IP access control (mig 319, applied 2026-09-15)
+Which networks each user may use the CRM from. Ships OFF, and everyone is `anywhere`. README → "IP access control" has the operator steps.
+- **Mode lives in `user_ip_access` (sidecar), NEVER on `user_profiles`.** That table has RLS `users_can_update_own_profile`
+  + an `authenticated` UPDATE grant, so a restricted user could PATCH themselves to `anywhere` with the anon key.
+  No row = `anywhere`. All three tables are RLS-on, no policies, revoked from anon/authenticated.
+- **Switch** = `business_config` `security.ip_restriction.enabled`. `GET /business-config` strips `security.*` (every user
+  reads it), and `PUT/DELETE` there refuses `security.*` even for superadmin. Only `/api/ip-access` writes it, because
+  that route enforces the `409 {needs_confirm}` lockout checks.
+- **Hot path**: `ipAccess.isEnabled()` is an in-memory boolean, and OFF means zero queries. Scheduler re-reads it every 60s (so
+  the CLI works without restart); `server.js` reads it before `app.listen`. Enforcement = `ipAccessGate` chained INSIDE
+  `authMiddleware` + `guardLogin()` in `/auth/login`, `/refresh`, `/exchange`. `checkAccess()` is the one pure decision.
+- **Any write to `user_ip_rules` or `user_ip_access.ip_access_mode` must call `ipAccess.invalidatePolicies()`**, or the
+  change waits out the 30s policy snapshot.
+- Client IP = `resolveClientIp()` (`utils/clientIp.js`): forwarded header only from `IP_TRUSTED_PROXIES`. `geoGate`,
+  `presence.js`, `portal.js` still read X-Forwarded-For raw; switch them once the proxies are configured.
+- Break-glass: `npm run ip-access -- disable | anywhere <email>` (backend/), or `IP_RESTRICTION_FORCE_OFF=true` + restart.
+- Audit = `module_audit_log` module `access` (rules, mode changes only, `security.*` config). Last-seen stamps are NOT logged.
+- Tests run on `backend/testing/supabaseFake.js` (in-memory supabase-js; `fake.calls` proves "no queries when off").

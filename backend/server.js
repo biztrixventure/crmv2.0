@@ -83,11 +83,14 @@ const trainingRoutes            = require('./routes/training');
 const accountingRoutes          = require('./routes/accounting');
 const hrRoutes                  = require('./routes/hr');
 const moduleDesignationsRoutes  = require('./routes/moduleDesignations');
+const ipAccessRoutes            = require('./routes/ipAccess');
 const { egressAudit }           = require('./middleware/egressAudit');
 const { requireFeature }        = require('./utils/featureGate');
 const { startCallbackScheduler } = require('./utils/callbackScheduler');
 const { startBackgroundJobs } = require('./utils/scheduler');
 const { startAutoFetchDispo } = require('./utils/autoFetchDispo');
+const { configureTrustProxy } = require('./utils/clientIp');
+const ipAccess = require('./utils/ipAccess');
 const { supabaseAdmin: _saForSync } = require('./config/database');
 
 // On startup: RECONCILE app_metadata.role='superadmin' against SUPERADMIN_EMAIL.
@@ -230,6 +233,11 @@ async function ensureAdminProfiles() {
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+// Trusted reverse proxies (IP access control, mig 319). A no-op unless
+// IP_TRUSTED_PROXIES is set, so req.ip -- and every rate limiter keyed on it --
+// stays exactly as it was. See utils/clientIp.js.
+configureTrustProxy(app);
 
 // ============================================================================
 // MIDDLEWARE
@@ -516,6 +524,9 @@ app.get('/api/pwa/public', pwa.publicFlags);
 app.use('/api/pwa', authMiddleware, readonlyGuard, pwa.adminRouter);
 app.use('/api/compliance',        authMiddleware, readonlyGuard, egressAudit, complianceRoutes);
 app.use('/api/egress',            authMiddleware, readonlyGuard, egressRoutes);
+// IP access control admin (mig 319). Superadmin / ip_access.manage only; anyone
+// else gets a plain 404. Enforcement is not here -- it rides in authMiddleware.
+app.use('/api/ip-access',         authMiddleware, readonlyGuard, ipAccessRoutes);
 // QA Department — recording review + scoring. egressAudit so QA recording plays
 // are governed like the rest; each route guards itself by qa_* permission.
 // Ticket-authenticated audio. Mounted BEFORE authMiddleware on purpose: an
@@ -635,7 +646,14 @@ app.use(errorHandler);
 
 const { warm: warmAuditCols } = require('./utils/auditColumnGuard');
 
-app.listen(PORT, () => {
+// Read the IP-restriction switch BEFORE accepting connections, so a restart
+// never opens a window in which it reads as off. Capped at 5s: a slow database
+// must not keep the whole app from starting (the scheduler re-reads it every
+// minute anyway).
+Promise.race([
+  ipAccess.refreshSettings(),
+  new Promise(resolve => setTimeout(resolve, 5000)),
+]).then(() => app.listen(PORT, () => {
   startCallbackScheduler();
   startBackgroundJobs();       // matview refresh + cache sweep (utils/scheduler)
   startAutoFetchDispo();       // catch-up dispo fetch for manual-dial transfers
@@ -651,6 +669,6 @@ app.listen(PORT, () => {
   console.log(`🔗 Supabase URL: ${process.env.VITE_SUPABASE_URL}`);
   console.log(`🌐 CORS Origin: ${process.env.CORS_ORIGIN || 'http://localhost:5173'}`);
   console.log(`💾 Database: Supabase\n`);
-});
+}));
 
 module.exports = app;

@@ -85,6 +85,9 @@ export const ADMIN_TAB_CATALOG = [
   { id: 'task-boards',      label: 'Task Boards',          group: 'superadmin',    roEligible: false, defaultForRo: false, gate: null },
   { id: 'blacklist',        label: 'Blacklist / DNC',      group: 'superadmin',    roEligible: false, defaultForRo: false, gate: null },
   { id: 'egress',           label: 'Data Egress',          group: 'superadmin',    roEligible: false, defaultForRo: false, gate: null },
+  // IP access control (mig 319) -- who may reach the CRM from where. Never a
+  // readonly_admin surface.
+  { id: 'ip-access',        label: 'IP Access',            group: 'superadmin',    roEligible: false, defaultForRo: false, gate: 'ip_access.manage' },
   { id: 'branding',         label: 'Branding & SEO',       group: 'superadmin',    roEligible: false, defaultForRo: false, gate: null },
   { id: 'appearance',       label: 'Appearance',           group: 'superadmin',    roEligible: false, defaultForRo: false, gate: null },
   // PWA install + the push event matrix. Superadmin only: it decides who gets

@@ -11,6 +11,7 @@ const AREA_LABEL = {
   reports: 'Reports & Stats', reviews: 'Call Reviews', forms: 'Forms & FAQs',
   user_management: 'User Management', users: 'Company Users',
   company_management: 'Companies', companies: 'Closer Pool', notifications: 'Notifications',
+  security: 'Security',
 };
 const areaLabel = (c) => AREA_LABEL[c] || (c || 'other').replace(/_/g, ' ');
 const pretty = (name) => name.replace(/_/g, ' ').replace(/\b\w/g, m => m.toUpperCase());

@@ -2,6 +2,7 @@ const { verifyToken } = require('../config/auth');
 const { supabaseAdmin } = require('../config/database');
 const logger = require('../utils/logger');
 const { runWithContext } = require('../utils/requestContext');
+const { ipAccessGate } = require('./ipAccessGate');
 
 const authMiddleware = async (req, res, next) => {
   try {
@@ -78,7 +79,8 @@ const authMiddleware = async (req, res, next) => {
     // Everything downstream of here runs "as" this user: every database write
     // made while serving the request carries their id to the mig 313 change
     // record. The id comes from the verified token, never from the client.
-    runWithContext({ actorId: token.sub, source: 'api' }, next);
+    // IP access control (mig 319) runs first -- a no-op while it is switched off.
+    runWithContext({ actorId: token.sub, source: 'api' }, () => ipAccessGate(req, res, next));
   } catch (error) {
     console.error('Auth middleware error:', error.message);
     return res.status(401).json({ error: 'Unauthorized' });

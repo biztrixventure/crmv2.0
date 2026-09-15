@@ -43,6 +43,7 @@ import BlacklistSettings from "../components/Admin/Blacklist/BlacklistSettings";
 import ReadonlyAdminManager from "../components/Admin/ReadonlyAdmins/ReadonlyAdminManager";
 import UserControlCenter from "../components/Admin/UserControlCenter";
 import EgressGovernance from "../components/Admin/EgressGovernance/EgressGovernance";
+import IpAccessManager from "../components/Admin/IpAccess/IpAccessManager";
 import BrandingManager from "../components/Admin/Branding/BrandingManager";
 import AppearanceManager from "../components/Admin/Appearance/AppearanceManager";
 import PwaManager from "../components/Admin/Pwa/PwaManager";
@@ -205,6 +206,9 @@ const AdminPanel = () => {
     ...(isSAorRO                                       ? [{ id: "clients-plans",  label: "Clients & Plans"      }] : []),
     ...(user?.role === 'superadmin'                    ? [{ id: "blacklist",      label: "Blacklist / DNC"      }] : []),
     ...(user?.role === 'superadmin'                    ? [{ id: "egress",         label: "Data Egress"          }] : []),
+    // IP access control (mig 319). Superadmin only, never a readonly_admin: it
+    // decides who can reach the CRM at all.
+    ...(user?.role === 'superadmin'                    ? [{ id: "ip-access",      label: "IP Access"            }] : []),
     ...(user?.role === 'superadmin'                    ? [{ id: "branding",       label: "Branding & SEO"       }] : []),
     ...(user?.role === 'superadmin'                    ? [{ id: "appearance",     label: "Appearance"           }] : []),
     ...(user?.role === 'superadmin'                    ? [{ id: "pwa",            label: "Progressive Web App"  }] : []),
@@ -281,6 +285,7 @@ const AdminPanel = () => {
       case 'business-rules':    return <BusinessRulesHub />;
       case 'blacklist':         return <BlacklistSettings />;
       case 'egress':            return <EgressGovernance />;
+      case 'ip-access':         return user?.role === 'superadmin' ? <IpAccessManager /> : null;
       case 'branding':          return <BrandingManager />;
       case 'appearance':        return <AppearanceManager />;
       case 'pwa':               return <PwaManager />;

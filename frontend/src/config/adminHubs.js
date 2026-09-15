@@ -20,7 +20,7 @@
 import {
   BookOpen, Megaphone, Hash, Paintbrush, Database, Lock,
   HelpCircle, MessageSquareText, Radio, Trophy, Send, Users, Tag, PhoneCall,
-  Eraser, Eye, Download, Palette, Smartphone,
+  Eraser, Eye, Download, Palette, Smartphone, Globe,
 } from 'lucide-react';
 
 export const ADMIN_HUBS = [
@@ -86,10 +86,11 @@ export const ADMIN_HUBS = [
     id: 'hub-governance',
     label: 'Access & Governance',
     icon: Lock,
-    subtitle: 'Who may see what, and what may leave the system.',
+    subtitle: 'Who may see what, from where, and what may leave the system.',
     members: [
       { id: 'readonly-admins', label: 'Readonly Admins', icon: Eye },
       { id: 'egress',          label: 'Data Egress',     icon: Download },
+      { id: 'ip-access',       label: 'IP Access',       icon: Globe },
     ],
   },
 ];

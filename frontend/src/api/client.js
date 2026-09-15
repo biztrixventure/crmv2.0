@@ -45,6 +45,20 @@ client.interceptors.response.use(
         return client(cfg);
       }
     }
+    // IP access control (mig 319): this network may not use the CRM. The server
+    // has already revoked the session; drop it here too and send the person to
+    // the login page with the reason. On the login page itself the error is
+    // shown by the form, so no redirect and no notice.
+    if (error.response?.status === 403 && error.response?.data?.code === 'IP_BLOCKED') {
+      if (!window.location.pathname.startsWith('/login')) {
+        try { sessionStorage.setItem('auth_notice', error.response.data.error || 'Access from your current network is not permitted.'); } catch { /* storage blocked */ }
+        localStorage.removeItem("token");
+        localStorage.removeItem("refresh_token");
+        localStorage.removeItem("user");
+        window.location.href = "/login";
+      }
+      return Promise.reject(error);
+    }
     if (error.response?.status === 401) {
       // Token expired or invalid
       localStorage.removeItem("token");

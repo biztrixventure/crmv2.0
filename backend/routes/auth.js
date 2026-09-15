@@ -5,6 +5,7 @@ const { asyncHandler } = require('../middleware/errorHandler');
 const { authMiddleware, requireRole } = require('../middleware/authMiddleware');
 const { resolveGovernance } = require('../utils/readonlyGovernance');
 const { resolveExportPerms } = require('../utils/egressGuard');
+const { guardLogin } = require('../utils/ipAccess');
 
 const router = express.Router();
 
@@ -196,6 +197,12 @@ router.post(
       if (error || !data.user) {
         return res.status(401).json({ error: "Invalid email or password" });
       }
+
+      // IP access control (mig 319): credentials are good, now the network.
+      // Supabase has already minted the session, so a denial revokes it here and
+      // the tokens never leave the server. No-op while the feature is off.
+      const ipBlock = await guardLogin(req, { user: data.user, session: data.session, event: 'login' });
+      if (ipBlock) return res.status(ipBlock.status).json(ipBlock.body);
 
       // SUPERADMIN check FIRST — env-level superadmins bypass company role lookup.
       // Case-insensitive + check app_metadata.role (set by startup sync).
@@ -502,6 +509,10 @@ router.post(
         return res.status(401).json({ error: "Failed to refresh session" });
       }
 
+      // A session must not be renewed from a network the user may not use.
+      const ipBlock = await guardLogin(req, { user: data.user, session: data.session, event: 'refresh' });
+      if (ipBlock) return res.status(ipBlock.status).json(ipBlock.body);
+
       res.json({
         token: data.session.access_token,
         refresh_token: data.session.refresh_token,
@@ -684,6 +695,10 @@ router.post('/exchange', asyncHandler(async (req, res) => {
   // Validate the token and get the Supabase user
   const { data: { user }, error } = await supabaseAdmin.auth.getUser(access_token);
   if (error || !user) return res.status(401).json({ error: 'Invalid or expired token' });
+
+  // A magic-link sign-in is a sign-in: same network check as POST /login.
+  const ipBlock = await guardLogin(req, { user, session: { access_token }, event: 'exchange' });
+  if (ipBlock) return res.status(ipBlock.status).json(ipBlock.body);
 
   const userId = user.id;
   const email  = user.email;

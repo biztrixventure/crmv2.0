@@ -19,6 +19,15 @@ const Login = () => {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  // Why the last session ended, when the server ended it (IP access control,
+  // mig 319 -- set by api/client.js). Read once, then forgotten.
+  const [notice, setNotice] = useState(() => {
+    try {
+      const n = sessionStorage.getItem("auth_notice");
+      if (n) sessionStorage.removeItem("auth_notice");
+      return n || "";
+    } catch { return ""; }
+  });
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -226,6 +235,15 @@ const Login = () => {
           </div>
 
           <form onSubmit={handleLogin} className="space-y-5">
+            {notice && !error && (
+              <Alert
+                type="warning"
+                title="You were signed out"
+                message={notice}
+                dismissible
+                onDismiss={() => setNotice("")}
+              />
+            )}
             {error && (
               <Alert
                 type="error"

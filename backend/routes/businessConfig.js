@@ -26,7 +26,15 @@ const SENSITIVE_KEY = (key) =>
   key === 'access_templates' ||
   key === 'record_view_templates' ||
   /^chat\.view_limit\./.test(key) ||                 // delegated chat caps
-  /^readonly_admin\.nav\./.test(key);
+  /^readonly_admin\.nav\./.test(key) ||
+  SECURITY_KEY(key);
+
+// security.* (IP access control, mig 319) is read and written ONLY through
+// /api/ip-access. It is stripped from the GET below -- that response goes to
+// every signed-in user, and nobody but an admin should be able to tell the
+// feature exists -- and it is never writable here, even by a superadmin, so the
+// confirmations /api/ip-access insists on cannot be skipped.
+const SECURITY_KEY = (key) => /^security\./.test(String(key || ''));
 
 // May this request write business-config for `key`? superadmin always; a
 // tool_business_rules holder may write non-sensitive keys only.
@@ -52,6 +60,7 @@ router.get('/', asyncHandler(async (req, res) => {
   // Non-members now resolve to their own scope (global keys still resolve for
   // everyone, which is what makes config-driven sections render).
   const config = await getAllConfig(await resolveScopedCompanyId(req));
+  for (const k of Object.keys(config)) if (SECURITY_KEY(k)) delete config[k];
   res.json({ config });
 }));
 
@@ -63,6 +72,9 @@ router.put('/', asyncHandler(async (req, res) => {
   if (value === undefined) return res.status(400).json({ error: 'value is required (null/false/0 are allowed but must be sent).' });
   if (typeof scope !== 'string' || (scope !== 'global' && !/^company:[0-9a-f-]{36}$/i.test(scope))) {
     return res.status(400).json({ error: 'scope must be "global" or "company:<uuid>".' });
+  }
+  if (SECURITY_KEY(key)) {
+    return res.status(403).json({ error: 'You do not have permission to change this setting.' });
   }
   const sa = await isSuperAdmin(req.user.id);
   // Cross-tenant guard: a non-superadmin delegate must never write ANOTHER
@@ -80,6 +92,9 @@ router.put('/', asyncHandler(async (req, res) => {
 
 // DELETE /business-config/:scope/:key  — clear a company override (falls back to global)
 router.delete('/:scope/:key', requireSuperAdmin, asyncHandler(async (req, res) => {
+  if (SECURITY_KEY(req.params.key)) {
+    return res.status(403).json({ error: 'You do not have permission to change this setting.' });
+  }
   await resetConfig(req.params.scope, req.params.key);
   res.json({ ok: true });
 }));
@@ -108,6 +123,7 @@ router.post('/clone-global/:companyId', requireSuperAdmin, asyncHandler(async (r
 
   let copied = 0, skipped = 0;
   for (const row of (globals || [])) {
+    if (SECURITY_KEY(row.key)) continue;   // system-wide only; never a per-company copy
     if (!overwrite && existingKeys.has(row.key)) { skipped++; continue; }
     await setConfig(scope, row.key, row.value, req.user.id);
     copied++;

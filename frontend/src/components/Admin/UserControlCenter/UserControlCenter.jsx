@@ -20,7 +20,7 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   UserCog, ShieldCheck, Building2, Users2, Headphones, LayoutTemplate,
   Lock, Activity, Download, RefreshCw, Mail, Clock, Circle, ClipboardCheck, ArrowLeft, Briefcase,
-  Smartphone, Layers, Search,
+  Smartphone, Layers, Search, Globe,
 
 } from 'lucide-react';
 import client from '../../../api/client';
@@ -45,6 +45,7 @@ import ClientAccessSection from './ClientAccessSection';
 import PwaSection from './PwaSection';
 import ModulesSection from './ModulesSection';
 import CustomerLookupSection from './CustomerLookupSection';
+import IpAccessSection from './IpAccessSection';
 
 // compliance_manager is here so the QA tab shows for them: they are the users a
 // superadmin designates as quality managers (mig 227), and in practice nobody
@@ -80,6 +81,9 @@ const TABS = [
   { id: 'modules',      label: 'Modules',        icon: Layers,        scope: 'user' },
   // External customer lookup — per-user switches + the service the tool calls.
   { id: 'customer_lookup', label: 'Customer Lookup', icon: Search,      scope: 'user' },
+  // Which networks this person may use the CRM from (mig 319). scope:'user' --
+  // the rules follow the login, not a company.
+  { id: 'ip_access',    label: 'IP Access',      icon: Globe,          scope: 'user' },
   { id: 'governance',   label: 'Governance',     icon: Lock,           scope: 'user' },
   { id: 'egress',       label: 'Data Egress',    icon: Download,       scope: 'user' },
   { id: 'activity',     label: 'Activity',       icon: Activity,       scope: 'user' },
@@ -258,6 +262,7 @@ export default function UserControlCenter() {
             {tab === 'pwa'          && <PwaSection account={account} />}
             {tab === 'modules'      && <ModulesSection account={account} />}
             {tab === 'customer_lookup' && <CustomerLookupSection account={account} />}
+            {tab === 'ip_access'    && <IpAccessSection account={account} />}
             {tab === 'governance'   && <GovernanceSection account={account} isReadonlyAdmin={isReadonlyAdmin} />}
             {tab === 'egress'       && <EgressSection account={account} assignment={activeAssignment} />}
             {tab === 'activity'     && <ActivitySection account={account} />}
