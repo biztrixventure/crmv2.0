@@ -103,11 +103,13 @@ async function recordCall(source, req, body) {
   // instead of looking the clip up directly on the lead's own cluster.
   const code = normalizeLeadCode(String(p.code || p.alt_code || '').trim(), agent) || null;
   const parsed = code ? parseVendorCode(code) : null;
-  // Only trust box_id when the prefix resolved to exactly the boxes that
-  // carry it (parsed.exact) — a bare numeric lead_id with no prefix is
-  // ambiguous across boxes and must stay null until the recording poller
-  // (Phase 5.2) resolves it by actually finding the clip (mig 239).
-  const boxId = parsed && parsed.exact && parsed.boxes.length ? parsed.boxes[0].id : null;
+  // Only stamp box_id when the code names exactly ONE box. A bare lead_id, or
+  // a prefix two boxes share (wavetechpk + wti_flexo both send WTI, and each
+  // numbers its leads from 1), names a different customer on each box, so it
+  // stays null until the recording poller finds the clip (mig 239). Taking
+  // boxes[0] here labelled every old-dialer call as the new dialer the minute
+  // the two prefixes matched (2026-09-15).
+  const boxId = parsed && parsed.exact && parsed.boxes.length === 1 ? parsed.boxes[0].id : null;
   const dialerLeadId = parsed ? parsed.leadId : null;
 
   const leg = source === 'ingest_fronter' ? 'fronter' : 'closer';

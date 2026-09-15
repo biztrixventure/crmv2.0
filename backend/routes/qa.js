@@ -38,7 +38,7 @@ function maxPointsOf(f) {
   }
   return null;   // free text has no ceiling
 }
-const { listCandidatesByLeadId, listCandidatesByPhone, listCandidatesByPhoneLeads, listCandidatesForSale, locationForRecording, listDayRecordings, getBoxes, fillLeadStatuses, resolveDispos, leadFieldCustomer, leadCustomFields, discoverCustomFieldNames, leadFromVendorCode, findLeadByPhone, annotateHangups, leadStatusByCode, leadFieldStatus, resolveDisposition } = require('../utils/dialerBoxes');
+const { listCandidatesByLeadId, listCandidatesByPhone, listCandidatesByPhoneLeads, listCandidatesForSale, locationForRecording, listDayRecordings, getBoxes, fillLeadStatuses, resolveDispos, leadFieldCustomer, leadCustomFields, discoverCustomFieldNames, leadFromVendorCode, parseVendorCode, boxForCode, findLeadByPhone, annotateHangups, leadStatusByCode, leadFieldStatus, resolveDisposition } = require('../utils/dialerBoxes');
 const { materializeCompany } = require('../utils/qaMaterializer');
 const { autoAssignCompany } = require('../utils/qaAutoAssign');
 const { WORK_TYPES, workTypeOf, getActiveRules, materializeCloserWork, applyCompanyRules, openCounts } = require('../utils/qaRules');
@@ -898,7 +898,15 @@ async function resolveAssignmentLead(a, { phone = null, allowPhoneLookup = true 
       if (!parsed || !parsed.leadId) continue;
       leadId = parsed.leadId;
       boxIds = parsed.boxIds;
-      boxId = boxId || parsed.boxId;
+      // parsed.boxId is just the FIRST box on the prefix. With two on it
+      // (wavetechpk + wti_flexo on WTI) that is a coin toss between two
+      // customers, and /vici-fields reads the vehicle data from boxId — so
+      // settle it by the customer's phone, or leave it unset.
+      if (!boxId) {
+        boxId = parsed.boxIds.length > 1
+          ? ((await boxForCode(parseVendorCode(code), phone)) || {}).id || null
+          : parsed.boxId;
+      }
       linkedBy = parsed.exact ? src : `${src}_unprefixed`;
       break;
     }

@@ -25,7 +25,7 @@ const { normPhone } = require('../utils/uploadService');
 const { titleCaseFormData } = require('../utils/titleCase');
 const { expandStateInFormData } = require('../utils/stateMap');
 const { isSuperAdmin, getCounterpartCompanyIds, activeUserNames } = require('../models/helpers');
-const { latestDisposition, leadStatusByCode, leadAgentByCode, boxPrefixes, refreshBoxes, resolveLeadIdByAgentDate, fetchAgentRoster, getBoxes, lookupCallsByPhone, lookupCallsByPhoneDiag, normalizeLeadCode, leadFieldCustomer, parseVendorCode } = require('../utils/dialerBoxes');
+const { latestDisposition, leadStatusByCode, leadAgentByCode, boxPrefixes, refreshBoxes, resolveLeadIdByAgentDate, fetchAgentRoster, getBoxes, lookupCallsByPhone, lookupCallsByPhoneDiag, normalizeLeadCode, leadFieldCustomer, parseVendorCode, boxForCode } = require('../utils/dialerBoxes');
 const notifications = require('../utils/notificationService');
 const { getConfig } = require('../utils/businessConfig');
 
@@ -361,12 +361,17 @@ const DIALER_FIELD_MAP = {
   customer_state:   'State',
   customer_zip:     'Zip',
 };
-async function enrichFromDialer(transferId, code) {
+async function enrichFromDialer(transferId, code, phone) {
   const parsed = parseVendorCode(code);
   // `exact` false means the prefix named no box — a bare lead_id is unique only
   // per box, so looking it up could name a different customer entirely.
   if (!parsed || !parsed.exact || !parsed.leadId) return false;
-  const cust = await leadFieldCustomer(parsed.boxes[0], parsed.leadId);
+  // The same holds for a prefix two boxes share (wavetechpk + wti_flexo on WTI):
+  // boxes[0] would write the OTHER box's customer into this transfer. The phone
+  // settles which box it is; no phone, no fill.
+  const box = await boxForCode(parsed, phone);
+  if (!box) return false;
+  const cust = await leadFieldCustomer(box, parsed.leadId);
   if (!cust || !cust.customer_name) return false;
 
   const { data: tr } = await supabaseAdmin
@@ -731,8 +736,8 @@ ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
   const [agentRes, exactRes] = await Promise.all([
     closerAgent ? resolveAgent(closerAgent) : Promise.resolve({ userId: null, companyId: null }),
     exactCodes.length
-      ? supabaseAdmin.from('transfers').select('id, company_id, created_by, assigned_closer_id, status, vicidial_vendor_code, created_at, vicidial_dispo, vicidial_dispo_at')
-          .in('vicidial_vendor_code', exactCodes).order('created_at', { ascending: false }).limit(1)
+      ? supabaseAdmin.from('transfers').select('id, company_id, created_by, assigned_closer_id, status, vicidial_vendor_code, normalized_phone, created_at, vicidial_dispo, vicidial_dispo_at')
+          .in('vicidial_vendor_code', exactCodes).order('created_at', { ascending: false }).limit(5)
       : Promise.resolve({ data: null }),
   ]);
   let closerUserId = agentRes.userId, closerCompanyId = agentRes.companyId;
@@ -740,8 +745,22 @@ ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
   dbg.closer_company_id = closerCompanyId;
 
   let tr = null, code = candidates[0];
-  // 1. Exact (prefixed) code — globally unique, trust it directly.
-  if (exactRes.data && exactRes.data.length) { tr = exactRes.data[0]; code = exactRes.data[0].vicidial_vendor_code; }
+  // 1. Exact (prefixed) code — unique when ONE box carries the prefix, so trust
+  //    it directly. Two boxes on the prefix (wavetechpk + wti_flexo both send
+  //    WTI, each numbering leads from 1) make the same code two customers: a
+  //    dispo for the new box's WTI264204 must not land on — and resetIfStale
+  //    must not wipe the closer off — an old WTI264204 transfer for someone
+  //    else. There the phones must agree when both sides have one; a mismatch
+  //    falls through to the phone match below.
+  if (exactRes.data && exactRes.data.length) {
+    const ph = normPhone(String(p.phone || ''));
+    const hit = exactRes.data.find(t => {
+      const pv = parseVendorCode(t.vicidial_vendor_code);
+      const shared = !!(pv && pv.boxes.length > 1);
+      return !shared || !ph || !t.normalized_phone || t.normalized_phone === ph;
+    });
+    if (hit) { tr = hit; code = hit.vicidial_vendor_code; }
+  }
   // 2. Prefixed bare lead_id — ambiguous across boxes, so REQUIRE the customer
   //    phone to also match (lead_id + phone together is unambiguous). Prevents a
   //    same numeric lead_id on another box stealing this disposition.
@@ -1207,7 +1226,7 @@ api.get('/pending', asyncHandler(async (req, res) => {
 // ── API: fill remaining fields + confirm → becomes a normal transfer ─────────
 api.post('/pending/:id/confirm', asyncHandler(async (req, res) => {
   const { data: tr } = await supabaseAdmin
-    .from('transfers').select('id, created_by, company_id, form_data, vicidial_pending, vicidial_vendor_code, assigned_closer_id').eq('id', req.params.id).maybeSingle();
+    .from('transfers').select('id, created_by, company_id, form_data, vicidial_pending, vicidial_vendor_code, normalized_phone, assigned_closer_id').eq('id', req.params.id).maybeSingle();
   if (!tr || tr.created_by !== req.user.id || !tr.vicidial_pending) {
     return res.status(404).json({ error: 'Pending transfer not found' });
   }
@@ -1232,7 +1251,10 @@ api.post('/pending/:id/confirm', asyncHandler(async (req, res) => {
   // for the lead's own record — a few seconds later, once this update has
   // committed, so the fill can never be overwritten by it.
   if (blank('FirstName') && blank('customer_name') && tr.vicidial_vendor_code) {
-    setTimeout(() => enrichFromDialer(tr.id, tr.vicidial_vendor_code).catch(e =>
+    // The number the DIALER sent (stamped at ingest), not whatever the fronter
+    // typed — it is the lead's own phone, which is what names the box.
+    const dialerPhone = tr.normalized_phone || normPhone((tr.form_data || {}).cli_number || '');
+    setTimeout(() => enrichFromDialer(tr.id, tr.vicidial_vendor_code, dialerPhone).catch(e =>
       logger.warn('VICIDIAL_XFER', `post-confirm name lookup failed for ${tr.id}: ${e.message}`)), 5000);
   }
 
@@ -1622,7 +1644,7 @@ api.post('/backfill/names', superOnly, asyncHandler(async (req, res) => {
   const batch  = Math.min(parseInt(req.body.batch, 10) || 25, 50);
   const before = req.body.before || null;   // created_at cursor — process OLDER than this
   let q = supabaseAdmin.from('transfers')
-    .select('id, vicidial_vendor_code, created_at')
+    .select('id, vicidial_vendor_code, normalized_phone, created_at')
     .not('vicidial_vendor_code', 'is', null)
     .eq('vicidial_pending', false)   // never pre-type a card the fronter has not confirmed yet
     .is('form_data->>FirstName', null)
@@ -1635,7 +1657,7 @@ api.post('/backfill/names', superOnly, asyncHandler(async (req, res) => {
   for (const tr of (rows || [])) {
     lastCursor = tr.created_at;
     try {
-      if (await enrichFromDialer(tr.id, tr.vicidial_vendor_code)) filled++;
+      if (await enrichFromDialer(tr.id, tr.vicidial_vendor_code, tr.normalized_phone)) filled++;
     } catch { /* purged lead / box down — keep going */ }
     await new Promise(r => setTimeout(r, 250));   // gentle on the dialer
   }

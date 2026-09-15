@@ -246,6 +246,11 @@ async function _leadFieldFresh(box, leadId, field) {
  * code alone cannot identify the lead, and the customer's phone has to settle
  * it. No phone to check with → no box, because reporting a stranger's
  * disposition as this call's is worse than reporting none.
+ *
+ * Live again since 2026-09-15: wti_flexo went live on WTI next to wavetechpk,
+ * numbering its leads from 1 (its first transfer was WTI10), so every low code
+ * names one customer on each box. Never take p.boxes[0] for a shared prefix —
+ * both boxes sit at sort_order 0, so "first" is whatever the database returns.
  */
 async function boxForCode(p, phone) {
   if (!p || !p.boxes.length) return null;
@@ -1312,6 +1317,9 @@ module.exports = {
   listDayRecordings, phoneFromLocation, listDayDispositions, leadStatusSearch,
   leadFieldStatus, leadFieldCustomer, fillLeadStatuses, resolveDispos,
   leadCustomFields, listCustomFieldNames, discoverCustomFieldNames, leadFromVendorCode, parseVendorCode, normalizeLeadCode,
+  // Which of several boxes on one prefix holds this lead, settled by the
+  // customer's phone. Every caller that used to take boxes[0] goes through it.
+  boxForCode,
   leadsByPhoneOnBox, findLeadByPhone, annotateHangups, resolveDisposition,
   // For the QA poller's company-scoped lead learn: a company's calls live on
   // its own box (vicidial_config.prefix), so a phone that is ambiguous across

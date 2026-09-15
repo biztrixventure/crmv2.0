@@ -38,7 +38,7 @@
 
 const { supabaseAdmin } = require('../config/database');
 const logger = require('../utils/logger');
-const { recordingLookup, parseVendorCode, getBoxes, phoneTail, onlyDigits, lookupCallsByPhone, findLeadByPhone, leadsByPhoneOnBox, boxesForPrefix, annotateHangups } = require('./dialerBoxes');
+const { recordingLookup, parseVendorCode, boxForCode, getBoxes, phoneTail, onlyDigits, lookupCallsByPhone, findLeadByPhone, leadsByPhoneOnBox, boxesForPrefix, annotateHangups } = require('./dialerBoxes');
 
 const MAX_ATTEMPTS = 10;
 const BATCH_SIZE = 60; // capped per tick
@@ -295,11 +295,27 @@ async function pollOne(row) {
   }
 
   const parsed = parseVendorCode(row.vendor_code || row.dialer_lead_id);
-  const exactBoxes = parsed && parsed.boxes && parsed.boxes.length ? parsed.boxes : [];
+  let exactBoxes = parsed && parsed.boxes && parsed.boxes.length ? parsed.boxes : [];
+  // TWO BOXES ON ONE PREFIX number their leads independently (wti_flexo went
+  // live on WTI beside wavetechpk counting from 1), so this lead_id is a
+  // different customer on each. The old code asked both and let the nearest
+  // start time pick — before the real clip is ready, that is the OTHER
+  // customer's call. Ask each box whose lead this is and search only that one.
+  const rowPhone = row.normalized_phone || row.customer_phone || '';
+  if (exactBoxes.length > 1) {
+    const own = await boxForCode(parsed, rowPhone);
+    if (own) exactBoxes = [own];
+  }
   const exactResults = exactBoxes.length
     ? (await Promise.all(exactBoxes.map(b => recordingLookup(b, { lead_id: row.dialer_lead_id })))).flat()
     : [];
   let candidates = exactResults.filter(r => r && r.recording_id && r.location);
+  // Still both boxes (no number, or neither lead carries it): only the number
+  // in the file name can tell the two customers apart — findSaleRecording's rule.
+  if (exactBoxes.length > 1) {
+    const tail = phoneTail(rowPhone);
+    candidates = tail ? candidates.filter(r => onlyDigits(r.location).includes(tail)) : [];
+  }
 
   if (!candidates.length) {
     const tail = phoneTail(row.normalized_phone || row.customer_phone || '');
