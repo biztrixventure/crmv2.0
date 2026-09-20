@@ -245,10 +245,20 @@ async function pollProviderRow(row) {
   const callId = row.dialer_call_id || row.vendor_code || null;
 
   let found = null;
+  let duration = null;
   if (account && callId) {
     try {
       const res = await recordingForCall(account, callId);
       if (res.ok && res.url) found = res.url;
+      // THE SAME LOOKUP ALSO CARRIES THE DURATION. A CallTools "Call
+      // Disposition" webhook has no talk time on it at all — the duration
+      // lives on the call, not on the disposition — so the QA row lands with
+      // talk_sec null and reads like a call that never connected. The call we
+      // just fetched for the clip knows it, so take it while we are here
+      // rather than spending a second round trip later.
+      const call = res.raw && Array.isArray(res.raw.results) ? res.raw.results[0] : res.raw;
+      const secs = call && (call.billsec ?? call.duration ?? call.talk_time);
+      if (Number.isFinite(Number(secs))) duration = Math.round(Number(secs));
     } catch (e) { logger.warn('QA2_REC_POLL', `${row.id}: provider lookup — ${e.message}`); }
   }
 
@@ -260,6 +270,9 @@ async function pollProviderRow(row) {
       recording_state: 'found',
       recording_attempts: attempts,
     };
+    // Only FILL a missing duration — never overwrite one the webhook supplied,
+    // which is the agent-facing number.
+    if (duration != null && row.talk_sec == null) updates.talk_sec = duration;
     const { error } = await supabaseAdmin.from('qa2_call').update(updates).eq('id', row.id);
     if (!error) return;
     logger.warn('QA2_REC_POLL', `${row.id}: could not attach provider clip — ${error.message}`);
@@ -428,7 +441,10 @@ async function pollOne(row) {
 // transfer_id/sale_id are read by chooseClip's reclaim rule (a transfer-linked
 // row outranks an unreviewed duplicate) — they MUST be selected here or that
 // rule silently never fires, since row.transfer_id would just be undefined.
-const COLS_BASE = 'id, vendor_code, dialer_lead_id, recording_attempts, normalized_phone, customer_phone, agent_user, agent_user_id, call_at, leg, transfer_id, sale_id, source, company_id, box_id';
+// talk_sec is selected so the provider path can tell "no duration yet" from
+// "the webhook already told us" — without it the fill guard would be reading
+// undefined and would overwrite the agent-facing number every time.
+const COLS_BASE = 'id, vendor_code, dialer_lead_id, recording_attempts, normalized_phone, customer_phone, agent_user, agent_user_id, call_at, leg, transfer_id, sale_id, source, company_id, box_id, talk_sec';
 // Which dialer the call came from decides HOW its clip is found (migration
 // 320). Selected separately so the poller keeps working if the backend is
 // deployed before the migration is applied: the first select fails on the
