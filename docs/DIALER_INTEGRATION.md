@@ -48,6 +48,31 @@ https://<your-crm>/api/dialer/hook/<token>
 That URL *is* the credential — anyone holding it can post calls. Rotate it from
 the same row if it leaks; the old URL dies immediately.
 
+## 2b. Let the CRM wire the dialer up (CallTools)
+
+**Admin → Dialers → Wiring.** For a provider with an admin API the CRM does the
+whole job, so you never copy ids between two panels:
+
+* it reads **the dialer's own disposition list** — tick the ones that mean
+  *transferred* (no typing, so "XFER Transferred" can never be configured
+  against "XFER Transfered");
+* it creates or repairs **one automation + one webhook + the link between
+  them**, never a second copy (two automations on one disposition post every
+  transfer twice);
+* **Dry run is on by default** — the dialer fires, the CRM logs it, nothing is
+  written. Going live asks first and names the dispositions involved;
+* it writes the chosen dispositions to **both sides at once** — they are what
+  the CRM's XFER gate tests, so one set in the dialer and not in the CRM would
+  arrive and be filed as an ordinary call;
+* **Pause/Resume** stops the automation in the dialer without tearing anything
+  down.
+
+The tab also shows what is wired *right now* (automation id, webhook id,
+dry-run or live, paused or active), read back from the dialer rather than from
+what the CRM last intended.
+
+Other providers keep the manual steps below.
+
 ## 3. Point the dialer at it, and fire ONE call
 
 Configure the URL as the dialer's webhook target. While testing, add `?dry=1`:
@@ -84,10 +109,19 @@ anything that already worked.
 
 ## 5. Map the agents
 
-**Agents** tab. It lists the agent ids that have actually arrived in the last 7
-days but are not mapped yet — link each to a CRM user. A call from an unmapped
-agent is logged and goes no further, because the CRM has nobody to credit the
-transfer to.
+**Agents** tab → **Pull the roster**. The CRM reads the dialer's own user list
+and *suggests* who each login is — from the VICIdial id already on their
+profile, or an exact name match — and links them all on one press. Suggested,
+never silent: crediting a transfer to the wrong person is worse than leaving it
+unmapped, where it at least shows up as a problem.
+
+Both spellings of an id are linked, because the webhook sends the provider's
+internal id (CallTools sends `app_user`, a UUID) while a human reads the
+username.
+
+The tab also lists ids that have actually arrived in the last 7 days but are
+still unmapped. A call from an unmapped agent is logged and goes no further,
+because the CRM has nobody to credit the transfer to.
 
 VICIdial agents stay where they are (User Control Center → VICIdial). This list
 is per connection, so two dialers can both have an agent called `1001`.
@@ -110,6 +144,20 @@ queued for the closer to attach by hand if neither matches.
 Provider clips are filed under `box_id = '<provider>:<account-id-prefix>'`, so
 one recording still belongs to exactly one call row, and they never collide with
 a real VICIdial box id.
+
+## 8. Reading it back: which dialer did this come from?
+
+Every record that came from a dialer carries `dialer_provider` +
+`dialer_account_id`, and the UI shows it as a badge — on the transfer drawer
+(always, spelled out) and in the compliance list (only when it is *not* the
+usual VICIdial, so a badge means "look twice" instead of decorating every
+historical row).
+
+The badge reads `/api/dialers/labels`, which returns id, name and provider and
+nothing else, so a closer or a QA reviewer sees the source without being a
+superadmin. The **account name** wins over the provider name: two CallTools
+tenants are two different floors, and "CallTools" on both would answer the
+wrong question.
 
 ---
 
