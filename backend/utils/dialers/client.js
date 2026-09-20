@@ -36,6 +36,12 @@ function authHeaders(account) {
   switch (String(auth.type || 'none').toLowerCase()) {
     case 'bearer':
       return token ? { [auth.header_name || 'Authorization']: `Bearer ${token}` } : {};
+    // Django REST Framework's TokenAuthentication — `Authorization: Token <key>`.
+    // CallTools speaks this (verified against east-3.calltools.io), and so does
+    // most of the Python-backed world, so it is worth its own name rather than
+    // making an operator paste "Token abc..." into a field labelled "token".
+    case 'token':
+      return token ? { [auth.header_name || 'Authorization']: `Token ${token}` } : {};
     case 'header':
       return token ? { [auth.header_name || 'X-API-Key']: token } : {};
     case 'basic': {

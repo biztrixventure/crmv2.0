@@ -265,7 +265,14 @@ Payroll is MANUAL ENTRY in this phase -- no tax engine. See `TODO(tax)` in
   the PRIVATE `expense-receipts` bucket, shown by 2-minute signed links.
 - Every HR/Accounts CSV goes through `utils/moduleExport.js` (egress log).
 
-### Connected dialers — CallTools and anything else (mig 320, NOT yet applied)
+### Connected dialers — CallTools and anything else (mig 320, APPLIED 2026-09-21)
+Live CallTools tenant: `https://east-3.calltools.io`, DRF API at `/api/`, auth `Authorization: Token <key>`
+(auth.type `token`). Real endpoints: `contactcalls` (needs `?uuid=` or `?contact_id=`), `calldispositions`
+(**3428 = "XFER Transfered"** — the transfer dispo), `users`, `campaigns`, `queues`, `automations`,
+`actions`, `httprequests`, `connectorbuttons`. Automations fire an **HTTP Request** action (url,
+Get/Post, headers, JSON body) with merge fields `{{%locals[contact][first_name]}}` /
+`{{%locals[call][...]}}`; connector buttons use `{first_name}`-style tokens and already push leads
+into VICIdial (`add_lead`). Account row + webhook token live in `dialer_accounts` — never in the repo.
 "The dialer" is a ROW now (`dialer_accounts`), not a hardcoded product. One public URL per
 account: `POST /api/dialer/hook/<webhook_token>`. VICIdial is untouched — it keeps `/api/vicidial/*`
 and `VICIDIAL_INGEST_TOKEN`. Operator guide: `docs/DIALER_INTEGRATION.md`.

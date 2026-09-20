@@ -95,13 +95,22 @@ const CALLTOOLS_PRESET = {
     dedup_ms: 120000,
     ignore_dispos: [],
   },
-  auth: { type: 'bearer', header_name: 'Authorization' },
-  base_url: 'https://app.calltools.com',
+  // VERIFIED against a live tenant (east-3.calltools.io, 2026-09-21): the API
+  // is Django REST Framework at /api/, keyed by `Authorization: Token <key>`,
+  // and each tenant is its own host (east-3, east-1, …) — so base_url is left
+  // blank rather than guessing app.calltools.com, which is the marketing site.
+  auth: { type: 'token', header_name: 'Authorization' },
+  base_url: '',
   api: {
-    // Used by the recording poller when the webhook carried no audio link.
-    // Overridable per account under settings.api.
-    call_path: '/api/v1/calls/{call_id}/',
-    recording_url_field: 'recording_url',
+    // Calls are contactcalls, addressable by the call's uuid; the endpoint
+    // refuses an unfiltered GET ("contact_id or uuid filter is required"), so
+    // the poller always asks for one specific call. The recording field is a
+    // list of candidates because it is read out of the paged {results:[…]}
+    // envelope and tenants differ on the exact name.
+    call_path: '/api/contactcalls/?uuid={call_id}',
+    recording_url_field: ['results[0].recording_url', 'results[0].recording', 'results[0].call_recording_url'],
+    // A cheap authenticated GET for the Test button: small, always present.
+    test_path: '/api/calldispositions/',
   },
 };
 

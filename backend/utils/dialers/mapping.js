@@ -69,6 +69,24 @@ function flatten(obj, { prefix = '', out = {}, depth = 0, maxKeys = 400 } = {}) 
 }
 
 // ── transforms ──────────────────────────────────────────────────────────────
+
+// Seconds, however the dialer spells a duration: a number, a numeric string,
+// milliseconds, or a clock ("3:04" / "1:02:03"). The ONE implementation —
+// normalize.js reads it too, so a mapping with the transform and a mapping
+// without it can never disagree about what a duration means.
+function toSeconds(v) {
+  if (v === null || v === undefined || v === '') return null;
+  const s = String(v).trim();
+  const clock = /^(\d+):([0-5]?\d)(?::([0-5]?\d))?$/.exec(s);
+  if (clock) {
+    const [, a, b, c] = clock;
+    return c ? (+a * 3600 + +b * 60 + +c) : (+a * 60 + +b);
+  }
+  const n = parseFloat(s.replace(/[^0-9.]/g, ''));
+  if (!Number.isFinite(n)) return null;
+  return Math.round(n >= 100000 ? n / 1000 : n);
+}
+
 const TRANSFORMS = {
   trim:   (v) => String(v).trim(),
   upper:  (v) => String(v).trim().toUpperCase(),
@@ -81,13 +99,12 @@ const TRANSFORMS = {
   int:   (v) => { const n = parseInt(String(v).replace(/[^0-9.-]/g, ''), 10); return Number.isFinite(n) ? n : null; },
   float: (v) => { const n = parseFloat(String(v).replace(/[^0-9.-]/g, '')); return Number.isFinite(n) ? n : null; },
   abs:   (v) => { const n = parseFloat(v); return Number.isFinite(n) ? Math.abs(n) : null; },
-  // Talk time arrives as seconds on one dialer and milliseconds on the next.
-  // A call is never 100000 seconds (27 hours), so that is the safe boundary.
-  seconds: (v) => {
-    const n = parseFloat(String(v).replace(/[^0-9.]/g, ''));
-    if (!Number.isFinite(n)) return null;
-    return Math.round(n >= 100000 ? n / 1000 : n);
-  },
+  // Talk time arrives as seconds on one dialer, milliseconds on the next, and
+  // "3:04" on the one after that. A call is never 100000 seconds (27 hours), so
+  // that is the safe seconds/milliseconds boundary. The clock case is checked
+  // FIRST: stripping non-digits from "3:04" yields 304, a plausible-looking
+  // duration that is wrong by 120 seconds and would never be noticed.
+  seconds: (v) => toSeconds(v),
   ms_to_seconds: (v) => { const n = parseFloat(v); return Number.isFinite(n) ? Math.round(n / 1000) : null; },
   // "2026-09-21 14:03:11" (CallTools documents its datetimes as UTC, with no
   // zone on the wire) must not be read as local time — that silently shifts
@@ -205,6 +222,6 @@ function firstRule(payload, rules) {
 
 module.exports = {
   getPath, flatten, resolveField, applyMap, renderTemplate,
-  matchRule, firstRule, isEmpty, TRANSFORMS,
+  matchRule, firstRule, isEmpty, TRANSFORMS, toSeconds,
   TRANSFORM_NAMES: Object.keys(TRANSFORMS),
 };

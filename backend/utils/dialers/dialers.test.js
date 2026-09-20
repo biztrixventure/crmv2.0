@@ -21,6 +21,7 @@ const crypto = require('crypto');
 const { normalizeEvent, mappingGaps } = require('./normalize');
 const { applyMap, getPath, flatten } = require('./mapping');
 const { verifySignature } = require('./accounts');
+const { authHeaders } = require('./client');
 const { toIngestParams } = require('./bridge');
 const { getProvider } = require('./providers');
 
@@ -107,6 +108,25 @@ describe('normalize', () => {
     expect(ev.event_type).toBe('dispo');  // but NOT an xfer
   });
 
+  test('talk time survives however the dialer spells it', () => {
+    // Measured against CallTools' live payload: a form-encoded or JSON webhook
+    // sends "184", not 184, and requiring a transform for that silently dropped
+    // the duration — a QA row with no duration reads like a call that never
+    // connected.
+    const withTalk = (v) => {
+      const p = JSON.parse(JSON.stringify(CALL));
+      p.data.call.talk_time = v;
+      return normalizeEvent(account(), req(p)).talk_time;
+    };
+    expect(withTalk(184)).toBe(184);
+    expect(withTalk('184')).toBe(184);
+    expect(withTalk('184s')).toBe(184);
+    expect(withTalk('3:04')).toBe(184);     // mm:ss
+    expect(withTalk(184000)).toBe(184);     // milliseconds
+    expect(withTalk('')).toBeNull();
+    expect(withTalk(null)).toBeNull();
+  });
+
   test('an already-qualified code is left alone, never double-prefixed', () => {
     const payload = JSON.parse(JSON.stringify(CALL));
     payload.data.contact.id = 'CT88421';
@@ -178,6 +198,19 @@ describe('bridge parameters', () => {
     expect(p.talk_time).toBe('184');
     expect(p.uniqueid).toBe('CT-9f21');
     expect(p.first).toBe('Jane');
+  });
+});
+
+describe('outbound API auth', () => {
+  test('each auth style produces the header that product actually wants', () => {
+    // `token` is Django REST Framework's spelling and is what CallTools
+    // answers to — getting this wrong reads as "credentials rejected" rather
+    // than "wrong header shape", which is a long afternoon.
+    expect(authHeaders({ auth: { type: 'token', token: 'k' } })).toEqual({ Authorization: 'Token k' });
+    expect(authHeaders({ auth: { type: 'bearer', token: 'k' } })).toEqual({ Authorization: 'Bearer k' });
+    expect(authHeaders({ auth: { type: 'header', header_name: 'X-API-Key', token: 'k' } })).toEqual({ 'X-API-Key': 'k' });
+    expect(authHeaders({ auth: { type: 'none' } })).toEqual({});
+    expect(authHeaders({ auth: { type: 'token' } })).toEqual({});   // no key, no header
   });
 });
 

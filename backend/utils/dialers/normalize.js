@@ -27,13 +27,17 @@
 //     prevent on the VICIdial side.
 // ============================================================================
 
-const { applyMap, firstRule, isEmpty } = require('./mapping');
+const { applyMap, firstRule, isEmpty, toSeconds } = require('./mapping');
 const { withPreset } = require('./accounts');
 const { normPhone } = require('../uploadService');
 const { CANONICAL_FIELDS } = require('./providers');
 
 const CANONICAL_KEYS = new Set(CANONICAL_FIELDS.map(f => f.key));
 const upper = (v) => String(v || '').trim().toUpperCase();
+
+// Talk time is read through the SAME helper the `seconds` transform uses
+// (mapping.js), so a mapping that carries the transform and one that does not
+// can never disagree about what a duration means.
 
 // Merge everything the request carried into one object to map against. Query
 // first so a body field of the same name wins — a GET-style dialer puts
@@ -119,7 +123,12 @@ function normalizeEvent(rawAccount, req) {
     dispo,
     code,
     external_call_id: mapped.external_call_id ? String(mapped.external_call_id).trim() : null,
-    talk_time: Number.isFinite(mapped.talk_time) ? mapped.talk_time : null,
+    // A dialer that sends everything as strings ("talk_time":"184") is the
+    // norm, not the exception — a form-encoded webhook cannot send anything
+    // else. Requiring the mapping to carry a transform for that meant the
+    // duration was silently dropped (measured against CallTools' live payload),
+    // and a QA row with no duration looks like a call that never connected.
+    talk_time: toSeconds(mapped.talk_time),
     call_at: mapped.call_at || null,
     term: mapped.term ? upper(mapped.term) : null,
     recording_url: mapped.recording_url ? String(mapped.recording_url).trim() : null,
