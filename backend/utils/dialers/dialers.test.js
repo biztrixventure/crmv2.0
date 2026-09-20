@@ -15,6 +15,10 @@
 // ============================================================================
 
 jest.mock('../../config/database', () => ({ supabaseAdmin: {}, supabaseClient: {} }));
+// Declared at file scope, not inside the describe: client.js captures the axios
+// module object when it is first required (at the top of this file), so the
+// mock has to be in place before that happens.
+jest.mock('axios', () => ({ get: jest.fn(), post: jest.fn() }));
 jest.mock('../logger', () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn(), success: jest.fn() }));
 
 const crypto = require('crypto');
@@ -211,6 +215,50 @@ describe('outbound API auth', () => {
     expect(authHeaders({ auth: { type: 'header', header_name: 'X-API-Key', token: 'k' } })).toEqual({ 'X-API-Key': 'k' });
     expect(authHeaders({ auth: { type: 'none' } })).toEqual({});
     expect(authHeaders({ auth: { type: 'token' } })).toEqual({});   // no key, no header
+  });
+});
+
+describe('recording resolution', () => {
+  // Verified against the live CallTools tenant: a call answers with a FILE ID
+  // (call_recording_fsfile_id), and the audio lives behind a second,
+  // token-authenticated endpoint. A one-hop integration would report "no
+  // recording" for every call that has one.
+  const axios = require('axios');
+  const { recordingForCall } = require('./client');
+
+  const ctAccount = {
+    id: 'a', provider: 'calltools', base_url: 'https://dialer.example.invalid',
+    auth: { type: 'token', token: 'k' },
+    settings: { api: {
+      call_path: '/api/calls/?uuid={call_id}',
+      recording_url_field: ['results[0].call_recording_fsfile_id'],
+      recording_file_path: '/api/filesystemfiles/{file_id}/download/',
+    } },
+    field_map: {},
+  };
+
+  afterEach(() => axios.get.mockReset());
+
+  test('a file id is followed to the download endpoint', async () => {
+    axios.get.mockResolvedValue({ status: 200, data: { results: [{ call_recording_fsfile_id: 777569 }] } });
+    const r = await recordingForCall(ctAccount, 'call-uuid-1');
+    expect(r.ok).toBe(true);
+    expect(r.file_id).toBe('777569');
+    expect(r.url).toBe('https://dialer.example.invalid/api/filesystemfiles/777569/download/');
+  });
+
+  test('a dialer that already returns a URL is not sent on a second hop', async () => {
+    axios.get.mockResolvedValue({ status: 200, data: { results: [{ call_recording_fsfile_id: 'https://cdn.example.invalid/clip.mp3' }] } });
+    const r = await recordingForCall(ctAccount, 'call-uuid-2');
+    expect(r.url).toBe('https://cdn.example.invalid/clip.mp3');
+    expect(r.file_id).toBeUndefined();
+  });
+
+  test('a call with no recording yet is reported, not invented', async () => {
+    axios.get.mockResolvedValue({ status: 200, data: { results: [{ call_recording_fsfile_id: null }] } });
+    const r = await recordingForCall(ctAccount, 'call-uuid-3');
+    expect(r.ok).toBe(false);
+    expect(r.url).toBeNull();
   });
 });
 

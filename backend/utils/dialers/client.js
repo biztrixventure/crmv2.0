@@ -128,8 +128,28 @@ async function recordingForCall(rawAccount, callId) {
   const candidates = [].concat(field, ['recording_url', 'recording', 'recording_link', 'audio_url', 'data.recording_url']);
   for (const f of candidates) {
     const v = getPath(res.data, f);
-    if (v && typeof v === 'string' && /^https?:\/\//i.test(v)) {
+    if (v === null || v === undefined || v === '') continue;
+
+    // Already a link — done.
+    if (typeof v === 'string' && /^https?:\/\//i.test(v)) {
       return { ok: true, url: v, error: null, raw: res.data };
+    }
+
+    // A FILE ID, NOT A LINK. CallTools answers with
+    // `call_recording_fsfile_id` and serves the audio from a second endpoint
+    // (/api/filesystemfiles/<id>/download/), so the clip takes two hops. This
+    // is config, not a CallTools branch: any dialer that hands out an id and a
+    // download path gets the same treatment, and a dialer that returns a URL
+    // never reaches here.
+    const filePath = api.recording_file_path;
+    if (filePath) {
+      const base = String(account.base_url || '').replace(/\/+$/, '');
+      const rel = fillTemplate(filePath, { file_id: v, id: v });
+      const url = /^https?:\/\//i.test(rel) ? rel : `${base}${rel.startsWith('/') ? '' : '/'}${rel}`;
+      // NOT verified with a request here: the poller is a hot loop and the QA
+      // media proxy fetches the bytes (with this account's credentials) the
+      // moment a reviewer presses play, which is the real test of the link.
+      return { ok: true, url, error: null, file_id: String(v), raw: res.data };
     }
   }
   return { ok: false, url: null, error: 'call found but it carries no recording link yet', raw: res.data };

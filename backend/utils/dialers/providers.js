@@ -102,13 +102,17 @@ const CALLTOOLS_PRESET = {
   auth: { type: 'token', header_name: 'Authorization' },
   base_url: '',
   api: {
-    // Calls are contactcalls, addressable by the call's uuid; the endpoint
-    // refuses an unfiltered GET ("contact_id or uuid filter is required"), so
-    // the poller always asks for one specific call. The recording field is a
-    // list of candidates because it is read out of the paged {results:[…]}
-    // envelope and tenants differ on the exact name.
-    call_path: '/api/contactcalls/?uuid={call_id}',
-    recording_url_field: ['results[0].recording_url', 'results[0].recording', 'results[0].call_recording_url'],
+    // A recording takes TWO hops, verified on the live tenant:
+    //   /api/calls/?uuid=<call uuid>        -> call_recording_fsfile_id
+    //   /api/filesystemfiles/<id>/download/ -> the audio itself (WAV)
+    // The clip endpoint needs the same API token, which is why playback goes
+    // through the CRM's own media proxy rather than handing the browser a link.
+    // (/api/contactcalls/ answers for a call too, but it refuses an unfiltered
+    // GET and is keyed on the contact — /api/calls/ is the one keyed on the
+    // call's own uuid, which is what the webhook carries.)
+    call_path: '/api/calls/?uuid={call_id}',
+    recording_url_field: ['results[0].call_recording_fsfile_id', 'results[0].recording_url'],
+    recording_file_path: '/api/filesystemfiles/{file_id}/download/',
     // A cheap authenticated GET for the Test button: small, always present.
     test_path: '/api/calldispositions/',
   },

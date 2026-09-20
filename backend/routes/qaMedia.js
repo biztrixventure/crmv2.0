@@ -99,6 +99,14 @@ async function getClip(key, url, account) {
   return p;
 }
 
+// The container, from the first few bytes. Only the three a dialer ever hands
+// over; anything unrecognised stays MP3, which is what every VICIdial clip is.
+function sniffAudioType(buf) {
+  if (buf.length >= 12 && buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WAVE') return 'audio/wav';
+  if (buf.length >= 4 && buf.toString('ascii', 0, 4) === 'OggS') return 'audio/ogg';
+  return 'audio/mpeg';
+}
+
 // "bytes=START-END" → {start,end} clamped to the file, or null when unparseable.
 // A malformed or unsatisfiable range must answer 416 rather than silently
 // serving the whole file, or the browser's seek bookkeeping goes wrong.
@@ -191,7 +199,12 @@ router.get('/stream', async (req, res) => {
   }
 
   const size = buf.length;
-  res.setHeader('Content-Type', 'audio/mpeg');
+  // WHAT KIND OF AUDIO IS THIS, ACTUALLY. VICIdial serves MP3, so this used to
+  // say audio/mpeg unconditionally — but a connected dialer need not: CallTools
+  // serves WAV (audio/x-wav), and a WAV labelled audio/mpeg is a decode error
+  // in some browsers and a silent player in others. The bytes are already in
+  // hand, so read them rather than guess.
+  res.setHeader('Content-Type', sniffAudioType(buf));
   res.setHeader('Accept-Ranges', 'bytes');       // the dialer cannot say this; we can
   // private: one user's ticket, so no shared cache may hold it — but the
   // reviewer's own browser should, so a replay costs nothing.
