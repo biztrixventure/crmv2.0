@@ -65,6 +65,10 @@ const distributionBatchesRoutes = require('./routes/distributionBatches');
 const noteShortcodesRoutes      = require('./routes/noteShortcodes');
 const dataCleanupRoutes         = require('./routes/dataCleanup');
 const { ingest: vicidialIngest, api: vicidialApi } = require('./routes/vicidial');
+// Multi-dialer (migration 320): one public webhook for any other dialer
+// (CallTools and anything else that can POST), plus its superadmin surface.
+const { router: dialerHookRoutes } = require('./routes/dialerHooks');
+const dialerAdminRoutes           = require('./routes/dialerAdmin');
 const vehiclesRoutes            = require('./routes/vehicles');
 const chatRoutes                = require('./routes/chat');
 const chatAdminRoutes           = require('./routes/chatAdmin');
@@ -312,6 +316,17 @@ app.use('/api/distribution-batches', express.json({ limit: '16mb' }));
 // 33MB encoded) through POST /api/training/upload. Scoped to that one path so
 // the rest of /api/training keeps the global limit.
 app.use('/api/training/upload', express.json({ limit: '36mb' }));
+// Dialer webhooks (migration 320). Parsed HERE rather than by the global
+// parsers below for one reason: an HMAC signature is computed over the RAW
+// bytes, and once express.json has parsed and discarded the buffer, re-encoding
+// req.body does NOT reproduce them (key order, whitespace and unicode escaping
+// all differ), so every signed webhook would fail verification. `verify` keeps
+// the original text on the request. Three payload styles are accepted because
+// dialers disagree: JSON, form-encoded, and JSON mislabelled as text/plain.
+const keepRawBody = (req, res, buf) => { req.rawBody = buf.toString('utf8'); };
+app.use('/api/dialer/hook', express.json({ limit: '2mb', verify: keepRawBody }));
+app.use('/api/dialer/hook', express.urlencoded({ extended: true, limit: '2mb', verify: keepRawBody }));
+app.use('/api/dialer/hook', express.text({ type: ['text/*'], limit: '2mb', verify: keepRawBody }));
 
 // Body parser — raised from the 100kb default so announcements (and other
 // payloads) can carry embedded base64 images.
@@ -362,10 +377,16 @@ const userIdFromToken = (req) => {
 // has no JWT, so it would all collapse into one IP bucket and 429 real
 // dispositions at dialer volume. They're already guarded by the ingest token —
 // give them their own generous limiter and exempt them from the per-user one.
-const isVicidialIngest = (req) =>
-  /\/api\/vicidial\/(fronter-xfer|closer-dispo|dispo-debug)\b/.test(req.originalUrl || req.url || '');
+// Every other dialer (migration 320) posts to /api/dialer/hook/<token> and is
+// machine traffic for exactly the same reason: no JWT, one source IP for a
+// whole call centre, and its own per-account token as the credential. It gets
+// the same treatment, or a busy floor would 429 its own dispositions.
+const isDialerIngest = (req) =>
+  /\/api\/vicidial\/(fronter-xfer|closer-dispo|dispo-debug)\b/.test(req.originalUrl || req.url || '') ||
+  /\/api\/dialer\/hook\//.test(req.originalUrl || req.url || '');
+const isVicidialIngest = isDialerIngest;   // kept: the name the skip below reads
 
-app.use(['/api/vicidial/fronter-xfer', '/api/vicidial/closer-dispo', '/api/vicidial/dispo-debug'],
+app.use(['/api/vicidial/fronter-xfer', '/api/vicidial/closer-dispo', '/api/vicidial/dispo-debug', '/api/dialer/hook'],
   rateLimit({ windowMs: 15 * 60 * 1000, max: 20000, message: { error: 'Too many requests' } }));
 
 app.use('/api/', rateLimit({
@@ -447,6 +468,13 @@ app.use('/api/vicidial/closer-dispo', qa2IngestHook('ingest_closer'));
 // VICIdial ingest — fired by the VICIdial SERVER (no CRM session); guarded by a
 // shared token in the URL. Mounted before the authed groups so it isn't gated.
 app.use('/api/vicidial', vicidialIngest);
+// Any OTHER dialer's webhook. Public for the same reason the VICIdial ingest
+// is: the dialer has no CRM session. The credential is the per-account token in
+// the URL (+ an optional HMAC signature), not a shared env value, so one
+// dialer's token can be rotated without touching any other. The QA hook is NOT
+// mounted here — the bridge installs it per event, since the leg is only known
+// once the payload has been mapped.
+app.use('/api/dialer', dialerHookRoutes);
 // Guest (outsider) chat — PUBLIC, the token in the URL is the credential. Mounted
 // before the authed groups so it isn't gated; rate-limited since it's open.
 app.use('/api/guest',
@@ -492,6 +520,9 @@ app.use('/api/forms', authMiddleware, readonlyGuard, formsRoutes);
 app.use('/api/transfers', authMiddleware, readonlyGuard, egressAudit, readonlyDataGuard, transfersRoutes);
 // VICIdial fronter app routes (pending-from-dialer list + confirm) — authed.
 app.use('/api/vicidial', authMiddleware, vicidialApi);
+// Connected-dialer administration (accounts, mapping, agent links, event log).
+// Superadmin-gated inside the router, like the VICIdial box registry.
+app.use('/api/dialer-admin', authMiddleware, readonlyGuard, dialerAdminRoutes);
 app.use('/api/sales', authMiddleware, readonlyGuard, egressAudit, readonlyDataGuard, salesRoutes);
 // Payouts — superadmin only (enforced inside the router); readonlyGuard still
 // blocks the PATCH for a readonly_admin, matching every other admin surface.

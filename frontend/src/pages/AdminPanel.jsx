@@ -35,6 +35,8 @@ import ChatAdmin from "../components/Admin/Chat/ChatAdmin";
 import DataAnalyzer from "../components/Admin/DataAnalyzer/DataAnalyzer";
 import DataCleanup from "../components/Admin/DataCleanup/DataCleanup";
 import VicidialAdmin from "../components/Admin/Vicidial/VicidialAdmin";
+// Every OTHER dialer (CallTools and anything else with a webhook) — mig 320.
+import DialerHub from "../components/Admin/Dialers/DialerHub";
 import TaskBoardsAdmin from "../components/Admin/TaskBoards/TaskBoardsAdmin";
 import VehicleManager from "../components/Admin/Vehicles/VehicleManager";
 import ClientsPlansHub from "../components/Admin/ClientsPlans/ClientsPlansHub";
@@ -190,6 +192,8 @@ const AdminPanel = () => {
     // Data Cleanup is a destructive batch tool — superadmin only (never RO).
     ...(user?.role === 'superadmin'                    ? [{ id: "data-cleanup",   label: "Data Cleanup"         }] : []),
     ...(user?.role === 'superadmin'                    ? [{ id: "vicidial",       label: "VICIdial"             }] : []),
+    // Every other connected dialer (CallTools, generic webhook) — mig 320.
+    ...(user?.role === 'superadmin'                    ? [{ id: "dialers",        label: "Dialers"              }] : []),
     ...(user?.role === 'superadmin'                    ? [{ id: "task-boards",    label: "Task Boards"          }] : []),
     ...((isSAorRO || hasPermission('manage_faqs'))     ? [{ id: "faqs",           label: "FAQs"                 }] : []),
     ...((isSAorRO || hasPermission('manage_faqs'))     ? [{ id: "scripts",        label: "Scripts"              }] : []),
@@ -266,6 +270,7 @@ const AdminPanel = () => {
       case 'note-shortcodes':   return <NoteShortcodesManager />;
       case 'data-cleanup':      return <DataCleanup />;
       case 'vicidial':          return <VicidialAdmin />;
+      case 'dialers':           return <DialerHub />;
       case 'task-boards':       return <TaskBoardsAdmin />;
       case 'vehicles':          return <VehicleManager />;
       case 'clients-plans':     return <ClientsPlansHub />;

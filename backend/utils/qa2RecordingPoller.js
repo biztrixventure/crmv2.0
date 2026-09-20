@@ -226,7 +226,58 @@ async function pollByAgentDay(row) {
   );
 }
 
+// ── a call from a NON-VICIdial dialer ───────────────────────────────────────
+// There is no box to search and no lead_id to search it by: the clip belongs to
+// the provider and is named by the provider's own call id. Two ways it arrives:
+// the webhook already carried the URL (attached at ingest, so the row was never
+// 'pending'), or it was not ready at hangup and the provider's API has it now.
+// Only the second case reaches here.
+//
+// Deliberately NOT falling back to the VICIdial phone/agent-day search: those
+// clips live on boxes this call never touched, and a "match" there would put a
+// different customer's conversation in front of a reviewer.
+async function pollProviderRow(row) {
+  const attempts = (row.recording_attempts || 0) + 1;
+  const accounts = require('./dialers/accounts');
+  const { recordingForCall } = require('./dialers/client');
+
+  const account = row.dialer_account_id ? await accounts.byId(row.dialer_account_id) : null;
+  const callId = row.dialer_call_id || row.vendor_code || null;
+
+  let found = null;
+  if (account && callId) {
+    try {
+      const res = await recordingForCall(account, callId);
+      if (res.ok && res.url) found = res.url;
+    } catch (e) { logger.warn('QA2_REC_POLL', `${row.id}: provider lookup — ${e.message}`); }
+  }
+
+  if (found) {
+    const updates = {
+      box_id: row.box_id || (account ? accounts.boxNamespace(account) : row.dialer_provider),
+      recording_id: String(callId),
+      recording_location: found,
+      recording_state: 'found',
+      recording_attempts: attempts,
+    };
+    const { error } = await supabaseAdmin.from('qa2_call').update(updates).eq('id', row.id);
+    if (!error) return;
+    logger.warn('QA2_REC_POLL', `${row.id}: could not attach provider clip — ${error.message}`);
+  }
+
+  // No account, no call id, or no API path configured means this will never be
+  // found by asking — park it now instead of burning ten cycles on it.
+  const hopeless = !account || !callId || !(((account.settings || {}).api || {}).call_path);
+  await supabaseAdmin.from('qa2_call').update({
+    recording_attempts: hopeless ? MAX_ATTEMPTS : attempts,
+    recording_state: (hopeless || attempts >= MAX_ATTEMPTS) ? 'missing' : 'pending',
+  }).eq('id', row.id);
+}
+
 async function pollOne(row) {
+  // A provider call is answered by its provider, not by a box search.
+  if (row.dialer_provider && row.dialer_provider !== 'vicidial') return pollProviderRow(row);
+
   // LEARN THE LEAD ID FROM THE CUSTOMER'S NUMBER.
   //
   // A hand-entered transfer never gets a vendor code, so its QA row has no
@@ -377,7 +428,16 @@ async function pollOne(row) {
 // transfer_id/sale_id are read by chooseClip's reclaim rule (a transfer-linked
 // row outranks an unreviewed duplicate) — they MUST be selected here or that
 // rule silently never fires, since row.transfer_id would just be undefined.
-const COLS = 'id, vendor_code, dialer_lead_id, recording_attempts, normalized_phone, customer_phone, agent_user, agent_user_id, call_at, leg, transfer_id, sale_id, source, company_id';
+const COLS_BASE = 'id, vendor_code, dialer_lead_id, recording_attempts, normalized_phone, customer_phone, agent_user, agent_user_id, call_at, leg, transfer_id, sale_id, source, company_id, box_id';
+// Which dialer the call came from decides HOW its clip is found (migration
+// 320). Selected separately so the poller keeps working if the backend is
+// deployed before the migration is applied: the first select fails on the
+// unknown column, and from then on this tick — and every later one — uses the
+// old column list. A poller that dies here would stop attaching audio for
+// VICIdial calls too, which is a far worse outcome than a provider row waiting.
+const COLS_DIALER = `${COLS_BASE}, dialer_provider, dialer_account_id, dialer_call_id`;
+let dialerColsPresent = true;
+const COLS = () => (dialerColsPresent ? COLS_DIALER : COLS_BASE);
 
 // QA-RELEVANT ROWS GO FIRST, NEWEST FIRST. Every dialed call becomes a qa2_call
 // row, so 'pending' is a quarter of a million deep — at a batch a minute the
@@ -387,13 +447,23 @@ const COLS = 'id, vendor_code, dialer_lead_id, recording_attempts, normalized_ph
 // is what a reviewer opens today, so it is served first; the long tail is only
 // worked with whatever capacity is left over in the same tick.
 async function pollPendingRecordings() {
-  const base = () => supabaseAdmin.from('qa2_call').select(COLS)
+  const base = () => supabaseAdmin.from('qa2_call').select(COLS())
     .eq('recording_state', 'pending').lt('recording_attempts', MAX_ATTEMPTS);
 
-  const { data: hot, error } = await base()
+  const hotQuery = () => base()
     .or('linked_call_id.not.is.null,transfer_id.not.is.null,sale_id.not.is.null')
     .order('call_at', { ascending: false })
     .limit(BATCH_SIZE);
+
+  let { data: hot, error } = await hotQuery();
+  if (error && dialerColsPresent && /column|schema cache/i.test(error.message || '')) {
+    // Migration 320 is not applied yet — drop back to the pre-320 columns and
+    // carry on. Provider rows cannot exist without those columns either, so
+    // nothing is skipped by doing this.
+    dialerColsPresent = false;
+    logger.warn('QA2_REC_POLL', 'qa2_call.dialer_* not present — migration 320 not applied yet; polling without it');
+    ({ data: hot, error } = await hotQuery());
+  }
   if (error) { logger.warn('QA2_REC_POLL', error.message); return; }
 
   let rows = hot || [];

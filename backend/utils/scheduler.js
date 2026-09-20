@@ -84,6 +84,10 @@ const IP_SWITCH_MS     = 60 * 1000;
 // Access-log pruning (security.ip_restriction.log_retention_days, default 90).
 const IP_LOG_PRUNE_MS   = 6 * 60 * 60 * 1000;
 const IP_LOG_PRUNE_INIT = 10 * 60 * 1000;
+// Connected-dialer webhook log (mig 320) — raw payloads, so a short retention.
+const DIALER_EVENT_DAYS       = 14;
+const DIALER_EVENT_PRUNE_MS   = 6 * 60 * 60 * 1000;
+const DIALER_EVENT_PRUNE_INIT = 12 * 60 * 1000;
 
 let _timers = [];
 
@@ -209,6 +213,18 @@ function startBackgroundJobs() {
   const ipPrune = () => ipAccess.pruneLogs().catch(e => logger.warn('JOBS', `ip access-log prune error: ${e.message}`));
   _timers.push(setTimeout(ipPrune, IP_LOG_PRUNE_INIT));
   _timers.push(setInterval(ipPrune, IP_LOG_PRUNE_MS));
+
+  // Dialer webhook log (mig 320). Raw payloads hold customer names and numbers,
+  // so they are kept only long enough to debug a mapping — 14 days — and then
+  // dropped. A missing function (migration not applied) warns and is a no-op.
+  const dialerEventPrune = async () => {
+    try {
+      const { error } = await supabaseAdmin.rpc('fn_prune_dialer_events', { p_days: DIALER_EVENT_DAYS });
+      if (error) logger.warn('JOBS', `dialer event prune skipped: ${error.message}`);
+    } catch (e) { logger.warn('JOBS', `dialer event prune error: ${e.message}`); }
+  };
+  _timers.push(setTimeout(dialerEventPrune, DIALER_EVENT_PRUNE_INIT));
+  _timers.push(setInterval(dialerEventPrune, DIALER_EVENT_PRUNE_MS));
 
   logger.info('JOBS', `background jobs started — segments refresh ${REFRESH_SEGMENTS_MS / 60000}m, cache sweep ${CACHE_SWEEP_MS / 60000}m, payment scan ${PAYMENT_SCAN_MS / 3600000}h, qa materialize ${QA_MATERIALIZE_MS / 60000}m, milestone sweep ${MILESTONE_SWEEP_MS / 60000}m, qa2 recording poll ${QA2_REC_POLL_MS / 1000}s, qa2 TRA vendor-code backfill ${QA2_TRA_VENDOR_MS / 60000}m, qa2 auto-assign ${QA2_AUTOASSIGN_MS / 60000}m, qa2 retention ${QA2_RETENTION_MS / 3600000}h, qa2 crm-day ${QA2_CRMDAY_MS / 3600000}h, attendance ${ATTENDANCE_SYNC_MS / 3600000}h, revenue ${REVENUE_SYNC_MS / 3600000}h, ip switch ${IP_SWITCH_MS / 1000}s, ip log prune ${IP_LOG_PRUNE_MS / 3600000}h`);
 }

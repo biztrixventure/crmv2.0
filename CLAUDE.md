@@ -265,6 +265,36 @@ Payroll is MANUAL ENTRY in this phase -- no tax engine. See `TODO(tax)` in
   the PRIVATE `expense-receipts` bucket, shown by 2-minute signed links.
 - Every HR/Accounts CSV goes through `utils/moduleExport.js` (egress log).
 
+### Connected dialers — CallTools and anything else (mig 320, NOT yet applied)
+"The dialer" is a ROW now (`dialer_accounts`), not a hardcoded product. One public URL per
+account: `POST /api/dialer/hook/<webhook_token>`. VICIdial is untouched — it keeps `/api/vicidial/*`
+and `VICIDIAL_INGEST_TOKEN`. Operator guide: `docs/DIALER_INTEGRATION.md`.
+- **The engine is never duplicated.** `utils/dialers/bridge.js` runs the EXISTING
+  `fronterXferHandler` / `closerDispoHandler` (exported from `routes/vicidial.js`) in-process with a
+  synthetic req/res, plus the QA2 ingest hook. The 2-min dedup window, xfer_seq (291), stripBlank,
+  the closer-side guard and the queued-dispo reconcile are therefore the same code for every dialer.
+  Never write a second ingest path for a new dialer.
+- **The payload SHAPE is configuration**, not code: `dialer_accounts.field_map` interpreted by
+  `utils/dialers/mapping.js` (paths, fallback lists, templates, transforms). Add a dialer by adding a
+  preset in `providers.js` — or by mapping it in the UI from a real payload. Admin → Dialers →
+  Mapping reads `dialer_webhook_events` and lets you click the keys the dialer actually sent.
+- **The XFER gate moved per account**: `settings.xfer_dispos`. The bridge decides and states the
+  verdict via `req.__dialerXfer`; `vicidial_config.field_map.xfer_dispos` still rules the VICIdial path.
+- Agents: VICIdial keeps `user_profiles.vicidial_agent_ids`; every other dialer maps in
+  `dialer_agent_links` (`resolveAgent(agentId, {accountId})` falls back to it). A link naming a company
+  outranks the role order.
+- **A webhook answers 200 even when it cannot use the event** — a 4xx/5xx makes the dialer retry
+  forever. Only an unknown token (404) and a failed signature (401) are refused. `?dry=1` maps + logs
+  and writes nothing.
+- A bare lead id gets the account's `prefix` (88421 → CT88421) — without it two dialers numbering
+  leads from 1 collide on one transfer, the same failure 291/boxForCode exist to prevent.
+- Recordings: a URL in the payload is attached at ingest; otherwise `qa2RecordingPoller` asks the
+  provider API by `dialer_call_id`. Provider clips sit under `box_id='<provider>:<id8>'` so
+  `uq_qa2_call_recording` still means one clip per call. `qaMedia` adds the account's token
+  server-side — never the browser.
+- Every new column is deploy-order safe (insert/select retries without the `dialer_*` columns), so the
+  backend can ship before 320 is applied.
+
 ### IP access control (mig 319, applied 2026-09-15)
 Which networks each user may use the CRM from. Ships OFF, and everyone is `anywhere`. README → "IP access control" has the operator steps.
 - **Mode lives in `user_ip_access` (sidecar), NEVER on `user_profiles`.** That table has RLS `users_can_update_own_profile`

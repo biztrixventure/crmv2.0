@@ -54,6 +54,7 @@ const NAV_SECTIONS = [
       { id: 'hub-data',          label: 'Data Tools',        icon: Database },
       { id: 'hub-numbers',       label: 'Numbers',           icon: Hash },
       { id: 'vicidial',          label: 'VICIdial',          icon: PhoneCall },
+      { id: 'dialers',           label: 'Dialers',           icon: Radio },
       { id: 'task-boards',       label: 'Task Boards',       icon: ClipboardCheck },
     ],
   },

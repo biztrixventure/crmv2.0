@@ -35,6 +35,16 @@ const { checkUnclassifiedThreshold } = require('../utils/qa2UnclassifiedAlert');
 // vicidial.js's own fronter-xfer handler already uses.
 const DEDUP_WINDOW_MS = 10 * 60 * 1000;
 
+// The columns migration 320 adds. Kept in one place so the deploy-order retry
+// below and the duplicate-update path strip exactly the same set.
+const DIALER_COLS = ['dialer_provider', 'dialer_account_id', 'dialer_call_id'];
+const MISSING_COLUMN = /column|schema cache/i;
+const withoutDialerCols = (obj) => {
+  const copy = { ...obj };
+  DIALER_COLS.forEach(k => delete copy[k]);
+  return copy;
+};
+
 async function findExistingCall({ companyId, agentUserId, leg, code, norm }) {
   // A lead code names a LEAD, not a call: the dialer recycles it, and the same
   // fronter dials the same customer again hours or days later. Matching on the
@@ -70,7 +80,13 @@ async function recordCall(source, req, body) {
   const agent = String(p.agent || '').trim();
   if (!agent) return; // no agent context — nothing meaningful to record
 
-  const { userId, companyId } = await resolveAgent(agent);
+  // A call bridged in from a NON-VICIdial dialer (migration 320) carries its
+  // account here. Set in-process by utils/dialers/bridge.js — it can never
+  // arrive over HTTP, so a dialer cannot claim to be another provider. When
+  // absent this is a VICIdial ingest and everything below behaves as before.
+  const ev = req.__dialerEvent || null;
+
+  const { userId, companyId } = await resolveAgent(agent, ev ? { accountId: ev.account_id } : undefined);
   if (!userId || !companyId) return; // unmapped agent — the real routes skip these too
 
   const phone = String(p.phone || '').trim();
@@ -134,8 +150,15 @@ async function recordCall(source, req, body) {
   const method_id = await classifyCall({ source, dispo: dispoRaw, leg, hasTransfer: !!transferId });
   const now = new Date().toISOString();
 
+  // A provider call has no VICIdial box, so it gets its account's namespace
+  // ("calltools:1a2b3c4d") instead. That keeps uq_qa2_call_recording
+  // (box_id, recording_id) meaningful for provider clips too — one recording
+  // can still only be owned by one call row — while never colliding with a
+  // real box id.
+  const providerBox = ev && ev.box_id ? ev.box_id : null;
+
   const row = {
-    box_id: boxId,
+    box_id: boxId || providerBox,
     dialer_lead_id: dialerLeadId,
     vendor_code: code,
     method_id,
@@ -149,14 +172,32 @@ async function recordCall(source, req, body) {
     customer_phone: phone || null,
     normalized_phone: norm,
     dispo_raw: dispoRaw,
-    call_at: now,
+    // A provider tells us when the call actually happened; VICIdial's webhook
+    // fires at hangup, so "now" is the honest answer there.
+    call_at: (ev && ev.call_at) || now,
     talk_sec: talkSec,
     hangup_label: hangup?.label || null,
     hangup_reason: hangup?.reason || null,
     hangup_status: hangup?.status || null,
     recording_state: 'pending',
     source: 'ingest',
+    dialer_provider: ev ? ev.provider : 'vicidial',
+    dialer_account_id: ev ? ev.account_id : null,
+    dialer_call_id: ev ? ev.external_call_id : null,
   };
+
+  // THE RECORDING CAN ARRIVE WITH THE WEBHOOK. A VICIdial clip has to be
+  // hunted for afterwards (the poller: it appears on the box 60-90s after
+  // hangup), but a provider that puts the audio link in the payload has
+  // already answered the question — take it now, so the call is reviewable the
+  // moment it lands instead of waiting a poll cycle. No URL means the row stays
+  // 'pending' and the poller asks the provider's API for it later.
+  if (ev && ev.recording_url) {
+    row.recording_id = String(ev.recording_id || ev.external_call_id || '').trim() || null;
+    row.recording_location = ev.recording_url;
+    row.recording_state = row.recording_id ? 'found' : 'pending';
+    row.recorded_at = row.call_at;
+  }
 
   const existingId = await findExistingCall({ companyId: ownerCompanyId, agentUserId: userId, leg, code, norm });
   if (existingId) {
@@ -184,9 +225,25 @@ async function recordCall(source, req, body) {
     if (!updatable.hangup_label) { delete updatable.hangup_label; delete updatable.hangup_reason; delete updatable.hangup_status; }
     if (updatable.talk_sec == null) delete updatable.talk_sec;
     delete updatable.recording_state;   // the poller owns this once the row exists
-    if (Object.keys(updatable).length) await supabaseAdmin.from('qa2_call').update(updatable).eq('id', existingId);
+    // Same rule for the clip itself: whoever attached audio first keeps it, and
+    // uq_qa2_call_recording would reject a second row claiming it anyway.
+    delete updatable.recording_id; delete updatable.recording_location; delete updatable.recorded_at;
+    if (Object.keys(updatable).length) {
+      const { error: upErr } = await supabaseAdmin.from('qa2_call').update(updatable).eq('id', existingId);
+      if (upErr && MISSING_COLUMN.test(upErr.message || '')) {
+        await supabaseAdmin.from('qa2_call').update(withoutDialerCols(updatable)).eq('id', existingId);
+      }
+    }
   } else {
-    const { error } = await supabaseAdmin.from('qa2_call').insert(row);
+    let { error } = await supabaseAdmin.from('qa2_call').insert(row);
+    // DEPLOY-ORDER SAFETY, same pattern as transfers.xfer_seq in vicidial.js:
+    // the dialer columns arrive with migration 320. If the backend ships first,
+    // an unknown-column error here would silently drop EVERY QA row — far worse
+    // than losing the provider label on them. Retry once without those columns.
+    if (error && MISSING_COLUMN.test(error.message || '')) {
+      logger.warn('QA2_INGEST', 'qa2_call.dialer_* missing — migration 320 not applied yet; inserting without them');
+      ({ error } = await supabaseAdmin.from('qa2_call').insert(withoutDialerCols(row)));
+    }
     if (error) { logger.warn('QA2_INGEST', `insert failed: ${error.message}`); return; }
   }
 

@@ -41,6 +41,8 @@ const express = require('express');
 const axios = require('axios');
 const { readTicket } = require('../utils/mediaTicket');
 const { locationForRecording } = require('../utils/dialerBoxes');
+const dialerAccounts = require('../utils/dialers/accounts');
+const { fetchAudio } = require('../utils/dialers/client');
 const { supabaseAdmin } = require('../config/database');
 const logger = require('../utils/logger');
 
@@ -70,7 +72,12 @@ function evictIfNeeded() {
   }
 }
 
-async function getClip(key, url) {
+// `account` is set for a clip that belongs to a CONNECTED DIALER (migration
+// 320) rather than a VICIdial box. A VICIdial recording host serves the file to
+// anyone who can reach it; a provider's does not — the link sits behind the
+// same API token the account already holds, so the fetch has to carry it. The
+// token never leaves the server: the browser only ever talks to this proxy.
+async function getClip(key, url, account) {
   const hit = clips.get(key);
   if (hit && Date.now() - hit.at < CACHE_TTL_MS) {
     clips.delete(key); clips.set(key, hit);      // mark as most-recently-used
@@ -80,8 +87,9 @@ async function getClip(key, url) {
   if (pending) return pending;                   // a second listener joins the first fetch
 
   const p = (async () => {
-    const r = await axios.get(url, { responseType: 'arraybuffer', timeout: 120000 });
-    const buf = Buffer.from(r.data);
+    const buf = account
+      ? await fetchAudio(account, url)
+      : Buffer.from((await axios.get(url, { responseType: 'arraybuffer', timeout: 120000 })).data);
     clips.set(key, { buf, at: Date.now() });
     cacheBytes += buf.length;
     evictIfNeeded();
@@ -121,7 +129,28 @@ router.get('/stream', async (req, res) => {
 
   const ref = { box_id: claims.b, lead_id: claims.l, recording_id: claims.r };
   let url = null;
-  try { url = await locationForRecording(ref); } catch { /* fall through */ }
+  let account = null;
+
+  // A CONNECTED-DIALER CLIP IS RESOLVED BY ITS ACCOUNT, NOT BY A BOX.
+  // locationForRecording asks the VICIdial boxes to re-resolve a lead id, which
+  // a provider clip has no answer for, so it is skipped entirely here — both to
+  // avoid a pointless fan-out across every box and because a same-numbered lead
+  // on some box could otherwise answer for a call it has nothing to do with.
+  // The stored location is the right source: it was written server-side by the
+  // poller or the ingest hook, and is read back here under the ticket's own box
+  // and recording id — never from anything the client sent.
+  if (dialerAccounts.isProviderBox(claims.b)) {
+    try {
+      const { data } = await supabaseAdmin.from('qa2_call')
+        .select('recording_location, dialer_account_id')
+        .eq('box_id', claims.b).eq('recording_id', String(claims.r))
+        .not('recording_location', 'is', null).limit(1).maybeSingle();
+      if (data?.recording_location && /^https?:\/\//i.test(data.recording_location)) url = data.recording_location;
+      if (data?.dialer_account_id) account = await dialerAccounts.byId(data.dialer_account_id);
+    } catch (e) { logger.warn('QA_MEDIA', `provider clip lookup ${claims.b}/${claims.r}: ${e.message}`); }
+  }
+
+  if (!url) { try { url = await locationForRecording(ref); } catch { /* fall through */ } }
 
   // Fall back to the location we already recorded. locationForRecording asks
   // the box named on the ticket to re-resolve the clip by lead id, and a box
@@ -154,7 +183,7 @@ router.get('/stream', async (req, res) => {
   const key = `${claims.b}|${claims.r}`;
   let buf;
   try {
-    buf = await getClip(key, url);
+    buf = await getClip(key, url, account);
   } catch (e) {
     logger.warn('QA_MEDIA', `stream ${claims.b}/${claims.r}: ${e.message}`);
     if (!res.headersSent) res.status(502).json({ error: 'Could not load audio' });

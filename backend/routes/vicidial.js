@@ -40,8 +40,16 @@ const requireToken = (req, res, next) => {
   next();
 };
 
-// Resolve a VICIdial agent id → CRM user + their (active) company.
-async function resolveAgent(agentId) {
+// Resolve a dialer agent id → CRM user + their (active) company.
+//
+// VICIdial agents live on user_profiles.vicidial_agent_ids and that stays the
+// first answer. Any OTHER dialer (migration 320) maps its agents in
+// dialer_agent_links instead, because a CallTools login is not a VICIdial agent
+// id and putting both in one column would make "TMC100789" ambiguous across
+// products. The fallback is checked only when the profile columns miss, so no
+// existing resolution changes. opts.accountId scopes the fallback to one dialer
+// when the caller knows it (two dialers may both have an agent called "1001").
+async function resolveAgent(agentId, opts = {}) {
   if (!agentId) return { userId: null, companyId: null };
   const a = String(agentId).trim();
   // A user may have several dialer ids (one per box) in vicidial_agent_ids[];
@@ -67,7 +75,28 @@ async function resolveAgent(agentId) {
     }
   }
   const ids = [...userIds];
+  let linkedCompanyId = null;
+  if (!ids.length) {
+    // Generic dialer agent map. Wrapped: before migration 320 is applied the
+    // table does not exist, and a dialer webhook must degrade to "agent not
+    // mapped" rather than 500 and be retried for ever.
+    try {
+      let q = supabaseAdmin.from('dialer_agent_links')
+        .select('user_id, company_id, account_id, created_at')
+        .ilike('external_agent_id', a)          // no wildcards = case-insensitive equality
+        .not('user_id', 'is', null)
+        .order('created_at', { ascending: true });
+      if (opts.accountId) q = q.eq('account_id', opts.accountId);
+      const { data: links } = await q;
+      const link = (links || [])[0];
+      if (link) { ids.push(link.user_id); linkedCompanyId = link.company_id || null; }
+    } catch { /* table not there yet — fall through to "not mapped" */ }
+  }
   if (!ids.length) return { userId: null, companyId: null };
+  // A link that names its own company is the answer: that is an operator
+  // saying "this dialer agent works for THIS company", which outranks whatever
+  // role order the user happens to have.
+  if (linkedCompanyId) return { userId: ids[0], companyId: linkedCompanyId };
   // Among all matching profiles, keep only those with an ACTIVE company role and
   // pick the one whose active role is OLDEST (stable) — so a no-company duplicate
   // never wins (which would drop the transfer to company=null) and the choice is
@@ -406,7 +435,14 @@ const recentXfer = [];
 ingest.get('/xfer-debug', requireToken, (req, res) => res.json({ recent: recentXfer }));
 
 // ── INGEST: fronter XFER → pending transfer (code + phone only) ──────────────
-ingest.all('/fronter-xfer', requireToken, asyncHandler(async (req, res) => {
+//
+// Held in a named const, not written inline on the route, because ANOTHER
+// dialer's webhook runs this exact handler. /api/dialer/hook/:token (migration
+// 320) normalizes a CallTools / generic payload into these same parameters and
+// invokes this function directly — so the dedup window, the XFER gate, the
+// hand-entered merge, the recycled-lead sequence and the queued-dispo reconcile
+// are the SAME code for every dialer, not a second implementation that drifts.
+const fronterXferHandler = asyncHandler(async (req, res) => {
   const p = { ...req.query, ...req.body };
   const agent = String(p.agent || '').trim();
   const rawCode = String(p.code || '').trim();
@@ -500,7 +536,21 @@ ingest.all('/fronter-xfer', requireToken, asyncHandler(async (req, res) => {
   const configured = Array.isArray(cfg?.field_map?.xfer_dispos)
     ? cfg.field_map.xfer_dispos.map(s => String(s).trim().toUpperCase()).filter(Boolean) : [];
   const xferDispos = configured.length ? configured : ['XFER'];
-  if (!xferDispos.includes(dispo)) {
+  // A NON-VICIDIAL DIALER BRINGS ITS OWN TRANSFER DISPOSITIONS. CallTools calls
+  // it "Transferred", the next dialer will call it something else, and those
+  // names are configured on the dialer ACCOUNT (dialer_accounts.settings
+  // .xfer_dispos), which is where the operator sets them. The bridge has
+  // already applied that gate before it gets here, so re-testing the payload
+  // against this company's VICIdial list would reject every CallTools transfer.
+  // `__dialerBridge` is set in-process by utils/dialers/bridge.js and can never
+  // arrive over HTTP — a query parameter cannot reach it.
+  // The bridge has ALREADY applied the account's own gate, so it states the
+  // verdict (__dialerXfer) rather than letting this company's VICIdial list
+  // decide a second time — which could both reject a real CallTools transfer
+  // and, worse, promote a non-transfer CallTools dispo that happens to share a
+  // name with a VICIdial transfer code.
+  const gateOk = req.__dialerBridge === true ? req.__dialerXfer === true : xferDispos.includes(dispo);
+  if (!gateOk) {
     xdbg.outcome = `NO TRANSFER — "${dispo || '(none)'}" not in xfer_dispos [${xferDispos.join(',')}]`;
     return res.json({ ok: false, reason: 'non-transfer disposition', dispo });   // 200 → no dialer retry
   }
@@ -687,7 +737,8 @@ ingest.all('/fronter-xfer', requireToken, asyncHandler(async (req, res) => {
   })();
 
   res.json({ ok: true, transfer_id: data.id });
-}));
+});
+ingest.all('/fronter-xfer', requireToken, fronterXferHandler);
 
 // Ring buffer of the last 20 closer-dispo hits — lets the superadmin SEE exactly
 // what the dialer sent (token substitution + match outcome) without server logs.
@@ -695,7 +746,11 @@ const recentDispo = [];
 ingest.get('/dispo-debug', requireToken, (req, res) => res.json({ recent: recentDispo }));
 
 // ── INGEST: closer disposition → map onto the transfer ───────────────────────
-ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
+// Named for the same reason as fronterXferHandler above: every dialer's closer
+// disposition goes through this one matcher (exact code → prefixed bare id +
+// phone → phone → queue), so a CallTools dispo lands on the right transfer by
+// exactly the rules a VICIdial one does.
+const closerDispoHandler = asyncHandler(async (req, res) => {
   const p = { ...req.query, ...req.body };
   const dispo = String(p.dispo || '').trim();
   // Rich debug entry — captures exactly what the dialer sent + how it resolved,
@@ -881,7 +936,8 @@ ingest.all('/closer-dispo', requireToken, asyncHandler(async (req, res) => {
   dbg.outcome = `NO MATCH + agent "${closerAgent}" not mapped (phone=${dbg.normalized || 'none'})`;
   logger.warn('VICIDIAL_DISPO', `No transfer for ${candidates.join('/')} and agent "${closerAgent}" not mapped`);
   return res.json({ ok: false, reason: 'no matching transfer and agent not mapped', sent: candidates });
-}));
+});
+ingest.all('/closer-dispo', requireToken, closerDispoHandler);
 
 // ── API: closer's pending dialer dispositions (awaiting a lead) ───────────────
 api.get('/closer-dispos', asyncHandler(async (req, res) => {
@@ -2062,4 +2118,12 @@ api.get('/number-activity', asyncHandler(async (req, res) => {
 // in the queue and the transfer showing no closer/disposition).
 // resolveAgent additionally exported for QA v2's ingest hook (Phase 5) — pure
 // reuse, no change to its behavior or any existing caller here.
-module.exports = { ingest, api, reconcileQueuedDispoForTransfer, fetchAndApplyDispo, resolveAgent };
+// fronterXferHandler / closerDispoHandler are exported for utils/dialers/bridge.js
+// — the multi-dialer layer (migration 320) runs THESE handlers for a CallTools
+// or generic webhook instead of reimplementing transfer creation and
+// disposition matching. They are ordinary express handlers; the bridge calls
+// them with a synthetic req/res, never over HTTP.
+module.exports = {
+  ingest, api, reconcileQueuedDispoForTransfer, fetchAndApplyDispo, resolveAgent,
+  fronterXferHandler, closerDispoHandler,
+};
