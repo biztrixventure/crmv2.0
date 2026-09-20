@@ -66,12 +66,17 @@ function toIngestParams(ev) {
 
 // A response object with just enough of express's surface for the handlers and
 // the QA2 hook (which wraps res.json). Nothing is written to a socket.
+// `answered` settles when the handler actually responds. THAT is the
+// completion signal the bridge waits on — see runHandler for why the handler's
+// return value cannot be trusted.
 function makeRes() {
-  const r = { statusCode: 200, headersSent: false, body: null, locals: {} };
+  let settle;
+  const answered = new Promise(resolve => { settle = resolve; });
+  const r = { statusCode: 200, headersSent: false, body: null, locals: {}, answered };
   r.status = (c) => { r.statusCode = c; return r; };
-  r.json = (b) => { r.body = b; r.headersSent = true; return r; };
+  r.json = (b) => { r.body = b; r.headersSent = true; settle(b); return r; };
   r.send = r.json;
-  r.end = () => r;
+  r.end = () => { settle(r.body); return r; };
   r.setHeader = () => r;
   r.set = () => r;
   return r;
@@ -108,11 +113,36 @@ const runMiddleware = (mw, req, res) => new Promise((resolve, reject) => {
   try { mw(req, res, (err) => (err ? reject(err) : resolve())); } catch (e) { reject(e); }
 });
 
+// WAIT FOR THE RESPONSE, NOT FOR THE RETURN VALUE.
+//
+// asyncHandler (middleware/errorHandler.js) wraps the handler and returns
+// UNDEFINED — it keeps the promise to itself so it can route a rejection to
+// next(). So `Promise.resolve(fn(...))` resolves on the next microtask, long
+// before the handler has touched the database. Measured in production: the
+// transfer was created correctly but the bridge had already moved on, so the
+// webhook answered `transfer_id: null`, the event log recorded no outcome, and
+// — the part that actually matters — stampTransfer never ran, leaving a
+// CallTools transfer labelled as a VICIdial one.
+//
+// The response IS the completion signal. The timeout is a backstop so a
+// handler that never answers cannot hold a dialer's connection open.
+const HANDLER_TIMEOUT_MS = 20000;
+
 const runHandler = (fn, req, res) => new Promise((resolve, reject) => {
+  let settled = false;
+  const done = () => { if (!settled) { settled = true; resolve(); } };
+  const fail = (e) => { if (!settled) { settled = true; reject(e); } };
+
+  const timer = setTimeout(() => fail(new Error('the handler did not answer within 20s')), HANDLER_TIMEOUT_MS);
+  if (timer.unref) timer.unref();
+  res.answered.then(() => { clearTimeout(timer); done(); });
+
   try {
-    const out = fn(req, res, (err) => (err ? reject(err) : resolve()));
-    Promise.resolve(out).then(resolve, reject);
-  } catch (e) { reject(e); }
+    const out = fn(req, res, (err) => { clearTimeout(timer); return err ? fail(err) : done(); });
+    // A handler that DOES return its promise still reports failures this way;
+    // success is only ever concluded from the response above.
+    if (out && typeof out.then === 'function') out.then(() => {}, fail);
+  } catch (e) { clearTimeout(timer); fail(e); }
 });
 
 // Mark what the event created with the dialer it came from. Best-effort and

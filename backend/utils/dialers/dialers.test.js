@@ -218,6 +218,47 @@ describe('outbound API auth', () => {
   });
 });
 
+describe('the bridge waits for the handler', () => {
+  // THE BUG THIS PINS. asyncHandler returns undefined — it keeps the promise
+  // so it can route a rejection to next() — so waiting on the handler's return
+  // value resolved on the next microtask, before it had touched the database.
+  // In production the transfer was created correctly and the bridge had
+  // already moved on: the webhook answered transfer_id null, and the row was
+  // never stamped with the dialer it came from, so a CallTools transfer read
+  // as a VICIdial one. Completion is the RESPONSE, never the return value.
+  const { makeRes } = require('./bridge');
+  const { asyncHandler } = require('../../middleware/errorHandler');
+
+  // The same wait the bridge performs.
+  const run = (fn, res) => new Promise((resolve, reject) => {
+    res.answered.then(() => resolve());
+    const out = fn({}, res, (err) => (err ? reject(err) : resolve()));
+    if (out && typeof out.then === 'function') out.then(() => {}, reject);
+  });
+
+  test('a slow asyncHandler is awaited, so its body is readable', async () => {
+    const res = makeRes();
+    const handler = asyncHandler(async (req, r) => {
+      await new Promise(x => setTimeout(x, 30));      // the database round trip
+      r.json({ ok: true, transfer_id: 'abc-123' });
+    });
+    await run(handler, res);
+    expect(res.body).toEqual({ ok: true, transfer_id: 'abc-123' });
+  });
+
+  test('a handler that fails still settles, via next()', async () => {
+    const res = makeRes();
+    const handler = asyncHandler(async () => { throw new Error('boom'); });
+    await expect(run(handler, res)).rejects.toThrow('boom');
+  });
+
+  test('res.end with no body settles too', async () => {
+    const res = makeRes();
+    await run((req, r) => { r.end(); }, res);
+    expect(res.headersSent).toBe(false);
+  });
+});
+
 describe('recording resolution', () => {
   // Verified against the live CallTools tenant: a call answers with a FILE ID
   // (call_recording_fsfile_id), and the audio lives behind a second,
