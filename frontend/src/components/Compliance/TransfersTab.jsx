@@ -6,6 +6,7 @@ import { transferPhone } from '../../utils/phone';
 import { todayET } from '../../utils/timezone';
 import ThemedSelect from '../UI/Select';
 import { TableScroll } from '../UI/kit';
+import DialerBadge from '../Shared/DialerBadge';
 
 // DUP_REASON_LABEL moved to utils/exportSpec.js — it only ever fed the export,
 // and the column that uses it now lives there with its accessor.
@@ -312,8 +313,12 @@ const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
                     onMouseLeave={e => e.currentTarget.style.backgroundColor = focused ? 'var(--color-primary-50, #eef2ff)' : 'var(--color-surface)'}>
                     <td className="px-3 py-1.5">
                       <p className="font-semibold" style={{ color: 'var(--color-text)' }}>{customerName(t)}</p>
-                      <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                      <p className="text-xs mt-0.5 flex items-center gap-1.5 flex-wrap" style={{ color: 'var(--color-text-secondary)' }}>
                         {transferPhone(t) || ''}
+                        {/* Which dialer this came from. Silent for VICIdial —
+                            otherwise every historical row carries a badge that
+                            says nothing. A badge here means "not the usual one". */}
+                        <DialerBadge record={t} compact />
                       </p>
                       {t.is_duplicate && (
                         <button onClick={e => { e.stopPropagation(); setDetail(t); }}

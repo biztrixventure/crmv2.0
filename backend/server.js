@@ -523,6 +523,10 @@ app.use('/api/vicidial', authMiddleware, vicidialApi);
 // Connected-dialer administration (accounts, mapping, agent links, event log).
 // Superadmin-gated inside the router, like the VICIdial box registry.
 app.use('/api/dialer-admin', authMiddleware, readonlyGuard, dialerAdminRoutes);
+// Dialer NAMES only (id/name/provider), for the "which dialer did this come
+// from" badge on transfers, sales and QA rows. Any signed-in user may read it;
+// nothing here exposes a token, a URL or a credential.
+app.use('/api/dialers', authMiddleware, dialerAdminRoutes.labels);
 app.use('/api/sales', authMiddleware, readonlyGuard, egressAudit, readonlyDataGuard, salesRoutes);
 // Payouts — superadmin only (enforced inside the router); readonlyGuard still
 // blocks the PATCH for a readonly_admin, matching every other admin surface.

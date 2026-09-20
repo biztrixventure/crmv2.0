@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Radio, Plus, Trash2, Save, Copy, RefreshCw, Loader2, AlertTriangle,
   Wifi, ListTree, Users, ScrollText, BookOpen, Play, Eye, KeyRound,
+  Plug, CheckCircle2, CircleSlash, Link2, Download,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button, Alert } from '../../UI';
@@ -31,6 +32,7 @@ import { Loading, SectionHeader, PillTabs, Panel, EmptyState, TableScroll, Toggl
 
 const TABS = [
   { k: 'connections', label: 'Connections', icon: Radio },
+  { k: 'wiring',      label: 'Wiring',      icon: Plug },
   { k: 'mapping',     label: 'Mapping',     icon: ListTree },
   { k: 'agents',      label: 'Agents',      icon: Users },
   { k: 'events',      label: 'Events',      icon: ScrollText },
@@ -304,6 +306,152 @@ const ConnectionsTab = ({ accounts, providers, companies, selected, onSelect, re
   );
 };
 
+// ── Wiring ──────────────────────────────────────────────────────────────────
+// Set the DIALER up from here. Without this tab an operator has two admin
+// panels open and copies disposition ids between them by hand, which is how an
+// integration ends up listening for "XFER Transferred" while the dialer sends
+// "XFER Transfered" — no error anywhere, just no transfers.
+const WiringTab = ({ account, reload }) => {
+  const [wiring, setWiring] = useState(null);
+  const [dispos, setDispos] = useState(null);
+  const [picked, setPicked] = useState([]);
+  const [dryRun, setDryRun] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const accountId = account?.id;
+
+  const load = useCallback(() => {
+    if (!accountId) return;
+    setWiring(null); setDispos(null);
+    client.get(`dialer-admin/accounts/${accountId}/wiring`)
+      .then(r => { setWiring(r.data); setDryRun(r.data?.dry_run !== false); })
+      .catch(e => setWiring({ ok: false, error: e.response?.data?.error || 'Could not read the dialer' }));
+    client.get(`dialer-admin/accounts/${accountId}/remote-dispositions`)
+      .then(r => {
+        setDispos(r.data);
+        setPicked((r.data?.dispositions || []).filter(d => d.selected).map(d => d.id));
+      })
+      .catch(() => setDispos({ ok: false, dispositions: [] }));
+  }, [accountId]);
+  useEffect(() => { load(); }, [load]);
+
+  const provision = async () => {
+    if (!picked.length) return toast.error('Pick the disposition(s) that mean "transferred"');
+    const names = (dispos?.dispositions || []).filter(d => picked.includes(d.id)).map(d => d.name);
+    if (!dryRun && !window.confirm(
+      `Go LIVE?\n\nEvery call an agent marks "${names.join('", "')}" will create a real pending transfer in the CRM and notify the fronter.`
+    )) return;
+    setBusy(true);
+    try {
+      const r = await client.post(`dialer-admin/accounts/${accountId}/wiring`, {
+        disposition_ids: picked, disposition_names: names, dry_run: dryRun,
+      });
+      toast.success(r.data.dry_run ? 'Wired up in dry-run mode' : 'Wired up — LIVE');
+      load(); reload();
+    } catch (e) { toast.error(e.response?.data?.error || 'Could not write to the dialer'); }
+    finally { setBusy(false); }
+  };
+
+  const toggleActive = async (next) => {
+    setBusy(true);
+    try {
+      await client.post(`dialer-admin/accounts/${accountId}/wiring/active`, { active: next });
+      toast.success(next ? 'Automation resumed' : 'Automation paused in the dialer');
+      load();
+    } catch (e) { toast.error(e.response?.data?.error || 'Failed'); }
+    finally { setBusy(false); }
+  };
+
+  if (!account) return <EmptyState icon={Plug} title="Pick a connection first" />;
+  if (wiring === null) return <Loading variant="rows" rows={4} />;
+  if (wiring.ok === false) {
+    return <Alert type="warning">{wiring.error} — set the API base URL and token on the Connections tab, then come back.</Alert>;
+  }
+
+  return (
+    <div className="space-y-4" style={{ maxWidth: 900 }}>
+      <Panel className="p-4 space-y-2">
+        <SectionHeader title="What the dialer is doing right now" actions={
+          <Button variant="secondary" className="text-xs" onClick={load}><RefreshCw size={12} className="inline" /> Refresh</Button>
+        } />
+        <div className="flex items-center gap-2 text-sm flex-wrap">
+          {wiring.wired
+            ? <><CheckCircle2 size={15} style={{ color: 'var(--color-success-600, #16a34a)' }} /> Wired up</>
+            : <><CircleSlash size={15} style={{ color: 'var(--color-text-tertiary)' }} /> Nothing wired yet</>}
+          {wiring.wired && (
+            <span className="px-2 py-0.5 rounded-full text-[11px]"
+              style={{
+                background: wiring.dry_run ? 'var(--color-bg-tertiary)' : 'var(--color-success-100, #dcfce7)',
+                color: wiring.dry_run ? 'var(--color-text-secondary)' : 'var(--color-success-700, #15803d)',
+              }}>
+              {wiring.dry_run ? 'dry run — nothing is written' : 'LIVE — creating transfers'}
+            </span>
+          )}
+          {wiring.wired && !wiring.active && (
+            <span className="text-[11px]" style={{ color: 'var(--color-danger-600, #dc2626)' }}>paused in the dialer</span>
+          )}
+        </div>
+        {wiring.automation && (
+          <div className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
+            Automation #{wiring.automation.id} “{wiring.automation.name}” → webhook #{wiring.request?.id}
+          </div>
+        )}
+        {wiring.request?.url && (
+          <code className="block text-[11px] rounded p-2 truncate" style={{ background: 'var(--color-bg-tertiary)' }}>
+            {wiring.request.url}
+          </code>
+        )}
+        {wiring.wired && (
+          <div className="flex gap-2 pt-1">
+            <Button variant="secondary" className="text-xs" disabled={busy} onClick={() => toggleActive(!wiring.active)}>
+              {wiring.active ? 'Pause in the dialer' : 'Resume'}
+            </Button>
+          </div>
+        )}
+      </Panel>
+
+      <Panel className="p-4 space-y-3">
+        <SectionHeader
+          title="Which dispositions mean “transferred”"
+          subtitle="Read live from the dialer, so the names always match exactly. Everything not ticked is still recorded for QA — it just does not create a transfer."
+        />
+        {dispos === null ? <Loading variant="rows" rows={3} /> : !dispos.dispositions?.length ? (
+          <Alert type="warning">Could not read the dialer's dispositions. Check the API token on the Connections tab.</Alert>
+        ) : (
+          <div className="grid gap-1" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', maxHeight: 280, overflow: 'auto' }}>
+            {dispos.dispositions.map(d => (
+              <label key={d.id} className="flex items-center gap-2 text-sm px-1 py-0.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={picked.includes(d.id)}
+                  onChange={e => setPicked(p => (e.target.checked ? [...p, d.id] : p.filter(x => x !== d.id)))}
+                />
+                <span className="truncate" title={d.name}>{d.name}</span>
+              </label>
+            ))}
+          </div>
+        )}
+
+        <div className="flex items-center gap-3 flex-wrap pt-1" style={{ borderTop: '1px solid var(--color-border)' }}>
+          <Toggle
+            checked={dryRun} onChange={setDryRun}
+            label="Dry run"
+            hint="The dialer fires and the CRM logs it, but no transfer is created. Turn this off when the mapping looks right."
+          />
+          <div className="flex-1" />
+          <Button onClick={provision} disabled={busy}>
+            {busy ? <Loader2 size={14} className="inline animate-spin mr-1" /> : <Plug size={14} className="inline mr-1" />}
+            {wiring.wired ? 'Update the dialer' : 'Wire it up'}
+          </Button>
+        </div>
+        <p className="text-xs m-0" style={{ color: 'var(--color-text-tertiary)' }}>
+          This writes to the dialer: it creates (or repairs) one automation, one webhook, and the link between them —
+          never a second copy, because two automations on one disposition would post every transfer twice.
+        </p>
+      </Panel>
+    </div>
+  );
+};
+
 // ── Mapping ─────────────────────────────────────────────────────────────────
 // The canonical field on the left, where to read it from on the right, and the
 // keys the dialer really sent underneath — so mapping is picking, not guessing.
@@ -484,6 +632,94 @@ const MappingTab = ({ account, fields, transforms, reload }) => {
 };
 
 // ── Agents ──────────────────────────────────────────────────────────────────
+// Pull the dialer's own roster and link it in one pass. The CRM SUGGESTS who
+// each dialer login is — from the VICIdial id already on their profile, or an
+// exact name match — but never applies a guess silently: crediting a transfer
+// to the wrong person is worse than leaving it unmapped, where it at least
+// shows up as a problem.
+const RosterPanel = ({ account, onLinked }) => {
+  const [roster, setRoster] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const accountId = account?.id;
+
+  const pull = useCallback(() => {
+    if (!accountId) return;
+    setRoster(undefined);
+    client.get(`dialer-admin/accounts/${accountId}/remote-agents`)
+      .then(r => setRoster(r.data))
+      .catch(e => setRoster({ ok: false, error: e.response?.data?.error || 'Could not read the dialer', agents: [] }));
+  }, [accountId]);
+
+  const linkSuggested = async () => {
+    const links = (roster?.agents || [])
+      .filter(a => a.suggested_user_id)
+      .map(a => ({ external_id: a.external_id, username: a.username, user_id: a.suggested_user_id }));
+    if (!links.length) return toast.error('Nothing left to link');
+    setBusy(true);
+    try {
+      const r = await client.post(`dialer-admin/accounts/${accountId}/sync-agents`, { links });
+      toast.success(`Linked ${links.length} agent${links.length > 1 ? 's' : ''} (${r.data.linked} ids)`);
+      pull(); onLinked?.();
+    } catch (e) { toast.error(e.response?.data?.error || 'Failed'); }
+    finally { setBusy(false); }
+  };
+
+  if (roster === null) {
+    return (
+      <Panel className="p-3 flex items-center gap-2 flex-wrap">
+        <span className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+          Read the agent list straight from the dialer and match it to CRM people.
+        </span>
+        <div className="flex-1" />
+        <Button variant="secondary" className="text-xs" onClick={pull}>
+          <Download size={13} className="inline mr-1" /> Pull the roster
+        </Button>
+      </Panel>
+    );
+  }
+  if (roster === undefined) return <Loading variant="rows" rows={3} />;
+  if (roster.ok === false) return <Alert type="warning">{roster.error}</Alert>;
+
+  const suggested = (roster.agents || []).filter(a => a.suggested_user_id);
+  const unknown = (roster.agents || []).filter(a => !a.suggested_user_id && !a.linked_user_id);
+
+  return (
+    <Panel className="p-3 space-y-2">
+      <SectionHeader
+        title={`The dialer's roster — ${roster.agents.length} logins`}
+        subtitle={`${roster.agents.filter(a => a.linked_user_id).length} already linked · ${suggested.length} suggested · ${unknown.length} unrecognised`}
+        actions={<Button variant="secondary" className="text-xs" onClick={pull}><RefreshCw size={12} className="inline" /> Refresh</Button>}
+      />
+      {!!suggested.length && (
+        <>
+          <div className="space-y-1" style={{ maxHeight: 220, overflow: 'auto' }}>
+            {suggested.map(a => (
+              <div key={a.external_id} className="flex items-center gap-2 text-sm flex-wrap">
+                <code className="px-1.5 py-0.5 rounded text-xs" style={{ background: 'var(--color-bg-tertiary)' }}>
+                  {a.username || a.external_id}
+                </code>
+                <span style={{ color: 'var(--color-text-tertiary)' }}>{a.name}</span>
+                <Link2 size={12} style={{ color: 'var(--color-text-tertiary)' }} />
+                <span>{a.suggested_name}</span>
+                <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>({a.suggested_because})</span>
+              </div>
+            ))}
+          </div>
+          <Button onClick={linkSuggested} disabled={busy}>
+            {busy ? <Loader2 size={14} className="inline animate-spin mr-1" /> : <Link2 size={14} className="inline mr-1" />}
+            Link all {suggested.length} suggested
+          </Button>
+        </>
+      )}
+      {!!unknown.length && (
+        <p className="text-xs m-0" style={{ color: 'var(--color-text-tertiary)' }}>
+          No CRM match for {unknown.map(a => a.username || a.external_id).join(', ')} — link those by hand below if they take calls.
+        </p>
+      )}
+    </Panel>
+  );
+};
+
 const AgentsTab = ({ account }) => {
   const [data, setData] = useState(null);
   const [people, setPeople] = useState([]);
@@ -515,6 +751,7 @@ const AgentsTab = ({ account }) => {
   if (!account) return <EmptyState icon={Users} title="Pick a connection first" />;
   if (data === null) return <Loading variant="rows" rows={4} />;
 
+
   const peopleOptions = people.map(p => ({ value: p.user_id, label: `${p.name}${p.company ? ` — ${p.company}` : ''}` }));
 
   return (
@@ -524,6 +761,9 @@ const AgentsTab = ({ account }) => {
         credit the transfer to. VICIdial agents stay where they are (User Control Center → VICIdial); this list
         is only for <strong>{account.name}</strong>.
       </Alert>
+
+      <RosterPanel account={account} onLinked={load} />
+
 
       {!!data.unmapped.length && (
         <Panel className="p-3 space-y-2">
@@ -753,6 +993,7 @@ export default function DialerHub() {
             <ConnectionsTab accounts={accounts} providers={providers} companies={companies}
               selected={selected} onSelect={setSelected} reload={reload} />
           )}
+          {tab === 'wiring'  && <WiringTab account={account} reload={reload} />}
           {tab === 'mapping' && <MappingTab account={account} fields={fields} transforms={transforms} reload={reload} />}
           {tab === 'agents'  && <AgentsTab account={account} />}
           {tab === 'events'  && <EventsTab account={account} />}

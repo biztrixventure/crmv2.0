@@ -371,6 +371,174 @@ router.delete('/agents/:linkId', asyncHandler(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// ── setting the DIALER up, from here ────────────────────────────────────────
+// Everything below drives the dialer's own configuration. It exists because the
+// alternative is an operator with two admin panels open, copying disposition
+// ids and agent ids between them by hand — which is where integrations acquire
+// their typos ("XFER Transferred" against "XFER Transfered" and no transfers
+// for a week).
+//
+// Only providers with a published admin API can do this; the rest answer
+// "not supported" and keep the manual instructions on the Setup tab.
+const INTEGRATIONS = { calltools: require('../utils/dialers/calltools') };
+const integrationFor = (account) => INTEGRATIONS[String(account?.provider || '').toLowerCase()] || null;
+
+// The webhook URL is built HERE, not taken from the browser: it is the one
+// thing the dialer will call, and a spoofed value would point a customer's
+// dialer at someone else's CRM. The account's own token is the only variable.
+function hookUrlFor(req, account) {
+  const configured = String(process.env.PUBLIC_APP_URL || '').trim().replace(/\/+$/, '');
+  const proto = (req.headers['x-forwarded-proto'] || req.protocol || 'https').split(',')[0].trim();
+  const host = (req.headers['x-forwarded-host'] || req.get('host') || '').split(',')[0].trim();
+  const origin = configured || (host ? `${proto}://${host}` : '');
+  return origin ? `${origin}/api/dialer/hook/${account.webhook_token}` : '';
+}
+
+const needIntegration = async (req, res) => {
+  const account = await accounts.byId(req.params.id);
+  if (!account) { res.status(404).json({ error: 'Account not found' }); return null; }
+  const integration = integrationFor(account);
+  if (!integration) {
+    res.status(400).json({ error: `Setting up ${account.provider} from here is not supported — use the Setup tab's manual steps.` });
+    return null;
+  }
+  return { account, integration };
+};
+
+// The dialer's own disposition list — what "transfer" is actually called there.
+router.get('/accounts/:id/remote-dispositions', asyncHandler(async (req, res) => {
+  const ctx = await needIntegration(req, res); if (!ctx) return;
+  const out = await ctx.integration.remoteDispositions(ctx.account);
+  const chosen = ((ctx.account.settings || {}).xfer_dispos || []).map(s => String(s).toUpperCase());
+  res.json({
+    ...out,
+    dispositions: (out.dispositions || []).map(d => ({ ...d, selected: chosen.includes(String(d.name).toUpperCase()) })),
+  });
+}));
+
+// The dialer's roster, with the CRM person each one probably is. The match is
+// SUGGESTED, never applied silently: crediting a transfer to the wrong person
+// is worse than leaving it unmapped, where at least it shows up as a problem.
+router.get('/accounts/:id/remote-agents', asyncHandler(async (req, res) => {
+  const ctx = await needIntegration(req, res); if (!ctx) return;
+  const out = await ctx.integration.remoteAgents(ctx.account);
+  if (!out.ok) return res.json(out);
+
+  const { data: links } = await supabaseAdmin.from('dialer_agent_links')
+    .select('external_agent_id, user_id').eq('account_id', ctx.account.id);
+  const linked = new Map((links || []).map(l => [String(l.external_agent_id).toUpperCase(), l.user_id]));
+
+  // Two ways a CallTools agent is already known to the CRM: their dialer login
+  // is one of the VICIdial ids on a profile (true for most of this estate), or
+  // their name matches a person exactly.
+  const { data: profiles } = await supabaseAdmin.from('user_profiles')
+    .select('user_id, first_name, last_name, vicidial_agent_ids');
+  const byDialerId = new Map();
+  const byName = new Map();
+  (profiles || []).forEach(p => {
+    (p.vicidial_agent_ids || []).forEach(a => byDialerId.set(String(a).toUpperCase(), p));
+    const nm = `${p.first_name || ''} ${p.last_name || ''}`.trim().toLowerCase();
+    if (nm) byName.set(nm, byName.has(nm) ? null : p);   // null = ambiguous, never guess
+  });
+
+  const agents = (out.agents || []).map(a => {
+    const already = linked.get(String(a.external_id).toUpperCase()) || (a.username ? linked.get(String(a.username).toUpperCase()) : null);
+    const hit = (a.username && byDialerId.get(String(a.username).toUpperCase()))
+      || (a.name && byName.get(String(a.name).trim().toLowerCase()))
+      || null;
+    return {
+      ...a,
+      linked_user_id: already || null,
+      suggested_user_id: already ? null : (hit ? hit.user_id : null),
+      suggested_name: already || !hit ? null : `${hit.first_name || ''} ${hit.last_name || ''}`.trim(),
+      suggested_because: already || !hit ? null
+        : (a.username && byDialerId.has(String(a.username).toUpperCase()) ? 'same dialer id as VICIdial' : 'name matches'),
+    };
+  });
+  res.json({ ok: true, agents });
+}));
+
+// Apply the suggestions the operator accepted. Both spellings of the id are
+// linked — the webhook sends the provider's internal id, but a human reads the
+// username, and a payload change later must not silently unmap everyone.
+router.post('/accounts/:id/sync-agents', asyncHandler(async (req, res) => {
+  const account = await accounts.byId(req.params.id);
+  if (!account) return res.status(404).json({ error: 'Account not found' });
+  const pairs = Array.isArray(req.body?.links) ? req.body.links : [];
+  if (!pairs.length) return res.status(400).json({ error: 'Nothing to link' });
+
+  let linked = 0;
+  for (const p of pairs) {
+    const ids = [p.external_id, p.username].filter(Boolean).map(String);
+    if (!ids.length || !p.user_id) continue;
+    const { data: role } = await supabaseAdmin.from('user_company_roles')
+      .select('company_id').eq('user_id', p.user_id).eq('is_active', true)
+      .order('created_at', { ascending: true }).limit(1).maybeSingle();
+    for (const ext of [...new Set(ids)]) {
+      const { data: existing } = await supabaseAdmin.from('dialer_agent_links')
+        .select('id').eq('account_id', account.id).ilike('external_agent_id', ext).maybeSingle();
+      const row = {
+        account_id: account.id, external_agent_id: ext, user_id: p.user_id,
+        company_id: p.company_id || role?.company_id || null,
+        note: p.note || `linked from the dialer roster (${new Date().toISOString().slice(0, 10)})`,
+      };
+      if (existing) await supabaseAdmin.from('dialer_agent_links').update(row).eq('id', existing.id);
+      else await supabaseAdmin.from('dialer_agent_links').insert(row);
+      linked += 1;
+    }
+  }
+  res.json({ ok: true, linked });
+}));
+
+// What is wired on the dialer right now.
+router.get('/accounts/:id/wiring', asyncHandler(async (req, res) => {
+  const ctx = await needIntegration(req, res); if (!ctx) return;
+  const hookUrl = hookUrlFor(req, ctx.account);
+  const out = await ctx.integration.readWiring(ctx.account, hookUrl);
+  res.json({ ...out, hook_url: hookUrl });
+}));
+
+// Create or repair it. Idempotent: an existing webhook/automation for this
+// hook URL is updated, never duplicated — two automations on one disposition
+// would post every transfer twice.
+router.post('/accounts/:id/wiring', asyncHandler(async (req, res) => {
+  const ctx = await needIntegration(req, res); if (!ctx) return;
+  const hookUrl = hookUrlFor(req, ctx.account);
+  if (!hookUrl) return res.status(400).json({ error: 'Could not work out this CRM\'s public URL — set PUBLIC_APP_URL.' });
+
+  const dispositionIds = Array.isArray(req.body?.disposition_ids) ? req.body.disposition_ids : [];
+  const dispositionNames = Array.isArray(req.body?.disposition_names) ? req.body.disposition_names : [];
+  const dryRun = req.body?.dry_run !== false;
+
+  const out = await ctx.integration.provisionWiring(ctx.account, {
+    hookUrl, dispositionIds, dryRun,
+    dispositionLabel: (dispositionNames[0] || 'XFER').toUpperCase(),
+  });
+  if (!out.ok) return res.status(502).json(out);
+
+  // The CRM side must agree with what was just written to the dialer: these
+  // names are what the XFER gate tests, so a disposition chosen here and not
+  // recorded here would arrive and be filed as an ordinary call.
+  if (dispositionNames.length) {
+    const settings = { ...(ctx.account.settings || {}), xfer_dispos: dispositionNames.map(n => String(n).toUpperCase()) };
+    await supabaseAdmin.from('dialer_accounts')
+      .update({ settings, updated_at: new Date().toISOString() }).eq('id', ctx.account.id);
+    accounts.invalidate();
+  }
+  logger.success('DIALER_ADMIN', `${ctx.account.name}: wiring ${out.dry_run ? 'provisioned (dry run)' : 'LIVE'}`);
+  res.json(out);
+}));
+
+// Pause/resume without tearing anything down.
+router.post('/accounts/:id/wiring/active', asyncHandler(async (req, res) => {
+  const ctx = await needIntegration(req, res); if (!ctx) return;
+  const out = await ctx.integration.setActive(ctx.account, {
+    hookUrl: hookUrlFor(req, ctx.account),
+    active: req.body?.active !== false,
+  });
+  res.json(out);
+}));
+
 // ── recordings ──────────────────────────────────────────────────────────────
 // "Why has this call got no audio?" answered directly against the dialer's API,
 // without waiting for the poller's next tick.
@@ -382,4 +550,21 @@ router.post('/accounts/:id/recording-probe', asyncHandler(async (req, res) => {
   res.json(await recordingForCall(account, callId));
 }));
 
+// ── names for badges (authenticated, NOT superadmin) ────────────────────────
+// A transfer row says which dialer it came from, and a closer or a QA reviewer
+// has to be able to read that badge — but they must not see tokens, URLs or
+// credentials. So this returns the three harmless fields and nothing else, and
+// it is mounted outside the superadmin router above on purpose.
+const labels = express.Router();
+labels.get('/labels', asyncHandler(async (req, res) => {
+  const { data } = await supabaseAdmin.from('dialer_accounts').select('id, name, provider');
+  res.json({
+    accounts: data || [],
+    // The providers a record can carry even with no account row — every legacy
+    // row reads 'vicidial', which has no account and never will.
+    providers: { vicidial: 'VICIdial', calltools: 'CallTools', generic: 'Dialer' },
+  });
+}));
+
 module.exports = router;
+module.exports.labels = labels;

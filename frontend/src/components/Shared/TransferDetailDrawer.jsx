@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Clock, AlertTriangle, Send, DollarSign, CheckCircle, XCircle, MessageSquare, Activity, UserPlus } from 'lucide-react';
 import { Badge } from '../UI';
 import DrawerShell from './DrawerShell';
+import DialerBadge from './DialerBadge';
 import FetchDispoButton from '../Vicidial/FetchDispoButton';
 import ReassignOwnership from './ReassignOwnership';
 import { useAuth } from '../../contexts/AuthContext';
@@ -153,7 +154,7 @@ export default function TransferDetailDrawer({ transfer, onClose }) {
   const DEFAULT_FIELDS = {
     customer: ['name', 'phone', 'phone_2', 'email', 'address'],
     vehicle:  ['year', 'make', 'model', 'miles', 'vin'],
-    people:   ['fronter', 'closer', 'dialer_code', 'dialer_dispo', 'rejections'],
+    people:   ['fronter', 'closer', 'dialer_source', 'dialer_code', 'dialer_dispo', 'rejections'],
     timeline: ['created', 'updated', 'rejected'],
   };
 
