@@ -145,6 +145,47 @@ Provider clips are filed under `box_id = '<provider>:<account-id-prefix>'`, so
 one recording still belongs to exactly one call row, and they never collide with
 a real VICIdial box id.
 
+## 7b. The other hand-off: CallTools → VICIdial (what the CLOSER sees)
+
+This one is not the CRM's doing and is easy to forget. When a fronter presses
+**TRANSFER TO CLOSER** in CallTools, a *connector button* calls VICIdial's
+`add_lead`, and the closer works that lead in VICIdial — so what the closer sees
+is whatever that URL carries.
+
+What it sends today (list 998 on wavetechpk):
+
+| VICIdial field | From CallTools | The closer sees |
+|---|---|---|
+| `first_name` / `last_name` | contact name | the customer |
+| `address1` | address | address |
+| `address2` / `address3` / `province` | **make / model / year** | vehicle, under address labels |
+| `city` / `state` / `postal_code` / `email` | contact | the rest |
+| `comments` | `{last_note_text}` | **the fronter's last note** |
+| `vendor_lead_code` | `CT{id}` | the CRM transfer's own code |
+| `source_id` | `{call_uuid}` | the CallTools call (its recording) |
+
+The last two were added in September 2026; before that the lead reached the
+closer with no link back to anything. `vendor_lead_code` matters most: the
+closer's disposition returns it to the CRM, so the outcome matches the transfer
+**by code** instead of falling back to the customer's phone number.
+
+Worth knowing:
+
+* VICIdial strips some punctuation from `comments` (a semicolon is dropped) and
+  caps it at 255 characters, and only the **last** note is sent — a fronter who
+  wrote three notes gets one through.
+* Vehicle detail rides in `address2/address3/province` because that is how the
+  closer's screen was already set up. `add_lead` also accepts real custom
+  fields (`custom_fields=Y` plus the field label), which is the tidier answer if
+  those fields are ever added to the campaign.
+* Verified against the live dialer: every field above is accepted and reads back
+  correctly on the created lead.
+* A token that does not resolve is sent LITERALLY by every dialer — VICIdial
+  sends `--A--vendor_lead_code--B--`, CallTools would send `CT{id}`. The CRM
+  refuses such text as a lead code (`realCode()`), because otherwise every
+  affected transfer would share one "code" and a later disposition would attach
+  itself to whichever it found first.
+
 ## 8. Reading it back: which dialer did this come from?
 
 Every record that came from a dialer carries `dialer_provider` +
