@@ -23,7 +23,7 @@ function useLookups() {
       for (const u of (r.data.users || [])) if (!seen.has(u.user_id)) seen.set(u.user_id, u);
       setUsers([...seen.values()]);
     }).catch(() => {});
-    client.get('compliance/companies').then(r => setCompanies(r.data.companies || [])).catch(() => {});
+    client.get('qa2/companies').then(r => setCompanies(r.data.companies || [])).catch(() => {});
   }, []);
   return { users, companies };
 }

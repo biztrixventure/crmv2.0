@@ -740,7 +740,7 @@ export default function ReportsTab({ scope }) {
 
   const myCompanyIds = scope?.operationalCompanyIds === 'all' || scope?.isCompliance ? null : (scope?.operationalCompanyIds || []);
   useEffect(() => {
-    client.get('compliance/companies').then(r => {
+    client.get('qa2/companies').then(r => {
       const all = r.data.companies || [];
       setCompanies(myCompanyIds ? all.filter(c => myCompanyIds.includes(c.id)) : all);
     }).catch(() => {});

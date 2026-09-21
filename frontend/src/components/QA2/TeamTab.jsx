@@ -81,7 +81,7 @@ export default function TeamTab({ scope }) {
       client.get('qa2/team/roster'),
       client.get('qa2/team/agent-companies'),
       client.get('qa2/team/agent-methods'),
-      client.get('compliance/companies'),
+      client.get('qa2/companies'),
       client.get('qa2/methods'),
       client.get('qa2/team/sampling-rules'),
       client.get('qa2/team/targets'),

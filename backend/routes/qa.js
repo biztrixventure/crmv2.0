@@ -43,6 +43,10 @@ const { materializeCompany } = require('../utils/qaMaterializer');
 const { autoAssignCompany } = require('../utils/qaAutoAssign');
 const { WORK_TYPES, workTypeOf, getActiveRules, materializeCloserWork, applyCompanyRules, openCounts } = require('../utils/qaRules');
 const { sampleRcmFromDialer } = require('../utils/qaDialerSampler');
+// Both org screens are live and QA2 reads only its own tables, so every v1 org
+// write is applied to v2 as well — otherwise a manager wired here opens /qa2
+// and finds nothing (see utils/qaOrgMirror.js, mig 324).
+const { mirrorManagerCompanies, mirrorManagerAgents, mirrorDesignation } = require('../utils/qaOrgMirror');
 const { notifyUsers, getUserIdsByLevel } = require('../utils/notificationService');
 const cache = require('../utils/cache');
 const { issueTicket, TTL_SECONDS: TICKET_TTL } = require('../utils/mediaTicket');
@@ -3825,6 +3829,7 @@ router.put('/admin/manager-designation', asyncHandler(async (req, res) => {
     const { error } = await supabaseAdmin.from('qa_managers').delete().eq('user_id', userId);
     if (error) return res.status(500).json({ error: error.message });
   }
+  await mirrorDesignation(userId, enabled, req.user.id);
   logger.info('QA', `${enabled ? 'designated' : 'removed'} quality manager ${userId} by ${req.user.id}`);
   res.json({ ok: true, user_id: userId, designated: enabled });
 }));
@@ -3851,6 +3856,7 @@ router.put('/admin/manager/:managerId/companies', asyncHandler(async (req, res) 
   const { data: existing } = await supabaseAdmin.from('qa_manager_companies').select('company_id').eq('manager_id', managerId);
   const remove = (existing || []).map(r => r.company_id).filter(c => !ids.includes(c));
   if (remove.length) await supabaseAdmin.from('qa_manager_companies').delete().eq('manager_id', managerId).in('company_id', remove);
+  await mirrorManagerCompanies(managerId, ids, req.user.id);
   res.json({ ok: true, companies: ids.length, moved, removed: remove.length });
 }));
 
@@ -3880,6 +3886,7 @@ router.put('/admin/manager/:managerId/agents', asyncHandler(async (req, res) => 
     await supabaseAdmin.from('qa_team_members').delete().eq('manager_id', managerId).in('agent_id', remove);
     try { await supabaseAdmin.from('qa_assignments').update({ assigned_to: null }).in('assigned_to', remove).eq('status', 'pending'); } catch { /* best-effort release */ }
   }
+  await mirrorManagerAgents(managerId, ids, req.user.id);
   res.json({ ok: true, agents: ids.length, moved, removed: remove.length });
 }));
 
