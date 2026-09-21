@@ -368,6 +368,25 @@ const stripBlank = (obj) => Object.fromEntries(
   Object.entries(obj).filter(([, v]) => v !== null && v !== undefined && String(v).trim() !== '')
 );
 
+// A LEAD CODE, OR NOTHING — never a template that failed to resolve.
+//
+// Every dialer builds these URLs by substitution, and every dialer sends the
+// LITERAL placeholder when a token is wrong or the field is empty: VICIdial
+// sends "--A--vendor_lead_code--B--", CallTools' connector buttons send
+// "CT{id}". Treated as a code, that text becomes the vendor_lead_code of every
+// affected transfer — so they all share one "code", and a later disposition
+// matches whichever of them it finds first, attaching a closer's outcome to a
+// stranger's lead. An unresolved token means the dialer told us nothing, and
+// nothing is exactly what it should be worth.
+const realCode = (v) => {
+  const s = String(v == null ? '' : v).trim();
+  if (!s) return '';
+  if (/[{}]/.test(s)) return '';                 // {id}, {{lead_id}}, CT{id}
+  if (/--[AB]--/i.test(s)) return '';            // VICIdial's own --A--token--B--
+  if (/^(null|undefined|none|n\/a)$/i.test(s)) return '';
+  return s;
+};
+
 // ASK THE DIALER FOR THE CUSTOMER WHEN THE WEBHOOK DIDN'T CARRY THEM.
 //
 // Roughly one XFER in six arrives with empty first/last tokens, and the fronter
@@ -446,7 +465,7 @@ const fronterXferHandler = asyncHandler(async (req, res) => {
   const p = { ...req.query, ...req.body };
   const agent = String(p.agent || '').trim();
   const rawCode = String(p.code || '').trim();
-  const code  = normalizeLeadCode(rawCode, agent);
+  const code  = normalizeLeadCode(realCode(rawCode), agent);
   const phone = String(p.phone || '').trim();
   const norm  = normPhone(phone);
   // Full lead detail — matches the Dispo Call URL template in
@@ -769,8 +788,8 @@ const closerDispoHandler = asyncHandler(async (req, res) => {
   // Try each in order; first hit wins.
   // No code/alt_code is normal for the closer URL (dispo+agent only) — VICIdial
   // can't send lead tokens for the closer's calls. We fall through to the queue.
-  const inCode  = String(p.code || '').trim();
-  const inAlt   = String(p.alt_code || '').trim();
+  const inCode  = realCode(p.code);
+  const inAlt   = realCode(p.alt_code);
   // Exact codes carry the box prefix (WTI/ETC/TMC + lead_id) → globally unique.
   const exactCodes = [...new Set([inCode, inAlt].filter(Boolean))];
   // Prefixed variants of a BARE numeric id — used when the fronter never pressed
@@ -1225,7 +1244,11 @@ api.get('/pending', asyncHandler(async (req, res) => {
 
   const { data, error } = await supabaseAdmin
     .from('transfers')
-    .select('id, vicidial_vendor_code, normalized_phone, form_data, vicidial_dispo, vicidial_dispo_at, vicidial_agent, assigned_closer_id, created_at')
+    // dialer_provider/account are here so the fronter's card can say WHICH
+    // dialer sent the transfer. This select names its columns, so a column
+    // added to the table does not appear on its own — the badge would simply
+    // never render and nothing would complain.
+    .select('id, vicidial_vendor_code, normalized_phone, form_data, vicidial_dispo, vicidial_dispo_at, vicidial_agent, assigned_closer_id, created_at, dialer_provider, dialer_account_id')
     .eq('created_by', req.user.id).eq('vicidial_pending', true)
     .gte('created_at', cutoff)
     .order('created_at', { ascending: false });
@@ -2126,4 +2149,5 @@ api.get('/number-activity', asyncHandler(async (req, res) => {
 module.exports = {
   ingest, api, reconcileQueuedDispoForTransfer, fetchAndApplyDispo, resolveAgent,
   fronterXferHandler, closerDispoHandler,
+  realCode,   // exported for its tests — the rule is small and easy to break
 };

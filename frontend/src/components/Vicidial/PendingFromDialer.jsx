@@ -6,6 +6,8 @@ import client from '../../api/client';
 // Clicking Confirm opens the fronter's normal create-transfer form (prefilled
 // with the phone) via onPick; submitting there confirms this pending row.
 // Renders nothing when there's nothing pending (safe to mount anywhere).
+import DialerBadge from '../Shared/DialerBadge';
+
 export default function PendingFromDialer({ onPick, refreshSignal }) {
   const [items, setItems] = useState([]);
 
@@ -42,6 +44,10 @@ export default function PendingFromDialer({ onPick, refreshSignal }) {
               <div className="min-w-0">
                 <p className="text-sm font-semibold flex items-center gap-2 flex-wrap" style={{ color: 'var(--color-text)' }}>
                   {name || phone || '—'}
+                  {/* Which dialer sent this. Silent for VICIdial, so a badge
+                      here means "this one came from the other dialer" rather
+                      than decorating every card. */}
+                  <DialerBadge record={it} compact />
                   {it.vicidial_vendor_code && (
                     <span className="text-[11px] sm:text-[10px] font-mono px-1.5 py-0.5 rounded inline-flex items-center gap-0.5" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}><Hash size={8} /> Lead {it.vicidial_vendor_code}</span>
                   )}
