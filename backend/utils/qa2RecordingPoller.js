@@ -242,10 +242,16 @@ async function pollProviderRow(row) {
   const { recordingForCall } = require('./dialers/client');
 
   const account = row.dialer_account_id ? await accounts.byId(row.dialer_account_id) : null;
-  const callId = row.dialer_call_id || row.vendor_code || null;
+  // ONLY a real call id. The vendor code is the LEAD, not the call — asking
+  // the provider for a call whose uuid is "CT30359656" can only ever miss, and
+  // it used to burn an attempt doing so. A row with no call id goes straight
+  // to the contact route below, which is the right answer for a transfer
+  // reported at the moment the button was pressed.
+  const callId = row.dialer_call_id || null;
 
   let found = null;
   let duration = null;
+  let recId = callId;
   if (account && callId) {
     try {
       const res = await recordingForCall(account, callId);
@@ -262,10 +268,35 @@ async function pollProviderRow(row) {
     } catch (e) { logger.warn('QA2_REC_POLL', `${row.id}: provider lookup — ${e.message}`); }
   }
 
+  // THE CALL ID CAN BE WRONG, AND THE CONTACT NEVER IS.
+  //
+  // A transfer reported at the moment the agent PRESSES transfer has no call
+  // uuid of its own — the dialer's contact record still names the previous
+  // call. Measured live: that uuid resolved to zero calls while the contact's
+  // real call sat there with a recording on it. The contact id is what the
+  // press does carry, and it is what the CRM stores as the lead code, so ask
+  // for that contact's calls and take the one nearest this transfer.
+  if (!found && account && row.dialer_lead_id) {
+    try {
+      const integration = require('./dialers/calltools');
+      if (account.provider === 'calltools' && integration.recordingForContact) {
+        const alt = await integration.recordingForContact(account, row.dialer_lead_id, { at: row.call_at });
+        if (alt.ok && alt.url) {
+          found = alt.url;
+          // The clip's own id, so uq_qa2_call_recording still means one clip
+          // per call rather than one per (wrong) call uuid.
+          recId = alt.call_uuid || alt.file_id;
+          if (alt.duration != null) duration = alt.duration;
+          logger.info('QA2_REC_POLL', `${row.id}: clip found via contact ${row.dialer_lead_id} (call id was no good)`);
+        }
+      }
+    } catch (e) { logger.warn('QA2_REC_POLL', `${row.id}: contact lookup — ${e.message}`); }
+  }
+
   if (found) {
     const updates = {
       box_id: row.box_id || (account ? accounts.boxNamespace(account) : row.dialer_provider),
-      recording_id: String(callId),
+      recording_id: String(recId || callId),
       recording_location: found,
       recording_state: 'found',
       recording_attempts: attempts,
@@ -280,7 +311,9 @@ async function pollProviderRow(row) {
 
   // No account, no call id, or no API path configured means this will never be
   // found by asking — park it now instead of burning ten cycles on it.
-  const hopeless = !account || !callId || !(((account.settings || {}).api || {}).call_path);
+  // Hopeless means there is no route left to try — neither a call id nor the
+  // contact the clip could be found through.
+  const hopeless = !account || (!callId && !row.dialer_lead_id) || !(((account.settings || {}).api || {}).call_path);
   await supabaseAdmin.from('qa2_call').update({
     recording_attempts: hopeless ? MAX_ATTEMPTS : attempts,
     recording_state: (hopeless || attempts >= MAX_ATTEMPTS) ? 'missing' : 'pending',

@@ -102,6 +102,56 @@ async function remoteAgents(account) {
   };
 }
 
+// ── finding a clip when the call id is no good ──────────────────────────────
+//
+// The button-press trigger has no call uuid of its own — the press happens
+// DURING the call, so the contact's `last_call_uuid` still points at whatever
+// came before it. Measured on a live transfer: that uuid resolved to zero
+// calls, while the contact's real call sat there with a recording on it.
+//
+// What the press DOES give us is the contact, which is also what the CRM keeps
+// as the lead code. So ask for that contact's calls and take the one nearest
+// the transfer. The duration comes back with it — the only place a
+// button-press call can get one, since the press carries no talk time either.
+async function recordingForContact(account, contactId, { at } = {}) {
+  const id = String(contactId || '').replace(/\D/g, '');
+  if (!id) return { ok: false, url: null, error: 'no contact id on the row' };
+
+  const res = await apiGet(account, '/api/contactcalls/', { params: { contact_id: id, limit: 50 } });
+  if (!res.ok) return { ok: false, url: null, error: res.error };
+  const calls = (res.data && res.data.results) || [];
+  const withClip = calls.filter(c => c.call_recording_fsfile_id);
+  if (!withClip.length) return { ok: false, url: null, error: `contact ${id} has no recorded call yet` };
+
+  // Nearest in time to the transfer, so a customer who was called twice does
+  // not hand the reviewer the wrong conversation.
+  const want = at ? new Date(at).getTime() : null;
+  let pick = withClip[0];
+  if (want) {
+    const ranked = withClip
+      .map(c => ({ c, d: Math.abs(new Date(c.created_on || c.start || 0).getTime() - want) }))
+      .filter(x => Number.isFinite(x.d))
+      .sort((a, b) => a.d - b.d);
+    if (ranked.length) pick = ranked[0].c;
+  }
+
+  const acct = withPreset(account);
+  const api = (acct.settings || {}).api || {};
+  const base = String(acct.base_url || '').replace(/\/+$/, '');
+  const rel = String(api.recording_file_path || '/api/filesystemfiles/{file_id}/download/')
+    .replace('{file_id}', encodeURIComponent(pick.call_recording_fsfile_id));
+  const secs = pick.billsec != null ? pick.billsec : pick.duration;
+
+  return {
+    ok: true,
+    error: null,
+    url: `${base}${rel.startsWith('/') ? '' : '/'}${rel}`,
+    file_id: String(pick.call_recording_fsfile_id),
+    call_uuid: pick.uuid || null,
+    duration: Number.isFinite(Number(secs)) ? Math.round(Number(secs)) : null,
+  };
+}
+
 // ── the webhook the dialer fires at us ──────────────────────────────────────
 
 const WIRING_NAME = 'BizTrix CRM - XFER webhook';
@@ -262,4 +312,7 @@ async function setActive(account, { hookUrl, active }) {
   return r.ok ? { ok: true, active: !!active } : { ok: false, error: r.error };
 }
 
-module.exports = { remoteDispositions, remoteAgents, readWiring, provisionWiring, setActive, webhookBody, apiWrite };
+module.exports = {
+  remoteDispositions, remoteAgents, readWiring, provisionWiring, setActive,
+  webhookBody, apiWrite, recordingForContact,
+};
