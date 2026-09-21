@@ -4,6 +4,7 @@ import { Phone, RefreshCw, X, Copy, Check, PhoneCall, Clock, CheckCircle, SkipFo
   PhoneForwarded, ThumbsDown, Voicemail, PhoneOff } from 'lucide-react';
 import client from '../../api/client';
 import NumberDetail, { PIP_PALETTE } from './NumberDetail';
+import { timeLeft, fmtDeadline } from '../../utils/expiry';
 
 // Fronters' floating "My Numbers" — same Document Picture-in-Picture pattern as
 // the closer's call checklist: pops a real always-on-top OS window that floats
@@ -170,6 +171,13 @@ function NumbersBody({ numbers, loading, filter, setFilter, onCopy, copied, onSt
   const iconBtn = { background: 'transparent', border: 'none', color: '#fff', padding: 4, borderRadius: 6, cursor: 'pointer', display: 'flex' };
   const counts = numbers.reduce((a, n) => { a.all++; a[n.status] = (a[n.status] || 0) + 1; return a; }, { all: 0 });
   const list = filter === 'all' ? numbers : numbers.filter(n => n.status === filter);
+  // Some of these numbers are LENT — they go back on their own. The soonest
+  // deadline is the one worth a banner; each row carries its own countdown.
+  const lent = numbers.filter(n => n.expires_at);
+  const soonest = lent.length
+    ? lent.reduce((a, n) => (new Date(n.expires_at) < new Date(a.expires_at) ? n : a))
+    : null;
+  const soonestLeft = timeLeft(soonest?.expires_at);
   const [openNote, setOpenNote] = useState(null);
   const [detail, setDetail] = useState(null);   // number whose lead-detail is open
 
@@ -205,6 +213,22 @@ function NumbersBody({ numbers, loading, filter, setFilter, onCopy, copied, onSt
         </button>
         {onClose && <button onClick={onClose} title="Close" style={iconBtn}><X size={15} /></button>}
       </div>
+
+      {/* lent numbers: say so before they vanish */}
+      {soonest && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', flexShrink: 0,
+          borderBottom: `1px solid ${C.border}`,
+          background: soonestLeft.urgent ? '#fee2e2' : soonestLeft.soon ? '#fef3c7' : '#eef2ff',
+          color: soonestLeft.urgent ? '#b91c1c' : soonestLeft.soon ? '#92400e' : '#4338ca',
+        }}>
+          <Clock size={12} />
+          <span style={{ fontSize: 11, fontWeight: 700 }}>
+            {lent.length} number{lent.length === 1 ? '' : 's'} go back {soonestLeft.expired ? 'now' : `in ${soonestLeft.text.replace(' left', '')}`}
+          </span>
+          <span style={{ fontSize: 10, marginLeft: 'auto' }}>{fmtDeadline(soonest.expires_at)}</span>
+        </div>
+      )}
 
       {/* filter chips */}
       <div style={{ display: 'flex', gap: 4, padding: '6px 8px', flexWrap: 'wrap', borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
@@ -243,6 +267,16 @@ function NumbersBody({ numbers, loading, filter, setFilter, onCopy, copied, onSt
                   : <button onClick={() => onCopy(n.phone_number)} title="Copy" style={{ border: 'none', background: 'transparent', padding: 3, cursor: 'pointer', display: 'flex' }}><Copy size={13} color={C.sub} /></button>}
                 <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 999, background: s.bg, color: s.c }}>{s.l}</span>
               </div>
+              {n.expires_at && (() => {
+                const t = timeLeft(n.expires_at);
+                return (
+                  <div title={`Goes back on ${fmtDeadline(n.expires_at)}`}
+                    style={{ display: 'flex', alignItems: 'center', gap: 3, marginTop: 3, fontSize: 10, fontWeight: 700,
+                      color: t.urgent ? '#dc2626' : t.soon ? '#b45309' : '#6366f1' }}>
+                    <Clock size={10} /> {t.expired ? 'going back now' : `${t.text} with you`}
+                  </div>
+                );
+              })()}
               {n.customer_name && <div style={{ fontSize: 11, color: C.sub, marginTop: 2 }}>{n.customer_name}</div>}
               <div style={{ display: 'flex', gap: 2, marginTop: 4, alignItems: 'center' }}>
                 {act(n, 'transferred', PhoneForwarded, '#059669', 'Transferred')}

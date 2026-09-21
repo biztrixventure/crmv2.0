@@ -27,6 +27,51 @@ const canSend = (req) => SENDER_ROLES.has(req.user.role);
 const digits = (s) => String(s || '').replace(/\D/g, '');
 const fullName = (p) => `${p?.first_name || ''} ${p?.last_name || ''}`.trim() || null;
 
+// PostgREST puts .in() lists in the URL, so a long id list has to be sliced or
+// the request dies on the URL length — the same cap the compliance search hit
+// (mig 141). 150 ids per call is well inside every proxy's limit.
+const ID_CHUNK = 150;
+function idChunks(ids, size = ID_CHUNK) {
+  const out = [];
+  for (let i = 0; i < ids.length; i += size) out.push(ids.slice(i, i + size));
+  return out;
+}
+
+// ── the deadline on an assignment (mig 322) ──────────────────────────────────
+// Numbers can be LENT: the assigner names a day + time (or a duration) and the
+// numbers leave the holder on their own when it passes. The client sends either
+// an absolute instant — already converted to UTC, same rule as callback_at — or
+// a duration in hours for the presets. A deadline in the past, or one further
+// out than a year, is refused instead of clamped: numbers that vanish a second
+// after they land are a worse outcome than an error message.
+const MAX_EXPIRY_MS = 365 * 24 * 60 * 60 * 1000;
+function parseExpiry(body) {
+  const raw = body?.expires_at;
+  const hours = body?.expires_in_hours;
+  let when = null;
+  if (raw) {
+    const d = new Date(raw);
+    if (isNaN(d.getTime())) return { error: 'The time limit is not a valid date' };
+    when = d;
+  } else if (hours != null && hours !== '') {
+    const h = Number(hours);
+    if (!isFinite(h) || h <= 0) return { error: 'The time limit must be a positive number of hours' };
+    when = new Date(Date.now() + h * 3600 * 1000);
+  }
+  if (!when) return { expiresAt: null };
+  const delta = when.getTime() - Date.now();
+  if (delta < 60 * 1000)     return { error: 'The time limit must be at least a minute from now' };
+  if (delta > MAX_EXPIRY_MS) return { error: 'The time limit cannot be more than a year away' };
+  return { expiresAt: when.toISOString() };
+}
+const untilText = (iso) => {
+  if (!iso) return '';
+  const mins = Math.round((new Date(iso).getTime() - Date.now()) / 60000);
+  if (mins < 90) return `${Math.max(1, mins)} minutes`;
+  const hours = Math.round(mins / 60);
+  return hours < 48 ? `${hours} hours` : `${Math.round(hours / 24)} days`;
+};
+
 async function namesFor(ids) {
   const uniq = [...new Set(ids.filter(Boolean))];
   if (!uniq.length) return {};
@@ -127,7 +172,12 @@ router.get('/received', asyncHandler(async (req, res) => {
   const dateFrom  = req.query.date_from || null;
   const dateTo    = req.query.date_to || null;
 
-  let query = supabaseAdmin.from('distribution_batches').select('*').eq('status', 'active').order('sent_at', { ascending: false }).limit(300);
+  // A batch whose time limit ran out is GONE for the person it was lent to —
+  // that is the whole point of lending it. The sender still sees it (in Sent /
+  // All) so they can tell an expired batch from one that was never sent.
+  const seesEverything = sa && req.query.scope === 'all';
+  const statuses = (box === 'received' && !seesEverything) ? ['active'] : ['active', 'expired'];
+  let query = supabaseAdmin.from('distribution_batches').select('*').in('status', statuses).order('sent_at', { ascending: false }).limit(300);
   if (sa && req.query.scope === 'all') { /* no owner filter */ }
   else if (box === 'sent') query = query.eq('created_by', req.user.id);
   else query = query.eq('sent_to_user_id', req.user.id);
@@ -163,6 +213,7 @@ router.get('/received', asyncHandler(async (req, res) => {
     created_by: b.created_by, created_by_name: names[b.created_by] || null,
     sent_to_user_id: b.sent_to_user_id, sent_to_name: names[b.sent_to_user_id] || null,
     sent_at: b.sent_at, item_count: b.item_count, company_id: b.company_id,
+    status: b.status, expires_at: b.expires_at || null, expired_at: b.expired_at || null,
   })) });
 }));
 
@@ -233,6 +284,7 @@ router.get('/:id/items', asyncHandler(async (req, res) => {
       id: batch.id, name: batch.name, item_count: batch.item_count, source: batch.source,
       columns: batch.columns || [], file_name: batch.file_name || null,
       created_by: batch.created_by, sent_to_user_id: batch.sent_to_user_id, sent_at: batch.sent_at,
+      status: batch.status, expires_at: batch.expires_at || null, expired_at: batch.expired_at || null,
     },
     items: rows.map(({ total_count, ...r }) => ({
       ...r,
@@ -495,7 +547,7 @@ router.delete('/:id', asyncHandler(async (req, res) => {
   let released = 0;
   for (let i = 0; i < parentIds.length; i += 500) {
     const { data: freed } = await supabaseAdmin.from('distribution_batch_items')
-      .update({ assigned_to: null, assigned_at: null, assigned_by: null, status: 'new', updated_at: new Date().toISOString() })
+      .update({ assigned_to: null, assigned_at: null, assigned_by: null, assign_expires_at: null, status: 'new', updated_at: new Date().toISOString() })
       .in('id', parentIds.slice(i, i + 500)).eq('status', 'assigned').select('id');
     released += (freed || []).length;
   }
@@ -528,18 +580,22 @@ router.get('/:id/lineage', asyncHandler(async (req, res) => {
 // ── fronter "My Numbers" feed — items in active batches sent to me ────────────
 router.get('/my-numbers', asyncHandler(async (req, res) => {
   const { data: myBatches } = await supabaseAdmin.from('distribution_batches')
-    .select('id, name, sent_at').eq('sent_to_user_id', req.user.id).eq('status', 'active');
+    .select('id, name, sent_at, expires_at').eq('sent_to_user_id', req.user.id).eq('status', 'active');
   const ids = (myBatches || []).map(b => b.id);
   if (!ids.length) return res.json({ numbers: [] });
-  const nameById = Object.fromEntries((myBatches || []).map(b => [b.id, b.name]));
+  const byId = Object.fromEntries((myBatches || []).map(b => [b.id, b]));
   const { data: items } = await supabaseAdmin.from('distribution_batch_items')
-    .select('id, phone_number, customer_name, status, notes, batch_id, position, lead_id, created_at, data, assigned_to, worked_at')
+    .select('id, phone_number, customer_name, status, notes, batch_id, position, lead_id, created_at, data, assigned_to, worked_at, assign_expires_at')
     .in('batch_id', ids).neq('status', 'excluded')   // fronter never sees rule-excluded numbers
+    .is('recalled_at', null)                         // taken back = no longer theirs
     .order('created_at', { ascending: false }).limit(2000);
   // list_name = the batch name so the #Numbers page can group batch items like
   // it groups number_lists; assignment_day null (batches aren't day-scoped).
+  // expires_at is the row's own deadline, falling back to the batch's, so the
+  // holder can see the numbers leaving before they do.
   res.json({ numbers: (items || []).map(i => ({
-    ...i, source: 'batch', list_name: nameById[i.batch_id] || 'Distributed batch', assignment_day: null,
+    ...i, source: 'batch', list_name: byId[i.batch_id]?.name || 'Distributed batch', assignment_day: null,
+    expires_at: i.assign_expires_at || byId[i.batch_id]?.expires_at || null,
   })) });
 }));
 
@@ -770,6 +826,96 @@ router.post('/:id/append', asyncHandler(async (req, res) => {
   res.json({ imported: fresh.length, skipped: rows.length - fresh.length, item_count });
 }));
 
+// ── the two gates every assignment passes ────────────────────────────────────
+// Both are server-side because the picker is UI, not a boundary:
+//   1. the ladder — strictly lower rank than me (utils/roleRank.js)
+//   2. the company — unless I distribute org-wide (superadmin / compliance)
+// Shared by /assign and /reassign so taking a number off one person and handing
+// it to another cannot route around the checks the direct path enforces.
+async function assertAssignable(req, recipientIds) {
+  const ids = [...new Set((recipientIds || []).filter(Boolean))];
+  if (!ids.length) return { error: 'At least one recipient is required' };
+  const sa = await isSuperAdmin(req.user.id);
+  const myLevel = sa ? 'superadmin' : req.user.role;
+  const { data: recRoles } = await supabaseAdmin.from('user_company_roles')
+    .select('user_id, company_id, custom_roles(level)')
+    .in('user_id', ids).eq('is_active', true);
+  const levelOf = new Map();
+  (recRoles || []).forEach(r => { if (!levelOf.has(r.user_id)) levelOf.set(r.user_id, r.custom_roles?.level || null); });
+
+  if (ids.includes(req.user.id)) return { error: 'You cannot assign numbers to yourself' };
+  if (ids.some(id => !canAssignTo(myLevel, levelOf.get(id)))) {
+    return { error: 'You can only assign to people below your own level' };
+  }
+  if (!sa && !CROSS_COMPANY_ROLES.has(req.user.role)) {
+    const myCompanies = (await getUserCompanies(req.user.id)).map(c => c.id);
+    const mine = new Set((recRoles || []).filter(r => myCompanies.includes(r.company_id)).map(r => r.user_id));
+    if (ids.some(id => !mine.has(id))) return { error: 'You can only assign to people in your own company' };
+  }
+  return { sa };
+}
+
+// ── one recipient's share: the child batch, the child rows, and the LOCK ─────
+// Factored out of /assign so /reassign (take back from A, hand to B) runs the
+// exact same path — the child batch, the parent_item_id link the mirror trigger
+// needs, the assignment lock and the event row are one thing, not three.
+// Throws on failure; the caller rolls back the batches it created.
+async function dealToRecipient({ batch, recipientId, items, actor, actorName, companyId, expiresAt, nameBase }) {
+  const holderName = actorName || 'assigned';
+  const childName = `${String(nameBase || batch.name).slice(0, 150)} → ${holderName}`;
+  const { data: child, error: bErr } = await supabaseAdmin.from('distribution_batches').insert({
+    name: childName, created_by: actor, parent_batch_id: batch.id, source: 'sub_batch',
+    sent_to_user_id: recipientId, company_id: companyId, item_count: items.length,
+    columns: batch.columns || [], expires_at: expiresAt || null,
+  }).select().single();
+  if (bErr) throw new Error(bErr.message);
+
+  // child rows carry the file's data AND point back at the parent row, so a
+  // disposition set downstream mirrors up the chain (trigger, mig 254).
+  // The child rows start UNASSIGNED. `assigned_to` means "handed to someone
+  // below out of THIS batch" — ownership of the batch itself is
+  // sent_to_user_id. Stamping the recipient here made every row in their own
+  // batch look already-dealt, so a fronter manager could not pass anything
+  // to their fronters (400: "every number is already assigned").
+  const rows = items.map((it, idx) => ({
+    batch_id: child.id, position: idx + 1, parent_item_id: it.id,
+    phone_number: it.phone_number, lead_id: it.lead_id || null, customer_name: it.customer_name || null,
+    data: it.data || {}, status: 'new', assign_expires_at: expiresAt || null,
+  }));
+  const { data: inserted, error: iErr } = await supabaseAdmin.from('distribution_batch_items').insert(rows).select('id, parent_item_id');
+  if (iErr) { await supabaseAdmin.from('distribution_batches').delete().eq('id', child.id); throw new Error(iErr.message); }
+
+  // the LOCK: stamp the parent rows so nobody can deal them twice. The deadline
+  // rides along so the assigner reads it on the row they already have open.
+  // Sliced: a 1000-number hand-over put 1000 uuids in the .in() URL.
+  for (const slice of idChunks(items.map(i => i.id))) {
+    await supabaseAdmin.from('distribution_batch_items').update({
+      assigned_to: recipientId, assigned_at: new Date().toISOString(), assigned_by: actor,
+      assign_expires_at: expiresAt || null, status: 'assigned', updated_at: new Date().toISOString(),
+    }).in('id', slice).is('assigned_to', null);
+  }
+
+  const events = (inserted || []).map(r => ({
+    item_id: r.parent_item_id, batch_id: batch.id, actor_id: actor,
+    action: 'assigned', to_status: 'assigned',
+    note: expiresAt ? `time limit: ${new Date(expiresAt).toISOString()}` : null,
+  }));
+  if (events.length) await supabaseAdmin.from('distribution_batch_item_events').insert(events).then(() => {}, () => {});
+
+  return { child, childName };
+}
+
+// May this caller take numbers back out of `batch`? The person who sent it, a
+// superadmin or compliance, or anyone holding a batch ABOVE it in the chain — a
+// number handed down two hops is still the original sender's to recall.
+// readonly_admin never reaches here: /recall is behind canSend().
+async function canRecallFrom(req, batch, sa) {
+  if (sa || req.user.role === 'compliance_manager') return true;
+  if (batch.created_by === req.user.id || batch.sent_to_user_id === req.user.id) return true;
+  const { data: anc } = await supabaseAdmin.rpc('app_batch_ancestors', { p_batch_id: batch.id });
+  return (anc || []).some(a => a.id !== batch.id && (a.created_by === req.user.id || a.sent_to_user_id === req.user.id));
+}
+
 // ── POST /:id/assign — hand numbers DOWN, and lock them to that person ───────
 // One endpoint covering every way the user asked to assign:
 //   • explicit rows            → assignments:[{recipient_id, item_ids:[…]}]
@@ -787,35 +933,20 @@ router.post('/:id/assign', asyncHandler(async (req, res) => {
   if (!list.length) return res.status(400).json({ error: 'At least one recipient is required' });
   const mode = req.body.mode === 'random' ? 'random' : 'sequential';
 
-  // Two gates, both server-side because the picker is UI, not a boundary:
-  //   1. the ladder — strictly lower rank than me (utils/roleRank.js)
-  //   2. the company — unless I distribute org-wide (superadmin / compliance)
-  const sa2 = await isSuperAdmin(req.user.id);
-  const myLevel = sa2 ? 'superadmin' : req.user.role;
-  const recipientIds = list.map(a => a.recipient_id);
-  const { data: recRoles } = await supabaseAdmin.from('user_company_roles')
-    .select('user_id, company_id, custom_roles(level)')
-    .in('user_id', recipientIds).eq('is_active', true);
-  const levelOf = new Map();
-  (recRoles || []).forEach(r => { if (!levelOf.has(r.user_id)) levelOf.set(r.user_id, r.custom_roles?.level || null); });
+  const gate = await assertAssignable(req, list.map(a => a.recipient_id));
+  if (gate.error) return res.status(403).json({ error: gate.error });
 
-  if (recipientIds.includes(req.user.id)) return res.status(403).json({ error: 'You cannot assign numbers to yourself' });
-  const tooSenior = list.filter(a => !canAssignTo(myLevel, levelOf.get(a.recipient_id)));
-  if (tooSenior.length) {
-    return res.status(403).json({ error: 'You can only assign to people below your own level' });
-  }
+  // Optional time limit: after it, the numbers leave the recipient on their own
+  // (scheduler → fn_expire_batch_assignments). Absent = a permanent hand-over,
+  // which is what every existing caller sends.
+  const exp = parseExpiry(req.body);
+  if (exp.error) return res.status(400).json({ error: exp.error });
+  const expiresAt = exp.expiresAt;
 
-  if (!sa2 && !CROSS_COMPANY_ROLES.has(req.user.role)) {
-    const myCompanies = (await getUserCompanies(req.user.id)).map(c => c.id);
-    const mine = new Set((recRoles || []).filter(r => myCompanies.includes(r.company_id)).map(r => r.user_id));
-    const outside = list.filter(a => !mine.has(a.recipient_id));
-    if (outside.length) return res.status(403).json({ error: 'You can only assign to people in your own company' });
-  }
-
-  // The assignable pool: unassigned, not rule-excluded, in batch order.
+  // The assignable pool: unassigned, not rule-excluded, not taken back, in batch order.
   const { data: poolRows } = await supabaseAdmin.from('distribution_batch_items')
     .select('id, phone_number, lead_id, customer_name, data, position, status, assigned_to')
-    .eq('batch_id', batch.id).is('assigned_to', null).neq('status', 'excluded')
+    .eq('batch_id', batch.id).is('assigned_to', null).is('recalled_at', null).neq('status', 'excluded')
     .order('position', { ascending: true, nullsFirst: false }).order('created_at', { ascending: true })
     .limit(MAX_UPLOAD_ROWS);
   let pool = poolRows || [];
@@ -859,49 +990,20 @@ router.post('/:id/assign', asyncHandler(async (req, res) => {
       // the holder, so "WaveTech Aug → Ali R" is what everyone sees in the list
       // instead of five identical "→ assigned" rows.
       const holderName = nameOf[part.recipient_id] || 'assigned';
-      const childName = `${String(req.body.name || batch.name).slice(0, 150)} → ${holderName}`;
-      const { data: child, error: bErr } = await supabaseAdmin.from('distribution_batches').insert({
-        name: childName, created_by: req.user.id, parent_batch_id: batch.id, source: 'sub_batch',
-        sent_to_user_id: part.recipient_id, company_id: companyId, item_count: part.items.length,
-        columns: batch.columns || [],
-      }).select().single();
-      if (bErr) throw new Error(bErr.message);
+      const { child, childName } = await dealToRecipient({
+        batch, recipientId: part.recipient_id, items: part.items,
+        actor: req.user.id, actorName: holderName, companyId, expiresAt,
+        nameBase: req.body.name || batch.name,
+      });
       created.push(child.id);
-
-      // child rows carry the file's data AND point back at the parent row, so a
-      // disposition set downstream mirrors up the chain (trigger, mig 254).
-      // The child rows start UNASSIGNED. `assigned_to` means "handed to someone
-      // below out of THIS batch" — ownership of the batch itself is
-      // sent_to_user_id. Stamping the recipient here made every row in their own
-      // batch look already-dealt, so a fronter manager could not pass anything
-      // to their fronters (400: "every number is already assigned").
-      const rows = part.items.map((it, idx) => ({
-        batch_id: child.id, position: idx + 1, parent_item_id: it.id,
-        phone_number: it.phone_number, lead_id: it.lead_id || null, customer_name: it.customer_name || null,
-        data: it.data || {}, status: 'new',
-      }));
-      const { data: inserted, error: iErr } = await supabaseAdmin.from('distribution_batch_items').insert(rows).select('id, parent_item_id');
-      if (iErr) throw new Error(iErr.message);
-
-      // the LOCK: stamp the parent rows so nobody can deal them twice
-      const parentIds = part.items.map(i => i.id);
-      await supabaseAdmin.from('distribution_batch_items').update({
-        assigned_to: part.recipient_id, assigned_at: new Date().toISOString(), assigned_by: req.user.id,
-        status: 'assigned', updated_at: new Date().toISOString(),
-      }).in('id', parentIds).is('assigned_to', null);
-
-      const events = (inserted || []).map(r => ({
-        item_id: r.parent_item_id, batch_id: batch.id, actor_id: req.user.id,
-        action: 'assigned', to_status: 'assigned', note: null,
-      }));
-      if (events.length) await supabaseAdmin.from('distribution_batch_item_events').insert(events).then(() => {}, () => {});
 
       notifications.notifyUsers([part.recipient_id], {
         type: 'batch_received', title: 'Numbers assigned to you',
-        message: `${req.user.name || 'A manager'} assigned you ${part.items.length} numbers from "${batch.name}".`,
+        message: `${req.user.name || 'A manager'} assigned you ${part.items.length} numbers from "${batch.name}".`
+               + (expiresAt ? ` They go back automatically in ${untilText(expiresAt)}.` : ''),
         companyId, data: { batch_id: child.id, kind: 'distribution_batch' }, dedupBase: `batch_${child.id}`,
       }).catch(() => {});
-      summary.push({ batch_id: child.id, batch_name: childName, recipient_id: part.recipient_id, recipient_name: holderName, item_count: part.items.length });
+      summary.push({ batch_id: child.id, batch_name: childName, recipient_id: part.recipient_id, recipient_name: holderName, item_count: part.items.length, expires_at: expiresAt });
     }
   } catch (e) {
     if (created.length) await supabaseAdmin.from('distribution_batches').delete().in('id', created);
@@ -912,19 +1014,368 @@ router.post('/:id/assign', asyncHandler(async (req, res) => {
   res.status(201).json({ assigned, children: summary, remaining_unassigned: pool.length - assigned });
 }));
 
-// ── POST /:id/unassign — take numbers back (the lock is reversible) ──────────
+// ── taking numbers back ──────────────────────────────────────────────────────
+// ONE implementation, three doors: the Unassign button on a batch, the "take
+// back" action in the number report, and the expiry job (which calls the same
+// SQL function directly). It always works on the rows AS THE HOLDER HAS THEM,
+// because that is what has to disappear — releasing the assigner's lock without
+// removing the holder's copy left the fronter still dialling numbers their
+// manager had already handed to somebody else.
+async function recallHolderItems(req, itemIds, reason) {
+  const rows = [];
+  for (const slice of idChunks(itemIds)) {
+    const { data } = await supabaseAdmin.from('distribution_batch_items')
+      .select('id, batch_id, parent_item_id, recalled_at').in('id', slice);
+    rows.push(...(data || []));
+  }
+  const live = rows.filter(r => !r.recalled_at);
+  if (!live.length) return { status: 400, error: 'Those numbers have already been taken back' };
+
+  const batchIds = [...new Set(live.map(i => i.batch_id))];
+  const { data: bRows } = await supabaseAdmin.from('distribution_batches')
+    .select('id, name, created_by, sent_to_user_id, company_id, status').in('id', batchIds);
+  const batches = bRows || [];
+  const sa = await isSuperAdmin(req.user.id);
+  const allowed = new Set();
+  for (const b of batches) if (await canRecallFrom(req, b, sa)) allowed.add(b.id);
+  const take = live.filter(i => allowed.has(i.batch_id));
+  if (!take.length) return { status: 403, error: 'Those numbers were sent by someone outside your chain — you cannot take them back' };
+
+  const { data, error } = await supabaseAdmin.rpc('fn_recall_batch_items', {
+    p_item_ids: take.map(i => i.id), p_actor: req.user.id, p_reason: reason || null,
+  });
+  if (error) return { status: 500, error: error.message };
+  const out = Array.isArray(data) ? (data[0] || {}) : (data || {});
+
+  // tell the people who lost them — silently vanishing numbers read as a bug
+  const byHolder = new Map();
+  take.forEach(i => {
+    const b = batches.find(x => x.id === i.batch_id);
+    if (!b?.sent_to_user_id) return;
+    const cur = byHolder.get(b.sent_to_user_id) || { n: 0, batch: b };
+    cur.n += 1; byHolder.set(b.sent_to_user_id, cur);
+  });
+  for (const [uid, v] of byHolder) {
+    notifications.notifyUsers([uid], {
+      type: 'batch_recalled', title: 'Numbers taken back',
+      message: `${req.user.name || 'A manager'} took back ${v.n} number${v.n === 1 ? '' : 's'} from "${v.batch.name}".`
+             + (reason ? ` Reason: ${reason}` : ''),
+      companyId: v.batch.company_id, data: { batch_id: v.batch.id, kind: 'distribution_batch' },
+      dedupBase: `recall_${v.batch.id}`,
+    }).catch(() => {});
+  }
+
+  logger.success('DIST_BATCH', `recall ${take.length} item(s) across ${batchIds.length} batch(es) by ${req.user.id}${reason ? ` — ${reason}` : ''}`);
+  return {
+    result: {
+      recalled: Number(out.recalled || 0),
+      released: Number(out.released || 0),
+      skipped: itemIds.length - take.length,
+      // the rows that are free again, so the caller can deal them straight on
+      parent_item_ids: [...new Set(take.map(i => i.parent_item_id).filter(Boolean))],
+    },
+  };
+}
+
+// The rows named here are rows in THIS batch (the assigner's own view), so the
+// copies to remove are their children. Kept at the old path and the old shape —
+// the workspace's Unassign button and its "n taken back" toast are unchanged.
 router.post('/:id/unassign', asyncHandler(async (req, res) => {
   if (!canSend(req)) return res.status(403).json({ error: 'Not allowed' });
   const { batch, error } = await loadVisibleBatch(req, req.params.id);
   if (error) return res.status(error).json({ error: error === 404 ? 'Batch not found' : 'Not allowed' });
-  const itemIds = Array.isArray(req.body?.item_ids) ? req.body.item_ids.filter(Boolean) : [];
+  const itemIds = Array.isArray(req.body?.item_ids) ? req.body.item_ids.filter(Boolean).slice(0, 5000) : [];
   if (!itemIds.length) return res.status(400).json({ error: 'item_ids is required' });
-  // only rows nobody has worked yet — a disposition is history, not a draft
-  const { data, error: uErr } = await supabaseAdmin.from('distribution_batch_items')
-    .update({ assigned_to: null, assigned_at: null, assigned_by: null, status: 'new', updated_at: new Date().toISOString() })
-    .eq('batch_id', batch.id).in('id', itemIds).eq('status', 'assigned').select('id');
-  if (uErr) return res.status(500).json({ error: uErr.message });
-  res.json({ unassigned: (data || []).length, skipped: itemIds.length - (data || []).length });
+
+  const childIds = [];
+  for (const slice of idChunks(itemIds)) {
+    const { data: kids } = await supabaseAdmin.from('distribution_batch_items')
+      .select('id').in('parent_item_id', slice).is('recalled_at', null);
+    childIds.push(...(kids || []).map(k => k.id));
+  }
+
+  let recalled = 0, released = 0;
+  if (childIds.length) {
+    const out = await recallHolderItems(req, childIds, req.body?.reason ? String(req.body.reason).slice(0, 300) : 'taken back');
+    if (out.error) return res.status(out.status).json({ error: out.error });
+    recalled = out.result.recalled; released = out.result.released;
+  }
+  // Rows locked without a child copy (a pre-322 row, or a lock left behind by a
+  // deleted batch) still have to let go — release them directly.
+  for (const slice of idChunks(itemIds)) {
+    const { data: freed } = await supabaseAdmin.from('distribution_batch_items')
+      .update({ assigned_to: null, assigned_at: null, assigned_by: null, assign_expires_at: null, status: 'new', updated_at: new Date().toISOString() })
+      .eq('batch_id', batch.id).in('id', slice).eq('status', 'assigned').select('id');
+    released += (freed || []).length;
+  }
+
+  res.json({ unassigned: released, recalled, skipped: Math.max(0, itemIds.length - released) });
+}));
+
+// ── POST /recall — take numbers back from wherever they are sitting ──────────
+// Driven by the number report: the ids are the HOLDER's rows, which is exactly
+// what the report lists. Works across batches and across companies in one call.
+router.post('/recall', asyncHandler(async (req, res) => {
+  if (!canSend(req)) return res.status(403).json({ error: 'Not allowed to take numbers back' });
+  const itemIds = Array.isArray(req.body?.item_ids) ? [...new Set(req.body.item_ids.filter(Boolean))].slice(0, 5000) : [];
+  if (!itemIds.length) return res.status(400).json({ error: 'item_ids is required' });
+  const reason = req.body?.reason ? String(req.body.reason).slice(0, 300) : null;
+  const out = await recallHolderItems(req, itemIds, reason);
+  if (out.error) return res.status(out.status).json({ error: out.error });
+  res.json(out.result);
+}));
+
+// ── POST /:id/recall-all — take a whole batch back from its holder ───────────
+router.post('/:id/recall-all', asyncHandler(async (req, res) => {
+  if (!canSend(req)) return res.status(403).json({ error: 'Not allowed to take numbers back' });
+  const { data: batch } = await supabaseAdmin.from('distribution_batches').select('*').eq('id', req.params.id).maybeSingle();
+  if (!batch) return res.status(404).json({ error: 'Batch not found' });
+  const sa = await isSuperAdmin(req.user.id);
+  if (!(await canRecallFrom(req, batch, sa))) return res.status(403).json({ error: 'Not allowed' });
+  if (batch.status !== 'active') return res.status(400).json({ error: 'That batch is not active any more' });
+
+  const { data: live } = await supabaseAdmin.from('distribution_batch_items')
+    .select('id').eq('batch_id', batch.id).is('recalled_at', null).limit(MAX_UPLOAD_ROWS);
+  const ids = (live || []).map(i => i.id);
+  let result = { recalled: 0, released: 0 };
+  if (ids.length) {
+    const out = await recallHolderItems(req, ids, req.body?.reason ? String(req.body.reason).slice(0, 300) : 'batch taken back');
+    if (out.error) return res.status(out.status).json({ error: out.error });
+    result = out.result;
+  }
+  await supabaseAdmin.from('distribution_batches')
+    .update({ status: 'expired', expired_at: new Date().toISOString(), recalled_by: req.user.id }).eq('id', batch.id);
+  res.json({ ok: true, ...result });
+}));
+
+// ── PATCH /:id/expiry — set, extend or lift the time limit ───────────────────
+// The deadline lives on the batch AND on each of its rows (the row is what the
+// assigner has open), so both move together or the two disagree.
+router.patch('/:id/expiry', asyncHandler(async (req, res) => {
+  if (!canSend(req)) return res.status(403).json({ error: 'Not allowed' });
+  const { data: batch } = await supabaseAdmin.from('distribution_batches').select('*').eq('id', req.params.id).maybeSingle();
+  if (!batch) return res.status(404).json({ error: 'Batch not found' });
+  const sa = await isSuperAdmin(req.user.id);
+  if (!(await canRecallFrom(req, batch, sa))) return res.status(403).json({ error: 'Only the person who sent these numbers (or someone above them) can change the time limit' });
+  if (batch.status !== 'active') return res.status(400).json({ error: 'That batch has already been taken back — assign the numbers again instead' });
+
+  const exp = parseExpiry(req.body);
+  if (exp.error) return res.status(400).json({ error: exp.error });
+  const expiresAt = exp.expiresAt;   // null = lift the limit, keep the numbers
+
+  const { error: bErr } = await supabaseAdmin.from('distribution_batches').update({ expires_at: expiresAt }).eq('id', batch.id);
+  if (bErr) return res.status(500).json({ error: bErr.message });
+  await supabaseAdmin.from('distribution_batch_items')
+    .update({ assign_expires_at: expiresAt, updated_at: new Date().toISOString() })
+    .eq('batch_id', batch.id).is('recalled_at', null);
+  // the parent rows carry it too — that is where the assigner reads it
+  const { data: kidRows } = await supabaseAdmin.from('distribution_batch_items')
+    .select('parent_item_id').eq('batch_id', batch.id).is('recalled_at', null)
+    .not('parent_item_id', 'is', null).limit(MAX_UPLOAD_ROWS);
+  const parentIds = [...new Set((kidRows || []).map(r => r.parent_item_id))];
+  for (const slice of idChunks(parentIds)) {
+    await supabaseAdmin.from('distribution_batch_items')
+      .update({ assign_expires_at: expiresAt, updated_at: new Date().toISOString() })
+      .in('id', slice).eq('status', 'assigned');
+  }
+
+  if (batch.sent_to_user_id && batch.sent_to_user_id !== req.user.id) {
+    notifications.notifyUsers([batch.sent_to_user_id], {
+      type: 'batch_recalled', title: expiresAt ? 'Time limit changed' : 'Time limit lifted',
+      message: expiresAt
+        ? `"${batch.name}" now goes back in ${untilText(expiresAt)}.`
+        : `"${batch.name}" is yours to keep — the time limit was removed.`,
+      companyId: batch.company_id, data: { batch_id: batch.id, kind: 'distribution_batch' },
+      dedupBase: `expiry_${batch.id}`,
+    }).catch(() => {});
+  }
+  logger.success('DIST_BATCH', `expiry ${batch.id} → ${expiresAt || 'none'} by ${req.user.id}`);
+  res.json({ ok: true, expires_at: expiresAt });
+}));
+
+// ── the number report: "where is this number sitting?" ───────────────────────
+// Paste a list, or upload the file that was distributed in the first place, and
+// see who is holding each number right now — then take them back, or take them
+// back and hand them to someone else, without leaving the report.
+// Manager and up (ROSTER_ROLES); the RPC scopes a manager to their own tree +
+// their companies' agents, so a manager can never read another tenant's floor.
+function parsePhoneList(body) {
+  const raw = [];
+  if (Array.isArray(body?.phones)) raw.push(...body.phones);
+  if (typeof body?.text === 'string') raw.push(...body.text.split(/[\s,;]+/));
+  const out = [];
+  const seen = new Set();
+  for (const r of raw) {
+    const d = digits(r);
+    const phone = d.length === 11 && d[0] === '1' ? d.slice(1) : d;
+    if (phone.length !== 10 || seen.has(phone)) continue;
+    seen.add(phone); out.push(phone);
+  }
+  return out;
+}
+
+async function numberLookup(req, phones, includeRecalled) {
+  const sa = await isSuperAdmin(req.user.id);
+  const unrestricted = sa || UNRESTRICTED_ROLES.has(req.user.role);
+  const companyIds = unrestricted ? null : (await getUserCompanies(req.user.id)).map(c => c.id);
+  const { data, error } = await supabaseAdmin.rpc('app_batch_number_lookup', {
+    p_phones: phones,
+    p_user: req.user.id,
+    p_unrestricted: unrestricted,
+    p_company_ids: (companyIds && companyIds.length) ? companyIds : null,
+    p_include_recalled: !!includeRecalled,
+    p_limit: 5000,
+  });
+  if (error) return { status: 500, error: error.message };
+
+  const rows = data || [];
+  const names = await namesFor(rows.flatMap(r => [r.holder_id, r.sender_id, r.assigned_to]));
+
+  // Can this caller act on each row? Ownership is per BATCH, so it is answered
+  // once per batch, not once per number (a 1000-number paste hits a handful).
+  const canBy = new Map();
+  const batchIds = [...new Set(rows.map(r => r.batch_id))];
+  if (batchIds.length) {
+    const bRows = [];
+    for (const slice of idChunks(batchIds)) {
+      const { data } = await supabaseAdmin.from('distribution_batches')
+        .select('id, created_by, sent_to_user_id, status').in('id', slice);
+      bRows.push(...(data || []));
+    }
+    // canRecallFrom walks the ancestor chain, which is a query per batch. That
+    // is nothing for the handful a normal lookup touches, so it is capped: past
+    // the cap only the batches this person themselves sent or holds are
+    // actionable, which is the answer that needs no walk.
+    const WALK_CAP = 60;
+    for (let i = 0; i < bRows.length; i++) {
+      const b = bRows[i];
+      canBy.set(b.id, i < WALK_CAP
+        ? await canRecallFrom(req, b, sa)
+        : (sa || b.created_by === req.user.id || b.sent_to_user_id === req.user.id));
+    }
+  }
+
+  // group by phone — the question is about the NUMBER, not the row
+  const byPhone = new Map();
+  for (const r of rows) {
+    const list = byPhone.get(r.phone_number) || [];
+    list.push({
+      item_id: r.item_id, batch_id: r.batch_id, batch_name: r.batch_name, batch_status: r.batch_status,
+      holder_id: r.holder_id, holder_name: names[r.holder_id] || null,
+      sender_id: r.sender_id, sender_name: names[r.sender_id] || null,
+      assigned_to: r.assigned_to, assigned_to_name: names[r.assigned_to] || null,
+      assigned_at: r.assigned_at, sent_at: r.sent_at,
+      expires_at: r.assign_expires_at || r.batch_expires_at || null,
+      status: r.status, customer_name: r.customer_name, notes: r.notes,
+      worked_at: r.worked_at, recalled_at: r.recalled_at,
+      hop: r.hop, passed_on: r.passed_on,
+      can_recall: canBy.get(r.batch_id) === true && !r.recalled_at,
+    });
+    byPhone.set(r.phone_number, list);
+  }
+
+  const results = phones.map(p => ({ phone: p, holders: byPhone.get(p) || [] }));
+  return {
+    result: {
+      results,
+      found: results.filter(r => r.holders.length).length,
+      not_found: results.filter(r => !r.holders.length).map(r => r.phone),
+      searched: phones.length,
+      unrestricted,
+    },
+  };
+}
+
+router.post('/number-lookup', asyncHandler(async (req, res) => {
+  if (!ROSTER_ROLES.has(req.user.role) && !(await isSuperAdmin(req.user.id))) {
+    return res.status(403).json({ error: 'Not allowed' });
+  }
+  const phones = parsePhoneList(req.body);
+  if (!phones.length) return res.status(400).json({ error: 'No valid 10-digit numbers found — paste them or upload the file' });
+  if (phones.length > 5000) return res.status(400).json({ error: 'Max 5000 numbers per lookup — split the list' });
+  const out = await numberLookup(req, phones, req.body?.include_recalled);
+  if (out.error) return res.status(out.status).json({ error: out.error });
+  res.json(out.result);
+}));
+
+// single-number convenience (the search box next to a record)
+router.get('/number-lookup', asyncHandler(async (req, res) => {
+  if (!ROSTER_ROLES.has(req.user.role) && !(await isSuperAdmin(req.user.id))) {
+    return res.status(403).json({ error: 'Not allowed' });
+  }
+  const phones = parsePhoneList({ text: String(req.query.phone || '') });
+  if (!phones.length) return res.status(400).json({ error: 'A valid 10-digit number is required' });
+  const out = await numberLookup(req, phones, req.query.include_recalled === 'true');
+  if (out.error) return res.status(out.status).json({ error: out.error });
+  res.json(out.result);
+}));
+
+// ── POST /reassign — take them off one person and give them to another ───────
+// One action, because two (recall, then hunt for the freed rows) is how numbers
+// end up sitting free in a batch nobody is looking at. The freed rows are the
+// PARENT rows the recall released, and they are dealt through the same path a
+// normal assignment uses — ladder gate, company gate, lock, event, notification.
+router.post('/reassign', asyncHandler(async (req, res) => {
+  if (!canSend(req)) return res.status(403).json({ error: 'Not allowed to assign' });
+  const itemIds = Array.isArray(req.body?.item_ids) ? [...new Set(req.body.item_ids.filter(Boolean))].slice(0, 5000) : [];
+  const recipientId = req.body?.recipient_id;
+  if (!itemIds.length) return res.status(400).json({ error: 'item_ids is required' });
+  if (!recipientId) return res.status(400).json({ error: 'recipient_id is required' });
+
+  const gate = await assertAssignable(req, [recipientId]);
+  if (gate.error) return res.status(403).json({ error: gate.error });
+  const exp = parseExpiry(req.body);
+  if (exp.error) return res.status(400).json({ error: exp.error });
+  const expiresAt = exp.expiresAt;
+
+  const taken = await recallHolderItems(req, itemIds, req.body?.reason ? String(req.body.reason).slice(0, 300) : 'moved to someone else');
+  if (taken.error) return res.status(taken.status).json({ error: taken.error });
+  const parentIds = taken.result.parent_item_ids;
+  if (!parentIds.length) return res.json({ ...taken.result, assigned: 0, children: [], note: 'Nothing could be re-assigned — those numbers were already worked, so they stay on the record.' });
+
+  // only the rows the recall actually freed (a worked row keeps its holder)
+  const free = [];
+  for (const slice of idChunks(parentIds)) {
+    const { data: freeRows } = await supabaseAdmin.from('distribution_batch_items')
+      .select('id, batch_id, phone_number, lead_id, customer_name, data, position')
+      .in('id', slice).is('assigned_to', null).is('recalled_at', null);
+    free.push(...(freeRows || []));
+  }
+  if (!free.length) return res.json({ ...taken.result, assigned: 0, children: [], note: 'Nothing could be re-assigned — those numbers were already worked, so they stay on the record.' });
+
+  const byBatch = new Map();
+  free.forEach(r => { const l = byBatch.get(r.batch_id) || []; l.push(r); byBatch.set(r.batch_id, l); });
+  const { data: parents } = await supabaseAdmin.from('distribution_batches').select('*').in('id', [...byBatch.keys()]);
+  const cmap = await recipientCompanies([recipientId]);
+  const nameOf = await namesFor([recipientId]);
+
+  const created = []; const children = [];
+  try {
+    for (const parent of (parents || [])) {
+      const items = byBatch.get(parent.id) || [];
+      if (!items.length) continue;
+      const companyId = cmap[recipientId] || parent.company_id || null;
+      const { child, childName } = await dealToRecipient({
+        batch: parent, recipientId, items, actor: req.user.id,
+        actorName: nameOf[recipientId] || 'assigned', companyId, expiresAt,
+        nameBase: req.body.name || parent.name,
+      });
+      created.push(child.id);
+      notifications.notifyUsers([recipientId], {
+        type: 'batch_received', title: 'Numbers assigned to you',
+        message: `${req.user.name || 'A manager'} assigned you ${items.length} numbers from "${parent.name}".`
+               + (expiresAt ? ` They go back automatically in ${untilText(expiresAt)}.` : ''),
+        companyId, data: { batch_id: child.id, kind: 'distribution_batch' }, dedupBase: `batch_${child.id}`,
+      }).catch(() => {});
+      children.push({ batch_id: child.id, batch_name: childName, item_count: items.length });
+    }
+  } catch (e) {
+    if (created.length) await supabaseAdmin.from('distribution_batches').delete().in('id', created);
+    return res.status(500).json({ error: e.message });
+  }
+  const assigned = children.reduce((a, c) => a + c.item_count, 0);
+  logger.success('DIST_BATCH', `reassign ${assigned} number(s) → ${recipientId} by ${req.user.id}`);
+  res.json({ ...taken.result, assigned, children, expires_at: expiresAt });
 }));
 
 // ── GET /:id/activity — every action on every number in this batch ───────────

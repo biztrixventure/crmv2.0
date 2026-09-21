@@ -123,6 +123,43 @@ Accounting + HR (283-290) are **applied** (SQL-verified 2026-08-23: 24 tables, 2
 
 291 + 292 are **applied** (SQL-verified 2026-08-23). 291 = `transfers.xfer_seq`, uniqueness moved to `(vicidial_vendor_code, created_by, xfer_seq)` so a re-transferred recycled lead creates a NEW transfer instead of overwriting the fronter's earlier one — see "Re-transferred leads" below. 292 = repaired 926 transfers whose customer name had been blanked (originals in `transfers_name_backfill_292`, reversible).
 
+322 is **applied** (SQL-verified 2026-09-21: 3 new `distribution_batches` columns, 4 new `distribution_batch_items` columns, `fn_recall_batch_items` / `fn_expire_batch_assignments` / `app_batch_number_lookup` present; the recall path was exercised inside a rolled-back transaction — 1 named row recalled cascaded to 2, parent row unlocked). See "Lent numbers" below.
+
+### Lent numbers — time limits + take-back (mig 322)
+Numbers can be **lent, not given**: an assignment carries a deadline, and when it
+passes the numbers leave the holder on their own. The loan lives on
+`distribution_batches.expires_at` and is mirrored onto
+`distribution_batch_items.assign_expires_at` (the row the assigner has open).
+- **A take-back works on the HOLDER's rows, never on the assigner's lock alone.**
+  Releasing `assigned_to` without hiding the holder's child row left the fronter
+  still dialling numbers that had been handed to somebody else. One SQL function
+  does it — `fn_recall_batch_items(item_ids, actor, reason)` — and it walks DOWN
+  `parent_item_id`, so anyone the holder passed them to loses them too. Every
+  door (`POST /recall`, `/:id/unassign`, `/:id/recall-all`, `/reassign`, the
+  expiry job) calls it. Do not write a second one.
+- Rows are **hidden (`recalled_at`), never deleted** — the event log and the
+  disposition survive. Every list filters `recalled_at IS NULL`
+  (`app_batch_items`, `app_batch_status_counts`, `app_batch_scoreboard`,
+  `app_batch_roster`, `GET /my-numbers`), so a new query MUST filter it too.
+- **Only untouched rows unlock.** A row carrying a real disposition keeps its
+  outcome and its holder; `/reassign` skips those and says so in the response.
+- `fn_mirror_item_status` no longer mirrors status `'new'` upward: a release is
+  not an outcome, and mirroring it reset ancestor rows to "New" while the
+  manager below still legitimately held them.
+- Batch status gained `'expired'`. The holder's inbox filters to `'active'`, so
+  an expired batch simply disappears for them while the sender still sees it in
+  Sent / All.
+- The job is `utils/batchExpiry.js` → `fn_expire_batch_assignments()`, every 5
+  min from `utils/scheduler.js`. No-op for assignments without a deadline, which
+  is all of them until someone sets one.
+- Report: `POST /distribution-batches/number-lookup` (paste or upload a file →
+  who holds each number, whole chain) — manager and up, scoped by
+  `app_batch_number_lookup` exactly like the 159 roster. UI is
+  `components/Distribution/NumberFinder.jsx`, opened from Batches → Find numbers.
+- Deadline UI lives in ONE place: `components/Distribution/ExpiryPicker.jsx`
+  (+ `utils/expiry.js` for the countdown wording). `datetime-local` → UTC before
+  sending, same rule as `callback_at`.
+
 ### Re-transferred leads (mig 291)
 A VICIdial `lead_id` names a **LEAD, not a transfer EVENT** — the dialer recycles it, so a fronter transferring the same customer again sends the same `vicidial_vendor_code`. Each XFER must get its **own** transfer row so each keeps its own closer disposition; the earlier row is never edited. `a775261` broke this (it reset the old row and merged the incoming payload over its `form_data`, blanking the customer to the literal word "Lead"); fixed in `9b79a16`.
 - XFER idempotency keys on **TIME** (`XFER_DEDUP_MS`, 2 min), never on the code — a duplicate webhook lands in seconds, a genuine re-transfer is minutes-to-weeks later. Restoring code-only idempotency silently collapses real transfers.

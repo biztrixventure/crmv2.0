@@ -3,12 +3,14 @@ import { createPortal } from 'react-dom';
 import {
   X, Loader2, Users, Send, Trash2, GitBranch, RefreshCw, Search, StickyNote,
   PhoneForwarded, Clock, ThumbsDown, Voicemail, PhoneOff, CheckCircle2, Circle,
-  Activity, ChevronLeft, ChevronRight, UserMinus,
+  Activity, ChevronLeft, ChevronRight, UserMinus, Timer, Undo2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import client from '../../api/client';
 import UserPicker from './UserPicker';
+import ExpiryPicker, { EMPTY_EXPIRY, expiryPayload } from './ExpiryPicker';
 import { Lineage } from './BatchLineage';
+import { timeLeft, fmtDeadline, toLocalInputValue } from '../../utils/expiry';
 
 // One batch, worked end to end: every number in it (1000+ rows, paged), every
 // column the file carried, who holds each number, what the fronter did with it,
@@ -59,12 +61,19 @@ export default function BatchWorkspace({ batch, me, canSend, isSuper, onClose, o
   const [trail, setTrail] = useState([]);          // drill-down breadcrumb of batches
   const [lineage, setLineage] = useState(null);
   const [assignOpen, setAssignOpen] = useState(false);
+  const [expiryOpen, setExpiryOpen] = useState(false);   // change / lift the time limit
   const [noteFor, setNoteFor] = useState(null);    // item being noted
   const [noteText, setNoteText] = useState('');
   const [busy, setBusy] = useState(false);
 
   const isHolder = meta?.sent_to_user_id === me?.id;
   const canDelete = isSuper || meta?.created_by === me?.id;
+  // Whoever sent this batch (or a superadmin) owns the loan: they can change the
+  // deadline and pull the whole thing back early.
+  const canLend = canSend && (isSuper || meta?.created_by === me?.id);
+  const isLent = !!meta?.sent_to_user_id && meta?.sent_to_user_id !== me?.id;
+  const left = timeLeft(meta?.expires_at);
+  const isExpired = meta?.status === 'expired';
   // A number is worked by the person holding the batch — and a manager can fix a
   // wrong disposition on a batch they sent.
   const canDisposition = isHolder || isSuper || meta?.created_by === me?.id;
@@ -160,6 +169,18 @@ export default function BatchWorkspace({ batch, me, canSend, isSuper, onClose, o
     } catch (e) { toast.error(e.response?.data?.error || 'Could not unassign'); }
     finally { setBusy(false); }
   };
+  // Take the WHOLE batch back from the person holding it — the early version of
+  // the deadline, for when the answer is "now".
+  const recallAll = async () => {
+    if (!window.confirm(`Take every number in "${meta.name}" back from ${meta.sent_to_name || 'the holder'}?\n\nThey lose the list immediately, and so does anyone they passed numbers on to. Numbers nobody worked go back to unassigned; worked ones keep their outcome.`)) return;
+    setBusy(true);
+    try {
+      const r = await client.post(`distribution-batches/${batch.id}/recall-all`);
+      toast.success(`${r.data.recalled} numbers taken back${r.data.released ? ` · ${r.data.released} free to assign again` : ''}`);
+      onChanged?.();
+    } catch (e) { toast.error(e.response?.data?.error || 'Could not take them back'); }
+    finally { setBusy(false); }
+  };
   const del = async () => {
     if (!window.confirm('Delete this batch AND every sub-batch it was sent to?\n\nEveryone it was assigned to loses it. Numbers nobody has worked yet go back to unassigned so they can be dealt again. This cannot be undone.')) return;
     try {
@@ -188,12 +209,39 @@ export default function BatchWorkspace({ batch, me, canSend, isSuper, onClose, o
             {counts.total} numbers · <span style={{ color: '#4f46e5' }}>{counts.assigned} assigned</span> · <span style={{ color: 'var(--color-text-tertiary)' }}>{counts.unassigned} free</span>
             {meta.file_name ? ` · ${meta.file_name}` : ''}
           </div>
+          {/* the loan, stated where everyone sees it — the holder reads the same
+              line as the manager, so "nobody told me" cannot happen */}
+          {(meta.expires_at || isExpired) && (
+            <div className="text-xs font-semibold mt-0.5 flex items-center gap-1 flex-wrap"
+              style={{ color: isExpired ? 'var(--color-warning-600)' : (left.expired || left.urgent) ? 'var(--color-error-600)' : left.soon ? 'var(--color-warning-600)' : 'var(--color-text-secondary)' }}>
+              <Timer size={12} />
+              {isExpired
+                ? `These numbers went back on ${fmtDeadline(meta.expired_at) || 'their deadline'}`
+                : isHolder
+                  ? `These numbers go back on ${fmtDeadline(meta.expires_at)} — ${left.text}`
+                  : `Goes back to you on ${fmtDeadline(meta.expires_at)} — ${left.text}`}
+            </div>
+          )}
         </div>
         <div className="ml-auto flex items-center gap-2">
           <button onClick={() => { setView('items'); load(); loadCounts(); }} className="p-2 rounded-lg" style={{ border: '1px solid var(--color-border)' }} title="Refresh"><RefreshCw size={15} className={loading ? 'animate-spin' : ''} style={{ color: 'var(--color-text-secondary)' }} /></button>
           <button onClick={() => openPeople()} className="text-xs font-semibold px-2.5 py-2 rounded-lg flex items-center gap-1.5" style={{ border: '1px solid var(--color-border)', color: view === 'people' ? 'var(--color-primary-600)' : 'var(--color-text)' }}><Users size={14} /> By person</button>
           <button onClick={openActivity} className="text-xs font-semibold px-2.5 py-2 rounded-lg flex items-center gap-1.5" style={{ border: '1px solid var(--color-border)', color: view === 'activity' ? 'var(--color-primary-600)' : 'var(--color-text)' }}><Activity size={14} /> Activity</button>
           <button onClick={openLineage} className="text-xs font-semibold px-2.5 py-2 rounded-lg flex items-center gap-1.5" style={{ border: '1px solid var(--color-border)', color: 'var(--color-text)' }}><GitBranch size={14} /> Lineage</button>
+          {canLend && isLent && !isExpired && (
+            <>
+              <button onClick={() => setExpiryOpen(true)} className="text-xs font-semibold px-2.5 py-2 rounded-lg flex items-center gap-1.5"
+                style={{ border: '1px solid var(--color-border)', color: meta.expires_at ? 'var(--color-primary-600)' : 'var(--color-text)' }}
+                title="Set, extend or lift the time limit on this batch">
+                <Timer size={14} /> {meta.expires_at ? 'Time limit' : 'Set time limit'}
+              </button>
+              <button onClick={recallAll} disabled={busy} className="text-xs font-semibold px-2.5 py-2 rounded-lg flex items-center gap-1.5"
+                style={{ border: '1px solid var(--color-border)', color: 'var(--color-error-600)' }}
+                title="Take every number back from this person now">
+                <Undo2 size={14} /> Take all back
+              </button>
+            </>
+          )}
           {canSend && <button onClick={() => setAssignOpen(true)} className="text-sm font-bold px-3 py-2 rounded-lg flex items-center gap-1.5" style={{ background: 'var(--gradient-sidebar)', color: 'var(--color-text-inverse)' }}><Users size={15} /> Assign</button>}
           {canDelete && <button onClick={del} className="p-2 rounded-lg" style={{ border: '1px solid var(--color-border)', color: 'var(--color-error-600)' }} title="Delete batch"><Trash2 size={15} /></button>}
           <button onClick={onClose} style={{ color: 'var(--color-text-secondary)' }}><X size={18} /></button>
@@ -266,7 +314,7 @@ export default function BatchWorkspace({ batch, me, canSend, isSuper, onClose, o
                 <table className="text-sm" style={{ minWidth: '100%' }}>
                   <thead className="sticky top-0" style={{ background: 'var(--color-surface)', zIndex: 1 }}>
                     <tr>
-                      {['', '#', 'Number', 'Name', 'Status', 'Holder', 'Note', ...(canDisposition ? ['Outcome'] : []), ...cols].map((h, i) => (
+                      {['', '#', 'Number', 'Name', 'Status', 'Holder', 'Time limit', 'Note', ...(canDisposition ? ['Outcome'] : []), ...cols].map((h, i) => (
                         <th key={i} className="text-left font-semibold px-2 py-2 text-[11px] uppercase tracking-wide whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>{h}</th>
                       ))}
                     </tr>
@@ -274,6 +322,7 @@ export default function BatchWorkspace({ batch, me, canSend, isSuper, onClose, o
                   <tbody>
                     {items.map(it => {
                       const m = STATUS_META[it.status] || { label: it.status, color: '#64748b' };
+                      const rowLeft = timeLeft(it.assign_expires_at || (isHolder ? meta.expires_at : null));
                       return (
                         <tr key={it.id} style={{ borderTop: '1px solid var(--color-border)', background: sel.has(it.id) ? 'var(--color-surface-hover)' : 'transparent' }}>
                           <td className="px-2 py-1.5"><button onClick={() => toggle(it.id)}>{sel.has(it.id) ? <CheckCircle2 size={15} style={{ color: 'var(--color-primary-600)' }} /> : <Circle size={15} style={{ color: 'var(--color-text-tertiary)' }} />}</button></td>
@@ -282,6 +331,14 @@ export default function BatchWorkspace({ batch, me, canSend, isSuper, onClose, o
                           <td className="px-2 py-1.5 whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>{it.customer_name || '—'}</td>
                           <td className="px-2 py-1.5"><span className="text-[11px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap" style={{ background: `${m.color}1a`, color: m.color }}>{m.label}</span></td>
                           <td className="px-2 py-1.5 whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>{it.assigned_to_name || '—'}</td>
+                          <td className="px-2 py-1.5 whitespace-nowrap text-[11px]">
+                            {rowLeft.text
+                              ? <span className="font-semibold flex items-center gap-1" title={fmtDeadline(it.assign_expires_at || meta.expires_at)}
+                                  style={{ color: (rowLeft.expired || rowLeft.urgent) ? 'var(--color-error-600)' : rowLeft.soon ? 'var(--color-warning-600)' : 'var(--color-text-secondary)' }}>
+                                  <Clock size={11} /> {rowLeft.text}
+                                </span>
+                              : <span style={{ color: 'var(--color-text-tertiary)' }}>—</span>}
+                          </td>
                           <td className="px-2 py-1.5 max-w-[220px]">
                             <button onClick={() => { setNoteFor(it); setNoteText(it.notes || ''); }} className="flex items-center gap-1 text-xs text-left" style={{ color: it.notes ? 'var(--color-text)' : 'var(--color-text-tertiary)' }}>
                               <StickyNote size={12} /> <span className="truncate">{it.notes || 'add note'}</span>
@@ -312,6 +369,10 @@ export default function BatchWorkspace({ batch, me, canSend, isSuper, onClose, o
 
       {assignOpen && <AssignPanel batchId={batch.id} unassigned={counts.unassigned} selectedIds={[...sel]}
         onClose={() => setAssignOpen(false)} onDone={() => { setAssignOpen(false); setSel(new Set()); load(); loadCounts(); }} />}
+
+      {expiryOpen && <ExpiryDialog batch={meta}
+        onClose={() => setExpiryOpen(false)}
+        onDone={(iso) => { setExpiryOpen(false); setMeta(m => ({ ...m, expires_at: iso })); load(); }} />}
 
       {noteFor && (
         <div className="fixed inset-0 z-[80] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={() => setNoteFor(null)}>
@@ -546,6 +607,7 @@ function AssignPanel({ batchId, unassigned, selectedIds, onClose, onDone }) {
   const [mode, setMode] = useState(selectedIds.length ? 'selected' : 'per');   // selected | per | even
   const [per, setPer] = useState(100);
   const [order, setOrder] = useState('sequential');
+  const [expiry, setExpiry] = useState(EMPTY_EXPIRY);
   const [busy, setBusy] = useState(false);
 
   const toggle = (u) => setPeople(ps => ps.some(x => x.id === u.id) ? ps.filter(x => x.id !== u.id) : [...ps, u]);
@@ -567,7 +629,7 @@ function AssignPanel({ batchId, unassigned, selectedIds, onClose, onDone }) {
       } else {
         assignments = people.map(u => ({ recipient_id: u.id }));   // count omitted = even share
       }
-      const r = await client.post(`distribution-batches/${batchId}/assign`, { assignments, mode: order });
+      const r = await client.post(`distribution-batches/${batchId}/assign`, { assignments, mode: order, ...expiryPayload(expiry) });
       toast.success(`Assigned ${r.data.assigned} numbers to ${r.data.children.length} people · ${r.data.remaining_unassigned} left`);
       onDone();
     } catch (e) { toast.error(e.response?.data?.error || 'Could not assign'); }
@@ -593,6 +655,7 @@ function AssignPanel({ batchId, unassigned, selectedIds, onClose, onDone }) {
         <div className="p-4 space-y-3 overflow-y-auto">
           <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
             {unassigned} unassigned in this batch{selectedIds.length ? ` · ${selectedIds.length} rows selected` : ''}. Assigned numbers lock to that person — nobody else can be given them.
+            {' '}Set a time limit and they come back on their own.
           </div>
           <div className="flex gap-2">
             <Mode k="selected" label="Selected rows" hint={`${selectedIds.length} chosen`} />
@@ -612,6 +675,7 @@ function AssignPanel({ batchId, unassigned, selectedIds, onClose, onDone }) {
                 style={{ background: order === k ? 'var(--gradient-sidebar)' : 'transparent', color: order === k ? 'var(--color-text-inverse)' : 'var(--color-text-secondary)' }}>{label}</button>
             ))}
           </div>
+          <ExpiryPicker value={expiry} onChange={setExpiry} />
           <div>
             <div className="text-xs font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
               To whom — any user, any level (fronter, manager, compliance…)
@@ -629,6 +693,56 @@ function AssignPanel({ batchId, unassigned, selectedIds, onClose, onDone }) {
           <button onClick={onClose} className="text-sm font-semibold px-3 py-2 rounded-lg" style={{ color: 'var(--color-text-secondary)' }}>Cancel</button>
           <button onClick={go} disabled={busy || !n} className="text-sm font-bold px-4 py-2 rounded-lg flex items-center gap-2 disabled:opacity-50" style={{ background: 'var(--gradient-sidebar)', color: 'var(--color-text-inverse)' }}>
             {busy ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />} Assign
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── change, extend or lift the time limit after the fact ─────────────────────
+// "Give them another day" is the most common request a deadline produces, so it
+// is one dialog rather than "take them back and assign them again". Lifting the
+// limit leaves the numbers exactly where they are — only the deadline goes.
+function ExpiryDialog({ batch, onClose, onDone }) {
+  const [expiry, setExpiry] = useState(
+    batch?.expires_at ? { preset: 'custom', customLocal: toLocalInputValue(batch.expires_at) } : EMPTY_EXPIRY);
+  const [busy, setBusy] = useState(false);
+  const payload = expiryPayload(expiry);
+  const lifting = !payload.expires_at && !payload.expires_in_hours;
+
+  const save = async () => {
+    if (lifting && batch?.expires_at &&
+        !window.confirm(`Lift the time limit on "${batch.name}"?\n\nThe numbers stay with ${batch.sent_to_name || 'the holder'} until someone takes them back by hand.`)) return;
+    setBusy(true);
+    try {
+      const r = await client.patch(`distribution-batches/${batch.id}/expiry`, payload);
+      toast.success(r.data.expires_at ? `Goes back on ${fmtDeadline(r.data.expires_at)}` : 'Time limit lifted');
+      onDone?.(r.data.expires_at || null);
+    } catch (e) { toast.error(e.response?.data?.error || 'Could not change the time limit'); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={onClose}>
+      <div className="w-full max-w-md rounded-2xl overflow-hidden" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }} onClick={e => e.stopPropagation()}>
+        <div className="flex items-center gap-2 p-4" style={{ borderBottom: '1px solid var(--color-border)' }}>
+          <Timer size={17} style={{ color: 'var(--color-primary-600)' }} />
+          <div className="font-bold flex-1" style={{ color: 'var(--color-text)' }}>Time limit</div>
+          <button onClick={onClose} style={{ color: 'var(--color-text-secondary)' }}><X size={17} /></button>
+        </div>
+        <div className="p-4 space-y-3">
+          <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+            {batch?.sent_to_name ? `${batch.sent_to_name} is holding these numbers.` : 'These numbers are out with someone.'}
+            {' '}When the limit passes they come back on their own, and anyone they were passed on to loses them too.
+          </div>
+          <ExpiryPicker value={expiry} onChange={setExpiry} label="They keep these until" />
+        </div>
+        <div className="p-4 flex justify-end gap-2" style={{ borderTop: '1px solid var(--color-border)' }}>
+          <button onClick={onClose} className="text-sm font-semibold px-3 py-2 rounded-lg" style={{ color: 'var(--color-text-secondary)' }}>Cancel</button>
+          <button onClick={save} disabled={busy} className="text-sm font-bold px-4 py-2 rounded-lg flex items-center gap-2 disabled:opacity-50"
+            style={{ background: 'var(--gradient-sidebar)', color: 'var(--color-text-inverse)' }}>
+            {busy ? <Loader2 size={15} className="animate-spin" /> : <Timer size={15} />} {lifting ? 'Lift the limit' : 'Save'}
           </button>
         </div>
       </div>

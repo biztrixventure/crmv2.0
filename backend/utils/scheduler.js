@@ -20,6 +20,7 @@ const { runQa2AutoAssign, purgeStaleQa2Assignments, purgeParkedQa2Calls, parkDup
 const { runCrmDayForAllCompanies } = require('./qa2CrmDay');
 const { syncAllCompanies: syncAttendance } = require('./attendanceSync');
 const { runAllEnabled: syncRevenue } = require('./revenueSync');
+const { runBatchExpiry } = require('./batchExpiry');
 const ipAccess = require('./ipAccess');
 
 const REFRESH_SEGMENTS_MS = 10 * 60 * 1000;     // every 10 min
@@ -77,6 +78,13 @@ const ATTENDANCE_SYNC_INIT = 5 * 60 * 1000;
 // or a restart mid-run is simply finished by the next one.
 const REVENUE_SYNC_MS   = 60 * 60 * 1000;
 const REVENUE_SYNC_INIT = 7 * 60 * 1000;
+// Lent numbers going home (mig 322). 5 minutes is the resolution a floor
+// deadline actually needs — "you have these until 6pm" is not a promise about
+// 6:00:00 — and the sweep is a single indexed scan that finds nothing on almost
+// every tick. First run 2 min after boot so a deadline that passed while the
+// process was down is honoured promptly.
+const BATCH_EXPIRY_MS   = 5 * 60 * 1000;
+const BATCH_EXPIRY_INIT = 2 * 60 * 1000;
 // IP access control (mig 319). The switch is held in memory for the request
 // path; re-reading it every minute is what lets the break-glass CLI (or a SQL
 // edit) turn it off without a restart. One tiny indexed read per minute.
@@ -208,6 +216,13 @@ function startBackgroundJobs() {
   _timers.push(setTimeout(revenue, REVENUE_SYNC_INIT));
   _timers.push(setInterval(revenue, REVENUE_SYNC_MS));
 
+  // Numbers lent with a time limit go back to whoever dealt them, and everyone
+  // below that holder loses their copy too. Idempotent and a no-op for every
+  // assignment without a deadline, which is all of them until someone sets one.
+  const batchExpiry = () => runBatchExpiry().catch(e => logger.warn('JOBS', `batch expiry error: ${e.message}`));
+  _timers.push(setTimeout(batchExpiry, BATCH_EXPIRY_INIT));
+  _timers.push(setInterval(batchExpiry, BATCH_EXPIRY_MS));
+
   // refreshSettings never throws (it keeps the last known state and warns).
   _timers.push(setInterval(() => { ipAccess.refreshSettings(); }, IP_SWITCH_MS));
   const ipPrune = () => ipAccess.pruneLogs().catch(e => logger.warn('JOBS', `ip access-log prune error: ${e.message}`));
@@ -226,7 +241,7 @@ function startBackgroundJobs() {
   _timers.push(setTimeout(dialerEventPrune, DIALER_EVENT_PRUNE_INIT));
   _timers.push(setInterval(dialerEventPrune, DIALER_EVENT_PRUNE_MS));
 
-  logger.info('JOBS', `background jobs started — segments refresh ${REFRESH_SEGMENTS_MS / 60000}m, cache sweep ${CACHE_SWEEP_MS / 60000}m, payment scan ${PAYMENT_SCAN_MS / 3600000}h, qa materialize ${QA_MATERIALIZE_MS / 60000}m, milestone sweep ${MILESTONE_SWEEP_MS / 60000}m, qa2 recording poll ${QA2_REC_POLL_MS / 1000}s, qa2 TRA vendor-code backfill ${QA2_TRA_VENDOR_MS / 60000}m, qa2 auto-assign ${QA2_AUTOASSIGN_MS / 60000}m, qa2 retention ${QA2_RETENTION_MS / 3600000}h, qa2 crm-day ${QA2_CRMDAY_MS / 3600000}h, attendance ${ATTENDANCE_SYNC_MS / 3600000}h, revenue ${REVENUE_SYNC_MS / 3600000}h, ip switch ${IP_SWITCH_MS / 1000}s, ip log prune ${IP_LOG_PRUNE_MS / 3600000}h`);
+  logger.info('JOBS', `background jobs started — segments refresh ${REFRESH_SEGMENTS_MS / 60000}m, cache sweep ${CACHE_SWEEP_MS / 60000}m, payment scan ${PAYMENT_SCAN_MS / 3600000}h, qa materialize ${QA_MATERIALIZE_MS / 60000}m, milestone sweep ${MILESTONE_SWEEP_MS / 60000}m, qa2 recording poll ${QA2_REC_POLL_MS / 1000}s, qa2 TRA vendor-code backfill ${QA2_TRA_VENDOR_MS / 60000}m, qa2 auto-assign ${QA2_AUTOASSIGN_MS / 60000}m, qa2 retention ${QA2_RETENTION_MS / 3600000}h, qa2 crm-day ${QA2_CRMDAY_MS / 3600000}h, attendance ${ATTENDANCE_SYNC_MS / 3600000}h, revenue ${REVENUE_SYNC_MS / 3600000}h, batch expiry ${BATCH_EXPIRY_MS / 60000}m, ip switch ${IP_SWITCH_MS / 1000}s, ip log prune ${IP_LOG_PRUNE_MS / 3600000}h`);
 }
 
 function stopBackgroundJobs() {
