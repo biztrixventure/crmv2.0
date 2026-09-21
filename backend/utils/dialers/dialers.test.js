@@ -82,6 +82,23 @@ describe('mapping', () => {
     expect(keys).toContain('data.call.talk_time');
   });
 
+  test('unwrap undoes what a template engine did to the value', () => {
+    // Verbatim from CallTools' live connector-button webhook — the right
+    // values wearing a costume. Without this the agent never resolved and a
+    // real transfer was logged as "agent not mapped".
+    const { TRANSFORMS } = require('./mapping');
+    const u = TRANSFORMS.unwrap;
+    expect(u('"AppUser object (7009fa4d-4169-4c37-b948-6b3b2a4619b4)"')).toBe('7009fa4d-4169-4c37-b948-6b3b2a4619b4');
+    expect(u('"28075509"')).toBe('28075509');
+    // A null relation renders as the WORD None. Left alone it becomes a real
+    // value — every contact-less press would share the lead code "None".
+    expect(u('"Queue object (None)"')).toBe('');
+    expect(u('None')).toBe('');
+    // Anything already plain is untouched, so it is safe to leave on a field.
+    expect(u('WTI1025')).toBe('WTI1025');
+    expect(u('+15862651319')).toBe('+15862651319');
+  });
+
   test('a broken regex in a mapping cannot throw the webhook', () => {
     expect(() => applyMap({ a: 'x' }, { agent: { path: 'a', regex: '([' } })).not.toThrow();
   });

@@ -118,6 +118,26 @@ const TRANSFORMS = {
     const d = new Date(s);
     return Number.isNaN(d.getTime()) ? null : d.toISOString();
   },
+  // WHAT A TEMPLATE ENGINE HANDS YOU WHEN IT RENDERS A FIELD IT DOES NOT
+  // FLATTEN. Measured on CallTools' live connector-button webhook:
+  //   agent -> "AppUser object (7009fa4d-4169-4c37-b948-6b3b2a4619b4)"
+  //   code  -> "28075509"      (the quotes are part of the value)
+  // Both are the right value wearing a costume. Strip the quotes and take the
+  // value out of `Model object (value)`; anything already plain comes back
+  // untouched, so this is safe to leave on a field for ever.
+  unwrap: (v) => {
+    let s = String(v).trim();
+    const dequote = (x) => (x.length > 1 && x.startsWith('"') && x.endsWith('"') ? x.slice(1, -1).trim() : x);
+    s = dequote(s);
+    const obj = /^[A-Za-z_][A-Za-z0-9_]*\s+object\s*\((.*)\)$/.exec(s);
+    if (obj) s = obj[1].trim();
+    s = dequote(s);
+    // "Queue object (None)" means the call had no queue — the word is the
+    // template's way of writing nothing. Left as text it becomes a real value:
+    // a contact-less button press would produce the lead code "None", and
+    // EVERY such transfer would then share one code.
+    return /^(none|null|undefined|nil)$/i.test(s) ? '' : s;
+  },
   first_word: (v) => String(v).trim().split(/\s+/)[0] || '',
   last_words: (v) => String(v).trim().split(/\s+/).slice(1).join(' '),
   bool: (v) => ['1', 'true', 'yes', 'y', 'on'].includes(String(v).trim().toLowerCase()),
