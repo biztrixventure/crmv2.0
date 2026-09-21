@@ -278,6 +278,9 @@ export default function ReviewScreen({ assignment, onDone, onNext, nextLabel, re
   const [linked, setLinked] = useState(null);
   const [customerContext, setCustomerContext] = useState(null);
   const [hangup, setHangup] = useState(null);
+  // The VICIdial lead behind this recording — comments and the rest. Loads on
+  // its own so a slow box never delays the scorecard.
+  const [dialer, setDialer] = useState({ loading: false, detail: null });
   const [evaluation, setEvaluation] = useState(null);
   const [def, setDef] = useState(null); // { version, sections, parameters, computed_max }
   const [answers, setAnswers] = useState({}); // parameter_id -> {value_num, value_text, value_bool, is_na, comment}
@@ -304,6 +307,14 @@ export default function ReviewScreen({ assignment, onDone, onNext, nextLabel, re
         setLinked(callData.linked);
         setCustomerContext(callData.customer_context || null);
         setHangup(callData.hangup || null);
+
+        // The lead's own record on the dialer — comments above all. Fired here
+        // and NOT awaited: it is a per-field round trip to a box that can be
+        // slow or down, and the scorecard must not wait behind it.
+        setDialer({ loading: true, detail: null });
+        client.get(`qa2/calls/${assignment.call_id}/dialer-detail`)
+          .then(r => { if (!dead) setDialer({ loading: false, detail: r.data.detail || null }); })
+          .catch(() => { if (!dead) setDialer({ loading: false, detail: null }); });
 
         const evalRes = await client.post('qa2/evaluations', { assignment_id: assignment.id });
         if (dead) return;
@@ -497,6 +508,13 @@ export default function ReviewScreen({ assignment, onDone, onNext, nextLabel, re
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3 pt-3" style={{ borderTop: '1px solid var(--color-border)' }}>
               {[
                 { k: 'Dispo', v: call.dispo_raw || '—' },
+                // WHICH DIALER THIS RECORDING CAME FROM. With two dialers in
+                // the estate, a reviewer hearing something odd — a different
+                // greeting, a different hold tone, audio that cuts early —
+                // needs to know which system produced it before they score it.
+                // Stated outright here (not hidden like in a list) because
+                // this screen IS the detail.
+                { k: 'Dialer', v: <DialerBadge record={call} showLegacy />, raw: true },
                 { k: 'Closer dispo', v: call.closer_dispo || '—', strong: true },
                 { k: 'Ended by', v: hangup?.label || (hangup?.unavailable ? 'n/a' : '—'),
                   tone: /^AGENT/i.test(hangup?.reason || '') ? 'agent' : (hangup?.label ? 'customer' : null),
@@ -531,6 +549,52 @@ export default function ReviewScreen({ assignment, onDone, onNext, nextLabel, re
                   <div className="flex items-center gap-2"><Hash size={13} style={{ color: 'var(--color-text-tertiary)' }} />VIN {customerContext.vin}</div>
                 )}
               </div>
+            </Panel>
+          )}
+
+          {/* What the agent TYPED on the lead. The comments box is where the
+              objection, the callback promise and the "call after 6" live, and
+              none of it reaches the CRM — so it is read straight off the
+              dialer. Absent box, archived lead or no notes → nothing renders. */}
+          {(dialer.loading || dialer.detail) && (
+            <Panel tone="inset">
+              <SectionHeader level="section" title="From the dialer"
+                subtitle="The lead record behind this recording — read live from VICIdial, not entered by the reviewer." />
+              {dialer.loading ? (
+                <Loading variant="inline" size={16} />
+              ) : (
+                <div className="space-y-2 text-sm">
+                  {dialer.detail.comments ? (
+                    <div>
+                      <div className="text-[11px] font-bold uppercase tracking-wide mb-0.5" style={{ color: 'var(--color-text-tertiary)' }}>Agent comments</div>
+                      <div className="rounded-lg px-2.5 py-2 whitespace-pre-wrap"
+                        style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}>
+                        {dialer.detail.comments}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>No comments on this lead.</div>
+                  )}
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+                    {[
+                      ['Lead status',  dialer.detail.status],
+                      ['Times called', dialer.detail.called_count],
+                      ['Last call',    dialer.detail.last_local_call_time],
+                      ['In list',      dialer.detail.list_id],
+                      ['Vendor code',  dialer.detail.vendor_lead_code],
+                      ['Source',       dialer.detail.source_id],
+                      ['Email',        dialer.detail.email],
+                      ['Alt phone',    dialer.detail.alt_phone],
+                      ['Lead created', dialer.detail.entry_date],
+                    ].filter(([, v]) => v).map(([label, v]) => (
+                      <div key={label} className="flex gap-1.5 min-w-0">
+                        <span className="flex-shrink-0" style={{ color: 'var(--color-text-tertiary)' }}>{label}</span>
+                        <span className="truncate" style={{ color: 'var(--color-text)' }} title={String(v)}>{v}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </Panel>
           )}
 

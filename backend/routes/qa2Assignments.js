@@ -27,7 +27,7 @@ const { supabaseAdmin } = require('../config/database');
 const { resolveQa2Scope } = require('../utils/qa2ScopeResolver');
 const { companyInScope, methodInScope } = require('../utils/qa2Scope');
 const { issueTicket } = require('../utils/mediaTicket');
-const { annotateHangups } = require('../utils/dialerBoxes');
+const { annotateHangups, getBoxes, leadDialerDetail } = require('../utils/dialerBoxes');
 const { resolveCustomerContext } = require('../utils/qa2CustomerContext');
 const { resolveColumnAccess } = require('../utils/columnFilter');
 const { applyQa2Sort, applyQa2Filters } = require('../utils/qa2ColumnFilter');
@@ -92,6 +92,7 @@ router.get('/queue', asyncHandler(async (req, res) => {
              priority, due_at, period, created_at,
              qa2_call!inner(id, company_id, leg, agent_user, agent_user_id, customer_phone, dispo_raw, call_at,
                        recording_state, method_id, talk_sec, hangup_label, hangup_reason,
+                       dialer_provider, dialer_account_id,
                        qa2_method(label), companies(name))`)
     .eq('assigned_to', req.user.id);
   query = status ? query.eq('status', status) : query.in('status', ['pending', 'in_review']);
@@ -152,7 +153,8 @@ router.get('/pool', asyncHandler(async (req, res) => {
     .from('qa2_assignment')
     .select(`id, call_id, status, created_at,
              qa2_call!inner(id, company_id, leg, agent_user, agent_user_id, customer_phone, dispo_raw, call_at,
-                       recording_state, method_id, qa2_method(label), companies(name))`)
+                       recording_state, method_id, dialer_provider, dialer_account_id,
+                       qa2_method(label), companies(name))`)
     .is('assigned_to', null)
     .eq('status', 'pending')
     .is('calibration_group_id', null)
@@ -438,6 +440,38 @@ router.get('/calls/:id', asyncHandler(async (req, res) => {
     : hangup);
 
   res.json({ call, linked, customer_context: customerContext, hangup: hangupOut });
+}));
+
+// ── GET /calls/:id/dialer-detail — what the agent TYPED on the lead ──────────
+// The comments box on the VICIdial lead (plus the rest of the lead record) is
+// where a fronter writes the objection, the callback promise, the "call after
+// 6" — none of which reaches the CRM, and all of which a reviewer needs while
+// listening to the call.
+//
+// Deliberately its OWN endpoint rather than another leg of GET /calls/:id: this
+// is one HTTP call to the dialer PER FIELD, against a box that can be slow or
+// down, and the review screen has to open at the speed of the scorecard. It
+// loads alongside and fills in when it arrives; a null answer renders nothing.
+router.get('/calls/:id/dialer-detail', asyncHandler(async (req, res) => {
+  const scope = await requireScope(req, res);
+  if (!scope) return;
+  const { data: call } = await supabaseAdmin.from('qa2_call')
+    .select('id, company_id, method_id, box_id, dialer_lead_id, agent_user_id, linked_call_id')
+    .eq('id', req.params.id).maybeSingle();
+  if (!call) return res.status(404).json({ error: 'Call not found' });
+  if (!(await canSeeCall(scope, req.user.id, call))) return res.status(403).json({ error: 'Forbidden' });
+  if (!call.dialer_lead_id) return res.json({ detail: null, reason: 'no_lead_id' });
+
+  const box = getBoxes().find(b => b.id === call.box_id) || null;
+  try {
+    const detail = await leadDialerDetail(box, call.dialer_lead_id);
+    res.json({ detail: detail || null, lead_id: call.dialer_lead_id });
+  } catch (e) {
+    // A dialer that cannot be reached is not something the reviewer can act on
+    // — the panel simply stays empty.
+    logger.warn('QA2_CALLS', `dialer detail lookup failed for ${call.id}: ${e.message}`);
+    res.json({ detail: null, reason: 'dialer_unreachable' });
+  }
 }));
 
 router.post('/calls/:id/recording-ticket', asyncHandler(async (req, res) => {

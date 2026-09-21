@@ -808,6 +808,64 @@ async function leadFieldCustomer(box, leadId) {
   return null;
 }
 
+// ── The lead record behind a recording: COMMENTS and the rest ────────────────
+// A reviewer listening to a call wants what the agent TYPED on the lead as well
+// as what they said — the comments box is where a fronter records the objection,
+// the callback promise, the "customer asked to be called after 6". None of it
+// reaches the CRM, so the review screen never showed any of it.
+//
+// One request per field, exactly like _CUST_FIELDS above: VICIdial has no
+// all-fields-by-lead_id call. ccc_lead_info DOES return the whole record in one
+// request, but it is keyed on the dialer's call_id and only 11 of ~950k qa2_call
+// rows carry one — so it is not an option here. The set below is kept tight for
+// that reason, runs in parallel, and rides the same 15-minute _lssCache as every
+// other lead lookup, so re-opening a call costs nothing.
+//
+// Times (last_local_call_time, entry_date) are the DIALER's local wall clock and
+// are passed through as the strings they are — parsing them as UTC would shift
+// every one of them by the box's offset.
+const _DETAIL_FIELDS = [
+  'comments',               // the ask: the agent's own notes on this lead
+  'status', 'called_count', 'last_local_call_time', 'entry_date',
+  'list_id', 'vendor_lead_code', 'source_id',
+  'email', 'alt_phone',
+];
+// VICIdial stores line breaks inside the comments field as the literal token
+// "!N" (that is how its own agent screen round-trips a multi-line note), and
+// lead_field_info hands it back raw. Confirmed on a live lead:
+//   "Kim Brumbach !N155k!Nno no !NToyota Prius 2007 !N83301 !N"
+// Left alone a reviewer reads one run-on line with !N littered through it, so
+// it is decoded back into the newlines the agent actually typed.
+const decodeComments = (s) => String(s || '').replace(/\s*!N\s*/g, '\n').replace(/\n{3,}/g, '\n\n').trim() || null;
+
+async function _detailOnBox(box, leadId) {
+  const vals = await Promise.all(_DETAIL_FIELDS.map(f => _leadFieldValue(box, leadId, f)));
+  const out = {};
+  _DETAIL_FIELDS.forEach((f, i) => { if (vals[i]) out[f] = (f === 'comments' ? decodeComments(vals[i]) : vals[i]); });
+  // A status alone is not proof the lead lives here — several boxes will answer
+  // for a lead_id they happen to hold. Something identifying has to come back.
+  if (!out.comments && !out.vendor_lead_code && !out.last_local_call_time && !out.entry_date) return null;
+  return out;
+}
+/**
+ * The dialer's own record for a lead — comments first. Tries the recording's own
+ * box, then the others (a lead_id can resolve on a different cluster, the same
+ * reason leadFieldCustomer walks them). Best-effort throughout: a box that is
+ * down, an archived lead, or an API user below level 7 gives null, never a throw
+ * — reading the dialer must never be what stops a call being scored.
+ */
+async function leadDialerDetail(box, leadId) {
+  if (!leadId) return null;
+  const boxes = [box, ...BOXES.filter(b => b && (!box || b.id !== box.id))].filter(Boolean);
+  for (const b of boxes) {
+    try {
+      const d = await _detailOnBox(b, leadId);
+      if (d) return { ...d, box_id: b.id };
+    } catch { /* next box */ }
+  }
+  return null;
+}
+
 // ── VICIdial CUSTOM lead fields (the vehicle data etc. a campaign collects) ────
 // The vehicle details a fronter takes — VIN, make, model, year, mileage — are not
 // VICIdial standard lead columns. They live in the LIST's custom fields, which
@@ -1315,7 +1373,7 @@ module.exports = {
   resolveLeadIdByAgentDate,
   listCandidatesForSale, listCandidatesByPhone, listCandidatesByLeadId, listCandidatesByPhoneLeads, locationForRecording,
   listDayRecordings, phoneFromLocation, listDayDispositions, leadStatusSearch,
-  leadFieldStatus, leadFieldCustomer, fillLeadStatuses, resolveDispos,
+  leadFieldStatus, leadFieldCustomer, leadDialerDetail, fillLeadStatuses, resolveDispos,
   leadCustomFields, listCustomFieldNames, discoverCustomFieldNames, leadFromVendorCode, parseVendorCode, normalizeLeadCode,
   // Which of several boxes on one prefix holds this lead, settled by the
   // customer's phone. Every caller that used to take boxes[0] goes through it.
