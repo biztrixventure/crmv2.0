@@ -950,7 +950,32 @@ router.post('/:id/assign', asyncHandler(async (req, res) => {
     .order('position', { ascending: true, nullsFirst: false }).order('created_at', { ascending: true })
     .limit(MAX_UPLOAD_ROWS);
   let pool = poolRows || [];
-  if (!pool.length) return res.status(400).json({ error: 'Every number in this batch is already assigned' });
+
+  // The uniqueness gate. A number somebody else is already working must not go
+  // out again — that is two agents calling one customer, which is the whole
+  // reason numbers are distributed rather than shared. ON unless the caller
+  // deliberately says otherwise, and FAIL-OPEN: if the check itself breaks, the
+  // assignment still happens (a manager unable to deal numbers is worse than a
+  // rare duplicate, and the report catches those).
+  let skipped_held = 0;
+  if (req.body.exclude_held !== false && pool.length) {
+    try {
+      const map = await phoneHolderMap(req, [...new Set(pool.map(p => p.phone_number))], { excludeBatchId: batch.id });
+      const taken = new Set();
+      for (const [phone, e] of map) if (e.holders.length) taken.add(phone);
+      if (taken.size) {
+        const before = pool.length;
+        pool = pool.filter(p => !taken.has(p.phone_number));
+        skipped_held = before - pool.length;
+      }
+    } catch (e) { logger.warn('DIST_BATCH', `uniqueness check skipped on ${batch.id}: ${e.message}`); }
+  }
+
+  if (!pool.length) {
+    return res.status(400).json({ error: skipped_held
+      ? `Nothing left to deal — all ${skipped_held} free number${skipped_held === 1 ? ' is' : 's are'} already with someone else`
+      : 'Every number in this batch is already assigned' });
+  }
   if (mode === 'random') shuffleInPlace(pool);
 
   // explicit ids first (they name their own rows), then count/even from the rest
@@ -1010,8 +1035,8 @@ router.post('/:id/assign', asyncHandler(async (req, res) => {
     return res.status(500).json({ error: e.message });
   }
   const assigned = summary.reduce((a, s) => a + s.item_count, 0);
-  logger.success('DIST_BATCH', `assign ${batch.id} → ${summary.length} recipients, ${assigned} numbers, by ${req.user.id}`);
-  res.status(201).json({ assigned, children: summary, remaining_unassigned: pool.length - assigned });
+  logger.success('DIST_BATCH', `assign ${batch.id} → ${summary.length} recipients, ${assigned} numbers, ${skipped_held} held elsewhere, by ${req.user.id}`);
+  res.status(201).json({ assigned, children: summary, remaining_unassigned: pool.length - assigned, skipped_held });
 }));
 
 // ── taking numbers back ──────────────────────────────────────────────────────
@@ -1285,6 +1310,132 @@ async function numberLookup(req, phones, includeRecalled) {
     },
   };
 }
+
+// ── "is this number already out there?" — the uniqueness check ───────────────
+// The whole point of distributing numbers is that each agent gets numbers NOBODY
+// else is working. Two people calling the same customer is the failure this
+// prevents, so the same check runs at every door a number can enter through:
+// the upload dialog, the assign dialog, and the report.
+//
+// A number counts as TAKEN when a live row for it sits in an active batch that
+// somebody is holding. Rows further up the chain (`passed_on`) are not the
+// holder — the person at the bottom is. A row sitting unassigned in the pool of
+// whoever created that batch is POOLED, not held: it is not with an agent yet,
+// but uploading it a second time would still duplicate it.
+async function phoneHolderMap(req, phones, { excludeBatchId = null } = {}) {
+  const sa = await isSuperAdmin(req.user.id);
+  const unrestricted = sa || UNRESTRICTED_ROLES.has(req.user.role);
+  const companyIds = unrestricted ? null : (await getUserCompanies(req.user.id)).map(c => c.id);
+  const map = new Map();
+
+  // Chunked: the phone array travels in the RPC body, but a 20k-number file in
+  // one call would also be one enormous result set to hold in memory.
+  for (let i = 0; i < phones.length; i += 1000) {
+    const { data, error } = await supabaseAdmin.rpc('app_batch_number_lookup', {
+      p_phones: phones.slice(i, i + 1000),
+      p_user: req.user.id,
+      p_unrestricted: unrestricted,
+      p_company_ids: (companyIds && companyIds.length) ? companyIds : null,
+      p_include_recalled: false,
+      p_limit: 20000,
+    });
+    if (error) throw new Error(error.message);
+    for (const r of (data || [])) {
+      if (r.batch_status !== 'active') continue;      // deleted / expired = not out there
+      if (r.passed_on) continue;                      // somebody below is the real holder
+      if (excludeBatchId && r.batch_id === excludeBatchId) continue;
+      const e = map.get(r.phone_number) || { holders: [], pools: [] };
+      // holder === sender and nobody was dealt the row ⇒ it is still in that
+      // person's own pool rather than out with an agent.
+      if (r.holder_id && r.holder_id === r.sender_id && !r.assigned_to) {
+        e.pools.push({ batch_id: r.batch_id, batch_name: r.batch_name, holder_id: r.holder_id });
+      } else {
+        e.holders.push({
+          holder_id: r.holder_id, batch_id: r.batch_id, batch_name: r.batch_name,
+          status: r.status, expires_at: r.assign_expires_at || r.batch_expires_at || null,
+          item_id: r.item_id,
+        });
+      }
+      map.set(r.phone_number, e);
+    }
+  }
+  return map;
+}
+
+// Names + a capped detail list, shared by the upload check and the pool check.
+async function describeHolders(map, cap = 300) {
+  const names = await namesFor([...map.values()].flatMap(e =>
+    [...e.holders.map(h => h.holder_id), ...e.pools.map(p => p.holder_id)]));
+  const details = [];
+  for (const [phone, e] of map) {
+    if (details.length >= cap) break;
+    details.push({
+      phone,
+      holders: e.holders.map(h => ({ ...h, holder_name: names[h.holder_id] || null })),
+      pools:   e.pools.map(p => ({ ...p, holder_name: names[p.holder_id] || null })),
+    });
+  }
+  return details;
+}
+
+// POST /number-check — run before a file becomes a batch. Answers, for a whole
+// file at once: which of these numbers is somebody already working?
+router.post('/number-check', asyncHandler(async (req, res) => {
+  if (!canSend(req)) return res.status(403).json({ error: 'Not allowed' });
+  const phones = parsePhoneList(req.body);
+  if (!phones.length) return res.status(400).json({ error: 'No valid 10-digit numbers to check' });
+  if (phones.length > MAX_UPLOAD_ROWS) return res.status(400).json({ error: `Max ${MAX_UPLOAD_ROWS} numbers per check — split the file` });
+
+  const map = await phoneHolderMap(req, phones);
+  const heldPhones = [], pooledPhones = [];
+  for (const [phone, e] of map) (e.holders.length ? heldPhones : pooledPhones).push(phone);
+
+  res.json({
+    searched: phones.length,
+    held: heldPhones.length,
+    pooled: pooledPhones.length,
+    fresh: phones.length - heldPhones.length - pooledPhones.length,
+    held_phones: heldPhones,
+    pooled_phones: pooledPhones,
+    duplicate_phones: [...heldPhones, ...pooledPhones],
+    details: await describeHolders(map),
+  });
+}));
+
+// GET /:id/pool-check — the same question about the numbers this batch is about
+// to deal out: how many of them is somebody ELSE already holding?
+router.get('/:id/pool-check', asyncHandler(async (req, res) => {
+  const { batch, error } = await loadVisibleBatch(req, req.params.id);
+  if (error) return res.status(error).json({ error: error === 404 ? 'Batch not found' : 'Not allowed' });
+
+  // the rows the assign dialog would actually deal
+  let q = supabaseAdmin.from('distribution_batch_items')
+    .select('id, phone_number').eq('batch_id', batch.id)
+    .is('recalled_at', null).neq('status', 'excluded')
+    .order('position', { ascending: true, nullsFirst: false }).limit(MAX_UPLOAD_ROWS);
+  if (req.query.scope !== 'all') q = q.is('assigned_to', null);
+  const { data: rows } = await q;
+  const items = rows || [];
+  if (!items.length) return res.json({ total: 0, held: 0, pooled: 0, held_item_ids: [], pooled_item_ids: [], details: [] });
+
+  const map = await phoneHolderMap(req, [...new Set(items.map(i => i.phone_number))], { excludeBatchId: batch.id });
+  const heldIds = [], pooledIds = [];
+  for (const it of items) {
+    const e = map.get(it.phone_number);
+    if (!e) continue;
+    (e.holders.length ? heldIds : pooledIds).push(it.id);
+  }
+  res.json({
+    total: items.length,
+    held: heldIds.length,
+    pooled: pooledIds.length,
+    // capped: this only drives row badges, and a batch that big is not read row
+    // by row anyway
+    held_item_ids: heldIds.slice(0, 5000),
+    pooled_item_ids: pooledIds.slice(0, 5000),
+    details: await describeHolders(map, 200),
+  });
+}));
 
 router.post('/number-lookup', asyncHandler(async (req, res) => {
   if (!ROSTER_ROLES.has(req.user.role) && !(await isSuperAdmin(req.user.id))) {

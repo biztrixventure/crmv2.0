@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import {
   X, Loader2, Users, Send, Trash2, GitBranch, RefreshCw, Search, StickyNote,
   PhoneForwarded, Clock, ThumbsDown, Voicemail, PhoneOff, CheckCircle2, Circle,
-  Activity, ChevronLeft, ChevronRight, UserMinus, Timer, Undo2,
+  Activity, ChevronLeft, ChevronRight, UserMinus, Timer, Undo2, UsersRound, ShieldCheck,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import client from '../../api/client';
@@ -50,6 +50,7 @@ export default function BatchWorkspace({ batch, me, canSend, isSuper, onClose, o
   const [meta, setMeta] = useState(batch);
   const [total, setTotal] = useState(0);
   const [counts, setCounts] = useState({ counts: {}, total: 0, assigned: 0, unassigned: 0 });
+  const [elsewhere, setElsewhere] = useState({ ids: new Set(), held: 0 });   // also with someone else
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(100);
   const [q, setQ] = useState('');
@@ -99,6 +100,12 @@ export default function BatchWorkspace({ batch, me, canSend, isSuper, onClose, o
 
   const loadCounts = useCallback(() => {
     client.get(`distribution-batches/${batch.id}/status-counts`).then(r => setCounts(r.data)).catch(() => {});
+    // Which of THESE numbers is also sitting with somebody else? Shown per row
+    // and in the header, so a manager can see the overlap before dealing any of
+    // it out — the whole point being that each agent gets unique numbers.
+    client.get(`distribution-batches/${batch.id}/pool-check`, { params: { scope: 'all' } })
+      .then(r => setElsewhere({ ids: new Set(r.data.held_item_ids || []), held: r.data.held || 0 }))
+      .catch(() => setElsewhere({ ids: new Set(), held: 0 }));
   }, [batch.id]);
   useEffect(() => { loadCounts(); }, [loadCounts]);
 
@@ -207,6 +214,7 @@ export default function BatchWorkspace({ batch, me, canSend, isSuper, onClose, o
           <div className="font-bold truncate" style={{ color: 'var(--color-text)' }}>{meta.name}</div>
           <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
             {counts.total} numbers · <span style={{ color: '#4f46e5' }}>{counts.assigned} assigned</span> · <span style={{ color: 'var(--color-text-tertiary)' }}>{counts.unassigned} free</span>
+            {elsewhere.held > 0 && <> · <span style={{ color: 'var(--color-warning-600)' }}>{elsewhere.held} also with someone else</span></>}
             {meta.file_name ? ` · ${meta.file_name}` : ''}
           </div>
           {/* the loan, stated where everyone sees it — the holder reads the same
@@ -329,7 +337,15 @@ export default function BatchWorkspace({ batch, me, canSend, isSuper, onClose, o
                           <td className="px-2 py-1.5 tabular-nums text-xs" style={{ color: 'var(--color-text-tertiary)' }}>{it.position}</td>
                           <td className="px-2 py-1.5 tabular-nums font-semibold whitespace-nowrap" style={{ color: 'var(--color-text)' }}>{it.phone_number}</td>
                           <td className="px-2 py-1.5 whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>{it.customer_name || '—'}</td>
-                          <td className="px-2 py-1.5"><span className="text-[11px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap" style={{ background: `${m.color}1a`, color: m.color }}>{m.label}</span></td>
+                          <td className="px-2 py-1.5 whitespace-nowrap">
+                            <span className="text-[11px] font-bold px-2 py-0.5 rounded-full" style={{ background: `${m.color}1a`, color: m.color }}>{m.label}</span>
+                            {elsewhere.ids.has(it.id) && (
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full ml-1" title="Somebody else is already working this number"
+                                style={{ color: 'var(--color-warning-600)', border: '1px solid var(--color-warning-600)' }}>
+                                elsewhere
+                              </span>
+                            )}
+                          </td>
                           <td className="px-2 py-1.5 whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>{it.assigned_to_name || '—'}</td>
                           <td className="px-2 py-1.5 whitespace-nowrap text-[11px]">
                             {rowLeft.text
@@ -608,7 +624,21 @@ function AssignPanel({ batchId, unassigned, selectedIds, onClose, onDone }) {
   const [per, setPer] = useState(100);
   const [order, setOrder] = useState('sequential');
   const [expiry, setExpiry] = useState(EMPTY_EXPIRY);
+  const [check, setCheck] = useState(null);        // how many of these are already out
+  const [onlyUnique, setOnlyUnique] = useState(true);
+  const [showWho, setShowWho] = useState(false);
   const [busy, setBusy] = useState(false);
+
+  // Before anything is dealt: which of the free numbers is somebody ELSE already
+  // working? Two agents on one customer is the failure this surface exists to
+  // prevent, so the answer is on screen before the button is pressed.
+  useEffect(() => {
+    let dead = false;
+    client.get(`distribution-batches/${batchId}/pool-check`)
+      .then(r => { if (!dead) setCheck(r.data); })
+      .catch(() => { if (!dead) setCheck(null); });
+    return () => { dead = true; };
+  }, [batchId]);
 
   const toggle = (u) => setPeople(ps => ps.some(x => x.id === u.id) ? ps.filter(x => x.id !== u.id) : [...ps, u]);
   const n = people.length;
@@ -629,8 +659,11 @@ function AssignPanel({ batchId, unassigned, selectedIds, onClose, onDone }) {
       } else {
         assignments = people.map(u => ({ recipient_id: u.id }));   // count omitted = even share
       }
-      const r = await client.post(`distribution-batches/${batchId}/assign`, { assignments, mode: order, ...expiryPayload(expiry) });
-      toast.success(`Assigned ${r.data.assigned} numbers to ${r.data.children.length} people · ${r.data.remaining_unassigned} left`);
+      const r = await client.post(`distribution-batches/${batchId}/assign`, {
+        assignments, mode: order, exclude_held: onlyUnique, ...expiryPayload(expiry),
+      });
+      toast.success(`Assigned ${r.data.assigned} numbers to ${r.data.children.length} people · ${r.data.remaining_unassigned} left`
+        + (r.data.skipped_held ? ` · ${r.data.skipped_held} held back (already with someone else)` : ''));
       onDone();
     } catch (e) { toast.error(e.response?.data?.error || 'Could not assign'); }
     finally { setBusy(false); }
@@ -656,6 +689,58 @@ function AssignPanel({ batchId, unassigned, selectedIds, onClose, onDone }) {
           <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
             {unassigned} unassigned in this batch{selectedIds.length ? ` · ${selectedIds.length} rows selected` : ''}. Assigned numbers lock to that person — nobody else can be given them.
             {' '}Set a time limit and they come back on their own.
+          </div>
+
+          {/* every number about to go out, checked against every number already
+              out — with the same person or anyone else */}
+          <div className="rounded-xl p-2.5" style={{
+            border: `1px solid ${check?.held ? 'var(--color-warning-600)' : 'var(--color-border)'}`,
+            background: 'var(--color-surface)',
+          }}>
+            {!check ? (
+              <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                <Loader2 size={13} className="animate-spin" /> Checking these numbers against the ones already out…
+              </div>
+            ) : check.held ? (
+              <>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <UsersRound size={14} style={{ color: 'var(--color-warning-600)' }} />
+                  <span className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>
+                    {check.held} of these {check.total} numbers are already with someone else
+                  </span>
+                  <button onClick={() => setShowWho(s => !s)} className="text-[11px] font-semibold ml-auto" style={{ color: 'var(--color-primary-600)' }}>
+                    {showWho ? 'Hide' : 'Who has them'}
+                  </button>
+                </div>
+                <label className="flex items-start gap-2 mt-2 cursor-pointer">
+                  <input type="checkbox" checked={onlyUnique} onChange={e => setOnlyUnique(e.target.checked)} className="mt-0.5" />
+                  <span className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                    <strong style={{ color: 'var(--color-text)' }}>Only deal numbers nobody else has</strong> — the {check.held} already out are held back,
+                    so this batch hands out {Math.max(0, check.total - check.held)} unique numbers.
+                  </span>
+                </label>
+                {showWho && (
+                  <div className="mt-2 max-h-40 overflow-y-auto text-[11px] rounded-lg" style={{ border: '1px solid var(--color-border)' }}>
+                    {check.details.filter(d => d.holders.length).map(d => (
+                      <div key={d.phone} className="flex items-center gap-2 px-2 py-1" style={{ borderTop: '1px solid var(--color-border)' }}>
+                        <span className="tabular-nums font-semibold" style={{ color: 'var(--color-text)' }}>{d.phone}</span>
+                        <span style={{ color: 'var(--color-text-secondary)' }}>
+                          {d.holders.map(h => h.holder_name || '—').join(', ')}
+                        </span>
+                        <span className="ml-auto truncate max-w-[45%]" style={{ color: 'var(--color-text-tertiary)' }} title={d.holders[0]?.batch_name}>
+                          {d.holders[0]?.batch_name}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                <ShieldCheck size={14} style={{ color: 'var(--color-success-600)' }} />
+                All {check.total} free numbers here are unique — nobody else is working them.
+              </div>
+            )}
           </div>
           <div className="flex gap-2">
             <Mode k="selected" label="Selected rows" hint={`${selectedIds.length} chosen`} />

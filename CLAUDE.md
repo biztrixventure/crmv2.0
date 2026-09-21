@@ -160,6 +160,27 @@ passes the numbers leave the holder on their own. The loan lives on
   (+ `utils/expiry.js` for the countdown wording). `datetime-local` → UTC before
   sending, same rule as `callback_at`.
 
+### Unique numbers per agent (mig 323)
+Two agents calling one customer is the failure distribution exists to prevent, so
+the SAME check runs at every door a number can enter: `phoneHolderMap()` in
+`routes/distributionBatches.js`, built on `app_batch_number_lookup`.
+- `POST /number-check` — the upload dialog runs it on the parsed file BEFORE the
+  batch exists and shows who holds each duplicate; "Upload only the new ones" is
+  the default.
+- `GET /:id/pool-check` — feeds the assign dialog (counts + who) and the
+  workspace (per-row `elsewhere` badge, header total).
+- `POST /:id/assign` **filters held numbers by default** (`exclude_held`, opt
+  OUT with `false`) and reports `skipped_held`. It is FAIL-OPEN: a broken check
+  must never stop a manager dealing numbers.
+- Classification, and the two traps in it:
+  **`passed_on` ⇒ ignore the row** (the person below is the holder) — and it
+  only counts children whose batch is still `active`. 322 forgot that, so a
+  number whose child batch was deleted read as held by nobody; mig 323 fixes it.
+  **holder == sender and nothing dealt ⇒ POOLED**, not held: not with an agent
+  yet, but re-uploading it still duplicates it.
+- Baseline when this shipped (2026-09-21): 18,271 live rows, 8,459 numbers with a
+  holder, **450 of them held by two or more different people**.
+
 ### Re-transferred leads (mig 291)
 A VICIdial `lead_id` names a **LEAD, not a transfer EVENT** — the dialer recycles it, so a fronter transferring the same customer again sends the same `vicidial_vendor_code`. Each XFER must get its **own** transfer row so each keeps its own closer disposition; the earlier row is never edited. `a775261` broke this (it reset the old row and merged the incoming payload over its `form_data`, blanking the customer to the literal word "Lead"); fixed in `9b79a16`.
 - XFER idempotency keys on **TIME** (`XFER_DEDUP_MS`, 2 min), never on the code — a duplicate webhook lands in seconds, a genuine re-transfer is minutes-to-weeks later. Restoring code-only idempotency silently collapses real transfers.

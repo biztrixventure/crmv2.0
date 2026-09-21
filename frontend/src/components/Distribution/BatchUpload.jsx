@@ -1,10 +1,12 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useMemo, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Upload, Loader2, X, FileSpreadsheet, CheckCircle2 } from 'lucide-react';
+import { Upload, Loader2, X, FileSpreadsheet, CheckCircle2, UsersRound, ShieldCheck, ChevronDown } from 'lucide-react';
 import { toast } from 'sonner';
 import client from '../../api/client';
 import ThemedSelect from '../UI/Select';
 import UserPicker from './UserPicker';
+import ExpiryPicker, { EMPTY_EXPIRY, expiryPayload } from './ExpiryPicker';
+import { fmtDeadline } from '../../utils/expiry';
 
 // Turn a CSV/XLSX into a batch, from any level (superadmin, compliance, fronter
 // manager, company admin). Parsing happens HERE, in the browser — the backend
@@ -62,9 +64,14 @@ export default function BatchUpload({ onDone, onClose }) {
   const [split, setSplit] = useState('even');         // even | per
   const [per, setPer] = useState(100);
   const [order, setOrder] = useState('sequential');
+  const [expiry, setExpiry] = useState(EMPTY_EXPIRY);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(null);   // { done, total } while chunks upload
   const [err, setErr] = useState('');
+  const [dupes, setDupes] = useState(null);         // who already has these numbers
+  const [checking, setChecking] = useState(false);
+  const [skipDupes, setSkipDupes] = useState(true); // unique numbers per agent is the point
+  const [showDupes, setShowDupes] = useState(false);
   const inputRef = useRef(null);
 
   const pick = async (f) => {
@@ -90,13 +97,38 @@ export default function BatchUpload({ onDone, onClose }) {
   };
 
   // valid = a 10/11-digit phone, deduped on the normalized number
-  const seen = new Set();
-  const valid = rows.filter(r => {
-    const d = digitsOf(r[phoneCol]);
-    const p = d.length === 11 && d[0] === '1' ? d.slice(1) : d;
-    if (p.length !== 10 || seen.has(p)) return false;
-    seen.add(p); return true;
-  });
+  const normal = (v) => { const d = digitsOf(v); return d.length === 11 && d[0] === '1' ? d.slice(1) : d; };
+  const valid = useMemo(() => {
+    const seen = new Set();
+    return rows.filter(r => {
+      const p = normal(r[phoneCol]);
+      if (p.length !== 10 || seen.has(p)) return false;
+      seen.add(p); return true;
+    });
+  }, [rows, phoneCol]);
+
+  // ── who already has these numbers? ────────────────────────────────────────
+  // Asked BEFORE the batch exists, because the answer changes what you upload.
+  // Two agents calling the same customer is the failure this whole surface
+  // exists to prevent, so the file is checked against every number already out
+  // with somebody — the same person or anyone else.
+  useEffect(() => {
+    if (!valid.length) { setDupes(null); return; }
+    let dead = false;
+    const phones = valid.map(r => normal(r[phoneCol]));
+    setChecking(true); setShowDupes(false);
+    client.post('distribution-batches/number-check', { phones })
+      .then(r => { if (!dead) setDupes(r.data); })
+      .catch(() => { if (!dead) setDupes(null); })
+      .finally(() => { if (!dead) setChecking(false); });
+    return () => { dead = true; };
+  }, [valid, phoneCol]);
+
+  // what actually gets uploaded once the duplicates are (or are not) dropped
+  const dupeSet = useMemo(() => new Set(dupes?.duplicate_phones || []), [dupes]);
+  const kept = useMemo(
+    () => (skipDupes && dupeSet.size ? valid.filter(r => !dupeSet.has(normal(r[phoneCol]))) : valid),
+    [valid, dupeSet, skipDupes, phoneCol]);
 
   // A wide 1000-row file is megabytes of JSON — one request dies at the reverse
   // proxy's body cap (413) before Express ever sees it. So: create the batch with
@@ -105,10 +137,10 @@ export default function BatchUpload({ onDone, onClose }) {
   // batch already has).
   const CHUNK = 250;
   const send = async () => {
-    if (!valid.length) return toast.error('No valid phone numbers in that column');
+    if (!kept.length) return toast.error(valid.length ? 'Every number in this file is already out with someone' : 'No valid phone numbers in that column');
     setBusy(true);
     try {
-      const payload = valid.map(r => ({
+      const payload = kept.map(r => ({
         phone: r[phoneCol],
         customer_name: nameCol >= 0 ? r[nameCol] : null,
         lead_id: leadCol >= 0 ? r[leadCol] : null,
@@ -139,9 +171,10 @@ export default function BatchUpload({ onDone, onClose }) {
       if (people.length) {
         const assignments = people.map(u => (split === 'per' ? { recipient_id: u.id, count: per } : { recipient_id: u.id }));
         const a = await client.post(`distribution-batches/${batch.id}/assign`, {
-          assignments, mode: order, name: batchName.trim() || batch.name,
+          assignments, mode: order, name: batchName.trim() || batch.name, ...expiryPayload(expiry),
         });
-        toast.success(`${imported} numbers uploaded · ${a.data.assigned} split into ${a.data.children.length} batches · ${a.data.remaining_unassigned} kept back`);
+        toast.success(`${imported} numbers uploaded · ${a.data.assigned} split into ${a.data.children.length} batches · ${a.data.remaining_unassigned} kept back`
+          + (a.data.skipped_held ? ` · ${a.data.skipped_held} skipped (already with someone)` : ''));
       } else {
         toast.success(`Batch created — ${imported} numbers${payload.length - imported ? `, ${payload.length - imported} duplicates skipped` : ''}`);
       }
@@ -191,7 +224,10 @@ export default function BatchUpload({ onDone, onClose }) {
               <div className="flex items-center gap-2 text-sm flex-wrap">
                 <CheckCircle2 size={15} style={{ color: 'var(--color-success-600)' }} />
                 <span style={{ color: 'var(--color-text)' }}>{file?.name}</span>
-                <span style={{ color: 'var(--color-text-tertiary)' }}>· {rows.length} rows · {headers.length} columns · <strong style={{ color: 'var(--color-text-secondary)' }}>{valid.length} valid numbers</strong></span>
+                <span style={{ color: 'var(--color-text-tertiary)' }}>
+                  · {rows.length} rows · {headers.length} columns · <strong style={{ color: 'var(--color-text-secondary)' }}>{valid.length} valid numbers</strong>
+                  {kept.length !== valid.length && <strong style={{ color: 'var(--color-warning-600)' }}> · {valid.length - kept.length} skipped as duplicates</strong>}
+                </span>
                 <button onClick={() => { setHeaders([]); setRows([]); setFile(null); }} className="ml-auto text-xs font-semibold" style={{ color: 'var(--color-primary-600)' }}>Change file</button>
               </div>
 
@@ -205,6 +241,92 @@ export default function BatchUpload({ onDone, onClose }) {
                 Only the phone column is required — numbers are matched and assigned on the phone.
                 Map the lead ID only for VICIdial exports, so a number can be traced back to the dialer record
                 (a lead id is unique per box, not across boxes). Every other column is kept and shown anyway.
+              </div>
+
+              {/* who already has these numbers — asked before anything is created */}
+              <div className="rounded-xl p-3" style={{
+                border: `1px solid ${dupes?.held ? 'var(--color-warning-600)' : 'var(--color-border)'}`,
+                background: 'var(--color-surface)',
+              }}>
+                {checking ? (
+                  <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                    <Loader2 size={13} className="animate-spin" /> Checking who already has these {valid.length} numbers…
+                  </div>
+                ) : !dupes ? (
+                  <div className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
+                    Could not check these numbers against the ones already out. They will still be checked again when you assign them.
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {dupes.held || dupes.pooled
+                        ? <UsersRound size={14} style={{ color: 'var(--color-warning-600)' }} />
+                        : <ShieldCheck size={14} style={{ color: 'var(--color-success-600)' }} />}
+                      <span className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>
+                        {dupes.held || dupes.pooled
+                          ? `${dupes.held + dupes.pooled} of these ${dupes.searched} numbers are already in the system`
+                          : `All ${dupes.searched} numbers are new — nobody has them`}
+                      </span>
+                      {(dupes.held > 0 || dupes.pooled > 0) && (
+                        <button onClick={() => setShowDupes(s => !s)} className="text-[11px] font-semibold flex items-center gap-1 ml-auto" style={{ color: 'var(--color-primary-600)' }}>
+                          {showDupes ? 'Hide' : 'Show who has them'} <ChevronDown size={12} style={{ transform: showDupes ? 'rotate(180deg)' : 'none' }} />
+                        </button>
+                      )}
+                    </div>
+                    {(dupes.held > 0 || dupes.pooled > 0) && (
+                      <>
+                        <div className="text-[11px] mt-1" style={{ color: 'var(--color-text-secondary)' }}>
+                          <strong style={{ color: 'var(--color-warning-600)' }}>{dupes.held}</strong> are out with an agent right now
+                          {dupes.pooled ? <> · <strong>{dupes.pooled}</strong> sit unassigned in another batch</> : null}
+                          {' '}· <strong style={{ color: 'var(--color-success-600)' }}>{dupes.fresh}</strong> are new.
+                        </div>
+                        <div className="flex gap-2 mt-2">
+                          {[[true, 'Upload only the new ones', `${kept.length} numbers`],
+                            [false, 'Upload everything', `all ${valid.length}, duplicates included`]].map(([v, label, hint]) => (
+                            <button key={String(v)} onClick={() => setSkipDupes(v)} className="text-left px-3 py-2 rounded-lg flex-1"
+                              style={{ border: `1px solid ${skipDupes === v ? 'var(--color-primary-600)' : 'var(--color-border)'}`, background: skipDupes === v ? 'var(--color-surface-hover)' : 'transparent' }}>
+                              <div className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>{label}</div>
+                              <div className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>{hint}</div>
+                            </button>
+                          ))}
+                        </div>
+                        {showDupes && (
+                          <div className="mt-2 max-h-48 overflow-y-auto rounded-lg" style={{ border: '1px solid var(--color-border)' }}>
+                            <table className="w-full text-[11px]">
+                              <thead><tr style={{ background: 'var(--color-bg)' }}>
+                                {['Number', 'Who has it', 'Batch', 'Status'].map(h => (
+                                  <th key={h} className="text-left font-semibold px-2 py-1.5" style={{ color: 'var(--color-text-secondary)' }}>{h}</th>
+                                ))}
+                              </tr></thead>
+                              <tbody>
+                                {dupes.details.flatMap(d => {
+                                  const places = d.holders.length ? d.holders : d.pools;
+                                  return places.map((p, i) => (
+                                    <tr key={`${d.phone}-${i}`} style={{ borderTop: '1px solid var(--color-border)' }}>
+                                      <td className="px-2 py-1 tabular-nums font-semibold" style={{ color: 'var(--color-text)' }}>{i === 0 ? d.phone : ''}</td>
+                                      <td className="px-2 py-1" style={{ color: d.holders.length ? 'var(--color-text)' : 'var(--color-text-tertiary)' }}>
+                                        {p.holder_name || '—'}{d.holders.length ? '' : ' (unassigned pool)'}
+                                      </td>
+                                      <td className="px-2 py-1 max-w-[180px] truncate" style={{ color: 'var(--color-text-secondary)' }} title={p.batch_name}>{p.batch_name}</td>
+                                      <td className="px-2 py-1" style={{ color: 'var(--color-text-secondary)' }}>
+                                        {p.status || '—'}{p.expires_at ? ` · until ${fmtDeadline(p.expires_at)}` : ''}
+                                      </td>
+                                    </tr>
+                                  ));
+                                })}
+                              </tbody>
+                            </table>
+                            {dupes.details.length < dupes.held + dupes.pooled && (
+                              <div className="px-2 py-1.5 text-[11px]" style={{ color: 'var(--color-text-tertiary)', borderTop: '1px solid var(--color-border)' }}>
+                                Showing the first {dupes.details.length}. The rest are handled the same way.
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </>
+                )}
               </div>
 
               <label className="block text-xs" style={{ color: 'var(--color-text-secondary)' }}>
@@ -241,10 +363,11 @@ export default function BatchUpload({ onDone, onClose }) {
                         ))}
                       </div>
                     </div>
+                    <ExpiryPicker value={expiry} onChange={setExpiry} />
                     <div className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>
                       {split === 'per'
-                        ? <>{Math.min(per * people.length, valid.length)} of {valid.length} numbers go out ({per} each to {people.length}), the rest stay with you.</>
-                        : <>{valid.length} numbers split {people.length} ways — about {Math.floor(valid.length / people.length)} each.</>}
+                        ? <>{Math.min(per * people.length, kept.length)} of {kept.length} numbers go out ({per} each to {people.length}), the rest stay with you.</>
+                        : <>{kept.length} numbers split {people.length} ways — about {Math.floor(kept.length / people.length)} each.</>}
                     </div>
                   </>
                 )}
@@ -258,7 +381,7 @@ export default function BatchUpload({ onDone, onClose }) {
                       {headers.map((h, i) => <th key={i} className="text-left font-semibold px-2 py-1.5 whitespace-nowrap" style={{ color: i === phoneCol ? 'var(--color-primary-600)' : 'var(--color-text-secondary)' }}>{h}{i === phoneCol ? ' (phone)' : ''}</th>)}
                     </tr></thead>
                     <tbody>
-                      {valid.slice(0, 5).map((r, ri) => (
+                      {kept.slice(0, 5).map((r, ri) => (
                         <tr key={ri} style={{ borderTop: '1px solid var(--color-border)' }}>
                           {headers.map((_, ci) => <td key={ci} className="px-2 py-1 whitespace-nowrap" style={{ color: 'var(--color-text)' }}>{r[ci]}</td>)}
                         </tr>
@@ -282,8 +405,8 @@ export default function BatchUpload({ onDone, onClose }) {
               </div>
             )}
             <button onClick={onClose} className="text-sm font-semibold px-3 py-2 rounded-lg" style={{ color: 'var(--color-text-secondary)' }}>Cancel</button>
-            <button onClick={send} disabled={busy || !valid.length} className="text-sm font-bold px-4 py-2 rounded-lg flex items-center gap-2 disabled:opacity-50" style={{ background: 'var(--gradient-sidebar)', color: 'var(--color-text-inverse)' }}>
-              {busy ? <Loader2 size={15} className="animate-spin" /> : <Upload size={15} />} Create batch ({valid.length})
+            <button onClick={send} disabled={busy || !kept.length} className="text-sm font-bold px-4 py-2 rounded-lg flex items-center gap-2 disabled:opacity-50" style={{ background: 'var(--gradient-sidebar)', color: 'var(--color-text-inverse)' }}>
+              {busy ? <Loader2 size={15} className="animate-spin" /> : <Upload size={15} />} Create batch ({kept.length})
             </button>
           </div>
         )}
