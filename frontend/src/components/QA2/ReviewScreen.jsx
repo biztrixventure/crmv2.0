@@ -53,6 +53,24 @@ async function prefetchAudio(call) {
   } catch { /* best-effort — Next still works, just not pre-warmed */ }
 }
 
+// ── playback speed ───────────────────────────────────────────────────────────
+// A reviewer works through a queue of calls; most of a call is dead air and
+// hold music. The presets are the speeds people actually use, and Custom is
+// there because "how fast can I still understand it" is personal.
+// 5x is the ceiling: browsers keep pitch correction (and audible output at all)
+// only up to roughly there, so a higher number would silently play nothing.
+const SPEEDS = [1, 1.5, 2, 3, 4];
+const SPEED_MIN = 0.25, SPEED_MAX = 5;
+const SPEED_KEY = 'qa2.playbackRate';
+const clampSpeed = (v) => Math.min(SPEED_MAX, Math.max(SPEED_MIN, Number(v) || 1));
+// Remembered per browser: a reviewer who works at 2x wants 2x on the next call
+// too, not a reset with every record they open. Storage can throw (private
+// mode, blocked site data), so every touch is guarded and 1x is the fallback.
+const readSpeed = () => {
+  try { const v = parseFloat(localStorage.getItem(SPEED_KEY)); return v >= SPEED_MIN && v <= SPEED_MAX ? v : 1; }
+  catch { return 1; }
+};
+
 function AudioPlayer({ call }) {
   const audioRef = useRef(null);
   const urlRef = useRef(null);
@@ -61,6 +79,20 @@ function AudioPlayer({ call }) {
   const [cur, setCur] = useState(0);
   const [dur, setDur] = useState(0);
   const [cached, setCached] = useState(false);
+  const [speed, setSpeed] = useState(readSpeed);
+  const [customOpen, setCustomOpen] = useState(false);
+
+  const applySpeed = useCallback((v) => {
+    const r = clampSpeed(v);
+    setSpeed(r);
+    if (audioRef.current) audioRef.current.playbackRate = r;
+    try { localStorage.setItem(SPEED_KEY, String(r)); } catch { /* not important enough to fail on */ }
+  }, []);
+
+  // The element is recreated/re-sourced on every record, and some browsers reset
+  // playbackRate when a new source loads — so it is re-applied whenever the
+  // clip changes, not just when the reviewer picks a speed.
+  useEffect(() => { if (audioRef.current) audioRef.current.playbackRate = speed; }, [speed, loading, call.id]);
 
   const fmt = (s) => { if (!Number.isFinite(s)) return '0:00'; const m = Math.floor(s / 60); const r = Math.floor(s % 60); return `${m}:${String(r).padStart(2, '0')}`; };
 
@@ -118,7 +150,7 @@ function AudioPlayer({ call }) {
       <audio ref={audioRef}
         onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)}
         onTimeUpdate={e => setCur(e.currentTarget.currentTime)}
-        onLoadedMetadata={e => setDur(e.currentTarget.duration)}
+        onLoadedMetadata={e => { setDur(e.currentTarget.duration); e.currentTarget.playbackRate = speed; }}
         className="hidden" />
       <div className="flex items-center gap-3">
         <button onClick={toggle} disabled={loading}
@@ -134,6 +166,50 @@ function AudioPlayer({ call }) {
             className="absolute inset-0 w-full opacity-0 cursor-pointer" />
         </div>
         {cached && <span className="text-[10px] font-semibold" style={{ color: 'var(--color-success-600)' }}>cached</span>}
+      </div>
+
+      {/* Speed. Its own row so the transport above keeps the exact layout it
+          had — the seek bar is the control people aim at in a hurry. */}
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <span className="text-[10px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-tertiary)' }}>Speed</span>
+        {SPEEDS.map(s => {
+          const on = !customOpen && Math.abs(speed - s) < 0.001;
+          return (
+            <button key={s} type="button" onClick={() => { setCustomOpen(false); applySpeed(s); }}
+              className="text-[11px] font-bold px-2 py-0.5 rounded-full tabular-nums"
+              style={{
+                background: on ? 'var(--color-primary-600)' : 'var(--color-surface)',
+                color: on ? '#fff' : 'var(--color-text-secondary)',
+                border: '1px solid var(--color-border)',
+              }}>
+              {s}x
+            </button>
+          );
+        })}
+        <button type="button" onClick={() => setCustomOpen(o => !o)}
+          className="text-[11px] font-bold px-2 py-0.5 rounded-full"
+          style={{
+            background: customOpen ? 'var(--color-primary-600)' : 'var(--color-surface)',
+            color: customOpen ? '#fff' : 'var(--color-text-secondary)',
+            border: '1px solid var(--color-border)',
+          }}>
+          Custom
+        </button>
+        {customOpen && (
+          <>
+            <input type="number" min={SPEED_MIN} max={SPEED_MAX} step={0.25} value={speed}
+              onChange={e => applySpeed(e.target.value)}
+              className="text-[11px] tabular-nums rounded-lg px-1.5 py-0.5" style={{ width: 62, background: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}
+              aria-label="Playback speed" />
+            <span className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>{SPEED_MIN}–{SPEED_MAX}x</span>
+          </>
+        )}
+        {speed !== 1 && (
+          <button type="button" onClick={() => { setCustomOpen(false); applySpeed(1); }}
+            className="text-[10px] font-semibold ml-auto" style={{ color: 'var(--color-primary-600)' }}>
+            back to 1x
+          </button>
+        )}
       </div>
     </Panel>
   );
