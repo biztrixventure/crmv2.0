@@ -211,7 +211,7 @@ router.get('/unclassified', asyncHandler(async (req, res) => {
   const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 365);
   let query = supabaseAdmin
     .from('qa2_call')
-    .select('id, box_id, company_id, leg, agent_user, customer_phone, dispo_raw, call_at, source, created_at, recording_state, transfer_id, companies(name)')
+    .select('id, box_id, company_id, leg, agent_user, customer_phone, dispo_raw, call_at, source, created_at, recording_state, transfer_id, dialer_provider, dialer_account_id, companies(name)')
     .is('method_id', null).eq('qa_relevant', true)
     // A CRM anchor (transfer / sale) or an XFER dispo makes a call reviewable.
     // Being PAIRED to a closer leg does not: the recording-pairer links every

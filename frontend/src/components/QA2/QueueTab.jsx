@@ -27,6 +27,7 @@ import ColumnHeader from '../UI/ColumnHeader';
 import { useTableQuery, useAbortable, isCanceled } from '../../hooks/useTableQuery';
 import ReviewScreen from './ReviewScreen';
 import { WorkFilters, byMethod } from './PoolTab';
+import DialerBadge from '../Shared/DialerBadge';
 
 const FILTERS = [
   { key: 'pending', label: 'Not started', icon: Clock },
@@ -222,7 +223,14 @@ export default function QueueTab() {
                           </span>
                         ) : '—'}
                       </td>
-                      <td className="px-3 py-2" style={{ color: 'var(--color-text-secondary)' }}>{c.agent_name || c.agent_user || '—'}</td>
+                      <td className="px-3 py-2" style={{ color: 'var(--color-text-secondary)' }}>
+                        <span className="inline-flex items-center gap-1.5 flex-wrap">
+                          {c.agent_name || c.agent_user || '—'}
+                          {/* Silent for VICIdial, so a badge here means the
+                              recording came from the other dialer. */}
+                          <DialerBadge record={c} compact />
+                        </span>
+                      </td>
                       {/* The dialer's own facts about the call — what the reviewer
                           used to have to open the record to learn. On a TRA the
                           row is the FRONTER leg (its dispo is just XFER), so the

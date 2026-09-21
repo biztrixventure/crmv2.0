@@ -18,6 +18,7 @@ import client from '../../api/client';
 import ThemedSelect from '../UI/Select';
 import { Panel, SectionHeader, Loading } from '../UI/kit';
 import { getClip, putClip, clipKey } from '../../utils/audioCache';
+import DialerBadge from '../Shared/DialerBadge';
 
 // Prefetching for "Next" — module-level (not component state) so a value
 // warmed while viewing record A survives the full remount that opening

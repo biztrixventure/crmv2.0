@@ -378,7 +378,7 @@ router.get('/day-calls', asyncHandler(async (req, res) => {
   // browser; a manager classifies those from the Unclassified tab first.
   let query = supabaseAdmin
     .from('qa2_call')
-    .select('id, company_id, method_id, leg, agent_user, agent_user_id, customer_phone, dispo_raw, call_at, recording_state, source, qa2_method(label), companies(name)')
+    .select('id, company_id, method_id, leg, agent_user, agent_user_id, customer_phone, dispo_raw, call_at, recording_state, source, dialer_provider, dialer_account_id, qa2_method(label), companies(name)')
     .eq('company_id', company_id).gte('call_at', start).lte('call_at', end)
     .eq('qa_relevant', true).not('method_id', 'is', null);
   if (scope.operationalMethodIds !== 'all') query = query.in('method_id', scope.operationalMethodIds);

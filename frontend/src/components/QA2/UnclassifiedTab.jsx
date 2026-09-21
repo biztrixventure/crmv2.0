@@ -10,6 +10,7 @@ import { toast } from 'sonner';
 import client from '../../api/client';
 import ThemedSelect from '../UI/Select';
 import { Panel, SectionHeader, TableScroll, EmptyState, Loading } from '../UI/kit';
+import DialerBadge from '../Shared/DialerBadge';
 
 export default function UnclassifiedTab() {
   const [calls, setCalls] = useState(null);
@@ -82,7 +83,12 @@ export default function UnclassifiedTab() {
                     <td className="px-3 py-2">{c.companies?.name || '—'}</td>
                     <td className="px-3 py-2">{c.leg || '—'}</td>
                     <td className="px-3 py-2">{c.agent_user || '—'}</td>
-                    <td className="px-3 py-2">{c.customer_phone || '—'}</td>
+                    <td className="px-3 py-2">
+                      <span className="inline-flex items-center gap-1.5 flex-wrap">
+                        {c.customer_phone || '—'}
+                        <DialerBadge record={c} compact />
+                      </span>
+                    </td>
                     <td className="px-3 py-2">{c.dispo_raw || '—'}</td>
                     <td className="px-3 py-2" style={{ color: 'var(--color-text-secondary)' }}>{new Date(c.created_at).toLocaleString()}</td>
                     <td className="px-3 py-2">

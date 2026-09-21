@@ -29,6 +29,7 @@ import ThemedDate from '../UI/ThemedDate';
 import ColumnHeader from '../UI/ColumnHeader';
 import { useTableQuery, useAbortable, isCanceled } from '../../hooks/useTableQuery';
 import { Panel, SectionHeader, TableScroll, EmptyState, Loading } from '../UI/kit';
+import DialerBadge from '../Shared/DialerBadge';
 
 const LEG_OPTIONS = [{ value: 'fronter', label: 'Fronter' }, { value: 'closer', label: 'Closer' }];
 const REC_OPTIONS = [
@@ -679,7 +680,12 @@ export default function LoadDayTab({ scope }) {
                     <td className="px-3 py-2"><input type="checkbox" checked={selected.has(c.id)} onChange={() => toggleOne(c.id)} /></td>
                     <td className="px-3 py-2">{c.qa2_method?.label || '—'}</td>
                     <td className="px-3 py-2">{c.leg || '—'}</td>
-                    <td className="px-3 py-2">{c.agent_name || '—'}</td>
+                    <td className="px-3 py-2">
+                      <span className="inline-flex items-center gap-1.5 flex-wrap">
+                        {c.agent_name || '—'}
+                        <DialerBadge record={c} compact />
+                      </span>
+                    </td>
                     <td className="px-3 py-2">{c.dispo_raw || '—'}</td>
                     <td className="px-3 py-2">{c.closer_dispo || '—'}</td>
                     <td className="px-3 py-2">{c.recording_state || '—'}</td>

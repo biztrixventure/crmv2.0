@@ -20,6 +20,7 @@ import ThemedDate from '../UI/ThemedDate';
 import ThemedSelect from '../UI/Select';
 import { useTableQuery, useAbortable, isCanceled } from '../../hooks/useTableQuery';
 import ReviewScreen from './ReviewScreen';
+import DialerBadge from '../Shared/DialerBadge';
 
 // THE WORK BAR — day, company, method. Shared by Pool and My queue.
 //
@@ -257,7 +258,12 @@ export default function PoolTab() {
                     <td className="px-3 py-2">{a.qa2_call?.companies?.name || '—'}</td>
                     <td className="px-3 py-2">{a.qa2_call?.qa2_method?.label || '—'}</td>
                     <td className="px-3 py-2">{a.qa2_call?.leg || '—'}</td>
-                    <td className="px-3 py-2">{a.qa2_call?.agent_name || a.qa2_call?.agent_user || '—'}</td>
+                    <td className="px-3 py-2">
+                      <span className="inline-flex items-center gap-1.5 flex-wrap">
+                        {a.qa2_call?.agent_name || a.qa2_call?.agent_user || '—'}
+                        <DialerBadge record={a.qa2_call} compact />
+                      </span>
+                    </td>
                     <td className="px-3 py-2">{a.qa2_call?.recording_state || '—'}</td>
                     <td className="px-3 py-2">{a.qa2_call?.call_at ? new Date(a.qa2_call.call_at).toLocaleDateString() : '—'}</td>
                     <td className="px-3 py-2 text-right">
