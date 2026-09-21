@@ -599,7 +599,20 @@ const fronterXferHandler = asyncHandler(async (req, res) => {
     .eq('vicidial_vendor_code', code).eq('created_by', userId)
     .order('created_at', { ascending: false }).limit(1).maybeSingle();
 
-  if (existing && Date.now() - new Date(existing.created_at).getTime() < XFER_DEDUP_MS) {
+  // A CONNECTED DIALER CAN REPORT THE SAME TRANSFER TWICE, MINUTES APART.
+  //
+  // CallTools reports one transfer two ways: the fronter PRESSES "transfer to
+  // closer", and separately SETS a disposition when they finish wrapping up.
+  // Both describe the same transfer, but the gap between them is however long
+  // the agent takes — routinely more than the two minutes that separate a
+  // retried webhook from a genuinely recycled lead on VICIdial. Left at two
+  // minutes, the second report mints a second transfer and the fronter is
+  // credited twice for one call.
+  //
+  // So the window belongs to the ACCOUNT (settings.dedup_ms), and only the
+  // bridge can set it. VICIdial keeps the 2-minute rule exactly as it was.
+  const dedupMs = Number.isFinite(req.__dialerDedupMs) ? req.__dialerDedupMs : XFER_DEDUP_MS;
+  if (existing && Date.now() - new Date(existing.created_at).getTime() < dedupMs) {
     // Same event, fired twice. Touch only the two correlation fields, and only
     // when the payload actually carries them — never overwrite what is already
     // there with a blank, and never touch form_data (the fronter may have edited
@@ -609,7 +622,7 @@ const fronterXferHandler = asyncHandler(async (req, res) => {
       await supabaseAdmin.from('transfers').update(updates).eq('id', existing.id);
     }
     await reconcileQueuedDispoForTransfer({ id: existing.id }, norm);
-    xdbg.outcome = `duplicate webhook within ${XFER_DEDUP_MS / 1000}s — kept transfer ${existing.id}`;
+    xdbg.outcome = `duplicate webhook within ${Math.round(dedupMs / 1000)}s — kept transfer ${existing.id}`;
     return res.json({ ok: true, transfer_id: existing.id, updated: true, duplicate: true });
   }
   // Past the window → genuine new transfer. `existing` is deliberately NOT

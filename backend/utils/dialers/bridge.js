@@ -96,6 +96,11 @@ function makeReq(account, ev, params, { ip, isXfer }) {
     // never be driven from outside.
     __dialerBridge: true,
     __dialerXfer: !!isXfer,
+    // How far apart two reports of the SAME transfer may be and still count as
+    // one. A dialer that reports both the button press and the disposition
+    // needs a window as long as an agent's wrap-up; VICIdial, which only ever
+    // retries a webhook, keeps its own 2-minute rule.
+    __dialerDedupMs: Number((account.settings || {}).dedup_ms) || undefined,
     __dialerEvent: {
       provider: account.provider,
       account_id: account.id,
