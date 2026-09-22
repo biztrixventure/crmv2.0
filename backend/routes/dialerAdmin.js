@@ -556,13 +556,39 @@ router.post('/accounts/:id/recording-probe', asyncHandler(async (req, res) => {
 // credentials. So this returns the three harmless fields and nothing else, and
 // it is mounted outside the superadmin router above on purpose.
 const labels = express.Router();
+
+// The box list feeds the Dialer column's tick-list on every records table, so
+// it is read once per page load by every logged-in person. It changes when a
+// dialer is connected or a new prefix first appears — i.e. a few times a year —
+// so a short in-process cache spares the two index scans behind the view.
+let _boxCache = { at: 0, boxes: [] };
+const BOX_TTL = 5 * 60 * 1000;
+async function dialerBoxList() {
+  if (Date.now() - _boxCache.at < BOX_TTL) return _boxCache.boxes;
+  // app_dialer_boxes (mig 327) reads the boxes that are actually ON rows, not
+  // the ones still configured — OAT and INB have no live box and would vanish
+  // from a config-derived list while their transfers stayed in the table.
+  const { data, error } = await supabaseAdmin.from('app_dialer_boxes').select('box, records');
+  // A missing view (deploy before migration) must not blank the tag itself —
+  // the column still filters, just by typing. Do not cache the failure.
+  if (error) return _boxCache.boxes;
+  _boxCache = { at: Date.now(), boxes: data || [] };
+  return _boxCache.boxes;
+}
+
 labels.get('/labels', asyncHandler(async (req, res) => {
-  const { data } = await supabaseAdmin.from('dialer_accounts').select('id, name, provider');
+  const [{ data }, boxes] = await Promise.all([
+    supabaseAdmin.from('dialer_accounts').select('id, name, provider'),
+    dialerBoxList(),
+  ]);
   res.json({
     accounts: data || [],
     // The providers a record can carry even with no account row — every legacy
     // row reads 'vicidial', which has no account and never will.
     providers: { vicidial: 'VICIdial', calltools: 'CallTools', generic: 'Dialer' },
+    // [{ box, records }] — the record count is what makes the tick-list answer
+    // "how many are from each dialer" before you even tick anything.
+    boxes,
   });
 }));
 

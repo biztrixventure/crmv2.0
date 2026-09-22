@@ -360,6 +360,37 @@ and `VICIDIAL_INGEST_TOKEN`. Operator guide: `docs/DIALER_INTEGRATION.md`.
 - Every new column is deploy-order safe (insert/select retries without the `dialer_*` columns), so the
   backend can ship before 320 is applied.
 
+### Where a record came from (migs 325-327, applied 2026-09-22)
+With two dialers, "which one sent this?" is the first question asked of any odd
+record, so EVERY transfer and EVERY sale carries the answer on the row.
+- **The origin is stamped ON the row, never joined.** `transfers.dialer_box` and
+  `sales.{dialer_provider,dialer_account_id,dialer_box}`, trigger-fed by
+  `fn_sale_stamp_dialer` (from the sale's transfer) and `fn_transfer_stamp_box`.
+  The question people ask is "how many of this month's sales came from each
+  dialer", and grouping through an embedded resource filters one page in the
+  browser instead of the table in the database.
+- **No dialer fingerprint means NO dialer.** A sale with no vendor code, no
+  agent and no account was typed into the CRM — it is `NULL` (shown as
+  "Manual"), not VICIdial. The first backfill credited VICIdial with 5,868
+  hand-typed sales before this rule went in.
+- `dialer_box` is one level finer than the provider: the vendor-code prefix for
+  VICIdial (WTI / TMC / ETC / INB / OAT) and the connected account's own name
+  otherwise. It is the useful label — "VICIdial" says nothing when every row is.
+- **A view does not inherit ALTER TABLE.** `v_compliance_transfer_records` names
+  its columns, so 326 had to recreate it (same trap as 321). Adding a dialer
+  column anywhere means checking that view, or the compliance tab filters on a
+  column that is not there: 42703 -> 500 -> blank tab.
+- The filter tick-list comes from `app_dialer_boxes` (mig 327 — the boxes
+  actually ON rows, with counts), NOT from the dialerBoxes.js config and not
+  from `fn_dialer_box`'s prefix list. Both of those omit OAT and INB, which have
+  no live box but do have transfers. Served by `GET /api/dialers/labels`
+  (5-min cache) and rendered by `components/Shared/DialerBadge.jsx`.
+- One component renders the tag everywhere. It distinguishes **null from
+  undefined**: an explicit null is "Manual", an ABSENT field means the row was
+  not fetched with it and the badge renders nothing. Named selects are the
+  recurring trap here — `/vicidial/pending` and the four QA2 lists each had to
+  be widened by hand.
+
 ### IP access control (mig 319, applied 2026-09-15)
 Which networks each user may use the CRM from. Ships OFF, and everyone is `anywhere`. README → "IP access control" has the operator steps.
 - **Mode lives in `user_ip_access` (sidecar), NEVER on `user_profiles`.** That table has RLS `users_can_update_own_profile`

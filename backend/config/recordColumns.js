@@ -80,6 +80,20 @@ const SALE_COLUMNS = {
   car_model:       { col: 'car_model',          type: 'text',   sort: true, mask: 'pii' },
   car_year:        { col: 'car_year',           type: 'text',   sort: true, mask: 'pii' },
   miles:           { col: 'miles_num',          type: 'number', sort: true, mask: 'pii' },
+  // Where the sale came from. Stamped ON the row by mig 325 (trigger-fed from
+  // the transfer) rather than joined, because the question people ask is "how
+  // many of this month's sales came from each dialer" — grouping through an
+  // embedded resource would filter one page in the browser instead of the
+  // table in the database. Both columns are indexed.
+  //   dialer     — the product: vicidial / calltools. NULL = typed in the CRM.
+  //   dialer_box — one level finer: WTI / TMC / ETC / INB / OAT, or the
+  //                connected account's own name.
+  dialer:          { col: 'dialer_provider',    type: 'text',   sort: true },
+  // enum, NOT text — the header then renders a tick-list of the real boxes
+  // instead of a box you have to type "WTI" into. No `values` guard: unlike
+  // status these are plain text, so Postgres cannot reject an unknown label and
+  // the closed vocabulary would only go stale the day a dialer is connected.
+  dialer_box:      { col: 'dialer_box',         type: 'enum',   sort: true, enumSource: 'dialer_boxes' },
 };
 
 // The compliance surface additionally exposes the "Status Updated" header.
@@ -119,6 +133,10 @@ const TRANSFER_COLUMNS = {
   // idx_transfers_cli / btree.
   cli_number:  { col: 'form_data->>cli_number', type: 'text', sort: false, mask: 'pii' },
   vendor_code: { col: 'vicidial_vendor_code',   type: 'text', sort: false },
+  // Same pair as sales, so "show me every WTI transfer" and "show me every WTI
+  // sale" are the same gesture on both surfaces.
+  dialer:      { col: 'dialer_provider',        type: 'text', sort: true },
+  dialer_box:  { col: 'dialer_box',             type: 'enum', sort: true, enumSource: 'dialer_boxes' },
 };
 
 // ── callbacks ───────────────────────────────────────────────────────────────

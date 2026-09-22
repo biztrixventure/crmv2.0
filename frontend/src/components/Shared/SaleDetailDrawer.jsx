@@ -18,6 +18,7 @@ import { useDrawerLayout } from '../../hooks/useDrawerLayout';
 import { useCancellationReasons } from '../../hooks/useCancellationReasons';
 import { usePostDateFailReasons } from '../../hooks/usePostDateFailReasons';
 import SaleCopyBar from './SaleCopyBar';
+import DialerBadge from './DialerBadge';
 
 const SALE_BADGE = {
   open: 'info', sold: 'success', cancelled: 'error', follow_up: 'warning',
@@ -331,6 +332,9 @@ export default function SaleDetailDrawer({ sale: saleProp, onClose, onResold }) 
           {sale.reference_no && (
             <span className="text-xs font-mono text-text-tertiary">#{String(sale.reference_no).toUpperCase()}</span>
           )}
+          {/* Spelled out here — product AND box — because this is the detail
+              view. Reads "Manual" for a sale nobody dialled. */}
+          <DialerBadge record={sale} />
           <span className="text-xs text-text-tertiary ml-auto">
             {new Date(sale.created_at).toLocaleString()}
           </span>

@@ -35,6 +35,7 @@ import {
 } from './shared';
 import { useTableQuery, useAbortable, isCanceled } from '../../hooks/useTableQuery';
 import { useFilterOptions } from '../../hooks/useFilterOptions';
+import DialerBadge, { useDialerBoxOptions } from '../Shared/DialerBadge';
 
 // A timestamptz rendered in the VIEWER's timezone. Distinct from fmtSaleDate,
 // which slices the leading YYYY-MM-DD off the string: correct for sale_date (a
@@ -259,6 +260,9 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
   // prop the shell already holds; users are one cached fetch per session.
   // Statuses use the compliance label overrides, not the raw enum keys.
   const { userOptions, companyOptions, clientOptions } = useFilterOptions({ companyList });
+  // The boxes that are actually on records, with their counts, so the filter
+  // can be ticked instead of typed. Shares one cached fetch with the badges.
+  const dialerOptions = useDialerBoxOptions();
   const statusOptions = ALL_SALE_STATUSES.map(s => ({ value: s, label: labelOf(s) }));
   // Closer filter dropdown — userOptions carries each user's role level;
   // narrow to closers only so fronters/managers don't clutter the list.
@@ -819,6 +823,9 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                   <TqTh tq={tq} col="fronter" options={userOptions}>Fronter</TqTh>
                   <TqTh tq={tq} col="closer"  options={userOptions}>Closer</TqTh>
                   <TqTh tq={tq} col="company" options={companyOptions}>Company</TqTh>
+                  {/* Filter by where the sale came from: type WTI / TMC /
+                      CallTools, or use "is empty" for sales nobody dialled. */}
+                  <TqTh tq={tq} col="dialer_box" options={dialerOptions}>Dialer</TqTh>
                   <TqTh tq={tq} col="sale_date">Sale Date</TqTh>
                   <TqTh tq={tq} col="status_updated">Status Updated</TqTh>
                   {isPostDate && <Th>Charge Date</Th>}
@@ -916,6 +923,9 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                       <td className="px-3 py-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{s.fronter_name || '—'}</td>
                       <td className="px-3 py-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{closerName(s)}</td>
                       <td className="px-3 py-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{s.companies?.name || '—'}</td>
+                      {/* Pairs with the Dialer header — the box where there is
+                          one, "Manual" where the sale was typed in. */}
+                      <td className="px-3 py-1.5"><DialerBadge record={s} compact short /></td>
                       {/* Show the actual sale_date the closer entered (carries through
                           bulk uploads) instead of the upload moment. Falls back to
                           created_at on legacy rows where sale_date wasn't captured. */}
@@ -1039,7 +1049,7 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
                     </tr>
                     {expanded === s.id && Array.isArray(s.edit_history) && (
                       <tr key={`${s.id}-hist`} style={{ backgroundColor: 'var(--color-bg-secondary)' }}>
-                        <td colSpan={(isPostDate ? 11 : 10) + (isSuperadmin ? 3 : 0)} className="px-5 py-3">
+                        <td colSpan={(isPostDate ? 12 : 11) + (isSuperadmin ? 3 : 0)} className="px-5 py-3">
                           <p className="text-xs font-bold mb-2" style={{ color: 'var(--color-text-secondary)' }}>Audit Trail</p>
                           <div className="space-y-1">
                             {s.edit_history.map((h, i) => (
