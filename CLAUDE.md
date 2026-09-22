@@ -421,6 +421,43 @@ record, so EVERY transfer and EVERY sale carries the answer on the row.
   recurring trap here — `/vicidial/pending` and the four QA2 lists each had to
   be widened by hand.
 
+### QA2 recordings — the right clip, or none (mig 328, applied 2026-09-23)
+**A DIALER'S CLOCK IS NOT UTC AND NEVER SAYS SO.** `recording_lookup` returns a
+naive wall clock in the BOX's zone (`2026-09-18 17:39:50`), and so does every
+recording file name. `qa2_call.call_at` is a real UTC instant. Subtracting one
+from the other carried the box's whole UTC offset as error — four hours — and
+with no cap on how far a match could be, the least-badly-wrong clip won. The
+clips on a lead came out ROTATED among its calls. Measured 2026-09-23 before the
+fix: **11,091 of 54,423 attached recordings (1 in 5) were more than 30 minutes
+from their own call.**
+- Convert with `utils/dialerTime.js` (`naiveToUtcMs`, `clipDistanceMs`) using
+  `vicidial_boxes.tz` (IANA, default `America/New_York`). NOT a fixed offset:
+  Eastern is -4 in September and -5 in December, so a constant is correct until
+  the first Sunday in November and then wrong for six weeks.
+- A clip is scored against **both its start and its end**, because `call_at` is
+  not one thing: an `ingest` row is stamped at the DISPOSITION (call end), a
+  `crm_day` row carries the transfer's own time (nearer the start).
+- **Distance limits, and they are the point.** 30 min for the row's own agent,
+  90 s for any other agent — past that the nearest clip is the customer's NEXT
+  call, and one lead holds both transfer legs plus every redial. No audio beats
+  another conversation. `rankClips` in `utils/qa2RecordingPoller.js`.
+- **Never overwrite `talk_sec` with the clip's duration.** That destroyed the
+  only signal a mis-pick left behind — the row agreed with its own wrong audio.
+- The reviewer can override: `GET /qa2/calls/:id/recordings` lists every clip on
+  the lead (ranked by the same rule, flagged `is_current` / `same_agent` /
+  `held_by` / `rank:null` for outside-window), `POST /qa2/calls/:id/recording`
+  sets one. A manual pick parks `recording_attempts` at 99 so the poller never
+  re-picks it, and releases the clip from whichever row held it. UI is
+  `ClipPicker` in `components/QA2/ReviewScreen.jsx`, shown on the missing state
+  too — that is exactly when it is needed.
+- Audit a box for mis-picks in SQL from the file name, no dialer needed:
+  `to_timestamp(substring(recording_location from '(\d{8}-\d{6})_') …)::timestamp
+  AT TIME ZONE 'America/New_York'` vs `call_at`. Cast to `timestamp` FIRST —
+  `to_timestamp()` already returns timestamptz in the session zone, and
+  `AT TIME ZONE` on that converts the wrong way (it reported 100% wrong).
+- `wti_flexo` is retired: one day, 10 calls, host gone. It shared the WTI prefix
+  with `wavetechpk`, so every WTI lookup disambiguated between two boxes.
+
 ### IP access control (mig 319, applied 2026-09-15)
 Which networks each user may use the CRM from. Ships OFF, and everyone is `anywhere`. README → "IP access control" has the operator steps.
 - **Mode lives in `user_ip_access` (sidecar), NEVER on `user_profiles`.** That table has RLS `users_can_update_own_profile`
