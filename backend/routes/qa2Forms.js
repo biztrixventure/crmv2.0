@@ -52,6 +52,42 @@ async function resolveActiveFormVersion(methodId, companyId) {
   return version?.id || null;
 }
 
+/**
+ * What a full-replace save would DESTROY, given what the version holds now and
+ * what the client sent.
+ *
+ * Pure, and exported, because this decision has been got wrong twice in one
+ * day: first the ten TRA questions were replaced by two, then — with the
+ * question guard already in place — a save kept all ten keys and sent every
+ * options list empty, wiping all 29 scoring choices and leaving a scorecard
+ * whose questions could not be answered.
+ *
+ *   removing          a question that is on the version and not in the payload
+ *   clearing_options  a question that STAYS a choice and loses its last option
+ *
+ * Turning a choice into free text legitimately leaves it with no options, so
+ * that is not a loss; only a question still expecting a pick with nothing to
+ * pick from is.
+ */
+function formLossPlan({ existingParams, optionCounts, sections }) {
+  const incoming = new Map();
+  for (const s of (sections || [])) {
+    for (const p of (s.parameters || [])) if (p && p.key) incoming.set(p.key, p);
+  }
+  const existing = existingParams || [];
+  const counts = optionCounts || new Map();
+
+  const removing = [...new Set(existing.map(p => p.key))].filter(k => !incoming.has(k));
+  const clearing_options = existing.filter((ep) => {
+    const inc = incoming.get(ep.key);
+    if (!inc) return false;                                           // already a removal
+    if ((inc.input_type || ep.input_type) !== 'choice') return false;  // no longer a choice
+    return (counts.get(ep.id) || 0) > 0 && !(Array.isArray(inc.options) && inc.options.length);
+  }).map(ep => ep.key);
+
+  return { removing, clearing_options };
+}
+
 async function requireManager(req, res) {
   const scope = await resolveQa2Scope(req);
   if (!scope.managerAccess) { res.status(403).json({ error: 'Forbidden' }); return null; }
@@ -333,21 +369,46 @@ router.put('/versions/:vid', asyncHandler(async (req, res) => {
     // would be lost, and proceeds only when the caller says yes — the same
     // shape /api/ip-access uses before it can lock somebody out. A save that
     // adds, edits or reorders is untouched, which is nearly every save.
-    const incomingKeys = sections.flatMap(s => (s.parameters || []).map(p => p.key).filter(Boolean));
+    // AND SO DOES ONE THAT LOSES THE SCORES.
+    //
+    // Guarding the question keys alone was not enough. The very next save after
+    // the questions were restored kept all ten keys and sent every options list
+    // empty, which passed the key check untouched and wiped all 29 scoring
+    // choices: the reviewer got the right ten questions with nothing to pick in
+    // any of them. A choice question with no options cannot be answered at all,
+    // so losing its last option is as destructive as losing the question.
+    //
+    // Only a question that STAYS a choice counts — deliberately turning one into
+    // free text legitimately leaves it with none.
     const { data: existingParams } = await supabaseAdmin
-      .from('qa2_parameter').select('key').eq('form_version_id', vid);
-    const removing = [...new Set((existingParams || []).map(p => p.key))].filter(k => !incomingKeys.includes(k));
-    if (removing.length && req.body?.confirm_removals !== true) {
+      .from('qa2_parameter').select('id, key, input_type').eq('form_version_id', vid);
+    const existingIds = (existingParams || []).map(p => p.id);
+    const { data: existingOpts } = existingIds.length
+      ? await supabaseAdmin.from('qa2_parameter_option').select('parameter_id').in('parameter_id', existingIds)
+      : { data: [] };
+    const optionCounts = new Map();
+    for (const o of (existingOpts || [])) optionCounts.set(o.parameter_id, (optionCounts.get(o.parameter_id) || 0) + 1);
+
+    const { removing, clearing_options } = formLossPlan({ existingParams, optionCounts, sections });
+
+    if ((removing.length || clearing_options.length) && req.body?.confirm_removals !== true) {
+      const parts = [];
+      if (removing.length) parts.push(`removes ${removing.length} question${removing.length === 1 ? '' : 's'} (${removing.join(', ')})`);
+      if (clearing_options.length) parts.push(`clears every scoring option from ${clearing_options.join(', ')}`);
       return res.status(409).json({
         needs_confirm: true,
         removing,
-        error: `This save removes ${removing.length} question${removing.length === 1 ? '' : 's'} from the scorecard: ${removing.join(', ')}.`,
+        clearing_options,
+        error: `This save ${parts.join(', and ')}.`,
       });
     }
     // Say what went, so next time there is a trail rather than an
     // archaeological dig through version numbers.
     if (removing.length) {
       logger.warn('QA2_FORMS', `${req.user.id} removed ${removing.length} parameter(s) from version ${vid}: ${removing.join(', ')}`);
+    }
+    if (clearing_options.length) {
+      logger.warn('QA2_FORMS', `${req.user.id} cleared all options from ${clearing_options.length} choice parameter(s) on version ${vid}: ${clearing_options.join(', ')}`);
     }
 
     const { data: oldParams } = await supabaseAdmin.from('qa2_parameter').select('id').eq('form_version_id', vid);
@@ -458,3 +519,6 @@ router.post('/versions/:vid/preview-score', asyncHandler(async (req, res) => {
 
 module.exports = router;
 module.exports.resolveActiveFormVersion = resolveActiveFormVersion;
+// Exported for its tests — see qa2Forms.loss.test.js. The rule is small and
+// has already been got wrong twice.
+module.exports.formLossPlan = formLossPlan;

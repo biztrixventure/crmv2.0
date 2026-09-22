@@ -304,8 +304,13 @@ export default function FormBuilder({ form, initialVersionId, onBack }) {
       // mis-click quietly strip a live scorecard.
       const d = e.response?.data;
       if (e.response?.status === 409 && d?.needs_confirm) {
-        const list = (d.removing || []).join(', ');
-        if (window.confirm(`This removes ${d.removing?.length || 0} question(s) from the scorecard:\n\n${list}\n\nReviews already scored keep their own version. Remove them?`)) {
+        // Both kinds of loss are named. A question with no scoring options left
+        // cannot be answered at all, so agreeing to that blind is how the whole
+        // scorecard went blank the first time.
+        const lines = [];
+        if (d.removing?.length) lines.push(`Removes ${d.removing.length} question(s):\n  ${d.removing.join(', ')}`);
+        if (d.clearing_options?.length) lines.push(`Clears EVERY score choice from ${d.clearing_options.length} question(s), leaving them unanswerable:\n  ${d.clearing_options.join(', ')}`);
+        if (window.confirm(`${lines.join('\n\n')}\n\nReviews already scored keep their own version. Continue?`)) {
           setSaving(false);
           return save(true);
         }
