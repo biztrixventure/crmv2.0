@@ -721,7 +721,11 @@ const fronterXferHandler = asyncHandler(async (req, res) => {
       // with a real contact id, they match nothing in common, and the fronter
       // is credited twice. Adopting the CALL- row and stamping the real code on
       // it is an upgrade, not a second lead.
-      .or('vicidial_vendor_code.is.null,vicidial_vendor_code.like.CALL-*')
+      // `%`, not `*`. PostgREST accepts both in a pattern, but every other or()
+      // in this codebase uses `%` (compliance.js:344 is this exact shape), and a
+      // wildcard that failed to translate would match nothing and quietly
+      // reopen the duplicate this filter exists to close.
+      .or('vicidial_vendor_code.is.null,vicidial_vendor_code.like.CALL-%')
       .gte('created_at', since)
       .order('created_at', { ascending: false })
       .limit(1)
