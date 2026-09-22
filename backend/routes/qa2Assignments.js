@@ -27,7 +27,9 @@ const { supabaseAdmin } = require('../config/database');
 const { resolveQa2Scope } = require('../utils/qa2ScopeResolver');
 const { companyInScope, methodInScope } = require('../utils/qa2Scope');
 const { issueTicket } = require('../utils/mediaTicket');
-const { annotateHangups, getBoxes, leadDialerDetail } = require('../utils/dialerBoxes');
+const { annotateHangups, getBoxes, leadDialerDetail, recordingLookup, phoneTail, onlyDigits, boxTz } = require('../utils/dialerBoxes');
+const { naiveToUtcMs } = require('../utils/dialerTime');
+const { rankClips } = require('../utils/qa2RecordingPoller');
 const { resolveCustomerContext } = require('../utils/qa2CustomerContext');
 const { resolveColumnAccess } = require('../utils/columnFilter');
 const { applyQa2Sort, applyQa2Filters } = require('../utils/qa2ColumnFilter');
@@ -488,6 +490,140 @@ router.post('/calls/:id/recording-ticket', asyncHandler(async (req, res) => {
 
   const ticket = issueTicket({ userId: req.user.id, box_id: call.box_id, lead_id: call.dialer_lead_id, recording_id: call.recording_id });
   res.json({ url: `/api/qa-media/stream?ticket=${ticket}` });
+}));
+
+// ── GET /calls/:id/recordings — every clip this call could be ───────────────
+//
+// The matcher picks one; this is the list it picked from. It exists because the
+// matcher CANNOT always be right: one lead carries both legs of a transfer plus
+// every redial to that customer, and when two of them are seconds apart the
+// only thing separating them is which agent was on the line — which the dialer
+// does not always report. A reviewer listening to the call knows in five
+// seconds whether it is the right one, so give them the others rather than
+// making them report it and wait.
+//
+// Ranked by the SAME rule the matcher uses (rankClips), so what a reviewer sees
+// is the order the matcher considered rather than a second opinion that
+// disagrees with it. Clips outside the match window are returned too, flagged
+// rank:null: when a call's own audio never reached the box, the neighbouring
+// call is sometimes genuinely what the reviewer needs.
+router.get('/calls/:id/recordings', asyncHandler(async (req, res) => {
+  const scope = await requireScope(req, res);
+  if (!scope) return;
+  const { data: call } = await supabaseAdmin.from('qa2_call')
+    .select('id, company_id, method_id, box_id, dialer_lead_id, recording_id, recording_state, agent_user, call_at, leg, normalized_phone, customer_phone, linked_call_id')
+    .eq('id', req.params.id).maybeSingle();
+  if (!call) return res.status(404).json({ error: 'Call not found' });
+  if (!(await canSeeCall(scope, req.user.id, call))) return res.status(403).json({ error: 'Forbidden' });
+  if (!call.dialer_lead_id) return res.json({ clips: [], reason: 'no_lead_id' });
+
+  // The row's own box first, then the rest — a recycled lead id means a clip can
+  // sit on a box this row was never filed under. Off-box hits are phone-filtered
+  // for the reason findSaleRecording documents: a lead id is unique per cluster,
+  // not across the estate, so an unchecked hit is a different customer.
+  const tail = phoneTail(call.normalized_phone || call.customer_phone || '');
+  const own = getBoxes().filter(b => b.id === call.box_id);
+  const others = getBoxes().filter(b => b.id !== call.box_id);
+  let clips = [];
+  try {
+    const [ownRows, otherRows] = await Promise.all([
+      Promise.all(own.map(b => recordingLookup(b, { lead_id: call.dialer_lead_id }))).then(r => r.flat()),
+      Promise.all(others.map(b => recordingLookup(b, { lead_id: call.dialer_lead_id }))).then(r => r.flat()),
+    ]);
+    clips = ownRows.filter(r => r && r.recording_id && r.location)
+      .concat(otherRows.filter(r => r && r.recording_id && r.location && tail && onlyDigits(r.location).includes(tail)));
+  } catch (e) {
+    logger.warn('QA2_CALLS', `recording list failed for ${call.id}: ${e.message}`);
+    return res.json({ clips: [], reason: 'dialer_unreachable' });
+  }
+  if (!clips.length) return res.json({ clips: [], reason: 'none_on_lead' });
+
+  // Which clips another row already holds, so the picker can say so up front
+  // instead of failing on the unique index after the reviewer has chosen.
+  const ids = [...new Set(clips.map(c => String(c.recording_id)))];
+  const { data: held } = await supabaseAdmin.from('qa2_call')
+    .select('id, recording_id, box_id, leg, agent_user, call_at')
+    .in('recording_id', ids).neq('id', call.id);
+  const heldBy = new Map((held || []).map(h => [`${h.box_id}|${h.recording_id}`, h]));
+
+  const ranked = rankClips(clips, call);
+  const rankOf = new Map(ranked.map((c, i) => [`${c.box}|${c.recording_id}`, i]));
+
+  const out = clips.map((c) => {
+    const key = `${c.box}|${c.recording_id}`;
+    const h = heldBy.get(key) || null;
+    const startedMs = naiveToUtcMs(c.start, boxTz(c.box));
+    return {
+      box_id: c.box,
+      recording_id: String(c.recording_id),
+      // A real instant, so the browser never has to know the box's zone.
+      started_at: Number.isFinite(startedMs) ? new Date(startedMs).toISOString() : null,
+      duration: Number.isFinite(Number(c.duration)) ? Number(c.duration) : null,
+      agent: c.user || null,
+      same_agent: !!call.agent_user && String(c.user || '').toUpperCase() === String(call.agent_user).toUpperCase(),
+      is_current: String(c.recording_id) === String(call.recording_id || ''),
+      rank: rankOf.has(key) ? rankOf.get(key) : null,   // null = outside the match window
+      held_by: h ? { call_id: h.id, leg: h.leg, agent: h.agent_user, call_at: h.call_at } : null,
+    };
+  }).sort((a, b) => (a.rank ?? 1e9) - (b.rank ?? 1e9) || String(a.started_at).localeCompare(String(b.started_at)));
+
+  res.json({ clips: out, call_at: call.call_at, agent: call.agent_user, leg: call.leg });
+}));
+
+// ── POST /calls/:id/recording — the reviewer picks one ──────────────────────
+//
+// A manual choice OUTRANKS the matcher and must not be quietly undone: the
+// poller only touches rows in state 'pending', so leaving this row 'found' with
+// attempts parked at the ceiling means nothing re-picks it later.
+//
+// Taking a clip from another row is allowed, and is usually the POINT — two
+// legs of a transfer holding each other's audio is exactly what was reported,
+// and fixing one end means releasing it from the other. The row it comes from
+// goes back to 'pending' with its attempts reset, so the poller finds it the
+// right clip instead of it being left silently mute.
+router.post('/calls/:id/recording', asyncHandler(async (req, res) => {
+  const scope = await requireScope(req, res);
+  if (!scope) return;
+  const { box_id, recording_id } = req.body || {};
+  if (!box_id || !recording_id) return res.status(400).json({ error: 'box_id and recording_id are required' });
+
+  const { data: call } = await supabaseAdmin.from('qa2_call')
+    .select('id, company_id, method_id, box_id, dialer_lead_id, recording_id, linked_call_id')
+    .eq('id', req.params.id).maybeSingle();
+  if (!call) return res.status(404).json({ error: 'Call not found' });
+  if (!(await canSeeCall(scope, req.user.id, call))) return res.status(403).json({ error: 'Forbidden' });
+
+  // The dialer is asked for the URL; the client never supplies one. A location
+  // posted from the browser would let any reviewer point a review at any
+  // address, and the player streams whatever the row holds.
+  let clip = null;
+  try {
+    const box = getBoxes().find(b => b.id === box_id);
+    if (box) {
+      const rows = await recordingLookup(box, { lead_id: call.dialer_lead_id });
+      clip = (rows || []).find(r => String(r.recording_id) === String(recording_id)) || null;
+    }
+  } catch { /* falls through to the 404 below */ }
+  if (!clip) return res.status(404).json({ error: 'That recording is no longer on the dialer' });
+
+  const { data: holder } = await supabaseAdmin.from('qa2_call')
+    .select('id').eq('box_id', box_id).eq('recording_id', String(recording_id)).neq('id', call.id).maybeSingle();
+  if (holder) {
+    // Release first, or the unique index refuses our write.
+    await supabaseAdmin.from('qa2_call').update({
+      box_id: null, recording_id: null, recording_location: null,
+      recording_state: 'pending', recording_attempts: 0,
+    }).eq('id', holder.id);
+  }
+
+  const { error } = await supabaseAdmin.from('qa2_call').update({
+    box_id, recording_id: String(recording_id), recording_location: clip.location,
+    recording_state: 'found', recording_attempts: 99,
+  }).eq('id', call.id);
+  if (error) return res.status(409).json({ error: error.message });
+
+  logger.info('QA2_CALLS', `${req.user.id} set clip ${box_id}/${recording_id} on call ${call.id}${holder ? ` (taken from ${holder.id})` : ''}`);
+  res.json({ ok: true, box_id, recording_id: String(recording_id), released: holder ? holder.id : null });
 }));
 
 module.exports = router;

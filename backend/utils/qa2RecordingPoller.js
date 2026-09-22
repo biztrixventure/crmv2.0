@@ -38,7 +38,8 @@
 
 const { supabaseAdmin } = require('../config/database');
 const logger = require('../utils/logger');
-const { recordingLookup, parseVendorCode, boxForCode, getBoxes, phoneTail, onlyDigits, lookupCallsByPhone, findLeadByPhone, leadsByPhoneOnBox, boxesForPrefix, annotateHangups } = require('./dialerBoxes');
+const { recordingLookup, parseVendorCode, boxForCode, getBoxes, phoneTail, onlyDigits, lookupCallsByPhone, findLeadByPhone, leadsByPhoneOnBox, boxesForPrefix, annotateHangups, boxTz } = require('./dialerBoxes');
+const { clipDistanceMs } = require('./dialerTime');
 
 const MAX_ATTEMPTS = 10;
 const BATCH_SIZE = 60; // capped per tick
@@ -124,16 +125,55 @@ async function chooseClip(candidates, row) {
   }
   if (!free.length) return null;
 
-  const want = String(row.agent_user || '').trim().toUpperCase();
-  const mine = want ? free.filter(c => String(c.user || '').trim().toUpperCase() === want) : [];
-  const pool = mine.length ? mine : free;
+  return rankClips(free, row)[0] || null;
+}
 
-  const at = row.call_at ? new Date(row.call_at).getTime() : null;
-  if (!at) return pool[0];
-  return pool
-    .map(c => ({ c, d: Math.abs(new Date(String(c.start).replace(' ', 'T')).getTime() - at) }))
+// How far a clip may be from the call and still be the same call.
+//
+// The right clip lands within SECONDS: measured across the reported leads, the
+// worst correct match was 45s out and most were under 10. The window is wide
+// enough to absorb a crm_day row stamped from the transfer rather than the
+// disposition, and no wider — because past this point the nearest clip is the
+// customer's NEXT call, and handing a reviewer the wrong conversation is worse
+// than handing them none. Rows that fall outside simply stay unattached, and
+// the reviewer can pick from the full list in the UI.
+const MATCH_WINDOW_MS = 30 * 60 * 1000;
+// A clip belonging to a DIFFERENT agent has to be nearly exact before we will
+// believe it, because "same lead, different agent" is precisely the fronter's
+// clip on the closer's row -- the swap QA reported. Only a clip essentially
+// coincident with the call survives this.
+const CROSS_AGENT_WINDOW_MS = 90 * 1000;
+
+/**
+ * The clips that could be THIS call, best first. Exported for the picker
+ * endpoint, so the list a reviewer sees is ranked by the same rule that chose
+ * for them rather than a second opinion that disagrees.
+ */
+function rankClips(clips, row) {
+  const want = String(row.agent_user || '').trim().toUpperCase();
+  const scored = clips.map(c => {
+    const d = clipDistanceMs(c, row.call_at, boxTz(c.box));
+    const sameAgent = !!want && String(c.user || '').trim().toUpperCase() === want;
+    return { c, d, sameAgent };
+  });
+
+  // No timestamp to match against — a crm_day row can lack one. One candidate
+  // is an answer; several are a guess, and a guess is what put the wrong call
+  // in front of a reviewer.
+  if (!row.call_at || !Number.isFinite(new Date(row.call_at).getTime())) {
+    const own = scored.filter(x => x.sameAgent);
+    const pool = own.length ? own : scored;
+    return pool.length === 1 ? [pool[0].c] : [];
+  }
+
+  return scored
     .filter(x => Number.isFinite(x.d))
-    .sort((a, b) => a.d - b.d)[0]?.c || pool[0];
+    .filter(x => x.d <= (x.sameAgent || !want ? MATCH_WINDOW_MS : CROSS_AGENT_WINDOW_MS))
+    // The agent decides ties, and ties here are real: on lead 2982052 the
+    // fronter's own clip scored 45s and the closer's 44s, so a pure time sort
+    // handed the fronter leg the closer's conversation by one second.
+    .sort((a, b) => (b.sameAgent - a.sameAgent) || (a.d - b.d))
+    .map(x => x.c);
 }
 
 // A call with no dialer lead id can still be found: ask the dialer for that
@@ -380,7 +420,7 @@ async function pollOne(row) {
         box_id: hit.box, recording_id: String(hit.recording_id), recording_location: hit.location,
         recording_state: 'found', recording_attempts: attempts,
       };
-      if (Number.isFinite(hit.duration)) updates.talk_sec = hit.duration;
+      if (Number.isFinite(hit.duration) && row.talk_sec == null) updates.talk_sec = hit.duration;
       const { error } = await supabaseAdmin.from('qa2_call').update(updates).eq('id', row.id);
       if (!error) return;
     }
@@ -433,7 +473,11 @@ async function pollOne(row) {
       recording_state: 'found',
       recording_attempts: attempts,
     };
-    if (Number.isFinite(hit.duration)) updates.talk_sec = hit.duration;
+    // FILL a missing duration, never overwrite one the dialer already gave us.
+    // Overwriting it destroyed the one signal that a mis-picked clip leaves
+    // behind: the reported rows all carried the DURATION of the wrong clip, so
+    // the row agreed with its own bad audio and nothing looked out of place.
+    if (Number.isFinite(hit.duration) && row.talk_sec == null) updates.talk_sec = hit.duration;
     const { error: upErr } = await supabaseAdmin.from('qa2_call').update(updates).eq('id', row.id);
     if (!upErr) return;
     // Lost a race for this clip (the unique index did its job). Count the
@@ -461,7 +505,7 @@ async function pollOne(row) {
         box_id: late.box, recording_id: String(late.recording_id), recording_location: late.location,
         recording_state: 'found', recording_attempts: attempts,
       };
-      if (Number.isFinite(late.duration)) updates.talk_sec = late.duration;
+      if (Number.isFinite(late.duration) && row.talk_sec == null) updates.talk_sec = late.duration;
       const { error: lateErr } = await supabaseAdmin.from('qa2_call').update(updates).eq('id', row.id);
       if (!lateErr) return;
     }
@@ -617,4 +661,4 @@ async function pollTick() {
   try { await pollHangups(); } catch (e) { logger.warn('QA2_REC_POLL', `hangup pass: ${e.message}`); }
 }
 
-module.exports = { pollPendingRecordings: pollTick, pollHangups };
+module.exports = { pollPendingRecordings: pollTick, pollHangups, rankClips, chooseClip, MATCH_WINDOW_MS };

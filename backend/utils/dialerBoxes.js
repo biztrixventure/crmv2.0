@@ -16,10 +16,15 @@
 // The DB row was correct all along, so production was unaffected and the
 // staleness only surfaced off the DB path — which is what makes it dangerous. A
 // wrong URL here stays invisible until the day the DB load fails.
+// The zone a box reports its wall-clock times in. Every box in the estate runs
+// on US Eastern because that is where the customers are; migration 328 makes it
+// per-box so the next one does not have to.
+const DEFAULT_BOX_TZ = 'America/New_York';
+
 const FALLBACK_BOXES = [
-  { id: 'wavetechpk', base: process.env.WAVETECH_DIALER_URL || 'https://wavetechpk.i5.tel', user: process.env.WAVETECH_DIALER_USER || 'apiuser', pass: process.env.WAVETECH_DIALER_PASS || 'apiuser123', prefix: 'WTI' },
-  { id: 'etc',      base: process.env.ETC_DIALER_URL      || 'https://wavetech3new.i5.tel', user: process.env.ETC_DIALER_USER      || 'ceo',     pass: process.env.ETC_DIALER_PASS      || 'ceo',        prefix: 'ETC' },
-  { id: 'tmc',      base: process.env.TMC_DIALER_URL      || 'https://tmcsolihp.i5.tel',    user: process.env.TMC_DIALER_USER      || '1002',    pass: process.env.TMC_DIALER_PASS      || '1002',       prefix: 'TMC' },
+  { id: 'wavetechpk', base: process.env.WAVETECH_DIALER_URL || 'https://wavetechpk.i5.tel', user: process.env.WAVETECH_DIALER_USER || 'apiuser', pass: process.env.WAVETECH_DIALER_PASS || 'apiuser123', prefix: 'WTI', tz: DEFAULT_BOX_TZ },
+  { id: 'etc',      base: process.env.ETC_DIALER_URL      || 'https://wavetech3new.i5.tel', user: process.env.ETC_DIALER_USER      || 'ceo',     pass: process.env.ETC_DIALER_PASS      || 'ceo',        prefix: 'ETC', tz: DEFAULT_BOX_TZ },
+  { id: 'tmc',      base: process.env.TMC_DIALER_URL      || 'https://tmcsolihp.i5.tel',    user: process.env.TMC_DIALER_USER      || '1002',    pass: process.env.TMC_DIALER_PASS      || '1002',       prefix: 'TMC', tz: DEFAULT_BOX_TZ },
 ];
 // Mutable live copies (the functions below read these synchronously).
 let BOXES = FALLBACK_BOXES.map(b => ({ ...b }));
@@ -204,13 +209,35 @@ async function refreshBoxes() {
   try {
     const { supabaseAdmin } = require('../config/database');
     const { data, error } = await supabaseAdmin
-      .from('vicidial_boxes').select('name, prefix, base_url, api_user, api_pass, validation_url')
+      .from('vicidial_boxes').select('name, prefix, base_url, api_user, api_pass, validation_url, tz')
       .eq('is_active', true).order('sort_order', { ascending: true });
+    // Deploy-order safe: the backend may ship before migration 328 is applied,
+    // and a boxes list that failed to load is far worse than a default zone.
+    if (error && /column|schema cache/i.test(error.message || '')) return refreshBoxesLegacy();
     if (error || !data || !data.length) return;
-    BOXES = data.map(b => ({ id: b.name, base: String(b.base_url || '').replace(/\/+$/, ''), user: b.api_user, pass: b.api_pass, prefix: (b.prefix || '').toUpperCase(), validationUrl: String(b.validation_url || '').trim() }));
+    BOXES = data.map(b => ({ id: b.name, base: String(b.base_url || '').replace(/\/+$/, ''), user: b.api_user, pass: b.api_pass, prefix: (b.prefix || '').toUpperCase(), validationUrl: String(b.validation_url || '').trim(), tz: b.tz || DEFAULT_BOX_TZ }));
     indexPrefixes();
   } catch { /* keep current values */ }
 }
+// Pre-328 shape: same rows, zone defaulted. Split out rather than inlined so
+// the normal path reads as one statement.
+async function refreshBoxesLegacy() {
+  try {
+    const { supabaseAdmin } = require('../config/database');
+    const { data, error } = await supabaseAdmin
+      .from('vicidial_boxes').select('name, prefix, base_url, api_user, api_pass, validation_url')
+      .eq('is_active', true).order('sort_order', { ascending: true });
+    if (error || !data || !data.length) return;
+    BOXES = data.map(b => ({ id: b.name, base: String(b.base_url || '').replace(/\/+$/, ''), user: b.api_user, pass: b.api_pass, prefix: (b.prefix || '').toUpperCase(), validationUrl: String(b.validation_url || '').trim(), tz: DEFAULT_BOX_TZ }));
+    indexPrefixes();
+  } catch { /* keep current values */ }
+}
+
+// The zone a box's wall-clock strings are in. Unknown box -> the estate default
+// rather than UTC: treating an Eastern clock as UTC is the four-hour error this
+// whole change exists to remove.
+const boxTz = (boxId) => (BOXES.find(b => b.id === boxId) || {}).tz || DEFAULT_BOX_TZ;
+
 // Load once on boot, then keep fresh (60s) — cheap single-row read.
 refreshBoxes();
 setInterval(refreshBoxes, 60 * 1000).unref?.();
@@ -1359,6 +1386,7 @@ async function fetchAgentRoster({ boxId = null, days = 7 } = {}) {
 // NOTE: BOXES is mutable (refreshed from DB). Export accessors so callers always
 // get the LIVE list/prefixes, not a stale snapshot captured at require-time.
 module.exports = {
+  boxTz, DEFAULT_BOX_TZ,
   getBoxes: () => BOXES,
   fetchAgentRoster,
   boxPrefixes,

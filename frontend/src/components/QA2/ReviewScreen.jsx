@@ -72,9 +72,114 @@ const readSpeed = () => {
   catch { return 1; }
 };
 
+// ── "That is not this call" ─────────────────────────────────────────────────
+//
+// One dialer lead carries both legs of a transfer AND every redial to that
+// customer, so which clip belongs to a call is a judgement, not a lookup. It is
+// usually right and it is occasionally not, and a reviewer hears which within
+// five seconds — so let them fix it themselves instead of reporting it and
+// waiting for someone to repair a row.
+//
+// Loaded only when opened: every list is a live round trip to the dialer, and
+// the overwhelming majority of reviews never need it.
+function ClipPicker({ callId, currentId, onPicked }) {
+  const [open, setOpen] = useState(false);
+  const [clips, setClips] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [reason, setReason] = useState(null);
+
+  const fetchClips = useCallback(async () => {
+    setClips(null); setReason(null);
+    try {
+      const r = await client.get(`qa2/calls/${callId}/recordings`);
+      setClips(r.data.clips || []);
+      setReason(r.data.reason || null);
+    } catch { setClips([]); setReason('error'); }
+  }, [callId]);
+
+  useEffect(() => { if (open) fetchClips(); }, [open, fetchClips]);
+
+  const choose = async (c) => {
+    setBusy(true);
+    try {
+      await client.post(`qa2/calls/${callId}/recording`, { box_id: c.box_id, recording_id: c.recording_id });
+      toast.success('Recording updated');
+      setOpen(false);
+      onPicked?.({ box_id: c.box_id, recording_id: c.recording_id });
+    } catch (e) {
+      toast.error(e?.response?.data?.error || 'Could not switch the recording');
+    } finally { setBusy(false); }
+  };
+
+  const when = (iso) => (iso ? new Date(iso).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—');
+  const mmss = (s) => (Number.isFinite(s) ? `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}` : '—');
+
+  const EMPTY = {
+    no_lead_id: 'This call has no dialer lead id, so there is nothing to list.',
+    none_on_lead: 'The dialer has no recordings on this lead.',
+    dialer_unreachable: 'The dialer could not be reached just now.',
+    error: 'Could not load the list.',
+  };
+
+  return (
+    <div>
+      <button type="button" onClick={() => setOpen(o => !o)}
+        className="text-[11px] font-semibold underline"
+        style={{ color: 'var(--color-text-secondary)' }}>
+        {open ? 'Hide recordings' : 'Wrong recording? Show all'}
+      </button>
+
+      {open && (
+        <div className="mt-2 rounded-xl overflow-hidden" style={{ border: '1px solid var(--color-border)', background: 'var(--color-surface)' }}>
+          {clips === null && <div className="px-3 py-3"><Loading variant="inline" size={14} /></div>}
+          {clips !== null && !clips.length && (
+            <p className="m-0 px-3 py-3 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{EMPTY[reason] || EMPTY.none_on_lead}</p>
+          )}
+          {(clips || []).map((c) => {
+            const isCur = c.is_current || String(c.recording_id) === String(currentId || '');
+            return (
+              <button key={`${c.box_id}|${c.recording_id}`} type="button"
+                disabled={busy || isCur} onClick={() => choose(c)}
+                className="w-full text-left px-3 py-2 flex items-start gap-2"
+                style={{
+                  borderTop: '1px solid var(--color-border)',
+                  background: isCur ? 'var(--color-primary-50, #eef2ff)' : 'transparent',
+                  cursor: isCur ? 'default' : 'pointer',
+                  // Outside the match window, but still offered: a call whose own
+                  // audio never reached the box sometimes needs its neighbour.
+                  opacity: c.rank === null ? 0.6 : 1,
+                }}>
+                <span className="text-xs tabular-nums font-semibold flex-shrink-0" style={{ color: 'var(--color-text)' }}>
+                  {when(c.started_at)}
+                </span>
+                <span className="text-xs tabular-nums flex-shrink-0" style={{ color: 'var(--color-text-secondary)' }}>{mmss(c.duration)}</span>
+                <span className="text-[11px] flex-1 min-w-0" style={{ color: 'var(--color-text-secondary)' }}>
+                  {c.agent || 'unknown agent'}
+                  {c.same_agent && <strong style={{ color: 'var(--color-success-600)' }}> · this agent</strong>}
+                  {/* Said up front, rather than failing after the reviewer has
+                      chosen: this clip is on another review and will move. */}
+                  {c.held_by && !isCur && (
+                    <span style={{ color: 'var(--color-warning-700, #b45309)' }}> · on the {c.held_by.leg} review — picking this moves it</span>
+                  )}
+                </span>
+                {isCur && <span className="text-[10px] font-bold flex-shrink-0" style={{ color: 'var(--color-primary-600)' }}>PLAYING</span>}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AudioPlayer({ call }) {
   const audioRef = useRef(null);
   const urlRef = useRef(null);
+  // A clip the reviewer chose by hand. Kept here rather than refetching the
+  // whole review: the server has already moved the row, so the ticket endpoint
+  // serves the new audio by itself — this only stops the browser cache key
+  // still pointing at the clip that was just replaced.
+  const [picked, setPicked] = useState(null);
   const [loading, setLoading] = useState(false);
   const [playing, setPlaying] = useState(false);
   const [cur, setCur] = useState(0);
@@ -101,12 +206,18 @@ function AudioPlayer({ call }) {
     return () => { if (urlRef.current) URL.revokeObjectURL(urlRef.current); };
   }, []);
 
+  // The clip actually in the player: the reviewer's own choice where they made
+  // one, otherwise whatever the matcher attached.
+  const effBox = picked?.box_id || call.box_id;
+  const effRec = picked?.recording_id || call.recording_id;
+  const hasAudio = !!picked || call.recording_state === 'found';
+
   const load = useCallback(async () => {
     const a = audioRef.current;
-    if (!a || call.recording_state !== 'found') return;
+    if (!a || !hasAudio) return;
     setLoading(true);
     try {
-      const key = clipKey(call.box_id, call.recording_id);
+      const key = clipKey(effBox, effRec);
       const hit = await getClip(key);
       if (hit) {
         urlRef.current = URL.createObjectURL(hit);
@@ -127,7 +238,7 @@ function AudioPlayer({ call }) {
       a.addEventListener('playing', startCopy);
     } catch { toast.error('Could not load the recording'); }
     finally { setLoading(false); }
-  }, [call.id, call.box_id, call.recording_id, call.recording_state]);
+  }, [call.id, effBox, effRec, hasAudio]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -136,12 +247,17 @@ function AudioPlayer({ call }) {
     if (a.paused) a.play().catch(() => {}); else a.pause();
   };
 
-  if (call.recording_state !== 'found') {
+  if (!hasAudio) {
     return (
-      <Panel tone="inset" className="text-center py-6">
-        <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+      <Panel tone="inset" className="text-center py-6 space-y-2">
+        <p className="text-sm m-0" style={{ color: 'var(--color-text-secondary)' }}>
           {call.recording_state === 'missing' ? 'No recording was found for this call.' : 'Recording still being located — check back shortly.'}
         </p>
+        {/* The picker matters MOST here. A call is marked missing when nothing
+            matched it closely enough, and the audio is often sitting on the
+            lead under another leg — which is a click away rather than a
+            support request. */}
+        <ClipPicker callId={call.id} currentId={null} onPicked={setPicked} />
       </Panel>
     );
   }
@@ -212,6 +328,8 @@ function AudioPlayer({ call }) {
           </button>
         )}
       </div>
+
+      <ClipPicker callId={call.id} currentId={effRec} onPicked={setPicked} />
     </Panel>
   );
 }
