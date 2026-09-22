@@ -208,6 +208,57 @@ describe('normalize', () => {
   });
 });
 
+// ============================================================================
+// A BUTTON PRESS IS A TRANSFER SIGNAL — but only the buttons that mean it.
+//
+// Live evidence (2026-09-22): the CallTools tenant has six connector buttons.
+// Two are transfers ("Transfer to Closers", "Transfer to TMC"); "Zillow" and
+// "Google Maps" just open a web page. The dialer-side automation is bound to
+// one button, and that binding is one checkbox away from sending every press —
+// at which point a page-open would mint a transfer, which is the accept-any
+// failure that produced 3,077 stale cards on the VICIdial side.
+// ============================================================================
+describe('connector button gate', () => {
+  const pressed = (button, settings) => normalizeEvent(
+    account({
+      field_map: {
+        ...getProvider('calltools').preset.field_map,
+        button:   { path: 'button',   transform: 'unwrap' },
+        press_id: { path: 'press_id', transform: 'unwrap' },
+        // The live account maps these flat, the way the automation posts them —
+        // the preset reads CallTools' nested API shape, which a webhook body
+        // built by hand does not have.
+        dispo:    { path: 'dispo',    transforms: ['unwrap', 'upper'] },
+        phone:    { path: 'phone',    transforms: ['unwrap', 'phone10'] },
+        leg:      { path: 'leg',      transform: 'unwrap' },
+      },
+      settings: { xfer_dispos: ['XFER TRANSFERED'], default_leg: 'fronter', ...settings },
+    }),
+    req({ leg: 'fronter', button, press_id: '24656', dispo: 'XFER TRANSFERED', phone: '5550102233' }),
+  );
+
+  test('a listed button is a transfer', () => {
+    expect(pressed('942', { xfer_buttons: ['942'] }).event_type).toBe('xfer');
+  });
+
+  test('an unlisted button is logged for QA but never becomes a transfer', () => {
+    const ev = pressed('918', { xfer_buttons: ['942'] });      // Zillow
+    expect(ev.event_type).toBe('call');
+  });
+
+  test('the button survives CallTools rendering it as an object repr', () => {
+    expect(pressed('"ConnectorButton object (942)"', { xfer_buttons: ['942'] }).event_type).toBe('xfer');
+  });
+
+  test('no list configured falls through to the disposition rule', () => {
+    expect(pressed('942', {}).event_type).toBe('xfer');
+  });
+
+  test('the press id travels so a contact-less press can still be named', () => {
+    expect(pressed('942', { xfer_buttons: ['942'] }).extras.press_id).toBe('24656');
+  });
+});
+
 describe('bridge parameters', () => {
   test('the canonical call is spoken in the ingest handlers own token names', () => {
     const p = toIngestParams(normalizeEvent(account(), req(CALL)));

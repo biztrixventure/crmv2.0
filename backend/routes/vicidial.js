@@ -412,7 +412,11 @@ const realCode = (v) => {
 function xferCode(p, agent) {
   const code = normalizeLeadCode(realCode(p && p.code), agent);
   if (code) return { code, fromCall: false };
-  const callId = realCode((p && (p.call_id || p.uniqueid)) || '');
+  // press_id is the connector-button event's own id. It is deliberately NOT
+  // sent as call_id: the id of the call a button press belongs to points at the
+  // PREVIOUS call in CallTools, which had QA scoring the wrong recording. This
+  // names the transfer without going anywhere near the recording lookup.
+  const callId = realCode((p && (p.call_id || p.uniqueid || p.press_id)) || '');
   if (!callId) return { code: '', fromCall: false };
   return { code: `CALL-${callId.replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 16)}`, fromCall: true };
 }

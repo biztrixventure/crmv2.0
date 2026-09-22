@@ -371,12 +371,24 @@ and `VICIDIAL_INGEST_TOKEN`. Operator guide: `docs/DIALER_INTEGRATION.md`.
   have. CallTools reports one transfer twice (button press AND disposition); with
   a contact they share the contact id and collapse, without one they would each
   name the call differently and credit the fronter twice.
+- **A BUTTON PRESS IS A TRANSFER SIGNAL, and it gets the same per-account allow
+  list as a disposition**: `settings.xfer_buttons`, applied in
+  `resolveEventType`. CallTools has six connector buttons and only two are
+  transfers — "Zillow" and "Google Maps" open a web page. An unlisted button is
+  demoted to `'call'` (logged for QA, never a transfer), which is the guard the
+  3,077 stale VICIdial cards exist to justify. This gate is what makes the
+  dialer-side binding non-safety-critical.
 - The connector-button automation (514) was ACTIVE but had never fired: 18 real
-  presses of button 942, zero webhooks. Its condition compares
+  presses of button 942, zero webhooks. Its condition compared
   `{{%locals[connectorbuttonevent][connector_button]}}` to the integer 942, and
   CallTools renders related fields as reprs (`"AppUser object (uuid)"` — the same
-  thing `unwrap` exists for), so the comparison can never be true. 501 (the
-  disposition automation) is what actually feeds the CRM today.
+  thing `unwrap` exists for), so it could never be true. 501 (the disposition
+  automation) was carrying the whole integration alone.
+- `press_id` (the connector-button event's own id) names a contact-less press.
+  It is deliberately NOT sent as `call_id`: the call a press belongs to is the
+  PREVIOUS call in CallTools, which had QA scoring the wrong recording. About
+  21% of presses have no contact record, so without it one press in five is
+  lost.
 
 ### Where a record came from (migs 325-327, applied 2026-09-22)
 With two dialers, "which one sent this?" is the first question asked of any odd

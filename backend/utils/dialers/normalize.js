@@ -67,6 +67,23 @@ function resolveEventType(account, mapped, leg, dispo) {
   if (['dispo', 'disposition'].includes(explicit)) return 'dispo';
   if (['call', 'qa', 'log'].includes(explicit)) return 'call';
 
+  // A BUTTON PRESS IS A TRANSFER SIGNAL, AND IT GETS THE SAME PER-ACCOUNT
+  // ALLOW LIST AS A DISPOSITION.
+  //
+  // CallTools has six connector buttons and only some of them mean "transfer":
+  // "Transfer to Closers" and "Transfer to TMC" do, "Zillow" and "Google Maps"
+  // open a web page. The dialer-side automation is bound to one button, but
+  // that binding is one checkbox away from sending every press here, and a
+  // press that is not a transfer must never mint a transfer — that is the same
+  // failure as the 3,077 stale cards from accept-any dispositions.
+  //
+  // Unlisted button => 'call': the event is still logged for QA, it just does
+  // not become a transfer. No list configured => fall through, because an
+  // account that never set one is relying on the dialer-side binding.
+  const xferButtons = ((account.settings || {}).xfer_buttons || []).map(upper).filter(Boolean);
+  const button = upper(mapped.button);
+  if (button && xferButtons.length) return xferButtons.includes(button) ? 'xfer' : 'call';
+
   const xferDispos = ((account.settings || {}).xfer_dispos || []).map(upper).filter(Boolean);
   if (leg === 'fronter' && dispo && xferDispos.includes(dispo)) return 'xfer';
   return 'dispo';
