@@ -257,9 +257,18 @@ export default function FormBuilder({ form, initialVersionId, onBack }) {
 
   const updateVersionField = (k, v) => setVersion(prev => ({ ...prev, [k]: v }));
 
-  const save = async () => {
+  const save = async (confirmRemovals = false) => {
     setSaving(true);
     try {
+      // EVERY parameter reaches the payload, including any whose section is not
+      // in `sections`. The two buckets below cover the sections this builder
+      // knows about plus the ungrouped one — a parameter filed under anything
+      // else lands in neither, and since the server REPLACES the version with
+      // what it is sent, one that never reaches the payload is deleted without
+      // anybody having asked for it.
+      const emitted = new Set([...sections.map(s => s.id), null]);
+      const orphans = parameters.filter(p => !emitted.has(p.section_id));
+
       const payload = {
         base_denominator_mode: version.base_denominator_mode,
         base_denominator: version.base_denominator,
@@ -279,15 +288,32 @@ export default function FormBuilder({ form, initialVersionId, onBack }) {
             parameters: (bySection.get(s.id) || []).map(({ _tempId, id, form_version_id, created_at, options, sort, ...rest }, pi) => ({ ...rest, options, sort: pi })),
           })),
           {
-            name: null, sort: sections.length, // ungrouped bucket
-            parameters: (bySection.get(null) || []).map(({ _tempId, id, form_version_id, created_at, options, sort, ...rest }, pi) => ({ ...rest, options, sort: pi })),
+            name: null, sort: sections.length, // ungrouped bucket, plus any orphans
+            parameters: [...(bySection.get(null) || []), ...orphans]
+              .map(({ _tempId, id, form_version_id, created_at, options, sort, ...rest }, pi) => ({ ...rest, options, sort: pi })),
           },
         ],
       };
+      if (confirmRemovals) payload.confirm_removals = true;
       await client.put(`qa2/versions/${versionId}`, payload);
       toast.success('Saved');
       load();
-    } catch (e) { toast.error(e.response?.data?.error || 'Could not save'); }
+    } catch (e) {
+      // The server refuses a save that would drop questions until it is told
+      // that is the intention, and names them. Ask, rather than letting a
+      // mis-click quietly strip a live scorecard.
+      const d = e.response?.data;
+      if (e.response?.status === 409 && d?.needs_confirm) {
+        const list = (d.removing || []).join(', ');
+        if (window.confirm(`This removes ${d.removing?.length || 0} question(s) from the scorecard:\n\n${list}\n\nReviews already scored keep their own version. Remove them?`)) {
+          setSaving(false);
+          return save(true);
+        }
+        toast('Nothing was changed');
+      } else {
+        toast.error(d?.error || 'Could not save');
+      }
+    }
     finally { setSaving(false); }
   };
 
@@ -334,7 +360,7 @@ export default function FormBuilder({ form, initialVersionId, onBack }) {
           )}
           {canEdit && (
             <>
-              <button className="btn text-sm flex items-center gap-1.5" style={{ border: '1px solid var(--color-border)' }} onClick={save} disabled={saving}>
+              <button className="btn text-sm flex items-center gap-1.5" style={{ border: '1px solid var(--color-border)' }} onClick={() => save()} disabled={saving}>
                 <Save size={14} />{saving ? 'Saving…' : (isDraft ? 'Save draft' : 'Save changes')}
               </button>
               {/* Publish only means something for a version that has never been

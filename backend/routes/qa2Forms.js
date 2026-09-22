@@ -28,6 +28,7 @@ const { supabaseAdmin } = require('../config/database');
 const { resolveQa2Scope } = require('../utils/qa2ScopeResolver');
 const { companyInScope } = require('../utils/qa2Scope');
 const { computeEvaluation, maxPoints } = require('../utils/qa2Scoring');
+const logger = require('../utils/logger');
 
 // Which form_version an evaluation should score against for a given
 // (method, company) — company-specific active form first, else the global
@@ -320,6 +321,35 @@ router.put('/versions/:vid', asyncHandler(async (req, res) => {
   // has no evaluations yet by definition (publishing is what makes it
   // scoreable), so there is nothing to lose by rebuilding its structure.
   if (Array.isArray(sections)) {
+    // A REPLACE THAT LOSES QUESTIONS HAS TO BE ASKED FOR.
+    //
+    // This rebuilds the version from whatever the client sends, so a payload
+    // carrying two questions is indistinguishable from a deliberate deletion of
+    // the other eight. That is not hypothetical: the TRA scorecard went from
+    // ten fields to two on 2026-09-22 and was reviewed against for a day, with
+    // nothing anywhere recording what had gone or who did it.
+    //
+    // So a save that drops a question answers 409 {needs_confirm} naming what
+    // would be lost, and proceeds only when the caller says yes — the same
+    // shape /api/ip-access uses before it can lock somebody out. A save that
+    // adds, edits or reorders is untouched, which is nearly every save.
+    const incomingKeys = sections.flatMap(s => (s.parameters || []).map(p => p.key).filter(Boolean));
+    const { data: existingParams } = await supabaseAdmin
+      .from('qa2_parameter').select('key').eq('form_version_id', vid);
+    const removing = [...new Set((existingParams || []).map(p => p.key))].filter(k => !incomingKeys.includes(k));
+    if (removing.length && req.body?.confirm_removals !== true) {
+      return res.status(409).json({
+        needs_confirm: true,
+        removing,
+        error: `This save removes ${removing.length} question${removing.length === 1 ? '' : 's'} from the scorecard: ${removing.join(', ')}.`,
+      });
+    }
+    // Say what went, so next time there is a trail rather than an
+    // archaeological dig through version numbers.
+    if (removing.length) {
+      logger.warn('QA2_FORMS', `${req.user.id} removed ${removing.length} parameter(s) from version ${vid}: ${removing.join(', ')}`);
+    }
+
     const { data: oldParams } = await supabaseAdmin.from('qa2_parameter').select('id').eq('form_version_id', vid);
     const oldParamIds = (oldParams || []).map(p => p.id);
     if (oldParamIds.length) await supabaseAdmin.from('qa2_parameter_option').delete().in('parameter_id', oldParamIds);
