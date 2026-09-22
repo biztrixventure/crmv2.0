@@ -700,7 +700,7 @@ const fronterXferHandler = asyncHandler(async (req, res) => {
   // separate transfer or a repeat customer from another day.
   if (norm) {
     const since = new Date(Date.now() - 30 * 60 * 1000).toISOString();
-    const { data: manual } = await supabaseAdmin
+    const { data: manual, error: mergeLookupErr } = await supabaseAdmin
       .from('transfers')
       .select('id')
       .eq('company_id', companyId)
@@ -710,19 +710,48 @@ const fronterXferHandler = asyncHandler(async (req, res) => {
       // sending the closer's disposition to their dashboard instead.
       .eq('created_by', userId)
       .eq('normalized_phone', norm)
-      .is('vicidial_vendor_code', null)
+      // CODE-LESS, or named after the call rather than after a lead.
+      //
+      // The hand-entered row has no code at all. A row this dialer created from
+      // a code-less press has a CALL- name, which is a placeholder for the same
+      // thing — and leaving it out here would reintroduce the duplicate by the
+      // back door: CallTools reports one transfer twice, and the call can
+      // acquire a contact record BETWEEN the two reports (the agent links one
+      // mid-call). The press then arrives code-less and the disposition arrives
+      // with a real contact id, they match nothing in common, and the fronter
+      // is credited twice. Adopting the CALL- row and stamping the real code on
+      // it is an upgrade, not a second lead.
+      .or('vicidial_vendor_code.is.null,vicidial_vendor_code.like.CALL-*')
       .gte('created_at', since)
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle();
+    // A broken lookup here is invisible otherwise: `manual` comes back empty,
+    // we insert, and the duplicate this branch exists to prevent appears with
+    // nothing in the log to explain it.
+    if (mergeLookupErr) {
+      logger.error('VICIDIAL_XFER', `merge lookup failed (${mergeLookupErr.code || '?'}): ${mergeLookupErr.message} — inserting, a duplicate is possible`);
+    }
     if (manual) {
-      await supabaseAdmin.from('transfers')
-        .update({ vicidial_vendor_code: code, vicidial_agent: agent || null })
+      // The sequence has to come with the code. Uniqueness is
+      // (code, created_by, xfer_seq) — migration 291 — so stamping a code this
+      // fronter has used before onto a row still carrying seq 1 collides with
+      // their earlier transfer of that lead and the update fails. nextSeq was
+      // already computed against this very code.
+      const { error: mergeErr } = await supabaseAdmin.from('transfers')
+        .update({ vicidial_vendor_code: code, vicidial_agent: agent || null, xfer_seq: nextSeq })
         .eq('id', manual.id);
-      await reconcileQueuedDispoForTransfer({ id: manual.id }, norm);
-      logger.success('VICIDIAL_XFER', `Merged dialer XFER into hand-entered transfer ${manual.id} (code ${code})`);
-      xdbg.outcome = `merged into hand-entered transfer ${manual.id} (no duplicate)`;
-      return res.json({ ok: true, transfer_id: manual.id, merged: true });
+      // Only claim the merge if it actually happened. Saying "merged" over a
+      // failed update leaves a transfer with no code, which is exactly the row
+      // a later closer disposition cannot match.
+      if (mergeErr) {
+        logger.error('VICIDIAL_XFER', `merge into ${manual.id} failed (${mergeErr.code || '?'}): ${mergeErr.message} — inserting instead`);
+      } else {
+        await reconcileQueuedDispoForTransfer({ id: manual.id }, norm);
+        logger.success('VICIDIAL_XFER', `Merged dialer XFER into earlier transfer ${manual.id} (code ${code})`);
+        xdbg.outcome = `merged into earlier transfer ${manual.id} (no duplicate)`;
+        return res.json({ ok: true, transfer_id: manual.id, merged: true });
+      }
     }
   }
 
