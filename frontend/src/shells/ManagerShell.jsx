@@ -120,6 +120,7 @@ const BusinessRulesHub      = lazy(() => import("../components/Admin/BusinessRul
 const FeatureFlagsManager   = lazy(() => import("../components/Admin/FeatureFlagsManager"));
 const CompanyManagement     = lazy(() => import("../components/Admin/CompanyManagement").then(m => ({ default: m.CompanyManagement })));
 import TransferDetailDrawer from "../components/Shared/TransferDetailDrawer";
+import DialerBadge from "../components/Shared/DialerBadge";
 import SaleDetailDrawer from "../components/Shared/SaleDetailDrawer";
 import client from "../api/client";
 import DevCredit from "../components/DevCredit";
@@ -1017,8 +1018,9 @@ const ManagerShell = ({ workspaceMode = false }) => {
                             <p className="m-0 font-semibold" style={{ color: 'var(--color-text)' }}>
                               {t.form_data?.customer_name || t.form_data?.FirstName || 'Lead'}
                             </p>
-                            <p className="m-0 mt-0.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                            <p className="m-0 mt-0.5 text-xs flex items-center gap-1.5 flex-wrap" style={{ color: 'var(--color-text-secondary)' }}>
                               {transferPhone(t) || '—'}
+                              <DialerBadge record={t} compact short />
                             </p>
                           </td>
                           <td className="px-3 py-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{t.fronter_name || '—'}</td>

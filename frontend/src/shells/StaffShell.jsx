@@ -96,6 +96,7 @@ import { canonicalizeFormData } from "../utils/canonicalizeOption";
 import TargetsStrip from "../components/Engagement/TargetsStrip";
 import CrossRoleContent from "../components/Navigation/CrossRoleContent";
 import TransferDetailDrawer from "../components/Shared/TransferDetailDrawer";
+import DialerBadge from "../components/Shared/DialerBadge";
 import SaleDetailDrawer from "../components/Shared/SaleDetailDrawer";
 import client from "../api/client";
 import DevCredit from "../components/DevCredit";
@@ -1269,7 +1270,12 @@ const StaffShell = () => {
                           <td className="py-3 px-3 font-semibold text-text">
                             {t.form_data?.customer_name || t.form_data?.FirstName || 'Lead'}
                           </td>
-                          <td className="py-3 px-3 text-text-secondary text-xs"><CopyableNumber value={transferPhone(t)} /></td>
+                          <td className="py-3 px-3 text-text-secondary text-xs">
+                            <span className="inline-flex items-center gap-1.5 flex-wrap">
+                              <CopyableNumber value={transferPhone(t)} />
+                              <DialerBadge record={t} compact short />
+                            </span>
+                          </td>
                           <td className="py-3 px-3">{(() => { const ds = getTransferDisplayStatus(t); return <Badge variant={ds.variant} size="sm">{ds.label}</Badge>; })()}</td>
                           <td className="py-3 px-3">
                             {(t.latest_disposition || t.sale_closer_disposition) ? (() => {
@@ -1514,8 +1520,9 @@ const StaffShell = () => {
                               {t.form_data?.FirstName ? `${t.form_data.FirstName} ${t.form_data.LastName || ''}`.trim()
                                 : t.form_data?.customer_name || 'Unknown'}
                             </p>
-                            <p className="text-xs text-text-secondary mt-0.5">
+                            <p className="text-xs text-text-secondary mt-0.5 flex items-center gap-1.5 flex-wrap">
                               <CopyableNumber value={transferPhone(t)} size={10} />
+                              <DialerBadge record={t} compact short />
                             </p>
                             {t.vicidial_vendor_code && (
                               <span className="text-[10px] font-mono mt-1 px-1.5 py-0.5 rounded inline-flex items-center gap-0.5"
@@ -2240,7 +2247,12 @@ const StaffShell = () => {
                                 style={{ background: 'var(--gradient-sidebar)', fontSize: 13 }}>{(name[0] || 'L').toUpperCase()}</div>
                               <div className="min-w-0">
                                 <p className="font-semibold text-text truncate">{name}</p>
-                                {phone && <p className="text-xs text-text-secondary truncate"><CopyableNumber value={phone} size={10} /></p>}
+                                {phone && (
+                                  <p className="text-xs text-text-secondary truncate flex items-center gap-1.5">
+                                    <CopyableNumber value={phone} size={10} />
+                                    <DialerBadge record={t} compact short />
+                                  </p>
+                                )}
                                 {t.vicidial_vendor_code && (
                                   <span className="text-[10px] font-mono mt-1 px-1.5 py-0.5 rounded inline-flex items-center gap-0.5"
                                     title="Dialer lead ID" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>

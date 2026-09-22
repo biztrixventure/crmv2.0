@@ -1,25 +1,28 @@
 import { useEffect, useState } from 'react';
-import { Radio } from 'lucide-react';
 import client from '../../api/client';
 
 // ============================================================================
 // DialerBadge — which dialer did this record come from?
 //
-// With one dialer the answer was implicit and nobody had to ask. With two it
-// is the first question anyone asks of a number that looks wrong: is this a
-// CallTools transfer or a VICIdial one? So every record that came from a
-// dialer says so, in the same place, in the same shape.
+// With one dialer the answer was implicit and nobody had to ask. With two it is
+// the first question anyone asks of a record that looks odd, so EVERY record
+// that came from a dialer carries the tag, on every screen: the fronter's card,
+// the closer's and manager's lists, compliance, and QA beside the recording.
 //
-// The names come from /api/dialers/labels — id, name and provider only, no
-// tokens or URLs, so a closer or a QA reviewer can read the badge without
-// being a superadmin. They are fetched ONCE per page load and shared by every
-// badge on it: a transfer list renders hundreds of these, and a request each
-// would be absurd.
+// BOTH dialers are named. An earlier version stayed silent for VICIdial on the
+// theory that a badge on every row is noise — but silence is only readable if
+// you already know the convention, and "no tag" and "not loaded yet" look
+// identical. Naming both costs one small pill and removes the guess.
 //
-// A record with no account is pre-migration-320 data, which is VICIdial by
-// definition — not badged by default, because a badge on every historical row
-// is noise, and "unbadged means the old dialer" is learned in one glance. The
-// drawer passes showLegacy, because there detail IS the point.
+// The ACCOUNT name wins over the product name where there is room: two
+// CallTools tenants are two different floors, and "CallTools" on both would
+// answer the wrong question. In dense tables `short` shows the product and
+// keeps the account name in the tooltip.
+//
+// Names come from /api/dialers/labels — id, name and provider only, no tokens —
+// so a closer or a QA reviewer can read the tag without being a superadmin.
+// Fetched ONCE per page and shared by every badge on it: a transfer list
+// renders hundreds of these and a request each would be absurd.
 // ============================================================================
 
 let cache = null;          // { accounts: [...], providers: {...} }
@@ -36,8 +39,8 @@ function loadLabels() {
       return cache;
     })
     .catch(() => {
-      // A badge is decoration on top of the record — if the lookup fails the
-      // row still renders, just without a name.
+      // The tag sits on top of the record — if the lookup fails the row still
+      // renders, just with the product's name instead of the account's.
       cache = { accounts: [], providers: {} };
       return cache;
     })
@@ -57,44 +60,64 @@ export function useDialerLabels() {
   return labels || { accounts: [], providers: {} };
 }
 
-// Resolve a record to { label, title, provider } or null when there is nothing
-// to say.
+// One colour per dialer so a list is scannable without reading it: the
+// long-standing one stays neutral, anything newer gets its own accent.
+const TONES = {
+  vicidial:  { bg: 'var(--color-bg-tertiary)',          fg: 'var(--color-text-secondary)',        dot: 'var(--color-text-tertiary)' },
+  calltools: { bg: 'var(--color-primary-50, #eef2ff)',  fg: 'var(--color-primary-700, #4338ca)',  dot: 'var(--color-primary-500, #6366f1)' },
+  generic:   { bg: 'var(--color-warning-50, #fffbeb)',  fg: 'var(--color-warning-700, #b45309)',  dot: 'var(--color-warning-500, #f59e0b)' },
+};
+
+const FALLBACK_NAMES = { vicidial: 'VICIdial', calltools: 'CallTools', generic: 'Dialer' };
+
+// Resolve a record to { label, short, title, provider } — or null when the
+// record did not come from a dialer at all.
 export function dialerLabelFor(record, labels) {
   if (!record) return null;
-  const provider = record.dialer_provider || null;
   const accountId = record.dialer_account_id || null;
-  if (!provider && !accountId) return null;
-
   const account = accountId ? (labels.accounts || []).find(a => a.id === accountId) : null;
-  // The ACCOUNT name wins: two CallTools tenants are two different floors, and
-  // "CallTools" on both would answer the wrong question.
-  const label = account?.name || labels.providers?.[provider] || provider;
-  const title = account
-    ? `Came from ${account.name} (${labels.providers?.[account.provider] || account.provider})`
-    : `Came from ${label}`;
-  return { label, title, provider: account?.provider || provider };
+  const provider = account?.provider || record.dialer_provider || null;
+  if (!provider && !account) return null;
+
+  const productName = labels.providers?.[provider] || FALLBACK_NAMES[provider] || provider;
+  const label = account?.name || productName;
+  return {
+    provider,
+    label,
+    short: productName,
+    title: account ? `Came from ${account.name} (${productName})` : `Came from ${productName}`,
+  };
 }
 
-export default function DialerBadge({ record, showLegacy = false, className = '', compact = false }) {
+export default function DialerBadge({ record, compact = false, short = false, className = '', style }) {
   const labels = useDialerLabels();
   const info = dialerLabelFor(record, labels);
   if (!info) return null;
-  if (!showLegacy && info.provider === 'vicidial' && !record.dialer_account_id) return null;
+
+  const tone = TONES[info.provider] || TONES.generic;
+  const text = short ? info.short : info.label;
 
   return (
     <span
       title={info.title}
-      className={`inline-flex items-center gap-1 rounded-full ${compact ? 'px-1.5 py-0' : 'px-2 py-0.5'} ${className}`}
+      className={`inline-flex items-center gap-1 rounded-full font-medium ${compact ? 'px-1.5' : 'px-2 py-0.5'} ${className}`}
       style={{
-        background: 'var(--color-bg-tertiary)',
-        color: 'var(--color-text-secondary)',
+        background: tone.bg,
+        color: tone.fg,
         fontSize: compact ? 10 : 11,
         lineHeight: compact ? '15px' : '17px',
         whiteSpace: 'nowrap',
+        maxWidth: compact ? 150 : 220,
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        ...style,
       }}
     >
-      <Radio size={compact ? 9 : 11} style={{ flexShrink: 0 }} />
-      {info.label}
+      <span style={{
+        width: compact ? 5 : 6, height: compact ? 5 : 6, borderRadius: 999,
+        background: tone.dot, flexShrink: 0,
+      }} />
+      {text}
     </span>
   );
 }

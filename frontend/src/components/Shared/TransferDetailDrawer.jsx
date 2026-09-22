@@ -149,6 +149,11 @@ export default function TransferDetailDrawer({ transfer, onClose }) {
     rejected: transfer.rejected_at ? <Row key="rejected" label="Rejected at" value={new Date(transfer.rejected_at).toLocaleString()} /> : null,
     dialer_code:  transfer.vicidial_vendor_code ? <Row key="dialer_code"  label="Dialer lead ID"      value={transfer.vicidial_vendor_code} mono /> : null,
     dialer_dispo: transfer.vicidial_dispo       ? <Row key="dialer_dispo" label="Dialer disposition"   value={transfer.vicidial_dispo} /> : null,
+    // WHICH dialer this record came from, with the account's own name. The
+    // lists carry a short tag; someone who has opened one record wants the
+    // answer stated rather than abbreviated.
+    dialer_source: (transfer.dialer_provider || transfer.dialer_account_id)
+      ? <Row key="dialer_source" label="Dialer" value={<DialerBadge record={transfer} />} /> : null,
   };
 
   const DEFAULT_FIELDS = {

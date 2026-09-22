@@ -515,7 +515,7 @@ export default function ReviewScreen({ assignment, onDone, onNext, nextLabel, re
                 // needs to know which system produced it before they score it.
                 // Stated outright here (not hidden like in a list) because
                 // this screen IS the detail.
-                { k: 'Dialer', v: <DialerBadge record={call} showLegacy />, raw: true },
+                { k: 'Dialer', v: <DialerBadge record={call} /> },
                 { k: 'Closer dispo', v: call.closer_dispo || '—', strong: true },
                 { k: 'Ended by', v: hangup?.label || (hangup?.unavailable ? 'n/a' : '—'),
                   tone: /^AGENT/i.test(hangup?.reason || '') ? 'agent' : (hangup?.label ? 'customer' : null),
