@@ -15,7 +15,7 @@
 jest.mock('../config/database', () => ({ supabaseAdmin: {}, supabaseClient: {} }));
 jest.mock('../utils/logger', () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn(), success: jest.fn() }));
 
-const { realCode } = require('./vicidial');
+const { realCode, xferCode } = require('./vicidial');
 
 describe('realCode', () => {
   test('keeps a real code exactly as it arrived', () => {
@@ -40,5 +40,55 @@ describe('realCode', () => {
     ['', '   ', null, undefined, 'null', 'NULL', 'undefined', 'none', 'N/A'].forEach(v => {
       expect(realCode(v)).toBe('');
     });
+  });
+});
+
+// ============================================================================
+// xferCode — a lead code names the transfer, and when there is none the CALL
+// does. Regression for the five live CallTools presses on 2026-09-21 that
+// arrived with `code: null` and produced nothing at all: no transfer row, no
+// pending card, no notification. The fronter pressed transfer and the CRM
+// stayed empty, silently, because the webhook answers 200 either way.
+// ============================================================================
+describe('xferCode', () => {
+  test('a real lead code wins and is never rewritten', () => {
+    expect(xferCode({ code: 'CT26330017', call_id: 'abc' }, 'CT100')).toEqual({ code: 'CT26330017', fromCall: false });
+    expect(xferCode({ code: 'WTI264204' }, 'WTI100695')).toEqual({ code: 'WTI264204', fromCall: false });
+  });
+
+  test('a bare code still gets the box prefix from the agent', () => {
+    expect(xferCode({ code: '2724512' }, 'WTI100695')).toEqual({ code: 'WTI2724512', fromCall: false });
+  });
+
+  test('no lead code falls back to the call id — this is the live CallTools case', () => {
+    const got = xferCode({ code: null, call_id: '0ce93f60-6a9f-4aa5-b2e2-10b39b7efea5' }, '2629b8cc');
+    expect(got).toEqual({ code: 'CALL-0CE93F606A9F4AA5', fromCall: true });
+  });
+
+  test('one press is one code, so a duplicate webhook still dedups', () => {
+    const a = xferCode({ call_id: 'smoke-A' }, 'x');
+    const b = xferCode({ call_id: 'smoke-A' }, 'x');
+    expect(a.code).toBe(b.code);
+  });
+
+  test('two presses are two codes, so a re-transfer is a new row (mig 291)', () => {
+    expect(xferCode({ call_id: 'call-one' }, 'x').code)
+      .not.toBe(xferCode({ call_id: 'call-two' }, 'x').code);
+  });
+
+  test('VICIdial uniqueid serves as the call id too', () => {
+    expect(xferCode({ uniqueid: '1663012345.6789' }, 'WTI100695'))
+      .toEqual({ code: 'CALL-16630123456789', fromCall: true });
+  });
+
+  test('an unresolved token is not an id — it must not become a shared code', () => {
+    expect(xferCode({ code: 'CT{id}', call_id: '{{call_id}}' }, 'x')).toEqual({ code: '', fromCall: false });
+    expect(xferCode({ code: null, call_id: 'None' }, 'x')).toEqual({ code: '', fromCall: false });
+    expect(xferCode({ code: '--A--vendor_lead_code--B--' }, 'x')).toEqual({ code: '', fromCall: false });
+  });
+
+  test('nothing at all stays nothing, so the handler still refuses', () => {
+    expect(xferCode({}, 'x')).toEqual({ code: '', fromCall: false });
+    expect(xferCode(null, 'x')).toEqual({ code: '', fromCall: false });
   });
 });

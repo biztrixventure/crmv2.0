@@ -359,6 +359,24 @@ and `VICIDIAL_INGEST_TOKEN`. Operator guide: `docs/DIALER_INTEGRATION.md`.
   server-side — never the browser.
 - Every new column is deploy-order safe (insert/select retries without the `dialer_*` columns), so the
   backend can ship before 320 is applied.
+- **A TRANSFER IS NAMED BY ITS LEAD CODE, OR FAILING THAT BY THE CALL.** `xferCode()`
+  in `routes/vicidial.js`. Both CallTools automations send the CONTACT id as the
+  code, so a call with no contact record (manual dial, inbound) arrives with
+  `code: null` — and the handler used to 400, silently, because the webhook
+  answers 200 either way. Measured 2026-09-22: 5 of the last 20 live XFERs
+  vanished that way; the fronter pressed transfer and got no card, no bell, no
+  push. Now the dialer's own per-call id stands in (`CALL-<16>`; no box claims
+  that prefix, so nothing tries to resolve it as a lead).
+- **Code-less idempotency keys on PHONE + fronter**, not on the code it does not
+  have. CallTools reports one transfer twice (button press AND disposition); with
+  a contact they share the contact id and collapse, without one they would each
+  name the call differently and credit the fronter twice.
+- The connector-button automation (514) was ACTIVE but had never fired: 18 real
+  presses of button 942, zero webhooks. Its condition compares
+  `{{%locals[connectorbuttonevent][connector_button]}}` to the integer 942, and
+  CallTools renders related fields as reprs (`"AppUser object (uuid)"` — the same
+  thing `unwrap` exists for), so the comparison can never be true. 501 (the
+  disposition automation) is what actually feeds the CRM today.
 
 ### Where a record came from (migs 325-327, applied 2026-09-22)
 With two dialers, "which one sent this?" is the first question asked of any odd

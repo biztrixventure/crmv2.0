@@ -387,6 +387,36 @@ const realCode = (v) => {
   return s;
 };
 
+// WHAT NAMES THIS TRANSFER — A LEAD CODE, OR FAILING THAT THE CALL ITSELF.
+//
+// The handler used to demand a lead code and refuse without one. Measured on
+// the live CallTools tenant: the last five real XFER presses all arrived with
+// `code: null`, because the automation's contact merge fields resolve to
+// nothing in the disposition trigger — only call-level fields (call_id,
+// call_at) and the phone came through. Each of those was a fronter who pressed
+// transfer, watched the CRM and got NOTHING: no card, no bell, no push. The
+// webhook answers 200 so the dialer will not retry, which is what made the
+// failure silent rather than noisy.
+//
+// A lead code was never the point. It is a stable NAME for the call, and the
+// dialer's own per-call id is just as stable and is there when the lead code is
+// not. Nothing downstream changes: duplicate webhooks for one press carry the
+// same call id so they still collapse on the existing (code, created_by)
+// dedup, and a genuine re-transfer weeks later is a different call, which is
+// exactly what migration 291 wants.
+//
+// realCode() guards both inputs, because an unrendered `{{call_id}}` or a
+// literal "None" is not an id. The CALL- prefix is claimed by no dialer box, so
+// parseVendorCode reports exact:false and nothing ever tries to resolve one of
+// these against a VICIdial cluster as though it were a lead.
+function xferCode(p, agent) {
+  const code = normalizeLeadCode(realCode(p && p.code), agent);
+  if (code) return { code, fromCall: false };
+  const callId = realCode((p && (p.call_id || p.uniqueid)) || '');
+  if (!callId) return { code: '', fromCall: false };
+  return { code: `CALL-${callId.replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 16)}`, fromCall: true };
+}
+
 // ASK THE DIALER FOR THE CUSTOMER WHEN THE WEBHOOK DIDN'T CARRY THEM.
 //
 // Roughly one XFER in six arrives with empty first/last tokens, and the fronter
@@ -465,7 +495,7 @@ const fronterXferHandler = asyncHandler(async (req, res) => {
   const p = { ...req.query, ...req.body };
   const agent = String(p.agent || '').trim();
   const rawCode = String(p.code || '').trim();
-  const code  = normalizeLeadCode(realCode(rawCode), agent);
+  const { code, fromCall: codeFromCall } = xferCode(p, agent);
   const phone = String(p.phone || '').trim();
   const norm  = normPhone(phone);
   // Full lead detail — matches the Dispo Call URL template in
@@ -500,16 +530,24 @@ const fronterXferHandler = asyncHandler(async (req, res) => {
       AltPhone: String(p.alt_phone || '').trim() || null,
       ListId: String(p.list_id || '').trim() || null,
       Campaign: String(p.campaign || '').trim() || null,
-      UniqueId: String(p.uniqueid || '').trim() || null,   // the dialer's own per-call id
+      UniqueId: String(p.uniqueid || p.call_id || '').trim() || null,   // the dialer's own per-call id
       Term: String(p.term || p.term_reason || '').trim().toUpperCase() || null,
     },
   };
   const xdbg = {
     at: new Date().toISOString(), code, phone, normalized: norm || '',
-    agent, dispo: String(p.dispo || ''), agent_mapped: null, company_id: null, outcome: 'pending',
+    agent, dispo: String(p.dispo || ''), agent_mapped: null, company_id: null,
+    code_from_call: false, outcome: 'pending',
   };
   recentXfer.unshift(xdbg); if (recentXfer.length > 500) recentXfer.pop();
-  if (!code || !phone) { xdbg.outcome = 'rejected — missing code or phone'; return res.status(400).json({ ok: false, error: 'code and phone required' }); }
+  if (codeFromCall) {
+    xdbg.code_from_call = true;
+    logger.warn('VICIDIAL_XFER', `No lead code on this XFER — naming it by call id (${code}). The dialer is not sending a lead/contact id; the card will carry the phone only.`);
+  }
+  if (!code || !phone) {
+    xdbg.outcome = `rejected — need a phone and either a lead code or a call id (phone ${phone ? 'ok' : 'MISSING'}, code/call id MISSING)`;
+    return res.status(400).json({ ok: false, error: 'phone plus a lead code or call id required' });
+  }
 
   // Route to the fronter the VICIdial agent maps to. This MUST happen before the
   // idempotency lookup: a lead_id identifies a LEAD, not a transfer event, so
@@ -594,10 +632,23 @@ const fronterXferHandler = asyncHandler(async (req, res) => {
   // a duplicate webhook fire for the SAME event arrives within seconds, while a
   // genuine re-transfer of a recycled lead is minutes to weeks later. Without
   // this window a dialer retry would mint a second transfer and inflate counts.
-  const { data: existing } = await supabaseAdmin
+  //
+  // WITH NO LEAD CODE, THE PHONE IS THE KEY. A code-less transfer has nothing
+  // to match on, and the same call can be reported twice by two different
+  // automations: CallTools fires one webhook when the fronter PRESSES transfer
+  // and another when they SET the disposition. When the call has a contact
+  // record both carry the same contact id and collapse here. When it does NOT
+  // — a manual dial, an inbound with no contact — each names the call by its
+  // own id, those ids differ, and the fronter would be credited twice for one
+  // transfer. Same fronter, same number, inside the window IS the same
+  // transfer, which is the rule the hand-entered merge below already uses.
+  const idemp = supabaseAdmin
     .from('transfers').select('id, created_at, form_data, xfer_seq')
-    .eq('vicidial_vendor_code', code).eq('created_by', userId)
-    .order('created_at', { ascending: false }).limit(1).maybeSingle();
+    .eq('created_by', userId)
+    .order('created_at', { ascending: false }).limit(1);
+  const { data: existing } = await (codeFromCall && norm
+    ? idemp.eq('normalized_phone', norm)
+    : idemp.eq('vicidial_vendor_code', code)).maybeSingle();
 
   // A CONNECTED DIALER CAN REPORT THE SAME TRANSFER TWICE, MINUTES APART.
   //
@@ -627,7 +678,12 @@ const fronterXferHandler = asyncHandler(async (req, res) => {
   }
   // Past the window → genuine new transfer. `existing` is deliberately NOT
   // updated; it only tells us which sequence number this new row takes.
-  const nextSeq = existing ? (existing.xfer_seq || 1) + 1 : 1;
+  //
+  // The sequence counts re-transfers OF ONE LEAD CODE (migration 291). A code
+  // named after the call is unique to that call by construction, so it is
+  // always the first of its own sequence — and `existing` was matched on the
+  // phone there, not the code, so its sequence belongs to a different lead.
+  const nextSeq = codeFromCall ? 1 : (existing ? (existing.xfer_seq || 1) + 1 : 1);
 
   // DEDUP: a fronter who ALSO typed the transfer into the CRM by hand creates a
   // richer, code-less transfer seconds before the dialer's XFER fires here. Those
@@ -2160,7 +2216,7 @@ api.get('/number-activity', asyncHandler(async (req, res) => {
 // disposition matching. They are ordinary express handlers; the bridge calls
 // them with a synthetic req/res, never over HTTP.
 module.exports = {
-  ingest, api, reconcileQueuedDispoForTransfer, fetchAndApplyDispo, resolveAgent,
+  ingest, api, reconcileQueuedDispoForTransfer, fetchAndApplyDispo, resolveAgent, xferCode,
   fronterXferHandler, closerDispoHandler,
   realCode,   // exported for its tests — the rule is small and easy to break
 };
