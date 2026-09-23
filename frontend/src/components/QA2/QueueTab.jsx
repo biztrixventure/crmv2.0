@@ -80,9 +80,19 @@ export default function QueueTab() {
   const [columns, setColumns] = useState({});
   const [counts, setCounts] = useState(null);
   const [methodTab, setMethodTab] = useState('all');   // pill: 'all' | method_id
+  // What the agent is typing, and the settled value the server is asked for.
+  // Typing a ten-digit number would otherwise fire ten queries; the request
+  // goes when they stop, not on every keystroke.
+  const [search, setSearch] = useState('');
+  const [searchQ, setSearchQ] = useState('');
 
   const tq = useTableQuery({ scope: 'qa2:queue', columns, defaultSort: { by: 'call_at', dir: 'desc' } });
   const abortable = useAbortable();
+
+  useEffect(() => {
+    const t = setTimeout(() => setSearchQ(search.trim()), 300);
+    return () => clearTimeout(t);
+  }, [search]);
 
   // Filter options come from the ROWS, not from /compliance/companies and
   // /qa2/methods. Those two are manager/compliance-only, so a QA agent — the
@@ -104,15 +114,15 @@ export default function QueueTab() {
 
   const load = useCallback(() => {
     setLoadError(null);
-    client.get('qa2/queue', { params: { status: filter, ...tq.params }, signal: abortable() })
+    client.get('qa2/queue', { params: { status: filter, ...tq.params, ...(searchQ ? { search: searchQ } : {}) }, signal: abortable() })
       .then(r => {
         setRows(r.data.assignments || []);
         if (r.data.columns) setColumns(r.data.columns);
         if (r.data.counts) setCounts(r.data.counts);
       })
       .catch(e => { if (!isCanceled(e)) setLoadError(e.response?.data?.error || 'Could not load your queue'); });
-  }, [filter, tq.params, abortable]);
-  useEffect(() => { load(); }, [filter, tq.version]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [filter, tq.params, searchQ, abortable]);
+  useEffect(() => { load(); }, [filter, tq.version, searchQ]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Reviewing runs down the list you are looking at. Handing ReviewScreen the
   // NEXT row means an agent can score a whole queue without returning here
@@ -147,7 +157,8 @@ export default function QueueTab() {
       <SectionHeader level="page" icon={ListTodo} title="My queue" subtitle="Assignments already yours." />
 
       <WorkFilters tq={tq} companyOptions={companyOptions} methodOptions={methodOptions}
-        methodTab={methodTab} setMethodTab={setMethodTab} counts={methodCounts} />
+        methodTab={methodTab} setMethodTab={setMethodTab} counts={methodCounts}
+        search={search} setSearch={setSearch} />
 
       <div className="grid grid-cols-3 gap-3">
         {FILTERS.map(f => (
@@ -169,12 +180,25 @@ export default function QueueTab() {
 
       {loadError && <Panel tone="inset"><p className="text-sm" style={{ color: 'var(--color-error-600)' }}>{loadError}</p></Panel>}
       {!loadError && rows === null && <Loading variant="table" rows={4} />}
+      {/* A search that finds nothing must not read as "you have no work" —
+          that sends an agent away believing the call does not exist, when they
+          have only mistyped a digit. The search counts as a narrowing, exactly
+          like a column filter does. */}
       {!loadError && rows && rows.length === 0 && (
-        activeFilters.length > 0 ? (
-          <EmptyState icon={ListTodo} title="No calls match your filters"
-            hint="You may still have work here — these filters are hiding it."
-            action={<button onClick={tq.clearAll} className="text-sm font-bold px-3 py-2 rounded-lg"
-              style={{ background: 'var(--gradient-sidebar)', color: 'var(--color-text-inverse)' }}>Clear all filters</button>} />
+        (activeFilters.length > 0 || searchQ) ? (
+          <EmptyState icon={ListTodo}
+            title={searchQ ? `No call in this list matches “${searchQ}”` : 'No calls match your filters'}
+            hint={searchQ
+              ? 'It may be under another status tile, or assigned to someone else.'
+              : 'You may still have work here — these filters are hiding it.'}
+            action={
+              <button
+                onClick={() => { setSearch(''); if (activeFilters.length) tq.clearAll(); }}
+                className="text-sm font-bold px-3 py-2 rounded-lg"
+                style={{ background: 'var(--gradient-sidebar)', color: 'var(--color-text-inverse)' }}>
+                {searchQ ? 'Clear search' : 'Clear all filters'}
+              </button>
+            } />
         ) : (
           <EmptyState icon={ListTodo} title={EMPTY_COPY[filter].title} hint={EMPTY_COPY[filter].hint} />
         )
@@ -188,6 +212,9 @@ export default function QueueTab() {
                 <ColumnHeader tq={tq} colKey="company" label="Company" options={companyOptions} className={th} />
                 <ColumnHeader tq={tq} colKey="method" label="Method" options={methodOptions} className={th} />
                 <ColumnHeader tq={tq} colKey="leg" label="Leg" options={LEG_OPTIONS} className={th} />
+                {/* The customer's number, which is how a call gets referred to
+                    outside this screen. Searchable from the bar above. */}
+                <th className={th}>Number</th>
                 <th className={th}>Agent</th>
                 <th className={th}>Dispo</th>
                 <th className={th}>Closer dispo</th>
@@ -222,6 +249,12 @@ export default function QueueTab() {
                             {LegIcon ? <LegIcon size={12} /> : null}{legM.label}
                           </span>
                         ) : '—'}
+                      </td>
+                      {/* Pairs with the Number header. tabular-nums so the
+                          digits line up down the column and a number can be
+                          matched by eye against one somebody read out. */}
+                      <td className="px-3 py-2 tabular-nums whitespace-nowrap" style={{ color: 'var(--color-text)' }}>
+                        {c.customer_phone || c.normalized_phone || '—'}
                       </td>
                       <td className="px-3 py-2" style={{ color: 'var(--color-text-secondary)' }}>
                         <span className="inline-flex items-center gap-1.5 flex-wrap">

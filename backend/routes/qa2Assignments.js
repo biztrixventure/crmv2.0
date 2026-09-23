@@ -36,6 +36,34 @@ const { applyQa2Sort, applyQa2Filters } = require('../utils/qa2ColumnFilter');
 const { QA2_CALL_COLUMNS } = require('../config/recordColumns');
 const logger = require('../utils/logger');
 
+// ── searching the work list by the customer's number ────────────────────────
+//
+// The number is what a reviewer actually has to go on: a manager asks about
+// "that call to 845…", a customer rings back, a complaint names a number and
+// nothing else. Without this the only way to find one was to read down the list.
+//
+// Applied in SQL, not in the browser, because both lists are capped at 200
+// rows — a search over just the loaded page would quietly fail to find the call
+// it was asked for, which is worse than having no search at all.
+//
+// Stripped to DIGITS first, which is what makes it safe as well as useful:
+// PostgREST's or() grammar is comma- and parenthesis-delimited and nothing
+// escapable survives the strip, so no quoting question arises. It also means
+// 713-724-2731, (713) 7242731 and 7137242731 are all the same search.
+const PHONE_SEARCH_MIN_DIGITS = 3;
+function applyPhoneSearch(query, search) {
+  const digits = String(search || '').replace(/\D/g, '');
+  if (digits.length < PHONE_SEARCH_MIN_DIGITS) return query;
+  // Both columns: normalized_phone is the dependable digits-only one, and
+  // customer_phone is what the row was created with. `%` not `*` — every other
+  // or() in this codebase uses it, and a wildcard that failed to translate
+  // would match nothing and read to the agent as "no such call".
+  return query.or(
+    `customer_phone.ilike.%${digits}%,normalized_phone.ilike.%${digits}%`,
+    { foreignTable: 'qa2_call' },
+  );
+}
+
 async function requireScope(req, res) {
   const scope = await resolveQa2Scope(req);
   if (!scope.isCompliance && !scope.managerAccess && scope.role !== 'qa_agent') {
@@ -82,7 +110,7 @@ function callInScope(scope, call) {
 router.get('/queue', asyncHandler(async (req, res) => {
   const scope = await requireScope(req, res);
   if (!scope) return;
-  const { status, sort_by, sort_dir, filters } = req.query;
+  const { status, sort_by, sort_dir, filters, search } = req.query;
   const access = await resolveColumnAccess(req, QA2_CALL_COLUMNS);
 
   // !inner changes nothing about the result set (call_id is NOT NULL, every
@@ -92,12 +120,13 @@ router.get('/queue', asyncHandler(async (req, res) => {
     .from('qa2_assignment')
     .select(`id, call_id, assigned_to, assigned_at, opened_at, status, origin, calibration_group_id,
              priority, due_at, period, created_at,
-             qa2_call!inner(id, company_id, leg, agent_user, agent_user_id, customer_phone, dispo_raw, call_at,
+             qa2_call!inner(id, company_id, leg, agent_user, agent_user_id, customer_phone, normalized_phone, dispo_raw, call_at,
                        recording_state, method_id, talk_sec, hangup_label, hangup_reason,
                        dialer_provider, dialer_account_id,
                        qa2_method(label), companies(name))`)
     .eq('assigned_to', req.user.id);
   query = status ? query.eq('status', status) : query.in('status', ['pending', 'in_review']);
+  query = applyPhoneSearch(query, search);
   query = applyQa2Filters(query, filters, QA2_CALL_COLUMNS, access.blocked, 'qa2_call');
   query = applyQa2Sort(query, sort_by, sort_dir, access.sortMap, 'qa2_call', 'created_at', false);
   query = query.limit(200);
@@ -145,7 +174,7 @@ router.get('/pool', asyncHandler(async (req, res) => {
   if (scope.operationalCompanyIds !== 'all' && !scope.operationalCompanyIds.length) return res.json({ assignments: [], columns: {} });
   if (scope.operationalMethodIds !== 'all' && !scope.operationalMethodIds.length) return res.json({ assignments: [], columns: {} });
 
-  const { sort_by, sort_dir, filters } = req.query;
+  const { sort_by, sort_dir, filters, search } = req.query;
   const access = await resolveColumnAccess(req, QA2_CALL_COLUMNS);
 
   // Company/method scope now applies directly on the embedded qa2_call table
@@ -154,7 +183,7 @@ router.get('/pool', asyncHandler(async (req, res) => {
   let query = supabaseAdmin
     .from('qa2_assignment')
     .select(`id, call_id, status, created_at,
-             qa2_call!inner(id, company_id, leg, agent_user, agent_user_id, customer_phone, dispo_raw, call_at,
+             qa2_call!inner(id, company_id, leg, agent_user, agent_user_id, customer_phone, normalized_phone, dispo_raw, call_at,
                        recording_state, method_id, dialer_provider, dialer_account_id,
                        qa2_method(label), companies(name))`)
     .is('assigned_to', null)
@@ -177,6 +206,7 @@ router.get('/pool', asyncHandler(async (req, res) => {
   const cutoff = new Date(Date.now() - POOL_WINDOW_DAYS * 86400000).toISOString();
   query = query.or(`recorded_at.gte.${cutoff},call_at.gte.${cutoff}`, { foreignTable: 'qa2_call' });
 
+  query = applyPhoneSearch(query, search);
   query = applyQa2Filters(query, filters, QA2_CALL_COLUMNS, access.blocked, 'qa2_call');
   query = applyQa2Sort(query, sort_by, sort_dir, access.sortMap, 'qa2_call', 'created_at', true);
   query = query.limit(200);

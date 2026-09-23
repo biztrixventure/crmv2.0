@@ -11,7 +11,7 @@
 // ============================================================================
 
 import { useState, useEffect, useCallback } from 'react';
-import { Inbox as InboxIcon, X } from 'lucide-react';
+import { Inbox as InboxIcon, X, Search } from 'lucide-react';
 import { toast } from 'sonner';
 import client from '../../api/client';
 import { Panel, SectionHeader, TableScroll, EmptyState, Loading } from '../UI/kit';
@@ -37,7 +37,7 @@ const etDay = (offset = 0) => {
   const d = new Date(); d.setDate(d.getDate() - offset);
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
 };
-export function WorkFilters({ tq, companyOptions, methodOptions, methodTab, setMethodTab, counts }) {
+export function WorkFilters({ tq, companyOptions, methodOptions, methodTab, setMethodTab, counts, search, setSearch }) {
   const f = tq.filters?.call_at;
   const day = f && f.op === 'between' && f.v && f.v === f.v2 ? f.v : '';
   const setDay = (d) => (d ? tq.setFilter('call_at', { op: 'between', v: d, v2: d }) : tq.clearFilter('call_at'));
@@ -50,6 +50,34 @@ export function WorkFilters({ tq, companyOptions, methodOptions, methodTab, setM
   );
   return (
     <div className="space-y-2">
+      {/* THE NUMBER IS HOW A CALL GETS ASKED ABOUT. A manager quotes one, a
+          customer rings back, a complaint names it and nothing else — so it is
+          the first control on the bar, not buried in a column menu. The search
+          runs on the SERVER (both lists cap at 200 rows), so it finds a call
+          whether or not it happens to be on the page. */}
+      {setSearch && (
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1 max-w-sm">
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
+              style={{ color: 'var(--color-text-tertiary)' }} />
+            <input
+              value={search || ''}
+              onChange={e => setSearch(e.target.value)}
+              inputMode="tel"
+              placeholder="Search by customer number…"
+              aria-label="Search by customer number"
+              className="w-full text-sm rounded-lg pl-8 pr-8 py-1.5"
+              style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}
+            />
+            {search && (
+              <button type="button" onClick={() => setSearch('')} aria-label="Clear search"
+                className="absolute right-2 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }}>
+                <X size={14} />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>Shift day</span>
         <ThemedDate value={day} onChange={e => setDay(e.target.value)} />
@@ -103,6 +131,14 @@ export default function PoolTab() {
   const [open, setOpen] = useState(null);
   const [columns, setColumns] = useState({});
   const [methodTab, setMethodTab] = useState('all');   // pill: 'all' | method_id
+  // Same pair as the queue: what is being typed, and the settled value the
+  // server is asked for once typing stops.
+  const [search, setSearch] = useState('');
+  const [searchQ, setSearchQ] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => setSearchQ(search.trim()), 300);
+    return () => clearTimeout(t);
+  }, [search]);
 
   const tq = useTableQuery({ scope: 'qa2:pool', columns, defaultSort: { by: 'call_at', dir: 'desc' } });
   const abortable = useAbortable();
@@ -127,11 +163,11 @@ export default function PoolTab() {
 
   const load = useCallback(() => {
     setLoadError(null);
-    client.get('qa2/pool', { params: tq.params, signal: abortable() })
+    client.get('qa2/pool', { params: { ...tq.params, ...(searchQ ? { search: searchQ } : {}) }, signal: abortable() })
       .then(r => { setRows(r.data.assignments || []); if (r.data.columns) setColumns(r.data.columns); })
       .catch(e => { if (!isCanceled(e)) setLoadError(e.response?.data?.error || 'Could not load the pool'); });
-  }, [tq.params, abortable]);
-  useEffect(() => { load(); }, [tq.version]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [tq.params, searchQ, abortable]);
+  useEffect(() => { load(); }, [tq.version, searchQ]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const claim = async (assignment) => {
     setClaimingId(assignment.id);
@@ -207,7 +243,8 @@ export default function PoolTab() {
       <SectionHeader level="page" icon={InboxIcon} title="Pool" subtitle="Unassigned calls within your granted companies and methods — claim one to start." />
 
       <WorkFilters tq={tq} companyOptions={companyOptions} methodOptions={methodOptions}
-        methodTab={methodTab} setMethodTab={setMethodTab} counts={methodCounts} />
+        methodTab={methodTab} setMethodTab={setMethodTab} counts={methodCounts}
+        search={search} setSearch={setSearch} />
 
       {activeFilters.length > 0 && (
         <div className="flex items-center gap-2 flex-wrap">
@@ -229,11 +266,22 @@ export default function PoolTab() {
       {loadError && <Panel tone="inset"><p className="text-sm" style={{ color: 'var(--color-error-600)' }}>{loadError}</p></Panel>}
       {!loadError && rows === null && <Loading variant="table" rows={4} />}
       {!loadError && rows && rows.length === 0 && (
-        (tq.activeCount > 0 ? (
-          <EmptyState icon={InboxIcon} title="No calls match your filters"
-            hint="The pool may still have work — these filters are hiding it."
-            action={<button onClick={tq.clearAll} className="text-sm font-bold px-3 py-2 rounded-lg"
-              style={{ background: 'var(--gradient-sidebar)', color: 'var(--color-text-inverse)' }}>Clear all filters</button>} />
+        {/* Same reasoning as the queue: "Pool is empty" in answer to a search
+            would tell an agent the call does not exist when they mistyped. */}
+        ((tq.activeCount > 0 || searchQ) ? (
+          <EmptyState icon={InboxIcon}
+            title={searchQ ? `Nothing in the pool matches “${searchQ}”` : 'No calls match your filters'}
+            hint={searchQ
+              ? 'It may already be claimed, or outside the pool’s seven-day window.'
+              : 'The pool may still have work — these filters are hiding it.'}
+            action={
+              <button
+                onClick={() => { setSearch(''); if (tq.activeCount > 0) tq.clearAll(); }}
+                className="text-sm font-bold px-3 py-2 rounded-lg"
+                style={{ background: 'var(--gradient-sidebar)', color: 'var(--color-text-inverse)' }}>
+                {searchQ ? 'Clear search' : 'Clear all filters'}
+              </button>
+            } />
         ) : (
           <EmptyState icon={InboxIcon} title="Pool is empty" hint="Nothing waiting to be claimed right now." />
         ))
@@ -247,6 +295,7 @@ export default function PoolTab() {
                 <ColumnHeader tq={tq} colKey="company" label="Company" options={companyOptions} className={th} />
                 <ColumnHeader tq={tq} colKey="method" label="Method" options={methodOptions} className={th} />
                 <ColumnHeader tq={tq} colKey="leg" label="Leg" options={LEG_OPTIONS} className={th} />
+                <th className={th}>Number</th>
                 <th className={th}>Agent</th>
                 <ColumnHeader tq={tq} colKey="recording_state" label="Recording" options={REC_OPTIONS} className={th} />
                 <ColumnHeader tq={tq} colKey="call_at" label="Date" className={th} />
@@ -258,6 +307,9 @@ export default function PoolTab() {
                     <td className="px-3 py-2">{a.qa2_call?.companies?.name || '—'}</td>
                     <td className="px-3 py-2">{a.qa2_call?.qa2_method?.label || '—'}</td>
                     <td className="px-3 py-2">{a.qa2_call?.leg || '—'}</td>
+                    <td className="px-3 py-2 tabular-nums whitespace-nowrap" style={{ color: 'var(--color-text)' }}>
+                      {a.qa2_call?.customer_phone || a.qa2_call?.normalized_phone || '—'}
+                    </td>
                     <td className="px-3 py-2">
                       <span className="inline-flex items-center gap-1.5 flex-wrap">
                         {a.qa2_call?.agent_name || a.qa2_call?.agent_user || '—'}
