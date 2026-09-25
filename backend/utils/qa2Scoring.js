@@ -241,4 +241,8 @@ function computeEvaluation({ formVersion, parameters, options, answers }) {
   return { base_sum: baseSum, base_pct, penalty_total, final_score, autofail_result, result };
 }
 
-module.exports = { computeEvaluation, isYes, applyRounding, truncTo, roundTo, fieldPoints, maxPoints };
+// optionsByParam is exported for the per-call scorecard report: fieldPoints and
+// maxPoints both resolve choice questions against this exact map shape, so the
+// report builds it with this function rather than keeping a second copy that
+// could drift from the engine's own reading of the option rows.
+module.exports = { computeEvaluation, isYes, applyRounding, truncTo, roundTo, fieldPoints, maxPoints, optionsByParam };

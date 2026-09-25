@@ -13,12 +13,13 @@ import {
   LineElement, ArcElement, Tooltip, Legend, Filler,
 } from 'chart.js';
 import { Bar } from 'react-chartjs-2';
-import { BarChart3, Users, ListChecks, Gavel, ShieldAlert, Scale as ScaleIcon, Layers, Download, Activity } from 'lucide-react';
+import { BarChart3, Users, ListChecks, Gavel, ShieldAlert, Scale as ScaleIcon, Layers, Download, Activity, ClipboardList, MessageSquare } from 'lucide-react';
 import client from '../../api/client';
 import ThemedSelect from '../UI/Select';
 import ThemedDate from '../UI/ThemedDate';
 import { Panel, SectionHeader, TableScroll, EmptyState, Loading, KpiTile, PillTabs } from '../UI/kit';
 import { downloadCSV } from '../../utils/recordFormat';
+import { todayET } from '../../utils/timezone';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, PointElement, LineElement, ArcElement, Tooltip, Legend, Filler);
 
@@ -49,6 +50,9 @@ const SECTIONS = [
   // Overview first: it is the only section with anything to show before scoring
   // has volume behind it, and it is what a manager checks daily.
   { key: 'overview', label: 'Overview', icon: Activity },
+  // Scorecards sits second because it is the one section that shows the MARKING
+  // rather than a summary of it — the day's numbers, one row each.
+  { key: 'scorecards', label: 'Scorecards', icon: ClipboardList },
   { key: 'agent', label: 'Performance', icon: Users },
   { key: 'parameters', label: 'Parameters', icon: ListChecks },
   { key: 'reviewers', label: 'Reviewers', icon: Gavel },
@@ -731,6 +735,235 @@ function CoverageSection({ params }) {
   );
 }
 
+// ── Scorecards — the day's marking, number by number ────────────────────────
+// Every other section answers "how are we doing". This one answers "what did
+// the reviewer actually put on THIS call" — the question a manager needs when
+// an agent disputes a score, when a reviewer's work is being checked, and when
+// the day's sheet has to go to a fronter manager.
+//
+// Own date + method controls rather than the shared from/to range: it is a
+// one-day report by design, and the parameter columns only line up within a
+// single method's form.
+function ScorecardsSection({ params }) {
+  const [date, setDate] = useState(() => todayET());
+  const [dateField, setDateField] = useState('call');   // call day | scored on
+  const [methods, setMethods] = useState([]);
+  const [methodId, setMethodId] = useState('');
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState(null);
+
+  useEffect(() => {
+    client.get('qa2/methods')
+      .then(r => setMethods((r.data.methods || []).filter(m => m.is_active !== false)))
+      .catch(() => setMethods([]));
+  }, []);
+
+  useEffect(() => {
+    if (!date) return;
+    let dead = false;
+    setData(null); setErr(null);
+    client.get('qa2/reports/scorecards', {
+      params: { ...params, date, date_field: dateField, ...(methodId ? { method_id: methodId } : {}) },
+    })
+      .then(r => { if (!dead) setData(r.data); })
+      .catch(e => { if (!dead) setErr(e.response?.data?.error || 'Could not load that day'); });
+    return () => { dead = true; };
+  }, [params, date, dateField, methodId]);
+
+  const cols = data?.columns || [];
+  const rows = data?.rows || [];
+
+  // The day's average per question — which question the floor actually loses
+  // points on, read straight down the column that is already on screen.
+  const colAvg = useMemo(() => {
+    const out = {};
+    for (const c of cols) {
+      let sum = 0, n = 0, flagged = 0;
+      for (const r of rows) {
+        const cell = r.cells?.[c.id];
+        if (!cell || cell.na || cell.points == null) continue;
+        sum += cell.points; n += 1;
+        if (cell.flagged) flagged += 1;
+      }
+      out[c.id] = n ? { avg: Math.round((sum / n) * 10) / 10, n, flagged } : null;
+    }
+    return out;
+  }, [cols, rows]);
+
+  const fmtTime = (s) => { try { return s ? new Date(s).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) : '—'; } catch { return '—'; } };
+  const resultTone = (r) => (String(r || '').toLowerCase() === 'pass' ? 'var(--color-success-600)'
+    : String(r || '').toLowerCase() === 'fail' ? 'var(--color-error-600)' : 'var(--color-text-secondary)');
+
+  const th = 'px-2 py-2 text-left text-[11px] font-bold uppercase tracking-wide whitespace-nowrap';
+  const td = 'px-2 py-1.5 text-xs whitespace-nowrap';
+  // The first three columns are the row's identity — they stay put while the
+  // parameters scroll, otherwise a wide form leaves you reading anonymous marks.
+  const stick = (left) => ({ position: 'sticky', left, zIndex: 2, background: 'var(--color-bg)' });
+
+  return (
+    <div className="space-y-3">
+      <Panel className="flex flex-wrap items-end gap-2">
+        <div>
+          <div className="text-[11px] font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>Day</div>
+          <ThemedDate value={date} onChange={e => setDate(e.target.value)} />
+        </div>
+        <div className="min-w-[160px]">
+          <div className="text-[11px] font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>Method</div>
+          <ThemedSelect value={methodId} onChange={e => setMethodId(e.target.value)}>
+            <option value="">All methods</option>
+            {methods.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+          </ThemedSelect>
+        </div>
+        <div>
+          <div className="text-[11px] font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>Day means</div>
+          <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
+            {[['call', 'Called that day'], ['scored', 'Scored that day']].map(([k, label]) => (
+              <button key={k} onClick={() => setDateField(k)} className="text-xs font-semibold px-3 py-1.5"
+                style={{ background: dateField === k ? 'var(--gradient-sidebar)' : 'transparent', color: dateField === k ? 'var(--color-text-inverse)' : 'var(--color-text-secondary)' }}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="ml-auto">
+          <ExportButton
+            rows={rows}
+            headers={['Number', 'Agent', 'Evaluator', 'Method', 'Company', 'Call time', 'Result', 'Score', ...cols.map(c => c.label)]}
+            filename={`qa2-scorecards-${date}${methodId ? '-' + (methods.find(m => m.id === methodId)?.label || '') : ''}.csv`}
+            mapRow={r => [
+              r.phone || '', r.agent_name || '', r.reviewer_name || '', r.method || '', r.company || '',
+              fmtTime(r.call_at), r.result || '', r.final_score == null ? '' : r.final_score,
+              ...cols.map(c => {
+                const cell = r.cells?.[c.id];
+                if (!cell) return '';
+                return cell.na ? 'N/A' : `${cell.display}${cell.points != null ? ` (${cell.points}${cell.max ? '/' + cell.max : ''})` : ''}`;
+              }),
+            ]}
+          />
+        </div>
+      </Panel>
+
+      {err && <Panel tone="inset"><p className="text-xs" style={{ color: 'var(--color-error-600)' }}>{err}</p></Panel>}
+      {!data && !err && <Loading variant="cards" />}
+
+      {data && (
+        <>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+            <KpiTile label="Evaluations" value={NUM(data.totals?.evaluations)} />
+            <KpiTile label="Numbers' agents" value={NUM(data.totals?.agents)} />
+            <KpiTile label="Evaluators" value={NUM(data.totals?.reviewers)} />
+            <KpiTile label="Average score" value={data.totals?.avg_score == null ? '—' : `${data.totals.avg_score}%`} />
+            <KpiTile label="Passed" value={NUM(data.totals?.passes)} hint={data.totals?.evaluations ? `${pct(data.totals.passes, data.totals.evaluations)}% of the day` : undefined} />
+            <KpiTile label="Autofails" value={NUM(data.totals?.autofails)} />
+          </div>
+
+          <TruncatedBanner truncated={data.truncated} />
+
+          {!rows.length ? (
+            <EmptyState icon={ClipboardList} title="Nothing scored for that day"
+              subtitle={`No submitted evaluations for ${date}${methodId ? ' on that method' : ''}. Try the other day setting, another method, or a different date.`} />
+          ) : (
+            <Panel>
+              <SectionHeader level="section" title={`${rows.length} number${rows.length === 1 ? '' : 's'} scored`}
+                subtitle="One row per evaluation — the number, who was on it, who marked it, and every question's answer. Red is a marked-down answer; the last row is the day's average per question." />
+              <TableScroll>
+                <table className="w-full text-xs" style={{ minWidth: 'max-content' }}>
+                  <thead>
+                    <tr style={{ background: 'var(--color-surface)' }}>
+                      <th className={th} style={{ ...stick(0), background: 'var(--color-surface)' }}>Number</th>
+                      <th className={th} style={{ ...stick(112), background: 'var(--color-surface)' }}>Agent</th>
+                      <th className={th} style={{ ...stick(232), background: 'var(--color-surface)' }}>Evaluator</th>
+                      <th className={th}>Time</th>
+                      <th className={th}>Method</th>
+                      <th className={th}>Result</th>
+                      <th className={th}>Score</th>
+                      {cols.map(c => (
+                        <th key={c.id} className={th} title={`${c.section ? c.section + ' · ' : ''}${c.label}${c.max ? ` · out of ${c.max}` : ''}`}>
+                          <div className="max-w-[140px] truncate" style={{ color: c.role === 'autofail' ? 'var(--color-error-600)' : undefined }}>{c.label}</div>
+                          <div className="font-normal normal-case text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>
+                            {c.role === 'autofail' ? 'autofail' : c.role === 'penalty' ? 'penalty' : (c.max ? `/${c.max}` : '')}
+                          </div>
+                        </th>
+                      ))}
+                      <th className={th}>Notes</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map(r => (
+                      <tr key={r.evaluation_id} style={{ borderTop: '1px solid var(--color-border)' }}>
+                        <td className={`${td} tabular-nums font-semibold`} style={{ ...stick(0), color: 'var(--color-text)' }}>{r.phone || '—'}</td>
+                        <td className={td} style={{ ...stick(112), color: 'var(--color-text)' }}>
+                          <div className="max-w-[110px] truncate" title={r.agent_name || ''}>{r.agent_name || '—'}</div>
+                        </td>
+                        <td className={td} style={{ ...stick(232), color: 'var(--color-text-secondary)' }}>
+                          <div className="max-w-[110px] truncate" title={r.reviewer_name || ''}>{r.reviewer_name || '—'}</div>
+                        </td>
+                        <td className={td} style={{ color: 'var(--color-text-tertiary)' }}>{fmtTime(r.call_at)}</td>
+                        <td className={td} style={{ color: 'var(--color-text-secondary)' }}>{r.method || '—'}</td>
+                        <td className={`${td} font-bold`} style={{ color: resultTone(r.result) }}>
+                          {r.result || '—'}
+                          {r.autofail_result && r.autofail_result !== 'none' && (
+                            <span className="ml-1 text-[10px] font-bold" style={{ color: 'var(--color-error-600)' }}>AF</span>
+                          )}
+                        </td>
+                        <td className={`${td} tabular-nums font-bold`} style={{ color: 'var(--color-text)' }}>
+                          {r.final_score == null ? '—' : `${r.final_score}%`}
+                          {r.penalty_total ? <span className="ml-1 text-[10px]" style={{ color: 'var(--color-error-600)' }}>−{r.penalty_total}</span> : null}
+                        </td>
+                        {cols.map(c => {
+                          const cell = r.cells?.[c.id];
+                          if (!cell) return <td key={c.id} className={td} style={{ color: 'var(--color-text-tertiary)' }}>—</td>;
+                          return (
+                            <td key={c.id} className={td}
+                              title={[cell.comment ? `“${cell.comment}”` : '', cell.points != null ? `${cell.points}${cell.max ? '/' + cell.max : ''} points` : ''].filter(Boolean).join(' · ') || undefined}
+                              style={{ color: cell.na ? 'var(--color-text-tertiary)' : cell.flagged ? 'var(--color-error-600)' : 'var(--color-text)' }}>
+                              {/* free-text answers (the form's own "Comments" /
+                                  "Reason of rejection" fields) run long — the
+                                  full value stays in the tooltip */}
+                              <span className="font-semibold inline-block max-w-[160px] truncate align-bottom">{cell.display}</span>
+                              {!cell.na && cell.points != null && cell.max ? (
+                                <span className="ml-1 tabular-nums text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>{cell.points}/{cell.max}</span>
+                              ) : null}
+                              {cell.comment && <MessageSquare size={9} className="inline ml-1" style={{ color: 'var(--color-text-tertiary)' }} />}
+                            </td>
+                          );
+                        })}
+                        <td className={td} style={{ color: 'var(--color-text-secondary)' }}>
+                          <div className="max-w-[220px] truncate" title={r.notes || ''}>{r.notes || '—'}</div>
+                        </td>
+                      </tr>
+                    ))}
+                    <tr style={{ borderTop: '2px solid var(--color-border)', background: 'var(--color-surface)' }}>
+                      <td className={`${td} font-bold`} style={{ ...stick(0), background: 'var(--color-surface)', color: 'var(--color-text-secondary)' }}>Day average</td>
+                      <td className={td} style={{ ...stick(112), background: 'var(--color-surface)' }} />
+                      <td className={td} style={{ ...stick(232), background: 'var(--color-surface)' }} />
+                      <td className={td} colSpan={3} />
+                      <td className={`${td} tabular-nums font-bold`} style={{ color: 'var(--color-text)' }}>
+                        {data.totals?.avg_score == null ? '—' : `${data.totals.avg_score}%`}
+                      </td>
+                      {cols.map(c => {
+                        const a = colAvg[c.id];
+                        return (
+                          <td key={c.id} className={`${td} tabular-nums`}
+                            title={a ? `${a.n} answered · ${a.flagged} marked down` : 'nobody answered this'}
+                            style={{ color: a && a.flagged ? 'var(--color-warning-600)' : 'var(--color-text-secondary)' }}>
+                            {a ? `${a.avg}${c.max ? '/' + c.max : ''}` : '—'}
+                          </td>
+                        );
+                      })}
+                      <td className={td} />
+                    </tr>
+                  </tbody>
+                </table>
+              </TableScroll>
+            </Panel>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function ReportsTab({ scope }) {
   const [section, setSection] = useState('overview');
   const [companies, setCompanies] = useState([]);
@@ -754,6 +987,12 @@ export default function ReportsTab({ scope }) {
     return p;
   }, [companyId, from, to]);
 
+  // Scorecards is a ONE-DAY report and picks its own day, so it must not inherit
+  // the shared from/to range — only the company. Built up here with the other
+  // hooks, never inside the conditional render: a hook that only runs on one tab
+  // changes the hook order the moment you switch sections.
+  const scorecardParams = useMemo(() => (companyId ? { company_id: companyId } : {}), [companyId]);
+
   return (
     <div className="max-w-6xl mx-auto space-y-4">
       <SectionHeader level="page" icon={BarChart3} title="Reports" subtitle="Overview is the work itself — captured, recorded, handed out. The rest are scoring reports and fill in as reviewers submit." />
@@ -775,6 +1014,9 @@ export default function ReportsTab({ scope }) {
       <PillTabs items={SECTIONS} value={section} onChange={setSection} />
 
       {section === 'overview' && <OverviewSection params={params} />}
+      {/* Scorecards brings its own day + method; only the company filter above
+          applies to it, which is why it gets its own params object. */}
+      {section === 'scorecards' && <ScorecardsSection params={scorecardParams} />}
       {section === 'agent' && <PerformanceSection params={params} />}
       {section === 'parameters' && <ParametersSection params={params} />}
       {section === 'reviewers' && <ReviewersSection params={params} />}

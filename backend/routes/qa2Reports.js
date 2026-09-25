@@ -23,7 +23,10 @@ const router = express.Router();
 const { asyncHandler } = require('../middleware/errorHandler');
 const { supabaseAdmin } = require('../config/database');
 const { resolveQa2Scope } = require('../utils/qa2ScopeResolver');
-const { isYes } = require('../utils/qa2Scoring');
+const { isYes, fieldPoints, maxPoints, optionsByParam } = require('../utils/qa2Scoring');
+// The per-call scorecard report resolves its day exactly the way Load Day does
+// — an Eastern day, not a UTC one. See /reports/scorecards below.
+const { etDateToUtcStart, etDateToUtcEnd } = require('../utils/etUtils');
 
 const LIVE_STATUSES = ['submitted', 'flagged'];
 
@@ -556,6 +559,225 @@ router.get('/reports/coverage', asyncHandler(async (req, res) => {
     .sort((x, y) => x.company.localeCompare(y.company) || x.method.localeCompare(y.method));
 
   res.json({ rows: result, ...capInfo(calls, COVERAGE_CAP) });
+}));
+
+// ── GET /qa2/reports/scorecards — one day, one method, every number scored ──
+// Every other report here is an AGGREGATE: rates, averages, totals. A manager
+// also has to read the actual marking — number by number, the way the scorecard
+// was filled in — to check a reviewer's work, to answer an agent who disputes a
+// score, and to hand a fronter manager the day's sheet. That view did not
+// exist, so the evaluated data was effectively write-only.
+//
+// One row per evaluation: the number, who was on the call, who scored it, and a
+// cell PER PARAMETER carrying both what was answered and what it earned.
+//
+// The day is an EASTERN day, resolved with the same etDateToUtcStart/End Load
+// Day uses. A manager who picks the 24th there and the 24th here has to get the
+// same calls; UTC midnight would quietly move the boundary four or five hours
+// and split one shift across two reports.
+//
+// Columns key on `lineage_id`, not parameter id: editing a form mints a new
+// version with new parameter rows for the SAME questions, and keying on the id
+// would print one column per version of every question.
+router.get('/reports/scorecards', asyncHandler(async (req, res) => {
+  const scope = await requireViewer(req, res);
+  if (!scope) return;
+  const { date, method_id, company_id, agent_id, reviewer_id } = req.query;
+  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return res.status(400).json({ error: 'date is required, as YYYY-MM-DD' });
+  }
+  const start = etDateToUtcStart(date);
+  const end = etDateToUtcEnd(date);
+  if (!start || !end) return res.status(400).json({ error: 'Invalid date' });
+
+  // 'scored' answers "what did my reviewers mark today", 'call' answers "how
+  // did the floor do on that day's calls" — different questions, one switch.
+  const byScoredDay = req.query.date_field === 'scored';
+
+  const SCORECARD_CAP = 2000;   // one day of one method; far past a real day
+  let q = supabaseAdmin.from('qa2_evaluation')
+    .select(`id, call_id, reviewer_id, subject_user_id, subject_role, company_id, status,
+             base_sum, base_pct, penalty_total, final_score, autofail_result, result,
+             submitted_at, active_seconds, form_version_id, overall_notes,
+             companies(name),
+             qa2_call!inner(id, customer_phone, call_at, agent_user, agent_user_id, leg,
+                            method_id, dispo_raw, talk_sec, recording_state,
+                            dialer_provider, dialer_account_id, dialer_box, qa2_method(label))`)
+    .in('status', LIVE_STATUSES)
+    .limit(SCORECARD_CAP);
+
+  if (byScoredDay) q = q.gte('submitted_at', start).lte('submitted_at', end);
+  else             q = q.gte('qa2_call.call_at', start).lte('qa2_call.call_at', end);
+
+  const companyIds = scopedCompanyIds(scope);
+  if (companyIds !== null) q = q.in('company_id', companyIds);
+  if (company_id) q = q.eq('company_id', company_id);
+  const methodIds = scopedMethodIds(scope);
+  if (methodIds !== null) q = q.in('qa2_call.method_id', methodIds);
+  if (method_id) q = q.eq('qa2_call.method_id', method_id);
+  if (agent_id) q = q.eq('subject_user_id', agent_id);
+  if (reviewer_id) q = q.eq('reviewer_id', reviewer_id);
+
+  const { data: evals, error } = await q;
+  if (error) return res.status(500).json({ error: error.message });
+  const rowsRaw = evals || [];
+  if (!rowsRaw.length) return res.json({ date, columns: [], rows: [], totals: null, truncated: false });
+
+  // The answers, the questions they belong to, their sections and the names —
+  // none depends on another's result, so they go together rather than in series.
+  const evalIds = rowsRaw.map(e => e.id);
+  const versionIds = [...new Set(rowsRaw.map(e => e.form_version_id).filter(Boolean))];
+  const [{ data: answers }, { data: params }, { data: sections }, names] = await Promise.all([
+    supabaseAdmin.from('qa2_answer')
+      .select('evaluation_id, parameter_id, value_num, value_text, value_bool, is_na, comment')
+      .in('evaluation_id', evalIds).limit(SCORECARD_CAP * 60),
+    versionIds.length
+      ? supabaseAdmin.from('qa2_parameter')
+          .select('id, form_version_id, section_id, lineage_id, key, label, input_type, role, points_yes, points_no, scale_min, scale_max, penalty_value, included_in_base, sort')
+          .in('form_version_id', versionIds)
+      : Promise.resolve({ data: [] }),
+    versionIds.length
+      ? supabaseAdmin.from('qa2_section').select('id, form_version_id, name, sort').in('form_version_id', versionIds)
+      : Promise.resolve({ data: [] }),
+    nameMap([...rowsRaw.map(e => e.reviewer_id), ...rowsRaw.map(e => e.subject_user_id)]),
+  ]);
+
+  const paramRows = params || [];
+  const paramIds = paramRows.map(p => p.id);
+  // Choice questions score through their option rows — fieldPoints/maxPoints
+  // both resolve against that map, so it is built with the scoring engine's own
+  // optionsByParam rather than a second interpretation of the same rows.
+  const { data: options } = paramIds.length
+    ? await supabaseAdmin.from('qa2_parameter_option').select('parameter_id, value, label, points, is_pass').in('parameter_id', paramIds)
+    : { data: [] };
+  const optMap = optionsByParam(options || []);
+  const paramById = new Map(paramRows.map(p => [p.id, p]));
+  const sectionById = new Map((sections || []).map(s => [s.id, s]));
+
+  // One COLUMN per question lineage. The latest version's wording wins — that
+  // is what the form says today — and the widest max stands as the denominator.
+  const columns = new Map();
+  for (const p of paramRows) {
+    const key = p.lineage_id || p.id;
+    const sec = p.section_id ? sectionById.get(p.section_id) : null;
+    const cur = columns.get(key) || {
+      id: key, key: p.key, label: p.label, role: p.role, input_type: p.input_type,
+      section: sec?.name || null, section_sort: sec?.sort ?? 999, sort: p.sort ?? 999, max: 0,
+    };
+    cur.label = p.label; cur.role = p.role; cur.input_type = p.input_type;
+    if (sec) { cur.section = sec.name; cur.section_sort = sec.sort ?? 999; }
+    cur.sort = p.sort ?? cur.sort;
+    cur.max = Math.max(cur.max, p.role === 'penalty' ? Number(p.penalty_value || 0) : maxPoints(p, optMap));
+    columns.set(key, cur);
+  }
+  const columnList = [...columns.values()].sort((a, b) =>
+    (a.section_sort - b.section_sort) || (a.sort - b.sort) || String(a.label).localeCompare(String(b.label)));
+
+  const byEval = new Map();
+  for (const a of (answers || [])) {
+    if (!byEval.has(a.evaluation_id)) byEval.set(a.evaluation_id, []);
+    byEval.get(a.evaluation_id).push(a);
+  }
+
+  // What the reviewer actually chose, in the reviewer's own words — a bare "Y"
+  // in a grid means nothing to the agent it ends up being shown to.
+  const displayOf = (p, a) => {
+    if (!a || a.is_na) return a?.is_na ? 'N/A' : '—';
+    switch (p.input_type) {
+      case 'yes_no': return isYes(a) ? 'Yes' : ((a.value_text || '').toUpperCase() === 'N' ? 'No' : '—');
+      case 'scale':
+      case 'number': return a.value_num == null ? '—' : String(a.value_num);
+      case 'choice': {
+        const opt = (options || []).find(o => o.parameter_id === p.id && String(o.value) === String(a.value_text ?? ''));
+        return opt?.label || a.value_text || '—';
+      }
+      default: return a.value_text || '—';
+    }
+  };
+
+  const rows = rowsRaw.map(e => {
+    const call = e.qa2_call || {};
+    const mine = byEval.get(e.id) || [];
+    const cells = {};
+    for (const a of mine) {
+      const p = paramById.get(a.parameter_id);
+      if (!p) continue;                       // an answer whose question was deleted
+      const colKey = p.lineage_id || p.id;
+      const isPenalty = p.role === 'penalty';
+      const earned = isPenalty ? 0 : fieldPoints(p, a, optMap);
+      // What counts as "marked down", by what the question actually IS:
+      //   autofail / penalty  → a YES is the failure (qa2Evaluations.js's own
+      //                         reading at submit time)
+      //   choice              → the option's own is_pass says so. The live TRA
+      //                         form is nearly all choice questions with a
+      //                         verdict field, and none of them answer "N" —
+      //                         a text test would have flagged nothing on it.
+      //   yes_no              → an explicit N
+      const chosen = p.input_type === 'choice'
+        ? (optMap.get(p.id) || new Map()).get(String(a.value_text ?? ''))
+        : null;
+      const flagged = a.is_na ? false
+        : ['autofail', 'penalty'].includes(p.role) ? isYes(a)
+          : chosen ? chosen.is_pass === false
+            : (a.value_text || '').toUpperCase() === 'N';
+      cells[colKey] = {
+        display: displayOf(p, a),
+        points: a.is_na ? null : earned,
+        max: isPenalty ? Number(p.penalty_value || 0) : maxPoints(p, optMap),
+        na: !!a.is_na,
+        flagged,
+        role: p.role,
+        comment: a.comment || null,
+      };
+    }
+    return {
+      evaluation_id: e.id,
+      call_id: e.call_id,
+      phone: call.customer_phone || null,
+      call_at: call.call_at || null,
+      leg: call.leg || null,
+      dispo: call.dispo_raw || null,
+      talk_sec: call.talk_sec ?? null,
+      method: call.qa2_method?.label || null,
+      company: e.companies?.name || null,
+      dialer_provider: call.dialer_provider ?? null,
+      dialer_account_id: call.dialer_account_id ?? null,
+      dialer_box: call.dialer_box ?? null,
+      agent_name: names.get(e.subject_user_id) || call.agent_user || null,
+      agent_user: call.agent_user || null,
+      subject_role: e.subject_role || null,
+      reviewer_name: names.get(e.reviewer_id) || null,
+      scored_at: e.submitted_at,
+      active_seconds: e.active_seconds ?? null,
+      status: e.status,
+      result: e.result || null,
+      autofail_result: e.autofail_result || null,
+      base_sum: e.base_sum == null ? null : Number(e.base_sum),
+      base_pct: e.base_pct == null ? null : Number(e.base_pct),
+      penalty_total: e.penalty_total == null ? null : Number(e.penalty_total),
+      final_score: e.final_score == null ? null : Number(e.final_score),
+      notes: e.overall_notes || null,
+      cells,
+    };
+  }).sort((a, b) => new Date(b.call_at || 0) - new Date(a.call_at || 0));
+
+  const scored = rows.filter(r => r.final_score != null);
+  const totals = {
+    evaluations: rows.length,
+    agents: new Set(rows.map(r => r.agent_name).filter(Boolean)).size,
+    reviewers: new Set(rows.map(r => r.reviewer_name).filter(Boolean)).size,
+    avg_score: scored.length
+      ? Math.round((scored.reduce((s, r) => s + r.final_score, 0) / scored.length) * 10) / 10
+      : null,
+    passes: rows.filter(r => (r.result || '').toLowerCase() === 'pass').length,
+    fails: rows.filter(r => (r.result || '').toLowerCase() === 'fail').length,
+    autofails: rows.filter(r => r.autofail_result && r.autofail_result !== 'none').length,
+  };
+
+  res.json({
+    date, date_field: byScoredDay ? 'scored' : 'call',
+    columns: columnList, rows, totals, ...capInfo(rowsRaw, SCORECARD_CAP),
+  });
 }));
 
 module.exports = router;
