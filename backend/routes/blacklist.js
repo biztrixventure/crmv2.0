@@ -26,6 +26,7 @@ const maskedSettings = async () => {
   return {
     enabled:    !!(await getConfig(null, 'blacklist.enabled', false)),
     cache_days: parseInt(await getConfig(null, 'blacklist.cache_days', 30), 10) || 30,
+    fresh_grace_sec: Math.max(0, parseInt(await getConfig(null, 'blacklist.fresh_grace_sec', 60), 10) || 0),
     version:    VALID_VERSIONS.includes(v) ? v : 'v3',
     has_key:    !!key,
     key_preview: key ? `••••${String(key).slice(-4)}` : null,
@@ -38,8 +39,17 @@ router.get('/lookup/:phone', asyncHandler(async (req, res) => {
   const enabled = sa || await isFeatureEnabled('tool_blacklist_lookup', req.user.company_id || null, req.user.id).catch(() => false);
   if (!enabled) return res.status(403).json({ error: 'Blacklist lookup is not enabled for you' });
 
+  // AN AGENT'S OWN SEARCH IS A LIVE SEARCH. This endpoint is the one a closer
+  // types a number into before dialling it, so a 30-day-old cached answer is
+  // the wrong answer -- lists change daily. Re-check was superadmin-only, which
+  // left everybody else stuck with whatever the cache held. The small grace
+  // window (blacklist.fresh_grace_sec) only collapses a double-tap, or the
+  // badge and the panel asking about the same number at the same moment.
+  // The bulk scan and the compliance report still read the full cache.
+  const cfg = await bl.settings();
   const r = await bl.lookup(req.params.phone, {
-    force: sa && req.query.refresh === 'true',
+    force: req.query.refresh === 'true',
+    maxAgeMs: cfg.freshGraceSec * 1000,
     userId: req.user.id,
     source: 'lookup',
   });
@@ -61,6 +71,9 @@ router.put('/settings', asyncHandler(async (req, res) => {
   const b = req.body || {};
   if (b.enabled !== undefined)    await setConfig('global', 'blacklist.enabled', !!b.enabled, req.user.id);
   if (b.cache_days !== undefined) await setConfig('global', 'blacklist.cache_days', Math.max(1, Math.min(parseInt(b.cache_days, 10) || 30, 365)), req.user.id);
+  // 0 = every agent search hits the Alliance live; capped at an hour so this
+  // can never quietly become a second cache window.
+  if (b.fresh_grace_sec !== undefined) await setConfig('global', 'blacklist.fresh_grace_sec', Math.max(0, Math.min(parseInt(b.fresh_grace_sec, 10) || 0, 3600)), req.user.id);
   if (b.version !== undefined && VALID_VERSIONS.includes(String(b.version))) await setConfig('global', 'blacklist.version', String(b.version), req.user.id);
   if (b.clear_key) {
     await bl.setApiKey('', req.user.id);
@@ -144,7 +157,7 @@ router.post('/bulk-check', asyncHandler(async (req, res) => {
       if (r.cached) cachedCount++;
       r.blacklisted ? blacklisted++ : good++;
       results[idx] = {
-        phone: p, ok: true, blacklisted: r.blacklisted, message: r.message,
+        phone: p, ok: true, blacklisted: r.blacklisted, message: r.message, verdict: r.verdict,
         codes: r.codes || [], wireless: !!r.wireless, carrier: r.carrier || null,
         cached: !!r.cached, checked_at: r.checked_at,
       };

@@ -1,19 +1,15 @@
 import { useState } from 'react';
 import { Shield, ShieldAlert, ShieldCheck, Search, Loader2, Phone, Building2, RefreshCw } from 'lucide-react';
 import client from '../../api/client';
+import { verdictOf, statusText, groupCodes } from '../../utils/dncStatus';
 
 // Dedicated DNC / blacklist lookup page (closer + compliance). Type a number,
 // get the Good / Blacklisted verdict + the matched lists + carrier. Uses the same
 // cached, server-side-keyed endpoint as the inline badge.
-const CODE_LABEL = {
-  'federal-dnc': 'Federal DNC', 'colorado-dnc': 'Colorado DNC', 'florida-dnc': 'Florida DNC',
-  'indiana-dnc': 'Indiana DNC', 'pennsylvania-dnc': 'Pennsylvania DNC', 'texas-dnc': 'Texas DNC', 'wyoming-dnc': 'Wyoming DNC',
-  'attorney-primary': 'Attorney (primary)', 'attorney-secondary': 'Attorney (secondary)',
-  'plaintiff-primary': 'Plaintiff (primary)', 'plaintiff-secondary': 'Plaintiff (secondary)',
-  'prelitigation1': 'Pre-litigation', 'prelitigation2': 'Pre-litigation (2)',
-  'anti-telemarketing': 'Anti-telemarketing', 'gov': 'Government',
-};
-const pretty = (c) => CODE_LABEL[c] || c;
+// Status names, colours and list labels come from utils/dncStatus -- the same
+// ones the inline badge uses. Whatever the Alliance answers is shown under its
+// own name (Good / Suppressed / Blacklisted / anything new), grouped by the KIND
+// of list it matched, so an agent can see WHICH rule they would break.
 const fmtPhone = (d) => d && d.length === 10 ? `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}` : d;
 
 export default function DncLookupPanel({ compact = false, onResult }) {
@@ -32,9 +28,11 @@ export default function DncLookupPanel({ compact = false, onResult }) {
     finally { setBusy(false); }
   };
 
-  const bad = res && res.ok !== false && !res.error && res.blacklisted;
-  const good = res && res.ok !== false && !res.error && !res.blacklisted;
-  const color = bad ? '#dc2626' : '#16a34a';
+  const answered = res && res.ok !== false && !res.error && !!res.message;
+  const v = answered ? verdictOf(res) : null;
+  const clean = !!v && v.tone === 'safe';
+  const color = v ? v.color : '#16a34a';
+  const groups = answered ? groupCodes(res.codes || []) : [];
 
   return (
     <div className={compact ? '' : 'max-w-2xl mx-auto px-4 py-6'}>
@@ -62,12 +60,13 @@ export default function DncLookupPanel({ compact = false, onResult }) {
         <div className="mt-4 rounded-xl p-3 text-sm font-semibold" style={{ backgroundColor: '#fffbeb', border: '1px solid #fcd34d', color: '#b45309' }}>{res.error}</div>
       )}
 
-      {(good || bad) && (
+      {answered && (
         <div className="mt-4 rounded-2xl p-5" style={{ backgroundColor: 'var(--color-surface)', border: `1px solid ${color}55` }}>
           <div className="flex items-center gap-3">
-            {bad ? <ShieldAlert size={28} style={{ color }} /> : <ShieldCheck size={28} style={{ color }} />}
+            {clean ? <ShieldCheck size={28} style={{ color }} /> : <ShieldAlert size={28} style={{ color }} />}
             <div>
-              <div className="text-xl font-extrabold" style={{ color }}>{res.message}</div>
+              <div className="text-xl font-extrabold" style={{ color }}>{statusText(res)}</div>
+              <div className="text-xs font-semibold" style={{ color }}>{v.note}</div>
               <div className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>{fmtPhone(res.phone)}</div>
             </div>
             <button onClick={() => run(true)} disabled={busy} className="ml-auto text-xs font-semibold px-2.5 py-1.5 rounded-lg border inline-flex items-center gap-1.5" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
@@ -75,12 +74,27 @@ export default function DncLookupPanel({ compact = false, onResult }) {
             </button>
           </div>
 
-          {res.codes?.length > 0 && (
-            <div className="mt-3">
-              <div className="text-[11px] font-bold uppercase tracking-wide mb-1" style={{ color: 'var(--color-text-tertiary)' }}>On these lists</div>
-              <div className="flex flex-wrap gap-1.5">
-                {res.codes.map(c => <span key={c} className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: `${color}14`, color, border: `1px solid ${color}44` }}>{pretty(c)}</span>)}
-              </div>
+          {groups.length > 0 && (
+            <div className="mt-3 flex flex-col gap-2">
+              {groups.map(g => (
+                <div key={g.group}>
+                  <div className="text-[11px] font-bold uppercase tracking-wide mb-1" style={{ color: 'var(--color-text-tertiary)' }}>{g.label}</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {g.items.map(it => (
+                      <span key={it.code} title={it.code} className="text-xs font-bold px-2 py-0.5 rounded-full"
+                        style={{ backgroundColor: `${color}14`, color, border: `1px solid ${color}44` }}>{it.label}</span>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {/* An answer with no codes behind it still says something -- "Good"
+              means clean, and a status we do not recognise must not look like a
+              blank card. */}
+          {!groups.length && !clean && (
+            <div className="mt-3 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+              The Alliance returned no list codes for this number.
             </div>
           )}
 
@@ -95,7 +109,8 @@ export default function DncLookupPanel({ compact = false, onResult }) {
           )}
 
           <div className="mt-3 text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>
-            Checked {res.checked_at ? new Date(res.checked_at).toLocaleString() : 'now'}{res.cached ? ' · cached' : ''}
+            {res.results != null && <>Matched {res.results} list{res.results === 1 ? '' : 's'}{' '}</>}
+            Checked {res.checked_at ? new Date(res.checked_at).toLocaleString() : 'now'}{res.cached ? ' · cached' : ' · live'}
           </div>
         </div>
       )}

@@ -31,16 +31,54 @@ async function settings() {
     enabled:   !!(await getConfig(null, 'blacklist.enabled', false)),
     cacheDays: parseInt(await getConfig(null, 'blacklist.cache_days', 30), 10) || 30,
     version:   VALID_VERSIONS.includes(v) ? v : 'v3',
+    // Seconds an agent's own search may be served from cache. Small on purpose:
+    // it only exists so a double-tap, or the badge and the panel asking about
+    // the same number at once, do not fire two identical live lookups.
+    freshGraceSec: Math.max(0, parseInt(await getConfig(null, 'blacklist.fresh_grace_sec', 60), 10) || 0),
   };
+}
+
+// EVERY ANSWER THE ALLIANCE GIVES, NOT JUST GOOD/BAD.
+//
+// The API answers with a message per list it matched -- live data shows Good,
+// Blacklisted and Suppressed, and a suppressed number is NOT the same thing as
+// a litigator: it is a number the client asked never to be called again. The
+// old boolean painted both bright red "Blacklisted", so an agent could not tell
+// which rule they were about to break, and the reason (the `code` list:
+// plaintiff-primary, prelitigation2, screamer, suppression, federal-dnc ...)
+// was the only thing separating them.
+//
+// `verdict` is that answer, normalized: clean | suppressed | blacklisted |
+// flagged (anything new the Alliance starts sending -- named, never silently
+// dropped into one of the others). `blacklisted` stays exactly as it was, so
+// the bulk scan, the compliance report and every stored count keep their
+// meaning: not-Good.
+const VERDICTS = [
+  { verdict: 'clean',       test: (m) => m === 'good' },
+  { verdict: 'suppressed',  test: (m) => m.includes('suppress') },
+  { verdict: 'blacklisted', test: (m) => m.includes('blacklist') || m.includes('dnc') },
+];
+function classify(message, codes = []) {
+  const m = String(message || '').trim().toLowerCase();
+  if (!m) return 'unknown';
+  const hit = VERDICTS.find(v => v.test(m));
+  if (hit) return hit.verdict;
+  // An unrecognised message with no codes behind it is still an answer, not a
+  // clean number -- surface it under its own name rather than calling it good.
+  return codes.length ? 'blacklisted' : 'flagged';
 }
 
 // Shape a cache/row into the client result (message-driven verdict).
 function toResult(row, cached) {
   const message = row.message || 'Unknown';
+  const codes = row.codes || [];
   const blacklisted = !!message && message.toLowerCase() !== 'good';
   return {
     ok: true, cached: !!cached, phone: row.phone, message, blacklisted,
-    codes: row.codes || [], wireless: !!row.wireless, carrier: row.carrier || null,
+    verdict: classify(message, codes),
+    api_status: row.status || null,          // the Alliance's own call status
+    results: row.results ?? null,            // how many lists it matched
+    codes, wireless: !!row.wireless, carrier: row.carrier || null,
     checked_at: row.checked_at,
   };
 }
@@ -59,16 +97,21 @@ async function touchCache(phone, userId, source) {
  * `userId` / `source` are stamped on the cache row so compliance can see who
  * searched what and how often (mig 253).
  */
-async function lookup(phone, { force = false, userId = null, source = 'lookup' } = {}) {
+async function lookup(phone, { force = false, maxAgeMs = null, userId = null, source = 'lookup' } = {}) {
   const p = norm(phone);
   if (p.length !== 10) return { ok: false, error: 'invalid phone number' };
 
   const cfg = await settings();
   if (!cfg.enabled) return { ok: false, error: 'Blacklist lookup is turned off' };
 
-  if (!force) {
+  // How old a cached answer may be for THIS caller. The bulk tools keep the
+  // full cache window; an agent typing a number in gets a live answer, because
+  // a number that was clean three weeks ago can be on a litigator list today
+  // and they are about to dial it now.
+  const window = force ? 0 : (Number.isFinite(maxAgeMs) && maxAgeMs !== null ? maxAgeMs : cfg.cacheDays * 86400000);
+  if (window > 0) {
     const { data: cached } = await supabaseAdmin.from('blacklist_lookups').select('*').eq('phone', p).maybeSingle();
-    if (cached && (Date.now() - new Date(cached.checked_at).getTime()) < cfg.cacheDays * 86400000) {
+    if (cached && (Date.now() - new Date(cached.checked_at).getTime()) < window) {
       await touchCache(p, userId, source);
       return toResult(cached, true);
     }
@@ -115,4 +158,4 @@ async function lookup(phone, { force = false, userId = null, source = 'lookup' }
   return toResult(row, false);
 }
 
-module.exports = { lookup, settings, getApiKey, setApiKey, norm };
+module.exports = { lookup, settings, getApiKey, setApiKey, norm, classify };

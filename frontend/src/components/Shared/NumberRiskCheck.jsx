@@ -3,20 +3,18 @@ import { Shield, ShieldAlert, ShieldCheck, Loader2 } from 'lucide-react';
 import client from '../../api/client';
 import { useFeatureFlags } from '../../contexts/FeatureFlagsContext';
 import { useAuth } from '../../contexts/AuthContext';
+import { verdictOf, statusText, codeShort, codeLabel } from '../../utils/dncStatus';
 
 // On-demand DNC / blacklist check for a single number (Blacklist Alliance).
 // Renders a small "Check DNC" button; on click shows a Good / Blacklisted badge
 // with the matched codes. Informational only — never blocks. Hidden unless the
 // tool_blacklist_lookup feature is on for the user (superadmin always sees it).
-const CODE_LABEL = {
-  'federal-dnc': 'Federal DNC', 'colorado-dnc': 'CO DNC', 'florida-dnc': 'FL DNC',
-  'indiana-dnc': 'IN DNC', 'pennsylvania-dnc': 'PA DNC', 'texas-dnc': 'TX DNC', 'wyoming-dnc': 'WY DNC',
-  'attorney-primary': 'Attorney', 'attorney-secondary': 'Attorney (2nd)',
-  'plaintiff-primary': 'Plaintiff', 'plaintiff-secondary': 'Plaintiff (2nd)',
-  'prelitigation1': 'Pre-litigation', 'prelitigation2': 'Pre-litigation (2)',
-  'anti-telemarketing': 'Anti-telemarketing', 'gov': 'Government',
-};
-const pretty = (c) => CODE_LABEL[c] || c;
+// The badge shows the Alliance's OWN status (Good / Suppressed / Blacklisted /
+// anything new it starts sending), not a good-or-bad boolean: a suppressed
+// number is a different rule from a litigator and must not read the same.
+// Names, colours and code labels live in utils/dncStatus so this badge and the
+// lookup page can never disagree -- each used to keep half a list of codes, and
+// neither knew 'suppression' or 'screamer'.
 
 export default function NumberRiskCheck({ phone, className = '' }) {
   const { isEnabledStrict } = useFeatureFlags();
@@ -53,22 +51,26 @@ export default function NumberRiskCheck({ phone, className = '' }) {
     </button>
   );
 
-  const bad = state.blacklisted;
-  const color = bad ? '#dc2626' : '#16a34a';
-  const codeStr = (state.codes || []).map(pretty).join(', ');
+  const v = verdictOf(state);
+  const clean = v.tone === 'safe';
+  const color = v.color;
+  const codes = state.codes || [];
+  const codeStr = codes.map(codeShort).join(', ');
   const carrier = state.carrier ? `${state.carrier.name || ''}${state.wireless ? ' · wireless' : ''}`.trim() : (state.wireless ? 'wireless' : '');
   const title = [
-    `${state.message}${codeStr ? ` — ${codeStr}` : ''}`,
+    `${statusText(state)}${codeStr ? ` — ${codeStr}` : ''}`,
+    codes.length ? `Lists: ${codes.map(codeLabel).join(', ')}` : null,
+    v.note,
     carrier && `Carrier: ${carrier}`,
-    state.checked_at && `Checked ${new Date(state.checked_at).toLocaleString()}${state.cached ? ' (cached)' : ''}`,
+    state.checked_at && `Checked ${new Date(state.checked_at).toLocaleString()}${state.cached ? ' (cached)' : ' (live)'}`,
   ].filter(Boolean).join('\n');
 
   return (
     <button type="button" onClick={check} title={`${title}\n\nTap to re-check`}
       className={`${pillBase} ${className}`}
       style={{ color, backgroundColor: `${color}14`, border: `1px solid ${color}44` }}>
-      {bad ? <ShieldAlert size={12} /> : <ShieldCheck size={12} />}
-      {state.message}{codeStr ? ` · ${codeStr}` : ''}
+      {clean ? <ShieldCheck size={12} /> : <ShieldAlert size={12} />}
+      {statusText(state)}{codeStr ? ` · ${codeStr}` : ''}
     </button>
   );
 }
