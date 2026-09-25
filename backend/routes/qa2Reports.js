@@ -602,7 +602,7 @@ router.get('/reports/scorecards', asyncHandler(async (req, res) => {
              companies(name),
              qa2_call!inner(id, customer_phone, call_at, agent_user, agent_user_id, leg,
                             method_id, dispo_raw, talk_sec, recording_state,
-                            dialer_provider, dialer_account_id, dialer_box, qa2_method(label))`)
+                            dialer_provider, dialer_account_id, qa2_method(label))`)
     .in('status', LIVE_STATUSES)
     .limit(SCORECARD_CAP);
 
@@ -705,25 +705,36 @@ router.get('/reports/scorecards', asyncHandler(async (req, res) => {
       const colKey = p.lineage_id || p.id;
       const isPenalty = p.role === 'penalty';
       const earned = isPenalty ? 0 : fieldPoints(p, a, optMap);
-      // What counts as "marked down", by what the question actually IS:
-      //   autofail / penalty  → a YES is the failure (qa2Evaluations.js's own
-      //                         reading at submit time)
-      //   choice              → the option's own is_pass says so. The live TRA
-      //                         form is nearly all choice questions with a
-      //                         verdict field, and none of them answer "N" —
-      //                         a text test would have flagged nothing on it.
-      //   yes_no              → an explicit N
+      const cellMax = isPenalty ? Number(p.penalty_value || 0) : maxPoints(p, optMap);
       const chosen = p.input_type === 'choice'
         ? (optMap.get(p.id) || new Map()).get(String(a.value_text ?? ''))
         : null;
-      const flagged = a.is_na ? false
+      // What counts as "marked down", by what the question actually IS:
+      //   autofail / penalty → a YES is the failure (qa2Evaluations.js's own
+      //                        reading at submit time)
+      //   anything graded    → the answer LOST POINTS: earned < the question's
+      //                        own max. This is the only rule that works on the
+      //                        live TRA form, whose scoring options all carry
+      //                        is_pass=false — including the full-marks one, so
+      //                        "Communication 20/20" read as a failure and 629
+      //                        of 787 cells came out red.
+      //   pass/fail verdicts → carry no points at all, so is_pass is the signal
+      //                        there and only there.
+      //   yes_no fallback    → an explicit N
+      //   info               → never flagged. It records context ("Status",
+      //                        "Reason of rejection"), it is not marked. Its
+      //                        options score nothing and carry is_pass=false,
+      //                        so the verdict rule below would have reddened
+      //                        every one of them.
+      const flagged = a.is_na || p.role === 'info' ? false
         : ['autofail', 'penalty'].includes(p.role) ? isYes(a)
-          : chosen ? chosen.is_pass === false
-            : (a.value_text || '').toUpperCase() === 'N';
+          : cellMax > 0 ? earned < cellMax
+            : chosen ? chosen.is_pass === false
+              : (a.value_text || '').toUpperCase() === 'N';
       cells[colKey] = {
         display: displayOf(p, a),
         points: a.is_na ? null : earned,
-        max: isPenalty ? Number(p.penalty_value || 0) : maxPoints(p, optMap),
+        max: cellMax,
         na: !!a.is_na,
         flagged,
         role: p.role,
@@ -740,9 +751,13 @@ router.get('/reports/scorecards', asyncHandler(async (req, res) => {
       talk_sec: call.talk_sec ?? null,
       method: call.qa2_method?.label || null,
       company: e.companies?.name || null,
+      // provider + account only. `dialer_box` is a TRANSFERS/SALES column
+      // (migs 325-327) and does not exist on qa2_call — selecting it here was a
+      // 42703 that surfaced as a blank 500 on the whole report. It is left
+      // ABSENT rather than null on purpose: DialerBadge reads an absent field
+      // as "not fetched" and renders nothing, where null would claim "Manual".
       dialer_provider: call.dialer_provider ?? null,
       dialer_account_id: call.dialer_account_id ?? null,
-      dialer_box: call.dialer_box ?? null,
       agent_name: names.get(e.subject_user_id) || call.agent_user || null,
       agent_user: call.agent_user || null,
       subject_role: e.subject_role || null,
