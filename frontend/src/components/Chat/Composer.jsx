@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useMessageTemplates } from '../../hooks/useMessageTemplates';
+import { useTouchKeyboard } from '../../hooks/useTouchKeyboard';
 import { isHtmlEmpty, htmlToText, extractMentions, uploadChatFile } from '../../utils/chatHtml';
 import TemplatesModal from './TemplatesModal';
 import Avatar from './Avatar';
@@ -179,6 +180,33 @@ const Composer = ({ onSend, onTyping, disabled, disabledReason, meId, members = 
     finally { setSending(false); focusEd(); }
   };
 
+  // Enter = new line on a touch keyboard, Enter = send on a real one.
+  const touchKeyboard = useTouchKeyboard();
+
+  // A line break INSIDE the contentEditable. execCommand('insertLineBreak')
+  // gives one <br> and leaves the caret after it; letting the browser's own
+  // Enter through instead nests <div>s, which the sanitizer then strips into a
+  // single run of text -- the newline would vanish on send.
+  const insertBreak = () => {
+    const ed = edRef.current;
+    if (!ed) return;
+    ed.focus();
+    if (!document.execCommand || !document.execCommand('insertLineBreak')) {
+      // Fallback for engines that dropped execCommand: place a <br> by hand.
+      const sel = window.getSelection();
+      if (!sel || !sel.rangeCount) return;
+      const range = sel.getRangeAt(0);
+      const br = document.createElement('br');
+      range.deleteContents();
+      range.insertNode(br);
+      range.setStartAfter(br);
+      range.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+    onInput();
+  };
+
   const onKey = (e) => {
     if (sug && matches.length) {
       if (e.key === 'ArrowDown') { e.preventDefault(); setHighlight(h => (h + 1) % matches.length); return; }
@@ -187,7 +215,13 @@ const Composer = ({ onSend, onTyping, disabled, disabledReason, meId, members = 
       if (e.key === 'Escape')    { e.preventDefault(); setSug(null); return; }
     }
     if (e.key === 'Escape' && replyTo) { e.preventDefault(); onClearReply?.(); return; }
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); }
+    if (e.key === 'Enter' && !e.shiftKey) {
+      // ON A PHONE, ENTER IS THE NEW-LINE KEY. A soft keyboard gives no Shift to
+      // hold, so sending here left no way to write a second line -- and sent
+      // half-finished messages instead. Send is the button. Desktop is unchanged.
+      if (touchKeyboard) { e.preventDefault(); insertBreak(); return; }
+      e.preventDefault(); submit();
+    }
   };
 
   if (disabled) {

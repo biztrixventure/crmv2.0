@@ -56,8 +56,10 @@ const Attachment = ({ a, mine }) => {
   );
 };
 
-const Bubble = memo(({ m, mine, meId, showName, read, settings = {}, onEdit, onDelete, onHide, onReact, onReply, onJumpTo }) => {
+const Bubble = memo(({ m, mine, meId, showName, read, settings = {}, nameOf, onEdit, onDelete, onHide, onReact, onReply, onJumpTo }) => {
   const [menu, setMenu] = useState(false);
+  // Which reaction chip is open, showing WHO reacted. One at a time.
+  const [whoRx, setWhoRx] = useState(null);
   const mentioned = !mine && Array.isArray(m.mentions) && m.mentions.includes(meId);
   const isTemp = String(m.id).startsWith('temp-');
   const ageMin = (Date.now() - new Date(m.created_at).getTime()) / 60000;
@@ -162,17 +164,49 @@ const Bubble = memo(({ m, mine, meId, showName, read, settings = {}, onEdit, onD
           </div>
         </div>
 
-        {/* reaction chips */}
+        {/* Reaction chips. A TAP OPENS THE LIST OF WHO REACTED -- the count alone
+            never said who, and on a phone there is no hover to reveal it. The
+            same panel carries the add/remove button, so tapping a chip can no
+            longer toggle your own reaction by accident. */}
         {m.reactions?.length > 0 && (
           <div className={`flex flex-wrap gap-1 mt-1 ${mine ? 'justify-end' : ''}`}>
             {m.reactions.map(r => {
               const mineR = r.user_ids.includes(meId);
+              const open = whoRx === r.emoji;
+              const names = r.user_ids.map(id => (nameOf ? nameOf(id) : (id === meId ? 'You' : 'User')));
               return (
-                <button key={r.emoji} onClick={() => onReact(m.id, r.emoji)}
-                  className="flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-xs transition-transform hover:scale-105"
-                  style={{ backgroundColor: mineR ? 'var(--color-primary-100)' : 'var(--color-bg-secondary)', border: `1px solid ${mineR ? 'var(--color-primary-300)' : 'var(--color-border)'}` }}>
-                  <span>{r.emoji}</span><span style={{ color: 'var(--color-text-secondary)', fontWeight: 600 }}>{r.user_ids.length}</span>
-                </button>
+                <div key={r.emoji} className="relative">
+                  <button onClick={() => setWhoRx(open ? null : r.emoji)}
+                    title={`${names.join(', ')} reacted with ${r.emoji}`}
+                    aria-label={`${r.emoji} ${r.user_ids.length}. Show who reacted`}
+                    className="flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-xs transition-transform hover:scale-105"
+                    style={{ backgroundColor: mineR ? 'var(--color-primary-100)' : 'var(--color-bg-secondary)', border: `1px solid ${mineR ? 'var(--color-primary-300)' : 'var(--color-border)'}` }}>
+                    <span>{r.emoji}</span><span style={{ color: 'var(--color-text-secondary)', fontWeight: 600 }}>{r.user_ids.length}</span>
+                  </button>
+                  {open && (
+                    <>
+                      <div className="fixed inset-0 z-10" onClick={() => setWhoRx(null)} />
+                      <div className={`absolute bottom-7 ${mine ? 'right-0' : 'left-0'} z-20 rounded-xl py-1.5 w-52`}
+                        style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-lg)' }}>
+                        <p className="px-3 pb-1.5 text-[11px] font-bold uppercase tracking-wide flex items-center gap-1.5"
+                          style={{ borderBottom: '1px solid var(--color-border)', color: 'var(--color-text-tertiary)' }}>
+                          <span className="text-sm">{r.emoji}</span>
+                          {r.user_ids.length} {r.user_ids.length === 1 ? 'reaction' : 'reactions'}
+                        </p>
+                        <div className="max-h-40 overflow-y-auto py-1">
+                          {names.map((n, i) => (
+                            <p key={`${r.user_ids[i]}-${i}`} className="px-3 py-1 text-xs truncate" style={{ color: 'var(--color-text)' }}>{n}</p>
+                          ))}
+                        </div>
+                        <button onClick={() => { setWhoRx(null); onReact(m.id, r.emoji); }}
+                          className="w-full text-left px-3 py-2 lg:py-1.5 text-xs font-semibold hover:bg-bg-secondary"
+                          style={{ borderTop: '1px solid var(--color-border)', color: 'var(--color-primary-600)' }}>
+                          {mineR ? `Remove my ${r.emoji}` : `React with ${r.emoji}`}
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
               );
             })}
           </div>
@@ -351,7 +385,7 @@ const MessageThread = ({ conversation, meId, onlineIds, onBack, banned, msgSetti
                   <span className="text-xs px-3 py-1 rounded-full" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>{dayLabel(m.created_at)}</span>
                 </div>
               )}
-              <Bubble m={m} mine={m.sender_id === meId} meId={meId} showName={showName} settings={msgSettings}
+              <Bubble m={m} mine={m.sender_id === meId} meId={meId} showName={showName} settings={msgSettings} nameOf={resolveName}
                 read={m.sender_id === meId && !m.pending && !m.deleted && readThrough != null && new Date(m.created_at) <= readThrough}
                 onEdit={onEdit} onDelete={onDelete} onHide={onHide} onReact={addReaction} onReply={setReplyTo} onJumpTo={jumpTo} />
             </div>
