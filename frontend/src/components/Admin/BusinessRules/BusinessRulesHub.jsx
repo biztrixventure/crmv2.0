@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Settings2, RefreshCw, Search, BarChart3, ShieldCheck, Bell, Building2, Copy, ClipboardX, LayoutTemplate, Workflow, LayoutDashboard, Car, Gauge, Boxes, Highlighter, CalendarClock, PartyPopper, CircleDollarSign } from 'lucide-react';
+import { Settings2, RefreshCw, Search, BarChart3, ShieldCheck, Bell, Building2, Copy, ClipboardX, LayoutTemplate, Workflow, LayoutDashboard, Car, Gauge, Boxes, Highlighter, CalendarClock, PartyPopper, CircleDollarSign, Award } from 'lucide-react';
 import client from '../../../api/client';
 import ResellRules from './ResellRules';
 import DedupRules from './DedupRules';
@@ -18,6 +18,7 @@ import DpStatusClientsRules from './DpStatusClientsRules';
 import PostDateRules from './PostDateRules';
 import CelebrationRules from './CelebrationRules';
 import CopyProtectionRules from './CopyProtectionRules';
+import QaScoreRules from './QaScoreRules';
 import ThemedSelect from '../../UI/Select';
 import { useAuth } from '../../../contexts/AuthContext';
 
@@ -38,6 +39,10 @@ const PAGES = [
   { id: 'dp_status_clients', label: 'DP Status Clients', icon: CircleDollarSign, Component: DpStatusClientsRules },
   { id: 'post_dates',   label: 'Post Dates',             icon: CalendarClock, Component: PostDateRules },
   { id: 'celebrations', label: 'Celebrations',           icon: PartyPopper, Component: CelebrationRules },
+  // Whether an AGENT sees their own QA score. It sits with the other coaching
+  // decisions rather than in the QA shell: the QA team scores the call, the
+  // business decides who is shown the number.
+  { id: 'qa_scores',    label: 'QA Scores',              icon: Award,       Component: QaScoreRules },
   { id: 'transfer',     label: 'Transfer Lifecycle',     icon: Workflow,    Component: TransferStatusRules },
   { id: 'batch_rules',  label: 'Batch Distribution',     icon: Boxes,       Component: BatchRules },
   { id: 'vehicle',      label: 'Vehicle Eligibility',    icon: Car,         Component: VehicleEligibilityRules },

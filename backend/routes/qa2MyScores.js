@@ -15,10 +15,33 @@ const router = express.Router();
 const { asyncHandler } = require('../middleware/errorHandler');
 const { supabaseAdmin } = require('../config/database');
 const { hasPermission } = require('../models/helpers');
+const { scoresVisibleFor } = require('../utils/qaScoreVisibility');
+
+// ── GET /my-scores/visibility ────────────────────────────────────────────────
+// What the shell asks before it draws the tab, so an agent is never shown a
+// "QA Scores" tab that answers 403. Mounted ABOVE /my-scores; Express matches
+// paths exactly, so the two never collide.
+router.get('/my-scores/visibility', asyncHandler(async (req, res) => {
+  const allowed = await hasPermission(req.user.id, req.user.company_id, 'qa2.view_own_scores');
+  const { visible, leg } = await scoresVisibleFor(req);
+  res.json({ visible: !!allowed && visible, leg });
+}));
 
 router.get('/my-scores', asyncHandler(async (req, res) => {
   const allowed = await hasPermission(req.user.id, req.user.company_id, 'qa2.view_own_scores');
   if (!allowed) return res.status(403).json({ error: 'Forbidden' });
+
+  // THE SWITCH IS ENFORCED HERE, not only in the shell. Hiding a tab hides a
+  // button, not an endpoint -- the scores have to be refused at the source, or
+  // "off" is decoration. `hidden: true` lets the panel say why rather than
+  // showing a bare Forbidden.
+  const { visible } = await scoresVisibleFor(req);
+  if (!visible) {
+    return res.status(403).json({
+      error: 'Your QA scores are not shown to agents right now. Your manager has the detail.',
+      hidden: true,
+    });
+  }
 
   const { data, error } = await supabaseAdmin
     .from('qa2_evaluation')

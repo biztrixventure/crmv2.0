@@ -231,6 +231,18 @@ const StaffShell = () => {
   // so the server is asked. Same answer the write endpoints enforce, so the
   // editor is never offered to somebody the API would refuse.
   const [kbManage, setKbManage] = useState(false);
+  // MAY THIS AGENT SEE THEIR OWN QA SCORES? The permission says they may ever;
+  // Business Rules -> QA Scores says whether it is on for their floor and
+  // company right now (fronters are off by default). Asked here so the tab is
+  // never drawn for a view the API would refuse.
+  const [qaScoresVisible, setQaScoresVisible] = useState(false);
+  useEffect(() => {
+    let dead = false;
+    client.get('qa2/my-scores/visibility')
+      .then(r => { if (!dead) setQaScoresVisible(!!r.data?.visible); })
+      .catch(() => { /* hidden is the safe answer */ });
+    return () => { dead = true; };
+  }, []);
   useEffect(() => {
     let dead = false;
     client.get('scripts/my-access')
@@ -294,9 +306,12 @@ const StaffShell = () => {
       ? [{ key: 'forms',   label: 'Forms',   icon: FileText }] : []),
     ...(hasPermission('view_call_reviews') || hasPermission('view_all_call_reviews')
       ? [{ key: 'reviews', label: 'Reviews', icon: Star     }] : []),
-    // QA v2 read-only self-view — final score + pass/fail only (mig 238's
-    // qa2.view_own_scores, seeded only for fronter/closer).
-    ...(hasPermission('qa2.view_own_scores')
+    // QA v2 read-only self-view -- final score + pass/fail only (mig 238's
+    // qa2.view_own_scores, seeded only for fronter/closer). The permission is
+    // necessary but no longer sufficient: Business Rules -> QA Scores decides
+    // whether this floor is shown its numbers at all, and the endpoint
+    // enforces the same answer.
+    ...(hasPermission('qa2.view_own_scores') && qaScoresVisible
       ? [{ key: 'qa2_scores', label: 'QA Scores', icon: Award }] : []),
     ...(hasPermission('view_fronter_stats') || hasPermission('view_closer_stats') || hasPermission('view_company_reports') || hasPermission('view_reports')
       ? [{ key: 'reports', label: 'Reports', icon: BarChart3}] : []),

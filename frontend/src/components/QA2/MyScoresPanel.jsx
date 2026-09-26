@@ -15,24 +15,34 @@ import { Panel, SectionHeader, TableScroll, EmptyState, Loading } from '../UI/ki
 export default function MyScoresPanel() {
   const [scores, setScores] = useState(null);
   const [loadError, setLoadError] = useState(null);
+  // Switched off for this floor (Business Rules -> QA Scores) is not a failure,
+  // so it must not read like one: a calm note, not a red error.
+  const [hidden, setHidden] = useState(false);
 
   useEffect(() => {
     client.get('qa2/my-scores')
       .then(r => setScores(r.data.scores || []))
-      .catch(e => setLoadError(e.response?.data?.error || 'Could not load your QA scores'));
+      .catch(e => {
+        if (e.response?.data?.hidden) { setHidden(true); return; }
+        setLoadError(e.response?.data?.error || 'Could not load your QA scores');
+      });
   }, []);
 
   return (
     <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-4">
       <SectionHeader level="page" icon={Award} title="My QA scores" subtitle="Final score and pass/fail for calls reviewed against QA v2 scorecards." />
 
-      {loadError && <Panel tone="inset"><p className="text-sm" style={{ color: 'var(--color-error-600)' }}>{loadError}</p></Panel>}
-      {!loadError && scores === null && <Loading variant="table" rows={4} />}
-      {!loadError && scores && scores.length === 0 && (
+      {hidden && (
+        <EmptyState icon={Award} title="Scores are not shown here"
+          hint="Your company does not publish QA scores to agents at the moment. Your manager has your reviews and can go through them with you." />
+      )}
+      {!hidden && loadError && <Panel tone="inset"><p className="text-sm" style={{ color: 'var(--color-error-600)' }}>{loadError}</p></Panel>}
+      {!hidden && !loadError && scores === null && <Loading variant="table" rows={4} />}
+      {!hidden && !loadError && scores && scores.length === 0 && (
         <EmptyState icon={Award} title="No QA scores yet" hint="Scores appear here once a reviewer submits an evaluation for one of your calls." />
       )}
 
-      {!loadError && scores && scores.length > 0 && (
+      {!hidden && !loadError && scores && scores.length > 0 && (
         <Panel pad="none">
           <TableScroll>
             <table className="w-full text-sm">
