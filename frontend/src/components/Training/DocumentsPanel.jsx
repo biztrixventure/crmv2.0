@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import client from '../../api/client';
 import { EmptyState, Loading, PillTabs, accent } from '../UI/kit';
+import CompanyTag from './CompanyTag';
 
 const bytes = (n) => {
   if (!n) return '';
@@ -81,7 +82,7 @@ function Reader({ doc, finished, onFinish, onClose }) {
   );
 }
 
-export default function DocumentsPanel({ companyId, done, onOpen, onFinish }) {
+export default function DocumentsPanel({ companyId, done, onOpen, onFinish, companies = [] }) {
   const [docs, setDocs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(null);
@@ -163,7 +164,10 @@ export default function DocumentsPanel({ companyId, done, onOpen, onFinish }) {
                   )}
                 </div>
                 <div className="p-3">
-                  <p className="text-sm font-bold m-0 leading-snug" style={{ color: 'var(--color-text)' }}>{d.title}</p>
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-sm font-bold m-0 leading-snug" style={{ color: 'var(--color-text)' }}>{d.title}</p>
+                    <CompanyTag companyId={d.company_id} companies={companies} />
+                  </div>
                   {d.description && (
                     <p className="text-[11px] m-0 mt-1 line-clamp-2" style={{ color: 'var(--color-text-secondary)' }}>
                       {d.description}

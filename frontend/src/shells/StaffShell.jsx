@@ -87,6 +87,10 @@ import CallbacksOverview from "../components/Callbacks/CallbacksOverview";
 import SaleSearch from "../components/Sales/SaleSearch";
 import FAQPanel from "../components/FAQ/FAQPanel";
 import ScriptPanel from "../components/FAQ/ScriptPanel";
+// The editors, for a team lead. Imported directly rather than lazily because
+// both already sit in the chunk this shell shares with the manager surfaces.
+import FAQManager from "../components/Admin/FAQManager/FAQManager";
+import ScriptManager from "../components/Admin/ScriptManager/ScriptManager";
 import EngagementBanners from "../components/Engagement/EngagementBanners";
 import ModuleNavLinks from '../components/Modules/ModuleNavLinks';
 import PendingFromDialer from "../components/Vicidial/PendingFromDialer";
@@ -222,6 +226,18 @@ const StaffShell = () => {
   // closerSection below stays on usePersistedState deliberately: it is a toggle
   // INSIDE a tab, not a navigation step, so it should not be a back target.
   const [activeTab, setActiveTab] = useHistoryTab(tabKey, defaultTab);
+  // MAY THIS PERSON WRITE THE KNOWLEDGE BASE? A team lead may (mig 331), and
+  // nothing in the token says so -- a lead is teams.lead_user_id, not a role --
+  // so the server is asked. Same answer the write endpoints enforce, so the
+  // editor is never offered to somebody the API would refuse.
+  const [kbManage, setKbManage] = useState(false);
+  useEffect(() => {
+    let dead = false;
+    client.get('scripts/my-access')
+      .then(r => { if (!dead) setKbManage(!!r.data?.manage); })
+      .catch(() => { /* read-only is the safe default */ });
+    return () => { dead = true; };
+  }, []);
   // A trainee lands ON the training portal, not on an empty dashboard. They hold
   // no create_transfer / create_sale permission yet, so isFronter and isCloser
   // are both false for them and the dashboard tabs have nothing to show --
@@ -1213,8 +1229,13 @@ const StaffShell = () => {
         {activeTab === 'tracked_numbers' && <CallbackNumbers user={user} />}
         {activeTab === 'batches'         && <BatchInbox />}
         {activeTab === 'search'          && <SaleSearch />}
-        {activeTab === 'faqs'            && <FAQPanel />}
-        {activeTab === 'scripts'         && <ScriptPanel />}
+        {/* A TEAM LEAD WRITES, EVERYONE ELSE READS. A lead is not a role --
+            teams.lead_user_id names them -- so nothing in the token says so, and
+            this shell is where they actually sit (they are a fronter or a
+            closer). /scripts/my-access is the server's own answer, and it is the
+            same one the write endpoints enforce. */}
+        {activeTab === 'faqs'            && (kbManage ? <FAQManager /> : <FAQPanel />)}
+        {activeTab === 'scripts'         && (kbManage ? <ScriptManager /> : <ScriptPanel />)}
 
         {/* ── TEAM TRANSFERS TAB ── */}
         {activeTab === 'team_transfers' && (

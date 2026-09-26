@@ -421,6 +421,30 @@ record, so EVERY transfer and EVERY sale carries the answer on the row.
   recurring trap here — `/vicidial/pending` and the four QA2 lists each had to
   be widened by hand.
 
+### Knowledge base + training are per COMPANY (mig 331, applied 2026-09-26)
+Scripts / rebuttals / FAQs had **no `company_id`** -- every row was estate-wide --
+and **no role held `manage_faqs`**, so only a superadmin and compliance (both
+hardcoded) could write the book every floor reads.
+- `company_id` NULL still means **shared with every company**, which is what every
+  pre-331 row is. Only estate-wide authority (superadmin / compliance) may edit a
+  shared row; a company's manager adds their own instead. One place decides all of
+  this: `backend/utils/knowledgeBase.js` (`scopeRead` / `writeCompany` / `guardRow`
+  / `readCompanyFilter`), used by BOTH `routes/scripts.js` and `routes/faqs.js` --
+  they each had their own copy of `canManage` before, so a rule fixed in one stayed
+  broken in the other. Tests: `utils/knowledgeBase.test.js`.
+- **A TEAM LEAD may write, and no permission says so.** A lead is
+  `teams.lead_user_id`, not a role, so the token can never carry it: the shells ask
+  `GET /scripts/my-access` (and `/faqs/my-access`), which is the same answer the
+  write endpoints enforce. That is why StaffShell can show the editor at all.
+- `manage_faqs` is now seeded for fronter_manager / closer_manager /
+  operations_manager / company_admin; `training.manage` gained closer_manager
+  (mig 311 had seeded everyone else).
+- **Training reads take `?company_id=all`** (superadmin only -> `listCompany` in
+  `routes/training.js`; `admin:true` + no company = every row). The portal opens on
+  All companies for an admin and tags each row with its owner (`CompanyTag`).
+  MANAGING still needs one company: a document has to belong somewhere, so the
+  Manage tab refuses "all" rather than filing an upload under the first company.
+
 ### QA2 recordings — the right clip, or none (mig 328, applied 2026-09-23)
 **A DIALER'S CLOCK IS NOT UTC AND NEVER SAYS SO.** `recording_lookup` returns a
 naive wall clock in the BOX's zone (`2026-09-18 17:39:50`), and so does every

@@ -18,6 +18,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Headphones, CheckCircle2, Check, Search, Clock } from 'lucide-react';
 import client from '../../api/client';
 import { EmptyState, Loading, PillTabs, accent } from '../UI/kit';
+import CompanyTag from './CompanyTag';
 
 const clock = (s) => {
   if (!s || s < 0) return '';
@@ -26,7 +27,7 @@ const clock = (s) => {
   return `${m}:${String(r).padStart(2, '0')}`;
 };
 
-export default function RecordingsPanel({ companyId, done, onOpen, onFinish }) {
+export default function RecordingsPanel({ companyId, done, onOpen, onFinish, companies = [] }) {
   const [recs, setRecs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [cat, setCat] = useState('all');
@@ -93,8 +94,9 @@ export default function RecordingsPanel({ companyId, done, onOpen, onFinish }) {
                     <Headphones size={18} style={{ color: a.fg }} />
                   </span>
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-bold m-0 leading-snug" style={{ color: 'var(--color-text)' }}>
+                    <p className="text-sm font-bold m-0 leading-snug flex items-center gap-1.5 flex-wrap" style={{ color: 'var(--color-text)' }}>
                       {r.title}
+                      <CompanyTag companyId={r.company_id} companies={companies} />
                     </p>
                     {r.description && (
                       <p className="text-[11px] m-0 mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>

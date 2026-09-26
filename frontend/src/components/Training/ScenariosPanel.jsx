@@ -19,8 +19,9 @@ import {
 } from 'lucide-react';
 import client from '../../api/client';
 import { EmptyState, Loading, PillTabs, accent } from '../UI/kit';
+import CompanyTag from './CompanyTag';
 
-function ScenarioCard({ scenario, finished, onAnswered }) {
+function ScenarioCard({ scenario, finished, onAnswered, companies = [] }) {
   const [picked, setPicked] = useState(null);
   const [verdict, setVerdict] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -62,6 +63,7 @@ function ScenarioCard({ scenario, finished, onAnswered }) {
               <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full"
                 style={{ background: a.soft, color: a.fg }}>{scenario.category}</span>
             )}
+            <CompanyTag companyId={scenario.company_id} companies={companies} />
             {finished && <CheckCircle2 size={15} style={{ color: 'var(--color-success-600)' }} />}
           </div>
           <p className="text-sm m-0 mt-2 whitespace-pre-wrap leading-relaxed"
@@ -152,7 +154,7 @@ function ScenarioCard({ scenario, finished, onAnswered }) {
   );
 }
 
-export default function ScenariosPanel({ companyId, done, onAnswered }) {
+export default function ScenariosPanel({ companyId, done, onAnswered, companies = [] }) {
   const [scenarios, setScenarios] = useState([]);
   const [loading, setLoading] = useState(true);
   const [cat, setCat] = useState('all');
@@ -207,7 +209,7 @@ export default function ScenariosPanel({ companyId, done, onAnswered }) {
       ) : (
         <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(420px, 1fr))' }}>
           {shown.map(s => (
-            <ScenarioCard key={s.id} scenario={s}
+            <ScenarioCard key={s.id} scenario={s} companies={companies}
               finished={done?.has(`scenario:${s.id}`)} onAnswered={onAnswered} />
           ))}
         </div>

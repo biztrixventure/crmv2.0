@@ -2,9 +2,9 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
-const { isSuperAdmin, hasPermission } = require('../models/helpers');
 const { escapeOrValue } = require('../utils/searchSanitize');
 const { makeCategoryRouter, cleanCategoryIds } = require('../utils/categoryRoutes');
+const kb = require('../utils/knowledgeBase');
 
 const router = express.Router();
 
@@ -17,13 +17,15 @@ function viewerAudiences(role) {
   return ['closer', 'fronter', 'both']; // oversight roles see everything
 }
 
-// Compliance managers get full CRUD too — they own the knowledge base across all
-// companies, same as the superadmin.
-async function canManage(req) {
-  return (await isSuperAdmin(req.user.id))
-    || req.user.role === 'compliance_manager'
-    || await hasPermission(req.user.id, req.user.company_id, 'manage_faqs');
-}
+// One definition of knowledge-base authority, shared with scripts.js: estate-wide
+// for superadmin / compliance, own-company for the roles that coach a floor
+// (mig 331) and for a team lead, whom no permission names.
+const canManage = (req) => kb.canManage(req);
+
+// What may I do, and whose rows am I writing? Asked before the editor draws.
+router.get('/my-access', asyncHandler(async (req, res) => {
+  res.json(await kb.manageScope(req));
+}));
 
 // Category CRUD (mounted before /:id so "categories" isn't read as an id).
 router.use('/categories', makeCategoryRouter('faq_categories', canManage));
@@ -36,7 +38,13 @@ router.get('/', asyncHandler(async (req, res) => {
   const allowed = viewerAudiences(req.user.role);
   const manage  = await canManage(req);
 
-  let query = supabaseAdmin.from('faqs').select('*').order('created_at', { ascending: false });
+  // This company's Q&A plus the shared ones; estate-wide viewers see every
+  // company's and may pin the list with ?company_id=.
+  const { companyId, estate } = await kb.readCompanyFilter(req);
+  let query = kb.scopeRead(
+    supabaseAdmin.from('faqs').select('*').order('created_at', { ascending: false }),
+    { companyId, estate },
+  );
 
   if (!(manage && (include_inactive === 'true' || include_inactive === true))) {
     query = query.eq('is_active', true);
@@ -66,24 +74,30 @@ router.post('/', [
   body('audience').optional().isIn(VALID_AUDIENCE),
   body('keywords').optional({ nullable: true }).isString(),
 ], asyncHandler(async (req, res) => {
-  if (!(await canManage(req))) return res.status(403).json({ error: 'You do not have permission to manage FAQs' });
+  const target = await kb.writeCompany(req);
+  if (target.error) return res.status(target.status || 403).json({ error: target.error });
 
   const errs = validationResult(req);
   if (!errs.isEmpty()) return res.status(400).json({ error: 'Validation failed', details: errs.array() });
 
   const { question, answer, keywords, audience } = req.body;
   const categoryIds = cleanCategoryIds(req.body.category_ids);
-  const { data, error } = await supabaseAdmin
-    .from('faqs')
-    .insert({
-      question:   question.trim(),
-      answer:     answer.trim(),
-      keywords:   keywords?.trim() || null,
-      audience:   VALID_AUDIENCE.includes(audience) ? audience : 'both',
-      category_ids: categoryIds || [],
-      created_by: req.user.id,
-    })
-    .select().single();
+  const row = {
+    company_id: target.companyId,
+    question:   question.trim(),
+    answer:     answer.trim(),
+    keywords:   keywords?.trim() || null,
+    audience:   VALID_AUDIENCE.includes(audience) ? audience : 'both',
+    category_ids: categoryIds || [],
+    created_by: req.user.id,
+  };
+  let { data, error } = await supabaseAdmin.from('faqs').insert(row).select().single();
+  // company_id arrives with mig 331. If the backend ships first, save the FAQ
+  // anyway (shared, as every FAQ was until then) rather than 500 the manager.
+  if (error && /column .*company_id|schema cache/i.test(error.message || '')) {
+    const { company_id, ...rest } = row;
+    ({ data, error } = await supabaseAdmin.from('faqs').insert(rest).select().single());
+  }
 
   if (error) return res.status(500).json({ error: error.message });
   res.status(201).json({ faq: data });
@@ -99,7 +113,10 @@ router.put('/:id', [
   body('keywords').optional({ nullable: true }).isString(),
   body('is_active').optional().isBoolean(),
 ], asyncHandler(async (req, res) => {
-  if (!(await canManage(req))) return res.status(403).json({ error: 'You do not have permission to manage FAQs' });
+  // The ROW decides: a company's manager must not rewrite a shared FAQ, or
+  // another company's.
+  const g = await kb.guardRow(req, 'faqs', req.params.id);
+  if (g.error) return res.status(g.status).json({ error: g.error });
 
   const errs = validationResult(req);
   if (!errs.isEmpty()) return res.status(400).json({ error: 'Validation failed', details: errs.array() });
@@ -124,7 +141,8 @@ router.put('/:id', [
 // DELETE /faqs/:id
 // ============================================================================
 router.delete('/:id', asyncHandler(async (req, res) => {
-  if (!(await canManage(req))) return res.status(403).json({ error: 'You do not have permission to manage FAQs' });
+  const g = await kb.guardRow(req, 'faqs', req.params.id);
+  if (g.error) return res.status(g.status).json({ error: g.error });
 
   const { error } = await supabaseAdmin.from('faqs').delete().eq('id', req.params.id);
   if (error) return res.status(500).json({ error: error.message });

@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
+import client from '../../../api/client';
 import ThemedSelect from '../../UI/Select';
 import {
   FileText, Plus, Search, Edit2, Trash2, X, ChevronDown,
   Tag, Eye, EyeOff, MessageSquareText, Users, Headphones, PhoneOutgoing, SlidersHorizontal,
+  Globe2, Building2, Lock,
 } from 'lucide-react';
 import { Button, Alert, AutoResizeTextarea } from '../../UI';
 import { useScripts } from '../../../hooks/useScripts';
@@ -32,9 +34,27 @@ const AudienceBadge = ({ audience }) => {
 
 const splitKeywords = (kw) => (kw || '').split(',').map(k => k.trim()).filter(Boolean);
 
+// WHOSE SCRIPT IS THIS (mig 331). No company_id means shared with every company
+// -- which is what every script written before that migration is -- and only a
+// superadmin or compliance may change one. A company's own rows carry its id, so
+// a fronter manager writing a rebuttal changes their floor's book and nobody
+// else's. The chip says which, because "why can I not edit this" is otherwise a
+// support question.
+const OwnerChip = ({ shared }) => (
+  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold"
+    style={shared
+      ? { backgroundColor: 'rgba(124,58,237,0.12)', color: '#7c3aed' }
+      : { backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>
+    {shared ? <><Globe2 size={10} /> Shared</> : <><Building2 size={10} /> Your company</>}
+  </span>
+);
+
 // ── Create / edit modal ─────────────────────────────────────────────────────
-const ScriptModal = ({ script, categories, onClose, onSave }) => {
+const ScriptModal = ({ script, categories, access, onClose, onSave }) => {
   const [form, setForm] = useState({
+    // Only an estate-wide admin may aim a script at every company, and a NEW one
+    // defaults to their own -- shared is the loud choice, never the default.
+    global: script ? !script.company_id : false,
     title:    script?.title    || '',
     content:  script?.content  || '',
     keywords: script?.keywords || '',
@@ -105,6 +125,22 @@ const ScriptModal = ({ script, categories, onClose, onSave }) => {
             <input type="checkbox" checked={form.is_active} onChange={e => set('is_active', e.target.checked)} />
             <span className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>Visible to agents</span>
           </label>
+
+          {access?.estate ? (
+            <label className="flex items-start gap-2 cursor-pointer select-none">
+              <input type="checkbox" className="mt-0.5" checked={!!form.global} onChange={e => set('global', e.target.checked)} />
+              <span className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+                Share with every company
+                <span className="block text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>
+                  Off means it belongs to your company only. A shared script can be edited by a superadmin or compliance, never by a company&apos;s own manager.
+                </span>
+              </span>
+            </label>
+          ) : (
+            <p className="text-[11px] m-0 flex items-center gap-1.5" style={{ color: 'var(--color-text-tertiary)' }}>
+              <Building2 size={11} /> Saved for your company. Only your own people see it.
+            </p>
+          )}
           <div className="flex gap-3 pt-2">
             <Button type="button" variant="secondary" onClick={onClose} className="flex-1">Cancel</Button>
             <Button type="submit" variant="primary" disabled={saving} className="flex-1">{saving ? 'Saving…' : script ? 'Save Changes' : 'Create Script'}</Button>
@@ -124,6 +160,18 @@ const StatTile = ({ label, value, tone, active, onClick }) => (
 // ── Main manager (standalone scripts) ────────────────────────────────────────
 const ScriptManager = () => {
   const { roControlAllowed } = useAuth();
+  // What the API will actually allow, asked once. A team lead holds no
+  // permission a token could carry (teams.lead_user_id names them), so the
+  // server is the only place that knows -- and `estate` decides whether the
+  // shared rows are editable here at all.
+  const [access, setAccess] = useState({ estate: false, manage: true, company_id: null });
+  useEffect(() => {
+    let dead = false;
+    client.get('scripts/my-access')
+      .then(r => { if (!dead) setAccess(r.data || {}); })
+      .catch(() => { /* keep the modest assumption already in state */ });
+    return () => { dead = true; };
+  }, []);
   const { scripts, loading, error, fetchScripts, createScript, updateScript, deleteScript } = useScripts();
   const catHook = useCategories('scripts');
   const [categoryId, setCategoryId] = useState('');
@@ -210,6 +258,7 @@ const ScriptManager = () => {
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className="font-semibold" style={{ color: 'var(--color-text)' }}>{s.title}</p>
                       <AudienceBadge audience={s.audience} />
+                      <OwnerChip shared={!s.company_id} />
                       {!s.is_active && <span className="text-[11px] sm:text-[10px] px-1.5 py-0.5 rounded font-bold" style={{ backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}>HIDDEN</span>}
                     </div>
                     {!open && <p className="text-xs mt-1 line-clamp-2" style={{ color: 'var(--color-text-secondary)' }}>{s.content}</p>}
@@ -221,12 +270,21 @@ const ScriptManager = () => {
                     )}
                   </div>
                   <div className="flex items-center gap-1 flex-shrink-0" onClick={e => e.stopPropagation()}>
-                    <button onClick={() => updateScript(s.id, { is_active: !s.is_active })} title={s.is_active ? 'Hide from agents' : 'Show to agents'} className="p-1.5 rounded-lg hover:bg-bg-secondary transition-colors">{s.is_active ? <Eye size={15} style={{ color: 'var(--color-success-600)' }} /> : <EyeOff size={15} style={{ color: 'var(--color-text-tertiary)' }} />}</button>
-                    {roControlAllowed('scripts.edit') && (
-                      <button onClick={() => setModal({ script: s })} title="Edit" className="p-1.5 rounded-lg hover:bg-bg-secondary transition-colors"><Edit2 size={15} style={{ color: 'var(--color-primary-500)' }} /></button>
-                    )}
-                    {roControlAllowed('scripts.delete') && (
-                      <button onClick={() => setConfirm(s)} title="Delete" className="p-1.5 rounded-lg hover:bg-error-50 transition-colors"><Trash2 size={15} style={{ color: 'var(--color-error-500)' }} /></button>
+                    {/* A shared script is every company's, so a company-scoped
+                        manager gets the reason instead of a button that 403s. */}
+                    {!s.company_id && !access.estate ? (
+                      <span title="Shared with every company - ask a superadmin, or add your own for your company"
+                        className="p-1.5 inline-flex" style={{ color: 'var(--color-text-tertiary)' }}><Lock size={14} /></span>
+                    ) : (
+                      <>
+                        <button onClick={() => updateScript(s.id, { is_active: !s.is_active })} title={s.is_active ? 'Hide from agents' : 'Show to agents'} className="p-1.5 rounded-lg hover:bg-bg-secondary transition-colors">{s.is_active ? <Eye size={15} style={{ color: 'var(--color-success-600)' }} /> : <EyeOff size={15} style={{ color: 'var(--color-text-tertiary)' }} />}</button>
+                        {roControlAllowed('scripts.edit') && (
+                          <button onClick={() => setModal({ script: s })} title="Edit" className="p-1.5 rounded-lg hover:bg-bg-secondary transition-colors"><Edit2 size={15} style={{ color: 'var(--color-primary-500)' }} /></button>
+                        )}
+                        {roControlAllowed('scripts.delete') && (
+                          <button onClick={() => setConfirm(s)} title="Delete" className="p-1.5 rounded-lg hover:bg-error-50 transition-colors"><Trash2 size={15} style={{ color: 'var(--color-error-500)' }} /></button>
+                        )}
+                      </>
                     )}
                   </div>
                 </div>
@@ -252,7 +310,7 @@ const ScriptManager = () => {
         </div>
       )}
 
-      {modal && <ScriptModal script={modal.script} categories={catHook.categories} onClose={() => setModal(null)} onSave={(payload) => modal.script ? updateScript(modal.script.id, payload) : createScript(payload)} />}
+      {modal && <ScriptModal script={modal.script} categories={catHook.categories} access={access} onClose={() => setModal(null)} onSave={(payload) => modal.script ? updateScript(modal.script.id, payload) : createScript(payload)} />}
 
       {catModal && <CategoryManagerModal title="Script categories" hook={catHook} onClose={() => setCatModal(false)} />}
 

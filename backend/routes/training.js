@@ -111,6 +111,17 @@ async function targetCompany(req) {
   return writeCompanyId(req);
 }
 
+// WHICH COMPANY A LIST IS READ FOR. Same as readCompanyId, except a
+// cross-company admin may ask for `all` -- scopedList with no company and
+// admin:true returns every company's rows, which is what "the admin can see all
+// the trainings" means. Everyone else is pinned to their own company by
+// readCompanyId, whatever the query string says.
+async function listCompany(req) {
+  const asked = String(req.query.company_id || '').trim().toLowerCase();
+  if (asked === 'all' && await isSuperAdmin(req.user.id)) return null;
+  return readCompanyId(req);
+}
+
 // Whether this viewer sees the manage surface for the resolved company. Every
 // list handler asks the same question the same way.
 async function viewerMode(req, companyId) {
@@ -142,6 +153,9 @@ router.get('/my-scope', asyncHandler(async (req, res) => {
   res.json({
     company_id: companyId,
     companies: await moduleCompanies(req),
+    // Only a cross-company admin may point the portal at every company at once
+    // (?company_id=all). The picker offers that option from this flag alone.
+    superadmin,
     can_view:     superadmin || view || isTrainee,
     can_manage:   superadmin || manage,
     can_progress: superadmin || manage || progress,
@@ -152,14 +166,14 @@ router.get('/my-scope', asyncHandler(async (req, res) => {
 
 // ── GET /training/documents ──────────────────────────────────────────────────
 router.get('/documents', asyncHandler(async (req, res) => {
-  const companyId = await readCompanyId(req);
+  const companyId = await listCompany(req);
   const { admin, activeOnly } = await viewerMode(req, companyId);
   res.json({ documents: await scopedList('training_documents', companyId, { admin, activeOnly }) });
 }));
 
 // ── GET /training/recordings ─────────────────────────────────────────────────
 router.get('/recordings', asyncHandler(async (req, res) => {
-  const companyId = await readCompanyId(req);
+  const companyId = await listCompany(req);
   const { admin, activeOnly } = await viewerMode(req, companyId);
   res.json({ recordings: await scopedList('training_recordings', companyId, { admin, activeOnly }) });
 }));
@@ -169,7 +183,7 @@ router.get('/recordings', asyncHandler(async (req, res) => {
 // scenario ids rather than a PostgREST embed, so a scenario with no options
 // still lists instead of vanishing behind an inner join.
 router.get('/scenarios', asyncHandler(async (req, res) => {
-  const companyId = await readCompanyId(req);
+  const companyId = await listCompany(req);
   const { admin, manage, activeOnly } = await viewerMode(req, companyId);
 
   const scenarios = await scopedList('training_scenarios', companyId, { admin, activeOnly });
@@ -206,7 +220,7 @@ router.get('/scenarios', asyncHandler(async (req, res) => {
 // trainee would be practising names the form no longer offers. training_terms
 // carries only the extras a manager typed in, and the uploaded name lists.
 router.get('/toolkit', asyncHandler(async (req, res) => {
-  const companyId = await readCompanyId(req);
+  const companyId = await listCompany(req);
   const admin = await isSuperAdmin(req.user.id);
   const kind = req.query.kind === 'name' ? 'name' : 'vehicle';
 

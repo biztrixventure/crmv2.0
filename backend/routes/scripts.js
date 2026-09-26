@@ -2,9 +2,9 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
-const { isSuperAdmin, hasPermission } = require('../models/helpers');
 const { escapeOrValue } = require('../utils/searchSanitize');
 const { makeCategoryRouter, cleanCategoryIds } = require('../utils/categoryRoutes');
+const kb = require('../utils/knowledgeBase');
 
 const router = express.Router();
 
@@ -21,12 +21,19 @@ function cleanSections(input) {
   return out;
 }
 
-// Insert/update that tolerates the `sections` column not being migrated yet:
-// on a schema error we retry without it so the rest of the script still saves.
+// Insert/update that tolerates a column not being migrated yet: on a schema
+// error we retry without it so the rest of the script still saves. `sections`
+// came with mig 056, `company_id` with mig 331 -- and this is the path a
+// manager saves on, so the backend shipping first must not 500 every save.
 async function writeScript(op, row) {
   let res = await op(row);
-  if (res.error && row.sections !== undefined && /column .*sections|schema cache/i.test(res.error.message || '')) {
+  const schemaErr = (r) => /column .*(sections|company_id)|schema cache/i.test(r.error?.message || '');
+  if (res.error && row.sections !== undefined && schemaErr(res)) {
     const { sections, ...rest } = row;
+    res = await op(rest);
+  }
+  if (res.error && row.company_id !== undefined && schemaErr(res)) {
+    const { company_id, ...rest } = row;
     res = await op(rest);
   }
   return res;
@@ -39,14 +46,17 @@ function viewerAudiences(role) {
   return ['closer', 'fronter', 'both'];
 }
 
-// Scripts reuse the manage_faqs permission (same knowledge-base authority).
-// Compliance managers get full CRUD too — they own the knowledge base across all
-// companies, same as the superadmin.
-async function canManage(req) {
-  return (await isSuperAdmin(req.user.id))
-    || req.user.role === 'compliance_manager'
-    || await hasPermission(req.user.id, req.user.company_id, 'manage_faqs');
-}
+// Scripts reuse the manage_faqs permission (same knowledge-base authority), and
+// since mig 331 that permission is held by the roles that coach a floor -- plus
+// team leads, whom no permission names. utils/knowledgeBase.js is the one
+// definition; faqs.js asks it the same question.
+const canManage = (req) => kb.canManage(req);
+
+// What may I do, and whose rows am I writing? The editor asks before it draws,
+// so it never offers a control the API would refuse.
+router.get('/my-access', asyncHandler(async (req, res) => {
+  res.json(await kb.manageScope(req));
+}));
 
 // Category CRUD (mounted before /:id so "categories" isn't read as an id).
 router.use('/categories', makeCategoryRouter('script_categories', canManage));
@@ -59,7 +69,14 @@ router.get('/', asyncHandler(async (req, res) => {
   const allowed = viewerAudiences(req.user.role);
   const manage  = await canManage(req);
 
-  let query = supabaseAdmin.from('scripts').select('*').order('created_at', { ascending: false });
+  // This company's scripts plus the shared ones. An estate-wide viewer
+  // (superadmin / compliance) sees every company's, and may pin the list to one
+  // with ?company_id=. Before mig 331 every row was estate-wide by accident.
+  const { companyId, estate } = await kb.readCompanyFilter(req);
+  let query = kb.scopeRead(
+    supabaseAdmin.from('scripts').select('*').order('created_at', { ascending: false }),
+    { companyId, estate },
+  );
 
   if (!(manage && (include_inactive === 'true' || include_inactive === true))) {
     query = query.eq('is_active', true);
@@ -89,13 +106,17 @@ router.post('/', [
   body('audience').optional().isIn(VALID_AUDIENCE),
   body('keywords').optional({ nullable: true }).isString(),
 ], asyncHandler(async (req, res) => {
-  if (!(await canManage(req))) return res.status(403).json({ error: 'You do not have permission to manage scripts' });
+  // writeCompany() answers both questions at once: may they write, and whose
+  // script is this. `global: true` (estate-wide only) writes the shared row.
+  const target = await kb.writeCompany(req);
+  if (target.error) return res.status(target.status || 403).json({ error: target.error });
 
   const errs = validationResult(req);
   if (!errs.isEmpty()) return res.status(400).json({ error: 'Validation failed', details: errs.array() });
 
   const { title, content, keywords, audience, sections } = req.body;
   const row = {
+    company_id: target.companyId,
     title:      title.trim(),
     content:    content.trim(),
     keywords:   keywords?.trim() || null,
@@ -121,7 +142,10 @@ router.put('/:id', [
   body('keywords').optional({ nullable: true }).isString(),
   body('is_active').optional().isBoolean(),
 ], asyncHandler(async (req, res) => {
-  if (!(await canManage(req))) return res.status(403).json({ error: 'You do not have permission to manage scripts' });
+  // The ROW decides, not only the caller: a company's manager must not be able
+  // to rewrite a shared script, or another company's.
+  const g = await kb.guardRow(req, 'scripts', req.params.id);
+  if (g.error) return res.status(g.status).json({ error: g.error });
 
   const errs = validationResult(req);
   if (!errs.isEmpty()) return res.status(400).json({ error: 'Validation failed', details: errs.array() });
@@ -147,7 +171,8 @@ router.put('/:id', [
 // DELETE /scripts/:id
 // ============================================================================
 router.delete('/:id', asyncHandler(async (req, res) => {
-  if (!(await canManage(req))) return res.status(403).json({ error: 'You do not have permission to manage scripts' });
+  const g = await kb.guardRow(req, 'scripts', req.params.id);
+  if (g.error) return res.status(g.status).json({ error: g.error });
 
   const { error } = await supabaseAdmin.from('scripts').delete().eq('id', req.params.id);
   if (error) return res.status(500).json({ error: error.message });

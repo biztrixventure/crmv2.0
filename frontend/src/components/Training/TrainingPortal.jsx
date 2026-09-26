@@ -54,11 +54,16 @@ export default function TrainingPortal() {
       .then(r => {
         if (dead) return;
         setScope(r.data);
-        // Fall back to the first company they may use. A superadmin often has
-        // no home company, and an unset picker means an unset company_id --
-        // which the API reads as "global", so an upload meant for one tenant
-        // would silently land in every one of them.
-        setCompanyId(r.data.company_id || r.data.companies?.[0]?.id || '');
+        // A cross-company admin opens on ALL companies -- the question they
+        // actually have is "what is every company teaching", and pinning them
+        // to whichever company sorted first answered nobody's.
+        //
+        // Everyone else falls back to the first company they may use: an unset
+        // picker means an unset company_id, which the API reads as "global", so
+        // an upload meant for one tenant would silently land in every one.
+        setCompanyId(r.data.superadmin
+          ? 'all'
+          : (r.data.company_id || r.data.companies?.[0]?.id || ''));
       })
       .catch(() => { if (!dead) setScope({ can_view: false }); })
       .finally(() => { if (!dead) setLoading(false); });
@@ -132,13 +137,17 @@ export default function TrainingPortal() {
           {/* Managers and superadmins point the portal at a company. A trainee
               never sees this: they have exactly one company, and a picker with
               one entry is a control that does nothing. */}
-          {canManage && companies.length > 1 && (
+          {canManage && (companies.length > 1 || scope.superadmin) && (
             <div style={{ minWidth: 200 }}>
               <span className="text-[10px] font-bold uppercase tracking-wider mb-1 flex items-center gap-1"
                 style={{ color: 'var(--color-text-secondary)' }}>
                 <Building2 size={11} /> Company
               </span>
               <Select value={companyId} onChange={(e) => setCompanyId(e.target.value)}>
+                {/* Reading every company at once is an admin-only view, and a
+                    reading one: uploads need a company, so the Manage tab asks
+                    for one rather than guessing. */}
+                {scope.superadmin && <option value="all">All companies</option>}
                 {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </Select>
             </div>
@@ -155,7 +164,7 @@ export default function TrainingPortal() {
       <PillTabs items={tabs} value={tab} onChange={setTab} />
 
       {tab === 'documents' && (
-        <DocumentsPanel companyId={companyId} done={done}
+        <DocumentsPanel companyId={companyId} done={done} companies={companies}
           onOpen={(id) => mark('document', id, 'opened')}
           onFinish={(id) => mark('document', id, 'completed')} />
       )}
@@ -170,12 +179,12 @@ export default function TrainingPortal() {
       )}
 
       {tab === 'scenarios' && (
-        <ScenariosPanel companyId={companyId} done={done}
+        <ScenariosPanel companyId={companyId} done={done} companies={companies}
           onAnswered={(id, correct) => mark('scenario', id, correct ? 'completed' : 'opened')} />
       )}
 
       {tab === 'recordings' && (
-        <RecordingsPanel companyId={companyId} done={done}
+        <RecordingsPanel companyId={companyId} done={done} companies={companies}
           onOpen={(id) => mark('recording', id, 'opened')}
           onFinish={(id) => mark('recording', id, 'completed')} />
       )}
@@ -184,11 +193,20 @@ export default function TrainingPortal() {
         <Suspense fallback={<TabFallback />}><MyQuizzes /></Suspense>
       )}
 
-      {tab === 'manage' && canManage && (
+      {/* MANAGING NEEDS ONE COMPANY. "All companies" is a reading view; a
+          document has to belong somewhere, and silently filing it under the
+          first company in the list is how material lands in the wrong tenant. */}
+      {tab === 'manage' && canManage && (companyId === 'all' ? (
+        <Panel tone="inset" radius="2xl" pad="lg">
+          <p className="text-sm m-0" style={{ color: 'var(--color-text-secondary)' }}>
+            Pick a single company above to add or edit its training. You are looking at every company right now.
+          </p>
+        </Panel>
+      ) : (
         <Suspense fallback={<TabFallback />}>
           <TrainingManager companyId={companyId} canProgress={!!scope.can_progress} />
         </Suspense>
-      )}
+      ))}
     </div>
   );
 }
