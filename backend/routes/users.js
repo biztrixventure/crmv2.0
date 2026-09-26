@@ -1460,6 +1460,119 @@ router.put('/:id/overrides',
 );
 
 // ============================================================================
+// TOOL ACCESS FOR ONE PERSON -- /users/tool-access/:userId  (GET, PUT)
+//
+// The per-user feature override (mig 122) has existed since the tools did, but
+// the only way to set one was the per-ASSIGNMENT editor, so turning the DNC
+// check on for one fronter meant knowing which company row to open -- and a
+// person with two companies needed two edits that could disagree. These two
+// endpoints are about the PERSON: one row per (user, tool), written with
+// company_id NULL, which resolveFeature() already accepts for any company.
+//
+// Saving replaces every row this user has for that tool, so a company-specific
+// row left over from the old editor can never quietly win for one company.
+// Rows are only touched for the tool being changed: whoever has a tool today
+// keeps it until someone turns it off here.
+//
+// 'inherit' means no user row at all -- the company override, or the flag's
+// own default, decides. That is the difference between "not decided for this
+// person" and "off for this person", and collapsing the two would silently
+// re-enable a tool the moment a company override changed.
+// ============================================================================
+const TOOL_KEY_RE = /^tool_[a-z0-9_]+$/;
+
+// The tools that can be handed out per person: the tool_* catalog plus
+// custom_workspace, which behaves the same way.
+async function toolCatalog() {
+  const { data } = await supabaseAdmin
+    .from('feature_flags').select('key, label, description, category, default_enabled, sort_order')
+    .order('sort_order');
+  return (data || []).filter(f => TOOL_KEY_RE.test(f.key) || f.key === 'custom_workspace');
+}
+
+router.get('/tool-access/:userId', asyncHandler(async (req, res) => {
+  if (!(await saGuard(req))) return res.status(403).json({ error: 'Superadmin access required' });
+  const userId = req.params.userId;
+
+  const catalog = await toolCatalog();
+  const keys = catalog.map(f => f.key);
+
+  // This person's companies, so the inherited answer can be shown per company
+  // instead of as one number that is right for nobody.
+  const { data: asg } = await supabaseAdmin
+    .from('user_company_roles')
+    .select('company_id, is_active, companies(name)')
+    .eq('user_id', userId).eq('is_active', true);
+  const companies = (asg || []).filter(a => a.company_id)
+    .map(a => ({ id: a.company_id, name: a.companies?.name || 'Company' }));
+
+  const [{ data: userOv }, { data: coOv }] = await Promise.all([
+    supabaseAdmin.from('user_feature_flags').select('feature_key, is_enabled, company_id').eq('user_id', userId).in('feature_key', keys.length ? keys : ['-']),
+    companies.length
+      ? supabaseAdmin.from('company_feature_flags').select('company_id, feature_key, is_enabled').in('company_id', companies.map(c => c.id)).in('feature_key', keys.length ? keys : ['-'])
+      : Promise.resolve({ data: [] }),
+  ]);
+
+  const tools = catalog.map(f => {
+    const rows = (userOv || []).filter(o => o.feature_key === f.key);
+    // A row with no company is the person-level answer; an older
+    // company-scoped row still counts, and is reported so it can be seen.
+    const anyRow = rows.find(r => r.company_id === null) || rows[0] || null;
+    const perCompany = companies.map(c => {
+      const co = (coOv || []).find(o => o.company_id === c.id && o.feature_key === f.key);
+      return { company: c.name, enabled: co ? co.is_enabled : f.default_enabled, source: co ? 'company' : 'default' };
+    });
+    return {
+      key: f.key, label: f.label, description: f.description, category: f.category,
+      default_enabled: f.default_enabled,
+      state: anyRow ? (anyRow.is_enabled ? 'on' : 'off') : 'inherit',
+      scoped_to_company: !!(anyRow && anyRow.company_id),
+      inherit_enabled: perCompany.length ? perCompany.some(c => c.enabled) : f.default_enabled,
+      companies: perCompany,
+    };
+  });
+
+  res.json({ user_id: userId, tools, companies });
+}));
+
+router.put('/tool-access/:userId',
+  [body('feature_key').isString().trim().notEmpty(), body('state').isIn(['on', 'off', 'inherit'])],
+  asyncHandler(async (req, res) => {
+    if (!(await saGuard(req))) return res.status(403).json({ error: 'Superadmin access required' });
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ error: 'Validation failed', details: errors.array() });
+
+    const userId = req.params.userId;
+    const key = String(req.body.feature_key).trim();
+    const state = req.body.state;
+
+    // Only tools go through here. A company-wide feature must not be flipped
+    // for one person from a screen that says "tools".
+    const catalog = await toolCatalog();
+    if (!catalog.some(f => f.key === key)) return res.status(400).json({ error: 'Not a per-user tool' });
+
+    const { data: u } = await supabaseAdmin.from('user_profiles').select('user_id').eq('user_id', userId).maybeSingle();
+    if (!u) return res.status(404).json({ error: 'User not found' });
+
+    // Replace whatever this user had for THIS tool only.
+    const del = await supabaseAdmin.from('user_feature_flags').delete().eq('user_id', userId).eq('feature_key', key);
+    if (del.error) {
+      return res.status(400).json({ error: /relation .*does not exist|user_feature_flags/i.test(del.error.message)
+        ? 'Per-user tool access needs migration 122 applied first.' : del.error.message });
+    }
+    if (state !== 'inherit') {
+      const { error } = await supabaseAdmin.from('user_feature_flags')
+        .insert({ user_id: userId, company_id: null, feature_key: key, is_enabled: state === 'on', set_by: req.user.id });
+      if (error) return res.status(400).json({ error: error.message });
+    }
+
+    clearFeatureCache();
+    logger.info('USER_TOOL_ACCESS', `${key} -> ${state} for user ${userId} by ${req.user.id}`);
+    res.json({ message: 'Saved', feature_key: key, state });
+  })
+);
+
+// ============================================================================
 // GET /users/:id/feature-overrides — per-user feature toggles for one user
 // (:id = user_company_roles.id). Returns the catalog, the company-effective
 // state, and this user's overrides so the editor can show 3-state per feature.
