@@ -23,6 +23,29 @@ const Spinner = () => <Loading variant="rows" rows={3} />;
 const typeColor = (t) => t === 'dm' ? 'info' : t === 'broadcast' ? 'warning' : 'primary';
 const convName = (c) => c.title || (c.members ? c.members.map(m => m.name).slice(0, 2).join(' ↔ ') : 'Conversation');
 
+// The line under the name: who else is in it, and which companies are talking.
+// A superadmin scanning this table is asking exactly that, and both facts are
+// already on the row -- showing them costs no extra request.
+const convSub = (c) => {
+  const members = c.members || [];
+  const extra = members.length > 2 ? `+${members.length - 2} more` : '';
+  const companies = [...new Set(members.map(m => m.company).filter(Boolean))];
+  return [extra, companies.join(' · ')].filter(Boolean).join(' — ');
+};
+
+// "4m ago" answers "is this live?" at a glance; the exact stamp stays one hover
+// away, and past a week the date itself IS the useful answer.
+const ago = (iso) => {
+  if (!iso) return '—';
+  const secs = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (!Number.isFinite(secs)) return '—';
+  if (secs < 60) return 'just now';
+  if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
+  if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
+  if (secs < 604800) return `${Math.floor(secs / 86400)}d ago`;
+  return fmt(iso);
+};
+
 const downloadText = (name, text) => {
   const blob = new Blob([text], { type: 'text/plain' });
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click(); URL.revokeObjectURL(a.href);
@@ -328,17 +351,42 @@ const ConversationsTab = ({ openId, setOpenId }) => {
         <TableScroll stickyFirst label="Chat records" className="rounded-2xl" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
           <table className="w-full text-sm">
             <thead><tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
-              {['Conversation', 'Type', 'Members', 'Messages', 'Last activity', ''].map(h => <th key={h} className="px-4 py-2.5 text-left text-xs font-bold uppercase" style={{ color: 'var(--color-text-secondary)' }}>{h}</th>)}
+              {/* Open sits second, beside the name it belongs to: the reason
+                  to open a conversation is who is in it, and reaching the far
+                  right of a six-column row to act on that was the long way
+                  round. Counts are right-aligned so they compare down the
+                  column instead of ragging. */}
+              {[
+                { h: 'Conversation' }, { h: '', w: 92 }, { h: 'Type' },
+                { h: 'Members', right: true }, { h: 'Messages', right: true }, { h: 'Last activity' },
+              ].map(({ h, right, w }) => (
+                <th key={h || 'open'} className={`px-4 py-2.5 text-xs font-bold uppercase ${right ? 'text-right' : 'text-left'}`}
+                  style={{ color: 'var(--color-text-secondary)', width: w }}>{h}</th>
+              ))}
             </tr></thead>
             <tbody>
               {convs.map(c => (
-                <tr key={c.id} style={{ borderBottom: '1px solid var(--color-border)' }}>
-                  <td className="px-4 py-3"><div className="flex items-center gap-1.5"><span className="font-semibold truncate max-w-[200px] inline-block" style={{ color: 'var(--color-text)' }}>{convName(c)}</span>{c.is_locked && <Lock size={12} style={{ color: 'var(--color-text-tertiary)' }} />}</div></td>
-                  <td className="px-4 py-3"><Badge variant={typeColor(c.type)} size="sm">{c.type}</Badge></td>
-                  <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{c.members?.length || 0}</td>
-                  <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{c.message_count}</td>
-                  <td className="px-4 py-3 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{fmt(c.last_message_at)}</td>
-                  <td className="px-4 py-3"><Button size="sm" variant="secondary" onClick={() => setOpenId(c.id)}>Open</Button></td>
+                <tr key={c.id} className="transition-colors hover:bg-bg-secondary" style={{ borderBottom: '1px solid var(--color-border)' }}>
+                  {/* THE WHOLE NAME. Clipped at 200px, every pair of full names
+                      ended in an ellipsis and the second person was unreadable
+                      -- on the one screen whose job is telling conversations
+                      apart. It wraps now. */}
+                  <td className="px-4 py-3 align-top" style={{ minWidth: 240 }}>
+                    <div className="flex items-start gap-1.5">
+                      <div className="min-w-0">
+                        <span className="font-semibold block" style={{ color: 'var(--color-text)', overflowWrap: 'anywhere' }}>{convName(c)}</span>
+                        {convSub(c) && (
+                          <span className="text-[11px] block mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>{convSub(c)}</span>
+                        )}
+                      </div>
+                      {c.is_locked && <Lock size={12} className="mt-1 flex-shrink-0" style={{ color: 'var(--color-text-tertiary)' }} />}
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 align-top"><Button size="sm" variant="secondary" onClick={() => setOpenId(c.id)}>Open</Button></td>
+                  <td className="px-4 py-3 align-top"><Badge variant={typeColor(c.type)} size="sm">{c.type}</Badge></td>
+                  <td className="px-4 py-3 align-top text-xs text-right tabular-nums" style={{ color: 'var(--color-text-secondary)' }}>{c.members?.length || 0}</td>
+                  <td className="px-4 py-3 align-top text-xs text-right tabular-nums" style={{ color: 'var(--color-text-secondary)' }}>{(c.message_count ?? 0).toLocaleString()}</td>
+                  <td className="px-4 py-3 align-top text-xs whitespace-nowrap" title={fmt(c.last_message_at)} style={{ color: 'var(--color-text-secondary)' }}>{ago(c.last_message_at)}</td>
                 </tr>
               ))}
             </tbody>
