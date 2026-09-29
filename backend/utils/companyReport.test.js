@@ -181,3 +181,57 @@ describe('buildOverview', () => {
     expect(o.companies[0].top_agent.metric).toBe('sold');
   });
 });
+
+describe('buildOverview: agents across companies', () => {
+  const rows = [
+    { company: { id: 'c1', name: 'Wave' }, side: 'fronter', totals: {},
+      agents: [{ user_id: A, name: 'Ann', sold: 5, dp_sold: 500, transfers: 50, xfer_sold: 5, active: 4 },
+               { user_id: P, name: 'Onyx', sold: 9, dp_sold: 900, transfers: 9 }] },
+    { company: { id: 'c2', name: 'Mejor' }, side: 'fronter', totals: {},
+      agents: [{ user_id: B, name: 'Bob', sold: 7, dp_sold: 700, transfers: 40, xfer_sold: 7, active: 7 }] },
+    { company: { id: 'c3', name: 'Vertex' }, side: 'closer', totals: {},
+      agents: [{ user_id: C1, name: 'Cara', sold: 12, dp_sold: 1200, transfers: 60, xfer_sold: 12, active: 10 }] },
+  ];
+  const o = buildOverview(rows, cfg, { canFin: true });
+  const byId = Object.fromEntries(o.agents.map(a => [a.user_id, a]));
+
+  test('ranks fronters across companies, each tagged with their company; closers on their own ladder', () => {
+    expect(byId[B]).toMatchObject({ rank: 1, company: 'Mejor', side: 'fronter' });
+    expect(byId[A]).toMatchObject({ rank: 2, company: 'Wave' });
+    expect(byId[C1]).toMatchObject({ rank: 1, side: 'closer' });
+    expect(byId[A].conversion).toBe(10);
+  });
+  test('the placeholder is listed but never ranked, even with the most money', () => {
+    expect(byId[P].placeholder).toBe(true);
+    expect(byId[P].rank).toBeNull();
+  });
+  test('without money: ranked by sales, no amounts', () => {
+    const n = buildOverview(rows, cfg, { canFin: false });
+    expect(JSON.stringify(n.agents)).not.toContain('"dp_sold"');
+    expect(n.earner_metric).toBe('sold');
+  });
+});
+
+describe('effectiveAccess', () => {
+  const { effectiveAccess } = require('./companyReport');
+  const companies = [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }];
+  const fm = { company_id: 'a', level: 'fronter_manager', perms: ['view_fronter_stats'] };
+  const admin = { company_id: 'a', level: 'company_admin', perms: ['view_company_reports', 'view_financial_data'] };
+  const comp = { company_id: 'a', level: 'compliance_manager', perms: ['view_financial_data'] };
+  const fronter = { company_id: 'a', level: 'fronter', perms: [] };
+
+  test('role decides when nothing is set for the person', () => {
+    expect(effectiveAccess({ memberships: [fm], companies })).toMatchObject({ can_view: true, view_source: 'role', amounts: false });
+    expect(effectiveAccess({ memberships: [admin], companies })).toMatchObject({ can_view: true, amounts: true });
+    expect(effectiveAccess({ memberships: [fronter], companies })).toMatchObject({ can_view: false, view_source: 'none' });
+  });
+  test('compliance sees every company', () => {
+    expect(effectiveAccess({ memberships: [comp], companies })).toMatchObject({ can_view: true, companies: 'all', amounts: true, view_source: 'estate' });
+  });
+  test('the person\'s switches beat the role both ways', () => {
+    expect(effectiveAccess({ memberships: [admin], override: { can_view: false }, companies }).can_view).toBe(false);
+    expect(effectiveAccess({ memberships: [admin], override: { show_amounts: false }, companies })).toMatchObject({ amounts: false, amounts_source: 'person' });
+    expect(effectiveAccess({ memberships: [fronter], override: { can_view: true, show_amounts: true }, companies })).toMatchObject({ can_view: true, amounts: true });
+    expect(effectiveAccess({ memberships: [fronter], override: { can_view: true, company_ids: ['b'] }, companies }).companies).toEqual([{ id: 'b', name: 'B' }]);
+  });
+});

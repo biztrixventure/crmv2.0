@@ -421,7 +421,7 @@ record, so EVERY transfer and EVERY sale carries the answer on the row.
   recurring trap here — `/vicidial/pending` and the four QA2 lists each had to
   be widened by hand.
 
-### Company Reports -- per-agent performance (mig 332, applied 2026-09-29)
+### Company Reports -- per-agent performance (migs 332 + 333, applied 2026-09-29)
 One screen, `components/Reports/CompanyReports.jsx`, mounted by ReportsPanel
 (manager + staff "Reports"), ComplianceShell ("Agent Reports") and AdminPanel
 ("Company Reports", company picker + All companies). API `/api/company-reports`
@@ -433,13 +433,25 @@ One screen, `components/Reports/CompanyReports.jsx`, mounted by ReportsPanel
   FRONTER company (verified 2026-09-29: 7,966 of 7,966 sales). A closer company is
   therefore scoped by its ROSTER (`closer_id` / `assigned_closer_id` among ALL its
   members, active or not); a fronter company by `company_id`.
-- **Access = two doors**, decided in ONE place, `resolveScope()`: a report
-  permission on the role (`view_company_reports` / `view_fronter_stats` /
-  `view_closer_stats` / `view_reports`) for companies the user is a member of, OR
-  the per-person switch `tool_company_reports` (User Control Center -> Tools; fails
-  CLOSED if its catalog row is missing). superadmin + compliance_manager: any
-  company; readonly_admin: governance companies. Asking for another company is a
-  403 -- never a silent fallback.
+- **Access**, decided in ONE place, `resolveScope()`: a report permission on the
+  role (`view_company_reports` / `view_fronter_stats` / `view_closer_stats` /
+  `view_reports`) for companies the user is a member of; superadmin +
+  compliance_manager: any company; readonly_admin: governance companies. THEN the
+  person's switches (mig 333, `user_report_access`, set in User Control Center ->
+  Reports): `can_view` ON/OFF beats the role both ways (OFF also closes it for
+  compliance/readonly; superadmin is never overridden), `company_ids` hands one
+  person exactly those companies, `show_amounts` shows/hides money IN THE REPORTS
+  ONLY (view_financial_data elsewhere is untouched). NULL = role decides. Asking
+  for another company is a 403 -- never a silent fallback. The shells ask
+  `GET /company-reports/scope` via `hooks/useReportAccess.js` (the token cannot
+  know a per-person switch). 332's `tool_company_reports` flag was DELETED by 333.
+- **Who can see = `GET /company-reports/access`** (superadmin; "Who can see" button
+  on the report). Its answer and UCC -> Reports both come from the pure
+  `effectiveAccess()` in `utils/companyReport.js` -- keep it in step with
+  resolveScope/canSeeMoney.
+- **All companies** (anyone with 2+ companies): company comparison bars + table,
+  and ONE agent ladder across companies (`buildOverview().agents`), fronters and
+  closers ranked separately (same sale seen from both ends).
 - **Definitions.** SOLD = non-post-date sale in the range, whatever happened
   later; ACTIVE = still closed_won; STICK RATE = active / sold (most sales cancel
   ~day 60). CONVERSION is transfer-cohort (transfers in range that have a sale,

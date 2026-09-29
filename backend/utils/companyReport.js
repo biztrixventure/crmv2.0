@@ -327,10 +327,90 @@ function buildOverview(rows, cfg, opts = {}) {
     };
     return canFin ? row : stripFields(row, MONEY_FIELDS);
   });
-  return { companies: list, earner_metric: canFin ? key : 'sold', can_see_money: canFin };
+
+  // Every agent of every company in one list -- "whose agent is on top".
+  // Ranked WITHIN a side: a fronter's sale and a closer's sale are the same
+  // sale seen from two ends, so one ladder mixing both would count it twice.
+  const rankKey = canFin ? key : 'sold';
+  let agents = [];
+  for (const r of rows || []) {
+    for (const a of r.agents || []) {
+      agents.push({
+        ...a,
+        company_id: r.company?.id || null, company: r.company?.name || null, side: r.side,
+        name: a.user_id ? (a.name || 'Unknown') : 'Unattributed',
+        placeholder: !!(a.user_id && placeholders.has(a.user_id)),
+        unattributed: !a.user_id,
+        conversion: rate(num(a.xfer_sold), num(a.transfers)),
+        stick_rate: rate(num(a.active), num(a.sold)),
+      });
+    }
+  }
+  for (const side of ['fronter', 'closer']) {
+    agents.filter(a => a.side === side && !a.placeholder && !a.unattributed)
+      .sort((x, y) => (num(y[rankKey]) - num(x[rankKey])) || (num(y.sold) - num(x.sold)) || (num(y.transfers) - num(x.transfers)))
+      .forEach((a, i) => { a.rank = i + 1; });
+  }
+  agents.forEach((a) => { if (a.rank === undefined) a.rank = null; });
+  agents.sort((x, y) => (x.rank == null) - (y.rank == null) || (x.rank || 0) - (y.rank || 0));
+  if (!canFin) agents = stripFields(agents, MONEY_FIELDS);
+
+  return { companies: list, agents, earner_metric: rankKey, can_see_money: canFin };
+}
+
+// ── who can see the reports, and why (User Control Center + Access list) ────
+const REPORT_PERMS = ['view_company_reports', 'view_fronter_stats', 'view_closer_stats', 'view_reports'];
+const ESTATE_LEVELS = new Set(['compliance_manager']);
+
+/**
+ * Describe one person's Company Reports access from plain data. Mirrors
+ * resolveScope()/canSeeMoney() in routes/companyReports.js -- change one,
+ * change both (companyReport.test.js pins the cases).
+ *
+ * @param memberships [{ company_id, company, level, perms: string[] }]  active
+ *        memberships, perms already = role grants + user grants - revokes
+ * @param override    user_report_access row or null
+ * @param companies   [{ id, name }] every active company (for "all" + names)
+ */
+function effectiveAccess({ memberships = [], override = null, companies = [] }) {
+  const o = override || {};
+  const name = Object.fromEntries(companies.map(c => [c.id, c.name]));
+  const picked = Array.isArray(o.company_ids) && o.company_ids.length ? o.company_ids : null;
+  const estate = memberships.some(m => ESTATE_LEVELS.has(m.level));
+  const has = (m, p) => (m.perms || []).includes(p);
+  const list = (ids) => ids.map(id => ({ id, name: name[id] || 'Unknown company' }));
+
+  let canView; let viewSource; let visible;   // visible: null = every company
+  if (o.can_view === false) { canView = false; viewSource = 'person'; visible = []; }
+  else if (o.can_view === true) { canView = true; viewSource = 'person'; visible = picked || memberships.map(m => m.company_id); }
+  else if (estate) { canView = true; viewSource = 'estate'; visible = picked; }
+  else {
+    visible = memberships.filter(m => REPORT_PERMS.some(p => has(m, p))).map(m => m.company_id);
+    canView = visible.length > 0; viewSource = canView ? 'role' : 'none';
+  }
+
+  let amounts; let amountsSource = 'role';
+  if (!canView) { amounts = false; }
+  else if (typeof o.show_amounts === 'boolean') { amounts = o.show_amounts; amountsSource = 'person'; }
+  else if (estate) { amounts = memberships.some(m => ESTATE_LEVELS.has(m.level) && has(m, 'view_financial_data')); }
+  else {
+    const byCo = new Map(memberships.map(m => [m.company_id, has(m, 'view_financial_data')]));
+    const flags = (visible || []).map(id => byCo.get(id) === true);
+    amounts = flags.length && flags.every(Boolean) ? true : flags.some(Boolean) ? 'some' : false;
+  }
+
+  return {
+    can_view: canView,
+    view_source: viewSource,
+    companies: visible === null ? 'all' : list([...new Set(visible)]),
+    amounts,
+    amounts_source: amountsSource,
+    estate,
+  };
 }
 
 module.exports = {
+  effectiveAccess, REPORT_PERMS,
   parseRange, sanitizeConfig, buildReport, buildOverview, stripFields, rate,
   EARNER_METRICS, MONEY_FIELDS, QA_FIELDS, DEFAULT_CONFIG, MAX_DAYS,
 };

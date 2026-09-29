@@ -12,6 +12,7 @@ import TeamManager from '../components/Admin/Teams/TeamManager';
 import QuotaReport from '../components/Teams/QuotaReport';
 import { useTheme } from "../contexts/ThemeContext";
 import { useFeatureFlags } from "../contexts/FeatureFlagsContext";
+import { useReportAccess } from '../hooks/useReportAccess';
 import { useNavigate } from "react-router-dom";
 import {
   Users, DollarSign, Send, Phone, BarChart3, TrendingUp,
@@ -209,6 +210,13 @@ const ManagerShell = ({ workspaceMode = false }) => {
   const { user, logout, updateUser, hasPermission, canExport } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const { isEnabled, isEnabledStrict, loading: flagsLoading } = useFeatureFlags();
+  // Company Reports nav: the server's answer (it knows the per-person switch);
+  // the role permissions stand in until it arrives so the item does not flicker.
+  const reportAccess = useReportAccess(user?.id);
+  const roleReports = (hasPermission('view_fronter_stats') || hasPermission('view_closer_stats') || hasPermission('view_company_reports') || hasPermission('view_reports')) && isEnabled('reports');
+  const reportsNav = reportAccess
+    ? reportAccess.can && (reportAccess.source !== 'role' || isEnabled('reports'))
+    : roleReports;
   // Superadmin-configurable rows-per-page (list.layout.manager.<role>); falls
   // back to the built-in 25 until configured, so nothing changes on rollout.
   const { pageSize: PAGE_SIZE } = useListLayout('manager', { pageSize: DEFAULT_PAGE_SIZE });
@@ -253,11 +261,9 @@ const ManagerShell = ({ workspaceMode = false }) => {
       ? [{ key: 'forms',   label: 'Forms',   icon: FileText }] : []),
     ...((hasPermission('view_all_call_reviews') || hasPermission('view_call_reviews')) && isEnabled('call_reviews')
       ? [{ key: 'reviews', label: 'Reviews', icon: Star     }] : []),
-    // Company Reports (mig 332): a report permission on the role, OR the
-    // per-person switch in User Control Center -> Tools (tool_company_reports).
-    ...(((hasPermission('view_fronter_stats') || hasPermission('view_closer_stats') || hasPermission('view_company_reports') || hasPermission('view_reports')) && isEnabled('reports'))
-      || isEnabledStrict('tool_company_reports')
-      ? [{ key: 'reports', label: 'Reports', icon: BarChart3}] : []),
+    // Company Reports (mig 332/333): the role's report permission, unless a
+    // superadmin decided for this person (User Control Center -> Reports).
+    ...(reportsNav ? [{ key: 'reports', label: 'Reports', icon: BarChart3}] : []),
     // Monthly-payment reminders — team view of due policies.
     //
     // Hidden from operations_manager: retention calling on due policies is not

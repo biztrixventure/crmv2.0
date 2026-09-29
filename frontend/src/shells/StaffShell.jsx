@@ -10,6 +10,7 @@ import UpdateBanner from "../components/UI/UpdateBanner";
 import DotGridBg from "../components/UI/DotGridBg";
 import { useTheme } from "../contexts/ThemeContext";
 import { useFeatureFlags } from "../contexts/FeatureFlagsContext";
+import { useReportAccess } from '../hooks/useReportAccess';
 import { useNavigate } from "react-router-dom";
 import { vehicleFieldIssues } from "../utils/vehicleValidation";
 import { smartFormat, isSuggestable, suggestionsFor, rememberValues } from "../utils/formAssist";
@@ -204,6 +205,12 @@ const StaffShell = () => {
   const [exportOpen, setExportOpen] = useState(false);
   const { theme, toggleTheme } = useTheme();
   const { isEnabled, isEnabledStrict } = useFeatureFlags();
+  // Company Reports nav: the server's answer (it knows the per-person switch);
+  // the role permissions stand in until it arrives.
+  const reportAccess = useReportAccess(user?.id);
+  const reportsNav = reportAccess
+    ? reportAccess.can
+    : (hasPermission('view_fronter_stats') || hasPermission('view_closer_stats') || hasPermission('view_company_reports') || hasPermission('view_reports'));
   const navigate = useNavigate();
   const updateAvailable = useVersionCheck();
 
@@ -313,10 +320,9 @@ const StaffShell = () => {
     // enforces the same answer.
     ...(hasPermission('qa2.view_own_scores') && qaScoresVisible
       ? [{ key: 'qa2_scores', label: 'QA Scores', icon: Award }] : []),
-    // Company Reports (mig 332): role permission OR the per-person tool switch.
-    ...(hasPermission('view_fronter_stats') || hasPermission('view_closer_stats') || hasPermission('view_company_reports') || hasPermission('view_reports')
-      || isEnabledStrict('tool_company_reports')
-      ? [{ key: 'reports', label: 'Reports', icon: BarChart3}] : []),
+    // Company Reports (mig 332/333): the role's report permission, unless a
+    // superadmin decided for this person (User Control Center -> Reports).
+    ...(reportsNav ? [{ key: 'reports', label: 'Reports', icon: BarChart3}] : []),
     // Monthly-payment reminders — closers (and anyone who can see sales) get
     // their due policies to call + confirm payment.
     ...((isCloser || hasPermission('view_team_sales') || hasPermission('view_own_sales'))

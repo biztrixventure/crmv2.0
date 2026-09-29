@@ -23,6 +23,7 @@ import PaymentRemindersPanel from '../components/Payments/PaymentRemindersPanel'
 import ComplianceDncReport from '../components/Shared/ComplianceDncReport';
 import CardValidator from '../components/Shared/CardValidator';
 import { useFeatureFlags } from '../contexts/FeatureFlagsContext';
+import { useReportAccess } from '../hooks/useReportAccess';
 
 import CompaniesTab        from '../components/Compliance/CompaniesTab';
 import QueueTab            from '../components/Compliance/QueueTab';
@@ -107,6 +108,7 @@ const ComplianceShell = () => {
   const notifHook = useNotifications();
   const updateAvailable = useVersionCheck();
   const { isEnabledStrict } = useFeatureFlags();
+  const reportAccess = useReportAccess(user?.id);
 
   // Layer admin override onto the code-defined catalog. Feature-gated tabs
   // (e.g. DNC) drop out unless their flag is on for this company — but superadmin
@@ -116,8 +118,10 @@ const ComplianceShell = () => {
   const TABS = useMemo(
     () => applyComplianceLayout(CODE_TABS.filter(t =>
       (!t.flag || isSuperadmin || isEnabledStrict(t.flag)) &&
-      (!t.perm || isSuperadmin || hasPermission(t.perm)))),
-    [applyComplianceLayout, isEnabledStrict, isSuperadmin, hasPermission],
+      (!t.perm || isSuperadmin || hasPermission(t.perm)) &&
+      // Company Reports: gone for a person a superadmin switched it off for.
+      (t.key !== 'company_reports' || !reportAccess || reportAccess.can))),
+    [applyComplianceLayout, isEnabledStrict, isSuperadmin, hasPermission, reportAccess],
   );
 
   // Dynamic disposition tabs (e.g. "Post Date") — one per non-"sale" disposition

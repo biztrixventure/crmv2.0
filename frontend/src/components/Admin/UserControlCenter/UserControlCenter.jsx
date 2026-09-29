@@ -20,7 +20,7 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   UserCog, ShieldCheck, Building2, Users2, Headphones, LayoutTemplate,
   Lock, Activity, Download, RefreshCw, Mail, Clock, Circle, ClipboardCheck, ArrowLeft, Briefcase,
-  Smartphone, Layers, Search, Globe, Wrench,
+  Smartphone, Layers, Search, Globe, Wrench, BarChart3,
 
 } from 'lucide-react';
 import client from '../../../api/client';
@@ -44,6 +44,7 @@ import QaSection from './QaSection';
 import ClientAccessSection from './ClientAccessSection';
 import PwaSection from './PwaSection';
 import ToolAccessSection from './ToolAccessSection';
+import ReportsSection from './ReportsSection';
 import ModulesSection from './ModulesSection';
 import CustomerLookupSection from './CustomerLookupSection';
 import IpAccessSection from './IpAccessSection';
@@ -86,6 +87,10 @@ const TABS = [
   // so it holds wherever they are assigned, which is what lets a fronter be
   // given a tool that started life as a closer one.
   { id: 'tools',        label: 'Tools',          icon: Wrench,         scope: 'user' },
+  // Company Reports (mig 333): may this person open the per-agent reports,
+  // for which companies, and do they see the payment amounts. NEW id -- never
+  // rename (tab ids are stored).
+  { id: 'reports',      label: 'Reports',        icon: BarChart3,      scope: 'user' },
   { id: 'customer_lookup', label: 'Customer Lookup', icon: Search,      scope: 'user' },
   // Which networks this person may use the CRM from (mig 319). scope:'user' --
   // the rules follow the login, not a company.
@@ -268,6 +273,7 @@ export default function UserControlCenter() {
             {tab === 'pwa'          && <PwaSection account={account} />}
             {tab === 'modules'      && <ModulesSection account={account} />}
             {tab === 'tools'        && <ToolAccessSection account={account} />}
+            {tab === 'reports'      && <ReportsSection account={account} />}
             {tab === 'customer_lookup' && <CustomerLookupSection account={account} />}
             {tab === 'ip_access'    && <IpAccessSection account={account} />}
             {tab === 'governance'   && <GovernanceSection account={account} isReadonlyAdmin={isReadonlyAdmin} />}

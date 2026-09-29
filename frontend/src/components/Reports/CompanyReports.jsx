@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BarChart3, Send, CheckCircle2, TrendingUp, DollarSign, PhoneCall, Award, Trophy,
   Download, Settings2, Columns3, Search, Building2, Info, Users, GitCompare, ListOrdered, PieChart,
-  ChevronUp, ChevronDown, Repeat, CalendarClock,
+  ChevronUp, ChevronDown, Repeat, CalendarClock, ShieldCheck,
 } from 'lucide-react';
 import client from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
@@ -23,6 +23,8 @@ import {
 import DailyBars from './DailyBars';
 import AgentReportDrawer from './AgentReportDrawer';
 import ReportSettings from './ReportSettings';
+import ReportAccessPanel from './ReportAccessPanel';
+import OverviewView, { SideBadge } from './OverviewView';
 
 // ============================================================================
 // CompanyReports -- per-agent performance for one company, and every company
@@ -52,15 +54,6 @@ function writeCols(side, cols) {
 
 const sideWord = (side) => (side === 'closer' ? 'closer' : 'fronter');
 
-function SideBadge({ side }) {
-  const a = accent(side === 'closer' ? 'info' : 'primary');
-  return (
-    <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider"
-      style={{ background: a.soft, color: a.fg }}>
-      {side === 'closer' ? 'Closer company' : 'Fronter company'}
-    </span>
-  );
-}
 
 function LeaderCard({ icon: Icon, title, leader, fmt, tone = 'primary', big = false, onOpen }) {
   const a = accent(tone);
@@ -165,6 +158,9 @@ export default function CompanyReports({ companyId: preferredCompanyId = null })
   const [q, setQ] = useState('');
   const [team, setTeam] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
+  const [showAccess, setShowAccess] = useState(false);
+  // An agent picked on the All-companies ladder opens once their company loads.
+  const [pendingAgent, setPendingAgent] = useState(null);
 
   // ── which companies may I open ──
   useEffect(() => {
@@ -177,7 +173,7 @@ export default function CompanyReports({ companyId: preferredCompanyId = null })
         const start = preferredCompanyId && ids.includes(preferredCompanyId) ? preferredCompanyId
           : s.default_company_id || ids[0] || null;
         // Estate-wide viewers with no company in mind open on the comparison.
-        setCompany(s.global && !preferredCompanyId && ids.length > 1 ? ALL : start);
+        setCompany(s.multi && s.global && !preferredCompanyId ? ALL : start);
       })
       .catch(() => { if (alive) setScope({ companies: [], global: false }); });
     return () => { alive = false; };
@@ -228,6 +224,12 @@ export default function CompanyReports({ companyId: preferredCompanyId = null })
 
   // reset per-company UI state
   useEffect(() => { setSelected([]); setOpenAgentId(null); setQ(''); setTeam(''); setSort({ key: null, dir: 'desc' }); }, [company]);
+  useEffect(() => {
+    if (pendingAgent && data?.company?.id === pendingAgent.company_id) {
+      setOpenAgentId(pendingAgent.user_id || '');
+      setPendingAgent(null);
+    }
+  }, [data, pendingAgent]);
 
   const agents = useMemo(() => data?.agents || [], [data]);
   const teams = useMemo(() => [...new Set(agents.map(a => a.team_name).filter(Boolean))].sort(), [agents]);
@@ -297,7 +299,7 @@ export default function CompanyReports({ companyId: preferredCompanyId = null })
   const earnerMetric = leaders.earner?.metric || data?.config?.earner_metric;
 
   const companyOptions = [
-    ...(scope.global && scope.companies.length > 1 ? [{ value: ALL, label: 'All companies' }] : []),
+    ...(scope.multi ? [{ value: ALL, label: 'All companies' }] : []),
     ...scope.companies.map(c => ({ value: c.id, label: c.name })),
   ];
 
@@ -320,6 +322,12 @@ export default function CompanyReports({ companyId: preferredCompanyId = null })
               </button>
             )}
             {scope.can_configure && (
+              <button type="button" onClick={() => setShowAccess(v => !v)} aria-pressed={showAccess}
+                className="btn btn-secondary inline-flex items-center gap-1.5 text-sm" title="Who can see these reports">
+                <ShieldCheck size={14} /> {showAccess ? 'Back to report' : 'Who can see'}
+              </button>
+            )}
+            {scope.can_configure && (
               <button type="button" onClick={() => setSettingsOpen(true)} className="btn btn-secondary inline-flex items-center gap-1.5 text-sm" title="Report settings">
                 <Settings2 size={14} /> Settings
               </button>
@@ -331,8 +339,11 @@ export default function CompanyReports({ companyId: preferredCompanyId = null })
         <Panel tone="surface" pad="sm" className="text-sm" style={{ color: accent('danger').fg }}>{error}</Panel>
       )}
 
-      {company === ALL
-        ? <OverviewTable overview={overview} loading={loading} onOpen={setCompany} />
+      {showAccess
+        ? <ReportAccessPanel />
+        : company === ALL
+        ? <OverviewView overview={overview} loading={loading} onOpenCompany={setCompany}
+            onOpenAgent={(a) => { setPendingAgent(a); setCompany(a.company_id); }} />
         : loading && !data
           ? <Loading variant="cards" cards={8} />
           : data && (
@@ -664,61 +675,5 @@ function Outcomes({ dispositions = [], boxes = [], total = 0 }) {
         )}
       </Panel>
     </div>
-  );
-}
-
-// ── All companies ───────────────────────────────────────────────────────────
-function OverviewTable({ overview, loading, onOpen }) {
-  if (loading && !overview) return <Loading variant="rows" rows={6} />;
-  if (!overview?.companies?.length) return <EmptyState icon={Building2} title="No companies to show" />;
-  const money = overview.can_see_money;
-  const th = 'px-3 py-2 text-[11px] font-bold uppercase tracking-wider whitespace-nowrap';
-  const rows = overview.companies.slice().sort((a, b) => (money ? (b.dp_sold || 0) - (a.dp_sold || 0) : b.sold - a.sold));
-  return (
-    <Panel tone="surface" pad="none" className="overflow-hidden">
-      <p className="text-xs m-0 px-3 pt-3" style={{ color: 'var(--color-text-secondary)' }}>
-        Every company, same rules. Fronter and closer companies count the same sales from opposite sides, so do not add the rows together. Click a company to open its agents.
-      </p>
-      <TableScroll stickyFirst label="All companies">
-        <table className="w-full text-sm mt-2">
-          <thead style={{ background: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>
-            <tr>
-              <th className={`${th} text-left`}>Company</th>
-              <th className={`${th} text-right`}>Agents</th>
-              <th className={`${th} text-right`}>Transfers</th>
-              <th className={`${th} text-right`}>Conversion</th>
-              <th className={`${th} text-right`}>Sold</th>
-              <th className={`${th} text-right`}>Stick rate</th>
-              <th className={`${th} text-right`}>Post-dates</th>
-              {money && <th className={`${th} text-right`}>Down payments</th>}
-              {money && <th className={`${th} text-right`}>Monthly book</th>}
-              <th className={`${th} text-left`}>Top agent</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map(c => (
-              <tr key={c.company?.id} onClick={() => onOpen(c.company?.id)} className="cursor-pointer"
-                style={{ borderTop: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text)' }}>
-                <td className="px-3 py-2 whitespace-nowrap">
-                  <span className="font-semibold">{c.company?.name}</span>
-                  <span className="ml-2"><SideBadge side={c.side} /></span>
-                </td>
-                <td className="px-3 py-2 text-right tabular-nums">{formatMetric('int', c.agents_active)}</td>
-                <td className="px-3 py-2 text-right tabular-nums">{formatMetric('int', c.transfers)}</td>
-                <td className="px-3 py-2 text-right tabular-nums">{formatMetric('pct', c.conversion)}</td>
-                <td className="px-3 py-2 text-right tabular-nums">{formatMetric('int', c.sold)}</td>
-                <td className="px-3 py-2 text-right tabular-nums">{formatMetric('pct', c.stick_rate)}</td>
-                <td className="px-3 py-2 text-right tabular-nums" style={{ color: 'var(--color-text-secondary)' }}>{formatMetric('int', c.post_dates)}</td>
-                {money && <td className="px-3 py-2 text-right tabular-nums">{formatMetric('money', c.dp_sold)}</td>}
-                {money && <td className="px-3 py-2 text-right tabular-nums">{formatMetric('money', c.monthly_active)}</td>}
-                <td className="px-3 py-2 whitespace-nowrap">
-                  {c.top_agent ? <>{c.top_agent.name} <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>{formatMetric(c.top_agent.metric === 'sold' ? 'int' : 'money', c.top_agent.value)}</span></> : '—'}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </TableScroll>
-    </Panel>
   );
 }
