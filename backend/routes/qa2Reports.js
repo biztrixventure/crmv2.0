@@ -27,6 +27,7 @@ const { isYes, fieldPoints, maxPoints, optionsByParam } = require('../utils/qa2S
 // The per-call scorecard report resolves its day exactly the way Load Day does
 // — an Eastern day, not a UTC one. See /reports/scorecards below.
 const { etDateToUtcStart, etDateToUtcEnd } = require('../utils/etUtils');
+const logger = require('../utils/logger');
 
 const LIVE_STATUSES = ['submitted', 'flagged'];
 
@@ -61,11 +62,36 @@ function applyRange(q, column, from, to) {
   return q;
 }
 
+// AN ID LIST RIDES IN THE URL. PostgREST puts `.in()` values in the query
+// string, so a few hundred uuids is a ~22kB URL and the request simply fails
+// ("TypeError: fetch failed") -- no rows, no error code, just nothing back.
+// Measured 2026-09-30: one month of scorecards = 610 evaluations = 22,569
+// characters, and the answers came back EMPTY, so every question cell on the
+// report rendered as a dash. A single day stayed under the limit, which is why
+// this only appeared once the report learned to take a range.
+//
+// 150 is the size the rest of this estate already settled on (the performance
+// report below, utils/qaRules.js, utils/dailyPerformance.js).
+const ID_CHUNK = 150;
+
+async function selectIn(table, select, column, ids, tweak) {
+  const list = [...new Set((ids || []).filter(Boolean))];
+  if (!list.length) return [];
+  const out = [];
+  for (let i = 0; i < list.length; i += ID_CHUNK) {
+    let q = supabaseAdmin.from(table).select(select).in(column, list.slice(i, i + ID_CHUNK));
+    if (tweak) q = tweak(q);
+    const { data, error } = await q;
+    // One bad chunk must not silently halve a report: say so, keep the rest.
+    if (error) logger.warn('QA2_REPORTS', `${table}.${column} chunk ${Math.floor(i / ID_CHUNK)}: ${error.message}`);
+    out.push(...(data || []));
+  }
+  return out;
+}
+
 async function nameMap(userIds) {
-  const ids = [...new Set(userIds.filter(Boolean))];
-  if (!ids.length) return new Map();
-  const { data } = await supabaseAdmin.from('user_profiles').select('user_id, first_name, last_name').in('user_id', ids);
-  return new Map((data || []).map(p => [p.user_id, `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'Unknown']));
+  const rows = await selectIn('user_profiles', 'user_id, first_name, last_name', 'user_id', userIds);
+  return new Map(rows.map(p => [p.user_id, `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'Unknown']));
 }
 
 // ── GET /qa2/reports/overview — the department as it stands today ─────────
@@ -428,12 +454,10 @@ router.get('/reports/autofails', asyncHandler(async (req, res) => {
   // reviewer/subject ids already on `evaluations`) don't depend on each
   // other — was two sequential round trips, now one wait.
   const evalIds = (evaluations || []).map(e => e.id);
-  const [{ data: answers }, names] = await Promise.all([
-    evalIds.length
-      ? supabaseAdmin.from('qa2_answer')
-          .select('evaluation_id, is_na, value_num, value_text, value_bool, qa2_parameter!inner(label, role, lineage_id)')
-          .in('evaluation_id', evalIds).eq('qa2_parameter.role', 'autofail')
-      : Promise.resolve({ data: [] }),
+  const [answers, names] = await Promise.all([
+    selectIn('qa2_answer',
+      'evaluation_id, is_na, value_num, value_text, value_bool, qa2_parameter!inner(label, role, lineage_id)',
+      'evaluation_id', evalIds, (q) => q.eq('qa2_parameter.role', 'autofail')),
     nameMap((evaluations || []).flatMap(e => [e.reviewer_id, e.subject_user_id])),
   ]);
   const counts = new Map();
@@ -649,32 +673,25 @@ router.get('/reports/scorecards', asyncHandler(async (req, res) => {
   // none depends on another's result, so they go together rather than in series.
   const evalIds = rowsRaw.map(e => e.id);
   const versionIds = [...new Set(rowsRaw.map(e => e.form_version_id).filter(Boolean))];
-  const [{ data: answers }, { data: params }, { data: sections }, names] = await Promise.all([
-    supabaseAdmin.from('qa2_answer')
-      .select('evaluation_id, parameter_id, value_num, value_text, value_bool, is_na, comment')
-      .in('evaluation_id', evalIds).limit(SCORECARD_CAP * 60),
-    versionIds.length
-      ? supabaseAdmin.from('qa2_parameter')
-          .select('id, form_version_id, section_id, lineage_id, key, label, input_type, role, points_yes, points_no, scale_min, scale_max, penalty_value, included_in_base, sort')
-          .in('form_version_id', versionIds)
-      : Promise.resolve({ data: [] }),
-    versionIds.length
-      ? supabaseAdmin.from('qa2_section').select('id, form_version_id, name, sort').in('form_version_id', versionIds)
-      : Promise.resolve({ data: [] }),
+  const [answers, paramRows, sections, names] = await Promise.all([
+    // Chunked: this is the list that broke the range report -- see selectIn.
+    selectIn('qa2_answer',
+      'evaluation_id, parameter_id, value_num, value_text, value_bool, is_na, comment',
+      'evaluation_id', evalIds),
+    selectIn('qa2_parameter',
+      'id, form_version_id, section_id, lineage_id, key, label, input_type, role, points_yes, points_no, scale_min, scale_max, penalty_value, included_in_base, sort',
+      'form_version_id', versionIds),
+    selectIn('qa2_section', 'id, form_version_id, name, sort', 'form_version_id', versionIds),
     nameMap([...rowsRaw.map(e => e.reviewer_id), ...rowsRaw.map(e => e.subject_user_id)]),
   ]);
-
-  const paramRows = params || [];
   const paramIds = paramRows.map(p => p.id);
   // Choice questions score through their option rows — fieldPoints/maxPoints
   // both resolve against that map, so it is built with the scoring engine's own
   // optionsByParam rather than a second interpretation of the same rows.
-  const { data: options } = paramIds.length
-    ? await supabaseAdmin.from('qa2_parameter_option').select('parameter_id, value, label, points, is_pass').in('parameter_id', paramIds)
-    : { data: [] };
-  const optMap = optionsByParam(options || []);
+  const options = await selectIn('qa2_parameter_option', 'parameter_id, value, label, points, is_pass', 'parameter_id', paramIds);
+  const optMap = optionsByParam(options);
   const paramById = new Map(paramRows.map(p => [p.id, p]));
-  const sectionById = new Map((sections || []).map(s => [s.id, s]));
+  const sectionById = new Map(sections.map(s => [s.id, s]));
 
   // One COLUMN per question lineage. The latest version's wording wins — that
   // is what the form says today — and the widest max stands as the denominator.
@@ -696,7 +713,7 @@ router.get('/reports/scorecards', asyncHandler(async (req, res) => {
     (a.section_sort - b.section_sort) || (a.sort - b.sort) || String(a.label).localeCompare(String(b.label)));
 
   const byEval = new Map();
-  for (const a of (answers || [])) {
+  for (const a of answers) {
     if (!byEval.has(a.evaluation_id)) byEval.set(a.evaluation_id, []);
     byEval.get(a.evaluation_id).push(a);
   }
@@ -710,7 +727,7 @@ router.get('/reports/scorecards', asyncHandler(async (req, res) => {
       case 'scale':
       case 'number': return a.value_num == null ? '—' : String(a.value_num);
       case 'choice': {
-        const opt = (options || []).find(o => o.parameter_id === p.id && String(o.value) === String(a.value_text ?? ''));
+        const opt = options.find(o => o.parameter_id === p.id && String(o.value) === String(a.value_text ?? ''));
         return opt?.label || a.value_text || '—';
       }
       default: return a.value_text || '—';
