@@ -741,11 +741,15 @@ function CoverageSection({ params }) {
 // an agent disputes a score, when a reviewer's work is being checked, and when
 // the day's sheet has to go to a fronter manager.
 //
-// Own date + method controls rather than the shared from/to range: it is a
-// one-day report by design, and the parameter columns only line up within a
-// single method's form.
+// Own date + method controls rather than the shared from/to range: the range
+// here means CALL days (or scored days -- the toggle below), and the parameter
+// columns only line up within a single method's form.
+//
+// A RANGE, not one day: a week's marking is one question. Both pickers open on
+// today, so the default is the single day it always was.
 function ScorecardsSection({ params }) {
-  const [date, setDate] = useState(() => todayET());
+  const [from, setFrom] = useState(() => todayET());
+  const [to, setTo] = useState(() => todayET());
   const [dateField, setDateField] = useState('call');   // call day | scored on
   const [methods, setMethods] = useState([]);
   const [methodId, setMethodId] = useState('');
@@ -759,16 +763,22 @@ function ScorecardsSection({ params }) {
   }, []);
 
   useEffect(() => {
-    if (!date) return;
+    if (!from || !to || to < from) return;
     let dead = false;
     setData(null); setErr(null);
     client.get('qa2/reports/scorecards', {
-      params: { ...params, date, date_field: dateField, ...(methodId ? { method_id: methodId } : {}) },
+      params: { ...params, from, to, date_field: dateField, ...(methodId ? { method_id: methodId } : {}) },
     })
       .then(r => { if (!dead) setData(r.data); })
-      .catch(e => { if (!dead) setErr(e.response?.data?.error || 'Could not load that day'); });
+      .catch(e => { if (!dead) setErr(e.response?.data?.error || 'Could not load those dates'); });
     return () => { dead = true; };
-  }, [params, date, dateField, methodId]);
+  }, [params, from, to, dateField, methodId]);
+
+  // What a row's date MEANS follows the toggle: in 'scored' mode the useful
+  // date is when it was marked, not when the call happened.
+  const rowDate = (r) => (dateField === 'scored' ? r.scored_at : r.call_at);
+  const fmtDay = (v) => { try { return v ? new Date(v).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '\u2014'; } catch { return '\u2014'; } };
+  const oneDay = from === to;
 
   const cols = data?.columns || [];
   const rows = data?.rows || [];
@@ -804,8 +814,12 @@ function ScorecardsSection({ params }) {
     <div className="space-y-3">
       <Panel className="flex flex-wrap items-end gap-2">
         <div>
-          <div className="text-[11px] font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>Day</div>
-          <ThemedDate value={date} onChange={e => setDate(e.target.value)} />
+          <div className="text-[11px] font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>From</div>
+          <ThemedDate value={from} max={to || undefined} onChange={e => setFrom(e.target.value)} />
+        </div>
+        <div>
+          <div className="text-[11px] font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>To</div>
+          <ThemedDate value={to} min={from || undefined} onChange={e => setTo(e.target.value)} />
         </div>
         <div className="min-w-[160px]">
           <div className="text-[11px] font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>Method</div>
@@ -815,9 +829,9 @@ function ScorecardsSection({ params }) {
           </ThemedSelect>
         </div>
         <div>
-          <div className="text-[11px] font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>Day means</div>
+          <div className="text-[11px] font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>Dates mean</div>
           <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
-            {[['call', 'Called that day'], ['scored', 'Scored that day']].map(([k, label]) => (
+            {[['call', 'Called then'], ['scored', 'Scored then']].map(([k, label]) => (
               <button key={k} onClick={() => setDateField(k)} className="text-xs font-semibold px-3 py-1.5"
                 style={{ background: dateField === k ? 'var(--gradient-sidebar)' : 'transparent', color: dateField === k ? 'var(--color-text-inverse)' : 'var(--color-text-secondary)' }}>
                 {label}
@@ -828,9 +842,10 @@ function ScorecardsSection({ params }) {
         <div className="ml-auto">
           <ExportButton
             rows={rows}
-            headers={['Number', 'Agent', 'Evaluator', 'Method', 'Company', 'Call time', 'Result', 'Score', ...cols.map(c => c.label)]}
-            filename={`qa2-scorecards-${date}${methodId ? '-' + (methods.find(m => m.id === methodId)?.label || '') : ''}.csv`}
+            headers={['Date', 'Number', 'Agent', 'Evaluator', 'Method', 'Company', 'Call time', 'Result', 'Score', ...cols.map(c => c.label)]}
+            filename={`qa2-scorecards-${from}${oneDay ? '' : `_to_${to}`}${methodId ? '-' + (methods.find(m => m.id === methodId)?.label || '') : ''}.csv`}
             mapRow={r => [
+              (rowDate(r) || '').slice(0, 10),
               r.phone || '', r.agent_name || '', r.reviewer_name || '', r.method || '', r.company || '',
               fmtTime(r.call_at), r.result || '', r.final_score == null ? '' : r.final_score,
               ...cols.map(c => {
@@ -853,19 +868,19 @@ function ScorecardsSection({ params }) {
             <KpiTile label="Numbers' agents" value={NUM(data.totals?.agents)} />
             <KpiTile label="Evaluators" value={NUM(data.totals?.reviewers)} />
             <KpiTile label="Average score" value={data.totals?.avg_score == null ? '—' : `${data.totals.avg_score}%`} />
-            <KpiTile label="Passed" value={NUM(data.totals?.passes)} hint={data.totals?.evaluations ? `${pct(data.totals.passes, data.totals.evaluations)}% of the day` : undefined} />
+            <KpiTile label="Passed" value={NUM(data.totals?.passes)} hint={data.totals?.evaluations ? `${pct(data.totals.passes, data.totals.evaluations)}% of these` : undefined} />
             <KpiTile label="Autofails" value={NUM(data.totals?.autofails)} />
           </div>
 
           <TruncatedBanner truncated={data.truncated} />
 
           {!rows.length ? (
-            <EmptyState icon={ClipboardList} title="Nothing scored for that day"
-              subtitle={`No submitted evaluations for ${date}${methodId ? ' on that method' : ''}. Try the other day setting, another method, or a different date.`} />
+            <EmptyState icon={ClipboardList} title={oneDay ? 'Nothing scored for that day' : 'Nothing scored in those dates'}
+              subtitle={`No submitted evaluations for ${oneDay ? from : `${from} to ${to}`}${methodId ? ' on that method' : ''}. Try the other date setting, another method, or a wider range.`} />
           ) : (
             <Panel>
               <SectionHeader level="section" title={`${rows.length} number${rows.length === 1 ? '' : 's'} scored`}
-                subtitle="One row per evaluation — the number, who was on it, who marked it, and every question's answer. Red is a marked-down answer; the last row is the day's average per question." />
+                subtitle="One row per evaluation — the number, who was on it, who marked it, and every question's answer. Red is a marked-down answer; the last row averages each question across everything shown." />
               <TableScroll>
                 <table className="w-full text-xs" style={{ minWidth: 'max-content' }}>
                   <thead>
@@ -873,6 +888,7 @@ function ScorecardsSection({ params }) {
                       <th className={th} style={{ ...stick(0), background: 'var(--color-surface)' }}>Number</th>
                       <th className={th} style={{ ...stick(112), background: 'var(--color-surface)' }}>Agent</th>
                       <th className={th} style={{ ...stick(232), background: 'var(--color-surface)' }}>Evaluator</th>
+                      {!oneDay && <th className={th}>Date</th>}
                       <th className={th}>Time</th>
                       <th className={th}>Method</th>
                       <th className={th}>Result</th>
@@ -898,6 +914,10 @@ function ScorecardsSection({ params }) {
                         <td className={td} style={{ ...stick(232), color: 'var(--color-text-secondary)' }}>
                           <div className="max-w-[110px] truncate" title={r.reviewer_name || ''}>{r.reviewer_name || '—'}</div>
                         </td>
+                        {!oneDay && (
+                          <td className={td} style={{ color: 'var(--color-text-secondary)' }}
+                            title={rowDate(r) ? new Date(rowDate(r)).toLocaleString() : ''}>{fmtDay(rowDate(r))}</td>
+                        )}
                         <td className={td} style={{ color: 'var(--color-text-tertiary)' }}>{fmtTime(r.call_at)}</td>
                         <td className={td} style={{ color: 'var(--color-text-secondary)' }}>{r.method || '—'}</td>
                         <td className={`${td} font-bold`} style={{ color: resultTone(r.result) }}>

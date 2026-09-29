@@ -561,7 +561,7 @@ router.get('/reports/coverage', asyncHandler(async (req, res) => {
   res.json({ rows: result, ...capInfo(calls, COVERAGE_CAP) });
 }));
 
-// ── GET /qa2/reports/scorecards — one day, one method, every number scored ──
+// ── GET /qa2/reports/scorecards — a date RANGE, one method, every number ───
 // Every other report here is an AGGREGATE: rates, averages, totals. A manager
 // also has to read the actual marking — number by number, the way the scorecard
 // was filled in — to check a reviewer's work, to answer an agent who disputes a
@@ -571,10 +571,15 @@ router.get('/reports/coverage', asyncHandler(async (req, res) => {
 // One row per evaluation: the number, who was on the call, who scored it, and a
 // cell PER PARAMETER carrying both what was answered and what it earned.
 //
-// The day is an EASTERN day, resolved with the same etDateToUtcStart/End Load
+// The days are EASTERN days, resolved with the same etDateToUtcStart/End Load
 // Day uses. A manager who picks the 24th there and the 24th here has to get the
 // same calls; UTC midnight would quietly move the boundary four or five hours
 // and split one shift across two reports.
+//
+// RANGE, not a single day (2026-09-30). A week's marking is one question, and
+// asking it seven times and pasting seven exports together is not an answer.
+// `from`/`to` are inclusive; `date` is still honoured on its own so a saved
+// link or an older client keeps working, and a lone `from` means that one day.
 //
 // Columns key on `lineage_id`, not parameter id: editing a form mints a new
 // version with new parameter rows for the SAME questions, and keying on the id
@@ -582,12 +587,27 @@ router.get('/reports/coverage', asyncHandler(async (req, res) => {
 router.get('/reports/scorecards', asyncHandler(async (req, res) => {
   const scope = await requireViewer(req, res);
   if (!scope) return;
-  const { date, method_id, company_id, agent_id, reviewer_id } = req.query;
-  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-    return res.status(400).json({ error: 'date is required, as YYYY-MM-DD' });
+  const { date, from, to, method_id, company_id, agent_id, reviewer_id } = req.query;
+  const isDay = (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
+  // from/to win; `date` on its own still means that single day.
+  const fromDay = isDay(from) ? from : (isDay(date) ? date : null);
+  const toDay = isDay(to) ? to : (isDay(date) && !isDay(from) ? date : fromDay);
+  if (!fromDay || !toDay) {
+    return res.status(400).json({ error: 'from and to are required, as YYYY-MM-DD' });
   }
-  const start = etDateToUtcStart(date);
-  const end = etDateToUtcEnd(date);
+  if (toDay < fromDay) return res.status(400).json({ error: 'The end date is before the start date' });
+
+  // A cap on the SPAN, separate from the row cap below: a year of one method
+  // would come back as a truncated 2000 rows that looks complete. 92 days is a
+  // quarter, past anything anyone reads cell by cell.
+  const MAX_DAYS = 92;
+  const days = Math.round((Date.parse(toDay + 'T00:00:00Z') - Date.parse(fromDay + 'T00:00:00Z')) / 86400000) + 1;
+  if (days > MAX_DAYS) {
+    return res.status(400).json({ error: `That is ${days} days. Pick ${MAX_DAYS} days or fewer.` });
+  }
+
+  const start = etDateToUtcStart(fromDay);
+  const end = etDateToUtcEnd(toDay);
   if (!start || !end) return res.status(400).json({ error: 'Invalid date' });
 
   // 'scored' answers "what did my reviewers mark today", 'call' answers "how
@@ -621,7 +641,9 @@ router.get('/reports/scorecards', asyncHandler(async (req, res) => {
   const { data: evals, error } = await q;
   if (error) return res.status(500).json({ error: error.message });
   const rowsRaw = evals || [];
-  if (!rowsRaw.length) return res.json({ date, columns: [], rows: [], totals: null, truncated: false });
+  if (!rowsRaw.length) {
+    return res.json({ from: fromDay, to: toDay, days, date: fromDay, columns: [], rows: [], totals: null, truncated: false });
+  }
 
   // The answers, the questions they belong to, their sections and the names —
   // none depends on another's result, so they go together rather than in series.
@@ -790,7 +812,9 @@ router.get('/reports/scorecards', asyncHandler(async (req, res) => {
   };
 
   res.json({
-    date, date_field: byScoredDay ? 'scored' : 'call',
+    from: fromDay, to: toDay, days,
+    date: fromDay,                       // back-compat with the single-day clients
+    date_field: byScoredDay ? 'scored' : 'call',
     columns: columnList, rows, totals, ...capInfo(rowsRaw, SCORECARD_CAP),
   });
 }));
