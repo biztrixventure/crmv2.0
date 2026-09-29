@@ -38,6 +38,7 @@ const NAV_SECTIONS = [
       { id: 'companies',     label: 'Companies',       icon: Building2  },
       { id: 'teams',         label: 'Teams',           icon: Users      },
       { id: 'quota_report',  label: 'Team Performance', icon: Target     },
+      { id: 'company-reports', label: 'Company Reports', icon: BarChart3 },
       { id: 'user-control',  label: 'User Control',    icon: UserCircle },
       { id: 'clients-plans', label: 'Clients & Plans', icon: Tag        },
       { id: 'forms',         label: 'Form Builder',    icon: FileText   },

@@ -313,7 +313,9 @@ const StaffShell = () => {
     // enforces the same answer.
     ...(hasPermission('qa2.view_own_scores') && qaScoresVisible
       ? [{ key: 'qa2_scores', label: 'QA Scores', icon: Award }] : []),
+    // Company Reports (mig 332): role permission OR the per-person tool switch.
     ...(hasPermission('view_fronter_stats') || hasPermission('view_closer_stats') || hasPermission('view_company_reports') || hasPermission('view_reports')
+      || isEnabledStrict('tool_company_reports')
       ? [{ key: 'reports', label: 'Reports', icon: BarChart3}] : []),
     // Monthly-payment reminders — closers (and anyone who can see sales) get
     // their due policies to call + confirm payment.

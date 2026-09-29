@@ -189,7 +189,7 @@ A VICIdial `lead_id` names a **LEAD, not a transfer EVENT** — the dialer recyc
 - No name on the XFER → seeded from the same customer's last named transfer **in the same company**, then from the dialer itself via `enrichFromDialer()` (`lead_field_info`, archive-proof). Historical repair: `POST /api/vicidial/backfill/names` (superadmin, batched + cursor).
 
 ### Post-dated sales (mig 083 + 221)
-A post-date is a **reminder, not a sale** — the card has not been charged, so it must never be counted as one. Identity is a string match on `closer_disposition` (`/post[\s_-]?date|postdate/i`) defined in **three places that must stay in sync**: `backend/utils/postDate.js`, `frontend/src/utils/dispositions.js`, and `fn_stamp_post_date` in mig 221.
+A post-date is a **reminder, not a sale** — the card has not been charged, so it must never be counted as one. Identity is a string match on `closer_disposition` (`/post[\s_-]?date|postdate/i`) defined in **four places that must stay in sync**: `backend/utils/postDate.js`, `frontend/src/utils/dispositions.js`, `fn_stamp_post_date` in mig 221, and `fn_is_post_date()` in mig 332 (Company Reports).
 - Use `excludePostDate(q)` from `backend/utils/postDate.js` for any new sales count. It is NULL-safe — the naive `.not('closer_disposition','ilike',…)` evaluates to NULL, not TRUE, for a NULL disposition and silently drops those rows.
 - `GET /sales` takes `exclude_post_date=true` (opt-in, so exports and admin tooling still see every row).
 - `post_dated_at` / `post_date_converted_at` are trigger-stamped and survive the charge — they drive the compliance `P → S` pill. Do **not** try to derive this from `policy_events`: its `charged` event fires on the scheduler's reminder stamp, not on the charge, and it never writes `post_dated` at all.
@@ -420,6 +420,50 @@ record, so EVERY transfer and EVERY sale carries the answer on the row.
   not fetched with it and the badge renders nothing. Named selects are the
   recurring trap here — `/vicidial/pending` and the four QA2 lists each had to
   be widened by hand.
+
+### Company Reports -- per-agent performance (mig 332, applied 2026-09-29)
+One screen, `components/Reports/CompanyReports.jsx`, mounted by ReportsPanel
+(manager + staff "Reports"), ComplianceShell ("Agent Reports") and AdminPanel
+("Company Reports", company picker + All companies). API `/api/company-reports`
+(`routes/companyReports.js`); ALL counting is ONE SQL call,
+`app_company_agent_report(company, from, to, hide_resells)` (+
+`app_company_report_overview` for All companies), service-role only. It replaced
+`GET /stats/leaderboards` (40k rows paged into Node) -- do not bring that back.
+- **Scope flips with company_type.** Every sale and transfer is filed under the
+  FRONTER company (verified 2026-09-29: 7,966 of 7,966 sales). A closer company is
+  therefore scoped by its ROSTER (`closer_id` / `assigned_closer_id` among ALL its
+  members, active or not); a fronter company by `company_id`.
+- **Access = two doors**, decided in ONE place, `resolveScope()`: a report
+  permission on the role (`view_company_reports` / `view_fronter_stats` /
+  `view_closer_stats` / `view_reports`) for companies the user is a member of, OR
+  the per-person switch `tool_company_reports` (User Control Center -> Tools; fails
+  CLOSED if its catalog row is missing). superadmin + compliance_manager: any
+  company; readonly_admin: governance companies. Asking for another company is a
+  403 -- never a silent fallback.
+- **Definitions.** SOLD = non-post-date sale in the range, whatever happened
+  later; ACTIVE = still closed_won; STICK RATE = active / sold (most sales cancel
+  ~day 60). CONVERSION is transfer-cohort (transfers in range that have a sale,
+  any date). Money = `down_payment` (USD even though `companies.currency` says
+  PKR); "Est. collected" = DP + monthly x whole months live (an ESTIMATE, no
+  ledger). Days are US Eastern; `sale_date` as stored. QA = QA2 (`qa2_evaluation`,
+  submitted, not superseded/voided, `subject_role` = the report's side).
+- **Placeholders + unattributed.** `business_config reports.company.placeholder_users`
+  (seeded with the Onyx placeholder, 289 sales) stay in totals, are labelled, and
+  are NEVER ranked / top earner / best partner. A sale with no fronter is one
+  "Unattributed" row, never zero for someone. Sales re-credited to a fronter on a
+  transfer someone else created count as `recredited`, not conversion.
+- **Per-viewer rules live in `utils/companyReport.js` (pure, tested):** no
+  `view_financial_data` -> every amount AND every money ranking removed (rank by
+  sales); agent-level viewer -> QA only if `qa.agent_scores` allows.
+- **Dynamic by design.** Columns = `frontend/src/config/companyReportMetrics.js`
+  (ONE catalog feeds table, column chooser, Compare, CSV, Settings). A new metric =
+  one catalog entry (+ the field in the SQL if it is new data). Superadmin
+  Settings (gear) edit `reports.company` globally or per company: placeholders,
+  top-earner metric, best-partner minimum sample, hidden metrics, inactive rows.
+- CSV goes through `auditedCSV('company_reports', ...)` (egress log + daily cap).
+- Known data issue it surfaces: 1-Vertex (closer co) holds 2,285 July-Aug VICIdial
+  "transfers" created under the closer company -- mis-attributed dialer rows, not
+  fixed here.
 
 ### Knowledge base + training are per COMPANY (mig 331, applied 2026-09-26)
 Scripts / rebuttals / FAQs had **no `company_id`** -- every row was estate-wide --

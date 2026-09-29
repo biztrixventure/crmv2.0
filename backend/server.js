@@ -33,6 +33,7 @@ const transfersRoutes = require('./routes/transfers');
 const salesRoutes = require('./routes/sales');
 const payoutsRoutes = require('./routes/payouts');
 const statsRoutes = require('./routes/stats');
+const companyReportsRoutes = require('./routes/companyReports');
 const notificationsRoutes = require('./routes/notifications');
 const saleConfigsRoutes   = require('./routes/sale-configs');
 const callbacksRoutes     = require('./routes/callbacks');
@@ -536,6 +537,9 @@ app.use('/api/callbacks',   authMiddleware, readonlyGuard, egressAudit, readonly
 app.use('/api/payment-reminders', authMiddleware, readonlyGuard, paymentRemindersRoutes);
 app.use('/api/push',        authMiddleware, readonlyGuard, pushRoutes);
 app.use('/api/stats',       authMiddleware, readonlyGuard, statsRoutes);
+// Company Reports (mig 332) -- per-agent performance; scoping + two-door access
+// gate live inside the router (resolveScope).
+app.use('/api/company-reports', authMiddleware, readonlyGuard, companyReportsRoutes);
 app.use('/api/notifications', authMiddleware, readonlyGuard, notificationsRoutes);
 app.use('/api/reviews',      authMiddleware, readonlyGuard, egressAudit, reviewsRoutes);
 app.use('/api/callback-numbers',  authMiddleware, readonlyGuard, callbackNumbersRoutes);

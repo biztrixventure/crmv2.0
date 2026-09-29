@@ -49,11 +49,14 @@ import TrainingPortal      from '../components/Training/TrainingPortal';
 // My HR (stage 2): the compliance manager's own record, payslips, leave,
 // attendance and expense claims -- same component every shell mounts.
 import MyHR                from '../components/Modules/MyHR';
-import { IdCard }          from 'lucide-react';
+import { IdCard, BarChart3 } from 'lucide-react';
+// Company Reports (mig 332) -- per-agent performance, any company (compliance is estate-wide).
+import CompanyReports      from '../components/Reports/CompanyReports';
 
 const CODE_TABS = [
   { key: 'companies',   label: 'Companies',          icon: Building2 },
   { key: 'calendar',    label: 'Calendar',           icon: CalendarDays },
+  { key: 'company_reports', label: 'Agent Reports',  icon: BarChart3 },
   { key: 'queue',       label: 'Review Queue',       icon: Clock },
   { key: 'payments',    label: 'Payments at Risk',   icon: AlertTriangle },
   { key: 'sales',       label: 'All Sales',          icon: FileText },
@@ -87,7 +90,7 @@ const CODE_TABS = [
 // drop out of their group; a key we don't recognize (future tabs) lands in
 // "More" so nothing can ever disappear.
 const TAB_GROUPS = [
-  { id: 'overview', label: 'Overview',        icon: Building2,      keys: ['companies', 'calendar'] },
+  { id: 'overview', label: 'Overview',        icon: Building2,      keys: ['companies', 'calendar', 'company_reports'] },
   { id: 'review',   label: 'Compliance Work', icon: Clock,          keys: ['queue', 'rec_review', 'payments', 'double_sold', 'bulk_status'] },
   { id: 'records',  label: 'Records',         icon: FileText,       keys: ['sales', 'transfers', 'callbacks'] },
   // Batches owns upload → assign → dispositions; Assigned Numbers / Number
@@ -297,6 +300,7 @@ const ComplianceShell = () => {
             onNavigate={navigateTo}
           />
         )}
+        {activeTab === 'company_reports' && <CompanyReports />}
         {activeTab === 'calendar' && (
           <EventsCalendar canEdit={false} />
         )}

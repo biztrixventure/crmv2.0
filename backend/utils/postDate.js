@@ -21,7 +21,8 @@
  * closer_disposition matches /post[\s_-]?date|postdate/i — the disposition
  * value comes from the live form_fields options, so the frontend resolves which
  * option is "the post-date one" at render time (isPostDateDispo in
- * frontend/src/utils/dispositions.js). Keep the two regexes identical.
+ * frontend/src/utils/dispositions.js). Keep the regexes identical -- here, there,
+ * fn_stamp_post_date (mig 221) and fn_is_post_date() (mig 332, Company Reports).
  *
  * ── THE NULL TRAP (read before touching excludePostDate) ────────────────────
  * `q.not('closer_disposition','ilike','%post%date%')` compiles to

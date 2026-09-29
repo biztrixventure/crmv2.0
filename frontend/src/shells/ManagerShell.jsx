@@ -253,7 +253,10 @@ const ManagerShell = ({ workspaceMode = false }) => {
       ? [{ key: 'forms',   label: 'Forms',   icon: FileText }] : []),
     ...((hasPermission('view_all_call_reviews') || hasPermission('view_call_reviews')) && isEnabled('call_reviews')
       ? [{ key: 'reviews', label: 'Reviews', icon: Star     }] : []),
-    ...((hasPermission('view_fronter_stats') || hasPermission('view_closer_stats') || hasPermission('view_company_reports') || hasPermission('view_reports')) && isEnabled('reports')
+    // Company Reports (mig 332): a report permission on the role, OR the
+    // per-person switch in User Control Center -> Tools (tool_company_reports).
+    ...(((hasPermission('view_fronter_stats') || hasPermission('view_closer_stats') || hasPermission('view_company_reports') || hasPermission('view_reports')) && isEnabled('reports'))
+      || isEnabledStrict('tool_company_reports')
       ? [{ key: 'reports', label: 'Reports', icon: BarChart3}] : []),
     // Monthly-payment reminders — team view of due policies.
     //
