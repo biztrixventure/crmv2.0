@@ -144,7 +144,8 @@ export default function CompanyReports({ companyId: preferredCompanyId = null })
 
   const [scope, setScope] = useState(null);
   const [company, setCompany] = useState(null);
-  const [range, setRange] = useState(() => getPresetRange('30d'));
+  // Opens on THIS MONTH -- the period the floor is run and paid on.
+  const [range, setRange] = useState(() => getPresetRange('month'));
   const [data, setData] = useState(null);
   const [overview, setOverview] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -315,7 +316,7 @@ export default function CompanyReports({ companyId: preferredCompanyId = null })
                 {companyOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
               </ThemedSelect>
             )}
-            <DateRangePicker onChange={setRange} defaultPreset="30d" />
+            <DateRangePicker onChange={setRange} defaultPreset="month" />
             {canDownload && (
               <button type="button" onClick={exportCsv} disabled={loading} className="btn btn-secondary inline-flex items-center gap-1.5 text-sm">
                 <Download size={14} /> Export CSV

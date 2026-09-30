@@ -57,11 +57,13 @@ function addDays(day, n) {
   return isoDay(d);
 }
 
-// Inclusive US-Eastern dates. Default: the last 30 days ending today (ET).
+// Inclusive US-Eastern dates. Default: THIS MONTH so far -- the 1st of the
+// end date's month through the end date (today, ET). A month is how the floor
+// is run and paid, so that is what a report opens on.
 function parseRange(from, to, todayEt) {
   const today = todayEt || isoDay(new Date());
   const t = DAY_RE.test(String(to || '')) ? String(to) : today;
-  const f = DAY_RE.test(String(from || '')) ? String(from) : addDays(t, -29);
+  const f = DAY_RE.test(String(from || '')) ? String(from) : `${t.slice(0, 8)}01`;
   if (Number.isNaN(Date.parse(`${f}T00:00:00Z`)) || Number.isNaN(Date.parse(`${t}T00:00:00Z`))) {
     return { error: 'Dates must be YYYY-MM-DD.' };
   }
@@ -335,8 +337,16 @@ function buildOverview(rows, cfg, opts = {}) {
         ? { user_id: top.user_id, name: top.name || 'Unknown', value: num(top[sortKey]), metric: sortKey }
         : null,
       // the company's podium, by the same ranking metric
+      // [0] is the top performer, [1] the runner-up -- each with what they did,
+      // so the card can say WHY they are on top, not just their name.
       top_agents: ladder.filter(a => num(a[sortKey]) > 0).slice(0, 3).map(a => ({
-        user_id: a.user_id, name: a.name || 'Unknown', sold: num(a.sold), value: num(a[sortKey]), metric: sortKey,
+        user_id: a.user_id, name: a.name || 'Unknown', team_name: a.team_name || null,
+        sold: num(a.sold), active: num(a.active), cancelled: num(a.cancelled),
+        transfers: num(a.transfers), xfer_sold: num(a.xfer_sold),
+        conversion: rate(num(a.xfer_sold), num(a.transfers)),
+        stick_rate: rate(num(a.active), num(a.sold)),
+        qa_avg: a.qa_avg ?? null, dp_sold: num(a.dp_sold),
+        value: num(a[sortKey]), metric: sortKey,
       })),
     };
     return canFin ? row : stripFields(row, MONEY_FIELDS);

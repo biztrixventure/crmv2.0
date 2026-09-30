@@ -460,10 +460,14 @@ One screen, `components/Reports/CompanyReports.jsx`, mounted by ReportsPanel
   Settings; `rankMetric()` drops it back to `sold` for any viewer without amounts
   (a money ORDER leaks money). Every surface leads with sales: leader card, company
   cards, comparison bars, ladder columns -- keep money to the right / last.
+- **Opens on THIS MONTH** (1st of the month -> today, US Eastern), in the UI
+  (`getPresetRange('month')`) and in `parseRange()`'s fallback -- not a rolling
+  30 days. A month is how the floor is run and paid.
 - **All companies = one KPI card per company** (`OverviewView.jsx` `CompanyCard`):
   sales first, still active, stick rate, conversion, transfers, agents, callbacks,
-  QA, then post-dates and (last) money, plus the company's top 3 agents by the
-  ranking metric (`buildOverview().companies[].top_agents`).
+  QA, then post-dates and (last) money, then a TOP PERFORMER and a RUNNER-UP block
+  (`Performer`) with each one's sales count, still-active, transfers, conversion
+  and how far the runner-up is behind (`buildOverview().companies[].top_agents`).
 - **Definitions.** SOLD = non-post-date sale in the range, whatever happened
   later; ACTIVE = still closed_won; STICK RATE = active / sold (most sales cancel
   ~day 60). CONVERSION is transfer-cohort (transfers in range that have a sale,

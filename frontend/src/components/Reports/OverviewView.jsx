@@ -60,8 +60,50 @@ function Kpi({ label, value, sub, strong = false, tip }) {
   );
 }
 
-// One company: its sales first, then everything else about it, its top three
-// agents, and (last, if the viewer may see amounts) the money.
+// The top performer / runner-up of one company: the name, the number of sales
+// that put them there (the big number), and what else they did. Money is the
+// last line and only for viewers who may see amounts.
+function Performer({ place, a, lead, closer, money, onOpen }) {
+  const top = place === 'top';
+  const tone = accent(top ? 'success' : 'info');
+  const Icon = top ? Crown : Trophy;
+  return (
+    <button type="button" onClick={onOpen}
+      className="text-left rounded-xl px-3 py-2.5 min-w-0 cursor-pointer hover:shadow-md transition-shadow"
+      style={{ background: top ? tone.soft : 'var(--color-bg)', border: `1px solid ${top ? tone.fg : 'var(--color-border)'}` }}>
+      <p className="text-[10px] font-bold uppercase tracking-wider m-0 leading-none flex items-center gap-1" style={{ color: 'var(--color-text-secondary)' }}>
+        <Icon size={12} style={{ color: tone.fg }} /> {top ? 'Top performer' : 'Runner-up'}
+      </p>
+      <div className="flex items-end justify-between gap-2 mt-1.5">
+        <div className="min-w-0">
+          <p className="text-sm font-bold m-0 truncate" style={{ color: 'var(--color-text)' }}>{a.name}</p>
+          {a.team_name && <p className="text-[11px] m-0 truncate" style={{ color: 'var(--color-text-tertiary)' }}>{a.team_name}</p>}
+        </div>
+        <p className="m-0 text-right flex-shrink-0 leading-none">
+          <span className="text-2xl font-bold tabular-nums" style={{ color: 'var(--color-text)' }}>{formatMetric('int', a.sold)}</span>
+          <span className="block text-[10px] font-bold uppercase tracking-wider mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>sale{a.sold === 1 ? '' : 's'}</span>
+        </p>
+      </div>
+      <p className="text-[11px] m-0 mt-1.5" style={{ color: 'var(--color-text-secondary)' }}>
+        {formatMetric('int', a.active)} still active ({formatMetric('pct', a.stick_rate)})
+        {' · '}{formatMetric('int', a.transfers)} {closer ? 'received' : 'transfers'}
+        {' · '}{formatMetric('pct', a.conversion)} conversion
+        {a.qa_avg != null && <>{' · '}QA {formatMetric('pct', a.qa_avg)}</>}
+      </p>
+      {!top && lead != null && (
+        <p className="text-[11px] m-0 mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>
+          {lead > 0 ? `${lead} sale${lead === 1 ? '' : 's'} behind the top` : 'level with the top on sales'}
+        </p>
+      )}
+      {money && a.dp_sold != null && (
+        <p className="text-[11px] m-0 mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>Down payments {formatMetric('money', a.dp_sold)}</p>
+      )}
+    </button>
+  );
+}
+
+// One company: its sales first, then everything else about it, its top
+// performer and runner-up, and (last, if the viewer may see amounts) the money.
 function CompanyCard({ c, money, onOpenCompany, onOpenAgent }) {
   const closer = c.side === 'closer';
   return (
@@ -100,25 +142,31 @@ function CompanyCard({ c, money, onOpenCompany, onOpenAgent }) {
         {money && <span>Monthly book <b style={{ color: 'var(--color-text)' }}>{formatMetric('money', c.monthly_active)}</b></span>}
       </div>
 
+      {/* who is on top in this company, what they did, and who is chasing them */}
       <div className="pt-3" style={{ borderTop: '1px solid var(--color-border)' }}>
-        <p className="text-[10px] font-bold uppercase tracking-wider m-0 mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Top agents</p>
         {(c.top_agents || []).length === 0
-          ? <p className="text-xs m-0" style={{ color: 'var(--color-text-tertiary)' }}>No sales in this range.</p>
+          ? <p className="text-xs m-0" style={{ color: 'var(--color-text-tertiary)' }}>Nobody has a sale in this range yet.</p>
           : (
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-              {c.top_agents.map((a, i) => (
-                <button type="button" key={a.user_id} onClick={() => onOpenAgent({ user_id: a.user_id, company_id: c.company?.id })}
-                  className="flex items-center gap-2 rounded-xl px-2.5 py-1.5 text-left min-w-0"
-                  style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
-                  <span className="text-xs font-bold tabular-nums flex-shrink-0" style={{ color: accent('warn').fg }}>{i + 1}</span>
-                  <span className="text-sm font-semibold truncate" style={{ color: 'var(--color-text)' }}>{a.name}</span>
-                  <span className="ml-auto text-xs tabular-nums whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>
-                    {formatMetric('int', a.sold)} sale{a.sold === 1 ? '' : 's'}
-                  </span>
-                </button>
-              ))}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <Performer place="top" a={c.top_agents[0]} closer={closer} money={money}
+                onOpen={() => onOpenAgent({ user_id: c.top_agents[0].user_id, company_id: c.company?.id })} />
+              {c.top_agents[1]
+                ? <Performer place="runner" a={c.top_agents[1]} lead={c.top_agents[0].sold - c.top_agents[1].sold} closer={closer} money={money}
+                    onOpen={() => onOpenAgent({ user_id: c.top_agents[1].user_id, company_id: c.company?.id })} />
+                : (
+                  <div className="rounded-xl px-3 py-2.5 flex items-center text-xs" style={{ border: '1px dashed var(--color-border)', color: 'var(--color-text-tertiary)' }}>
+                    No runner-up yet — nobody else has a sale in this range.
+                  </div>
+                )}
             </div>
           )}
+        {c.top_agents?.[2] && (
+          <p className="text-xs m-0 mt-2" style={{ color: 'var(--color-text-secondary)' }}>
+            3rd: <button type="button" className="font-semibold" style={{ color: 'var(--color-text)' }}
+              onClick={() => onOpenAgent({ user_id: c.top_agents[2].user_id, company_id: c.company?.id })}>{c.top_agents[2].name}</button>
+            {' '}· {formatMetric('int', c.top_agents[2].sold)} sale{c.top_agents[2].sold === 1 ? '' : 's'}
+          </p>
+        )}
       </div>
     </Panel>
   );

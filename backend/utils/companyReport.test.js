@@ -50,15 +50,17 @@ function raw(over = {}) {
 const cfg = { placeholder_users: [P], earner_metric: 'dp_sold', best_partner_min: 5 };
 
 describe('parseRange', () => {
-  test('defaults to the 30 days ending today', () => {
-    expect(parseRange(undefined, undefined, '2026-09-29')).toEqual({ from: '2026-08-31', to: '2026-09-29', days: 30 });
+  test('defaults to THIS MONTH so far', () => {
+    expect(parseRange(undefined, undefined, '2026-09-29')).toEqual({ from: '2026-09-01', to: '2026-09-29', days: 29 });
+    expect(parseRange(undefined, undefined, '2026-10-01')).toEqual({ from: '2026-10-01', to: '2026-10-01', days: 1 });
   });
   test('rejects a backwards range and anything over 400 days', () => {
     expect(parseRange('2026-09-10', '2026-09-01').error).toBeTruthy();
     expect(parseRange('2024-01-01', '2026-09-01').error).toBeTruthy();
   });
   test('garbage dates fall back rather than reaching SQL', () => {
-    expect(parseRange("2026-09-01'; drop", '2026-09-10', '2026-09-29').from).toBe('2026-08-12');
+    expect(parseRange("2026-09-01'; drop", '2026-09-10', '2026-09-29').from).toBe('2026-09-01');
+    expect(parseRange("x'; drop", '2026-08-20', '2026-09-29').from).toBe('2026-08-01');
   });
 });
 
@@ -262,7 +264,9 @@ describe('ranking is by SALES COUNT unless a superadmin picks otherwise', () => 
       agents: [{ user_id: A, name: 'Ann', sold: 6, dp_sold: 100 }, { user_id: B, name: 'Bob', sold: 3, dp_sold: 900 }] }];
     const o = buildOverview(rows, bySales, { canFin: true, days: 30 });
     expect(o.earner_metric).toBe('sold');
-    expect(o.companies[0].top_agents.map(a => a.name)).toEqual(['Ann', 'Bob']);
+    expect(o.companies[0].top_agents.map(a => a.name)).toEqual(['Ann', 'Bob']);   // top performer, runner-up
+    expect(o.companies[0].top_agents[0]).toMatchObject({ sold: 6, value: 6, metric: 'sold' });
+    expect(JSON.stringify(buildOverview(rows, bySales, { canFin: false }).companies[0].top_agents)).not.toContain('dp_sold');
     expect(o.companies[0]).toMatchObject({ sales_per_agent: 4.5, daily_avg: 2 });
     expect(o.agents[0]).toMatchObject({ user_id: A, rank: 1 });
   });
