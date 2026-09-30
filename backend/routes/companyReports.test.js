@@ -269,6 +269,6 @@ describe('settings', () => {
     expect((await request(app).put('/api/company-reports/config').set('x-user', MGR_A).send(body)).status).toBe(403);
     const r = await request(app).put('/api/company-reports/config').set('x-user', ADMIN).send(body);
     expect(r.status).toBe(200);
-    expect(r.body.config).toMatchObject({ placeholder_users: [MGR_A], earner_metric: 'dp_sold', best_partner_min: 3 });
+    expect(r.body.config).toMatchObject({ placeholder_users: [MGR_A], earner_metric: 'sold', best_partner_min: 3 });
   });
 });

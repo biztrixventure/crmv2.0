@@ -66,7 +66,7 @@ describe('sanitizeConfig', () => {
   test('drops non-uuid placeholders, unknown earner metrics and silly sample sizes', () => {
     const c = sanitizeConfig({ placeholder_users: ['x', P, P], earner_metric: 'transfers', best_partner_min: 99999 });
     expect(c.placeholder_users).toEqual([P]);
-    expect(c.earner_metric).toBe('dp_sold');
+    expect(c.earner_metric).toBe('sold');   // sales count is the default ranking, never money
     expect(c.best_partner_min).toBe(500);
   });
 });
@@ -145,9 +145,11 @@ describe('viewer without view_financial_data', () => {
   const json = JSON.stringify(r);
 
   test('no money field survives anywhere', () => {
-    for (const k of ['dp_sold', 'dp_active', 'est_collected', 'monthly_active', 'avg_deal', 'dp', 'earner_value']) {
+    for (const k of ['dp_sold', 'dp_active', 'est_collected', 'monthly_active', 'avg_deal', 'dp']) {
       expect(json).not.toContain(`"${k}"`);
     }
+    // the ranking value they do get is the sales count, never an amount
+    expect(r.agents.filter(a => a.rank).every(a => a.earner_value === a.sold)).toBe(true);
   });
 
   test('ranking and top earner fall back to sales, and the money ranking is gone', () => {
@@ -233,5 +235,35 @@ describe('effectiveAccess', () => {
     expect(effectiveAccess({ memberships: [admin], override: { show_amounts: false }, companies })).toMatchObject({ amounts: false, amounts_source: 'person' });
     expect(effectiveAccess({ memberships: [fronter], override: { can_view: true, show_amounts: true }, companies })).toMatchObject({ can_view: true, amounts: true });
     expect(effectiveAccess({ memberships: [fronter], override: { can_view: true, company_ids: ['b'] }, companies }).companies).toEqual([{ id: 'b', name: 'B' }]);
+  });
+});
+
+describe('ranking is by SALES COUNT unless a superadmin picks otherwise', () => {
+  const bySales = { placeholder_users: [P] };            // no earner_metric -> the default
+  test('default: the agent with the most sales is on top, even with less money', () => {
+    const r0 = raw();
+    r0.agents[0].sold = 3; r0.agents[0].dp_sold = 100;     // Ann: 3 sales, little money
+    r0.agents[1].sold = 2; r0.agents[1].dp_sold = 5000;    // Bob: 2 sales, lots of money
+    const r = buildReport(r0, bySales, { canFin: true });
+    expect(r.config.earner_metric).toBe('sold');
+    expect(r.agents[0].user_id).toBe(A);
+    expect(r.leaders.earner).toMatchObject({ user_id: A, value: 3, metric: 'sold' });
+  });
+  test('a money metric still works when chosen, and falls back to sales for viewers without amounts', () => {
+    const r0 = raw();
+    r0.agents[0].sold = 3; r0.agents[0].dp_sold = 100;
+    r0.agents[1].sold = 2; r0.agents[1].dp_sold = 5000;
+    const money = { placeholder_users: [P], earner_metric: 'dp_sold' };
+    expect(buildReport(r0, money, { canFin: true }).agents[0].user_id).toBe(B);
+    expect(buildReport(r0, money, { canFin: false }).agents[0].user_id).toBe(A);
+  });
+  test('overview: companies carry a sales podium and the ladder is by sales', () => {
+    const rows = [{ company: { id: 'c1', name: 'Wave' }, side: 'fronter', agents_active: 2, totals: { sold: 9, transfers: 60 },
+      agents: [{ user_id: A, name: 'Ann', sold: 6, dp_sold: 100 }, { user_id: B, name: 'Bob', sold: 3, dp_sold: 900 }] }];
+    const o = buildOverview(rows, bySales, { canFin: true, days: 30 });
+    expect(o.earner_metric).toBe('sold');
+    expect(o.companies[0].top_agents.map(a => a.name)).toEqual(['Ann', 'Bob']);
+    expect(o.companies[0]).toMatchObject({ sales_per_agent: 4.5, daily_avg: 2 });
+    expect(o.agents[0]).toMatchObject({ user_id: A, rank: 1 });
   });
 });

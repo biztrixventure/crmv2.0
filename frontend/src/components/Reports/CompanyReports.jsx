@@ -18,7 +18,7 @@ import { toast } from '../../utils/toast';
 import { auditedCSV } from '../../utils/moduleExport';
 import { buildFilename } from '../../utils/downloadFilename';
 import {
-  METRIC_GROUPS, availableMetrics, defaultColumns, formatMetric, metricLabel, metricValue, metricCsv, earnerLabel,
+  METRIC_GROUPS, availableMetrics, defaultColumns, formatMetric, metricLabel, metricValue, metricCsv, earnerLabel, earnerFmt,
 } from '../../config/companyReportMetrics';
 import DailyBars from './DailyBars';
 import AgentReportDrawer from './AgentReportDrawer';
@@ -379,12 +379,12 @@ export default function CompanyReports({ companyId: preferredCompanyId = null })
                       value={formatMetric('pct', t.cb_completion)} sub={`${formatMetric('int', t.cb_completed)} of ${formatMetric('int', t.cb_total)} · ${formatMetric('int', t.cb_missed)} missed`} />}
               </div>
 
-              {/* ── who is making the most money ── */}
+              {/* ── who is on top (by sales count unless Settings say otherwise) ── */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
                 <LeaderCard big icon={Trophy} tone="success" onOpen={setOpenAgentId}
-                  title={money ? `Top earner · ${earnerLabel(earnerMetric)}` : 'Top seller'}
-                  leader={leaders.earner} fmt={money && earnerMetric !== 'sold' ? 'money' : 'int'} />
-                <LeaderCard icon={CheckCircle2} title="Most sales" leader={leaders.most_sold} fmt="int" onOpen={setOpenAgentId} />
+                  title={`Top agent · most ${earnerLabel(earnerMetric)}`}
+                  leader={leaders.earner} fmt={earnerFmt(earnerMetric)} />
+                <LeaderCard icon={Send} title={side === 'closer' ? 'Most transfers received' : 'Most transfers'} leader={leaders.most_transfers} fmt="int" onOpen={setOpenAgentId} />
                 <LeaderCard icon={TrendingUp} title={`Best conversion (≥${data.config?.best_partner_min} transfers)`} leader={leaders.best_conversion} fmt="pct" onOpen={setOpenAgentId} />
                 <LeaderCard icon={Repeat} title={`Best stick rate (≥${data.config?.best_partner_min} sold)`} leader={leaders.best_stick} fmt="pct" onOpen={setOpenAgentId} />
               </div>

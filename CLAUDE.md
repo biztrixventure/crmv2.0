@@ -421,7 +421,7 @@ record, so EVERY transfer and EVERY sale carries the answer on the row.
   recurring trap here — `/vicidial/pending` and the four QA2 lists each had to
   be widened by hand.
 
-### Company Reports -- per-agent performance (migs 332 + 333, applied 2026-09-29)
+### Company Reports -- per-agent performance (migs 332-334, applied 2026-09-30)
 One screen, `components/Reports/CompanyReports.jsx`, mounted by ReportsPanel
 (manager + staff "Reports"), ComplianceShell ("Agent Reports") and AdminPanel
 ("Company Reports", company picker + All companies). API `/api/company-reports`
@@ -452,6 +452,18 @@ One screen, `components/Reports/CompanyReports.jsx`, mounted by ReportsPanel
 - **All companies** (anyone with 2+ companies): company comparison bars + table,
   and ONE agent ladder across companies (`buildOverview().agents`), fronters and
   closers ranked separately (same sale seen from both ends).
+- **RANKING IS BY SALES COUNT, never money by default** (mig 334). The number of
+  sales is what an agent and a company are judged on; money is a later option.
+  `EARNER_METRICS` (backend `utils/companyReport.js`, mirrored in
+  `config/companyReportMetrics.js`) lists `sold`, `active` first and the money
+  metrics after; default `sold`. A superadmin may still pick a money metric in
+  Settings; `rankMetric()` drops it back to `sold` for any viewer without amounts
+  (a money ORDER leaks money). Every surface leads with sales: leader card, company
+  cards, comparison bars, ladder columns -- keep money to the right / last.
+- **All companies = one KPI card per company** (`OverviewView.jsx` `CompanyCard`):
+  sales first, still active, stick rate, conversion, transfers, agents, callbacks,
+  QA, then post-dates and (last) money, plus the company's top 3 agents by the
+  ranking metric (`buildOverview().companies[].top_agents`).
 - **Definitions.** SOLD = non-post-date sale in the range, whatever happened
   later; ACTIVE = still closed_won; STICK RATE = active / sold (most sales cancel
   ~day 60). CONVERSION is transfer-cohort (transfers in range that have a sale,

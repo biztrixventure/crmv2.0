@@ -232,7 +232,7 @@ router.get('/overview', asyncHandler(async (req, res) => {
     }
     return data || [];
   });
-  let out = report.buildOverview(raw, cfg, { canFin });
+  let out = report.buildOverview(raw, cfg, { canFin, days: range.days });
   if (!showQa) out = report.stripFields(out, report.QA_FIELDS);
   res.json({ ...out, range });
 }));

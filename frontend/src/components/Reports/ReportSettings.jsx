@@ -12,7 +12,7 @@ import { METRICS, METRIC_GROUPS, EARNER_METRICS, metricLabel } from '../../confi
 // Everything here changes what the report SHOWS; none of it changes what is
 // counted -- that is the SQL's job and stays the same for every viewer.
 // ============================================================================
-const FALLBACK = { placeholder_users: [], earner_metric: 'dp_sold', best_partner_min: 5, hidden_metrics: [], show_inactive: false };
+const FALLBACK = { placeholder_users: [], earner_metric: 'sold', best_partner_min: 5, hidden_metrics: [], show_inactive: false };
 
 export default function ReportSettings({ open, onClose, companyId, companyName, side, agents = [], onSaved }) {
   const [scope, setScope] = useState('global');
@@ -75,7 +75,7 @@ export default function ReportSettings({ open, onClose, companyId, companyName, 
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              {label('Top earner is ranked by')}
+              {label('Agents are ranked by')}
               <ThemedSelect value={cfg.earner_metric} onChange={e => set({ earner_metric: e.target.value })} className="input">
                 {EARNER_METRICS.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}
               </ThemedSelect>

@@ -157,13 +157,20 @@ export function formatMetric(fmt, v) {
   }
 }
 
-// Earner metrics the settings may rank "top earner" by (mirrors the backend
-// EARNER_METRICS list in utils/companyReport.js).
+// What agents are ranked by (mirrors EARNER_METRICS in backend
+// utils/companyReport.js, same order). SALES COUNT is first and the default:
+// the number of sales is what an agent is judged on in this CRM. Money metrics
+// come after it and are never the default.
 export const EARNER_METRICS = [
-  { key: 'dp_sold',        label: 'Down payments (all sales)' },
-  { key: 'dp_active',      label: 'Down payments (still active)' },
-  { key: 'est_collected',  label: 'Estimated collected' },
-  { key: 'monthly_active', label: 'Monthly book' },
+  { key: 'sold',           label: 'Sales (count)',               short: 'sales' },
+  { key: 'active',         label: 'Sales still active (count)',  short: 'active sales' },
+  { key: 'dp_sold',        label: 'Down payments (all sales)',   short: 'down payments', money: true },
+  { key: 'dp_active',      label: 'Down payments (still active)', short: 'active down payments', money: true },
+  { key: 'est_collected',  label: 'Estimated collected',         short: 'est. collected', money: true },
+  { key: 'monthly_active', label: 'Monthly book',                short: 'monthly book', money: true },
 ];
 
-export const earnerLabel = (key) => (EARNER_METRICS.find(m => m.key === key)?.label || (key === 'sold' ? 'Sales' : key));
+export const earnerLabel = (key) => (EARNER_METRICS.find(m => m.key === key)?.short || key);
+export const isMoneyMetric = (key) => !!EARNER_METRICS.find(m => m.key === key)?.money;
+// How to print a ranking value: a count, or an amount.
+export const earnerFmt = (key) => (isMoneyMetric(key) ? 'money' : 'int');

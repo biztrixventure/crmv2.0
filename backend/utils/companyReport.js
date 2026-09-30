@@ -23,18 +23,23 @@
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_DAYS = 400;
 
-// The metrics the "top earner" may be ranked by. Money-only on purpose: the
-// question it answers is "who makes the company the most money".
-const EARNER_METRICS = ['dp_sold', 'dp_active', 'est_collected', 'monthly_active'];
+// What agents are ranked by, in the order the settings offer them. SALES COUNT
+// comes first and is the default: in this CRM the number of sales is what an
+// agent is judged on, and money is a secondary view of the same work. The money
+// metrics stay available to a superadmin, never as the default.
+const EARNER_METRICS = ['sold', 'active', 'dp_sold', 'dp_active', 'est_collected', 'monthly_active'];
+const MONEY_RANK_METRICS = new Set(['dp_sold', 'dp_active', 'est_collected', 'monthly_active']);
+// A viewer without amounts is never ranked by money -- the ORDER would leak it.
+const rankMetric = (configured, canFin) => (MONEY_RANK_METRICS.has(configured) && !canFin ? 'sold' : configured);
 
 // Every money field on an agent row / totals / pair. Stripped for viewers
 // without view_financial_data.
-const MONEY_FIELDS = ['dp_sold', 'dp_active', 'monthly_active', 'est_collected', 'avg_deal', 'dp', 'earner_value'];
+const MONEY_FIELDS = ['dp_sold', 'dp_active', 'monthly_active', 'est_collected', 'avg_deal', 'dp'];
 const QA_FIELDS = ['qa_n', 'qa_avg', 'qa_pass', 'qa_pass_rate'];
 
 const DEFAULT_CONFIG = Object.freeze({
   placeholder_users: [],
-  earner_metric: 'dp_sold',
+  earner_metric: 'sold',
   best_partner_min: 5,
   hidden_metrics: [],
   show_inactive: false,
@@ -172,8 +177,7 @@ function buildReport(raw, cfg, opts = {}) {
     companySeries.set(d, c);
   }
 
-  // Without money the ORDER must not be a money order either: rank by sales.
-  const earnerKey = canFin ? config.earner_metric : 'sold';
+  const earnerKey = rankMetric(config.earner_metric, canFin);
 
   let agents = (raw?.agents || []).map((a) => {
     const k = a.user_id || '';
@@ -203,7 +207,7 @@ function buildReport(raw, cfg, opts = {}) {
   // Rank: real, attributed people only.
   const rankable = (a) => !a.placeholder && !a.unattributed;
   const ranked = agents.filter(rankable).sort((x, y) =>
-    (y.earner_value - x.earner_value) || (y.sold - x.sold) || (y.transfers - x.transfers));
+    (y.earner_value - x.earner_value) || (y.sold - x.sold) || (num(y.active) - num(x.active)) || (y.transfers - x.transfers));
   ranked.forEach((a, i) => { a.rank = i + 1; });
   const labelled = agents.filter(a => !rankable(a));
   labelled.forEach((a) => { a.rank = null; });
@@ -309,13 +313,19 @@ function buildOverview(rows, cfg, opts = {}) {
   const list = (rows || []).map((r) => {
     const t = r.totals || {};
     const agents = (r.agents || []).filter(a => a.user_id && !placeholders.has(a.user_id));
-    const sortKey = canFin ? key : 'sold';
-    const top = agents.slice().sort((x, y) => (num(y[sortKey]) - num(x[sortKey])) || (num(y.sold) - num(x.sold)))[0];
+    const sortKey = rankMetric(key, canFin);
+    const ladder = agents.slice().sort((x, y) => (num(y[sortKey]) - num(x[sortKey])) || (num(y.sold) - num(x.sold)) || (num(y.active) - num(x.active)));
+    const top = ladder[0];
+    const days = num(opts.days) || 0;
     const row = {
       company: r.company, side: r.side,
       agents_active: num(r.agents_active),
       transfers: num(t.transfers), xfer_sold: num(t.xfer_sold), sold: num(t.sold), active: num(t.active),
-      cancelled: num(t.cancelled), post_dates: num(t.post_dates), unattributed: num(t.unattributed),
+      cancelled: num(t.cancelled), in_review: num(t.in_review), post_dates: num(t.post_dates), unattributed: num(t.unattributed),
+      daily_avg: days ? Math.round((num(t.transfers) / days) * 10) / 10 : null,
+      sales_per_agent: num(r.agents_active) ? Math.round((num(t.sold) / num(r.agents_active)) * 10) / 10 : null,
+      cb_total: num(t.cb_total), cb_completed: num(t.cb_completed), cb_missed: num(t.cb_missed),
+      qa_pass_rate: rate(num(t.qa_pass), num(t.qa_n)),
       dp_sold: num(t.dp_sold), dp_active: num(t.dp_active), est_collected: num(t.est_collected), monthly_active: num(t.monthly_active),
       conversion: rate(num(t.xfer_sold), num(t.transfers)),
       stick_rate: rate(num(t.active), num(t.sold)),
@@ -324,6 +334,10 @@ function buildOverview(rows, cfg, opts = {}) {
       top_agent: top && num(top[sortKey]) > 0
         ? { user_id: top.user_id, name: top.name || 'Unknown', value: num(top[sortKey]), metric: sortKey }
         : null,
+      // the company's podium, by the same ranking metric
+      top_agents: ladder.filter(a => num(a[sortKey]) > 0).slice(0, 3).map(a => ({
+        user_id: a.user_id, name: a.name || 'Unknown', sold: num(a.sold), value: num(a[sortKey]), metric: sortKey,
+      })),
     };
     return canFin ? row : stripFields(row, MONEY_FIELDS);
   });
@@ -331,7 +345,7 @@ function buildOverview(rows, cfg, opts = {}) {
   // Every agent of every company in one list -- "whose agent is on top".
   // Ranked WITHIN a side: a fronter's sale and a closer's sale are the same
   // sale seen from two ends, so one ladder mixing both would count it twice.
-  const rankKey = canFin ? key : 'sold';
+  const rankKey = rankMetric(key, canFin);
   let agents = [];
   for (const r of rows || []) {
     for (const a of r.agents || []) {
@@ -348,7 +362,7 @@ function buildOverview(rows, cfg, opts = {}) {
   }
   for (const side of ['fronter', 'closer']) {
     agents.filter(a => a.side === side && !a.placeholder && !a.unattributed)
-      .sort((x, y) => (num(y[rankKey]) - num(x[rankKey])) || (num(y.sold) - num(x.sold)) || (num(y.transfers) - num(x.transfers)))
+      .sort((x, y) => (num(y[rankKey]) - num(x[rankKey])) || (num(y.sold) - num(x.sold)) || (num(y.active) - num(x.active)) || (num(y.transfers) - num(x.transfers)))
       .forEach((a, i) => { a.rank = i + 1; });
   }
   agents.forEach((a) => { if (a.rank === undefined) a.rank = null; });
