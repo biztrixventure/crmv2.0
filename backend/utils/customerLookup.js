@@ -183,6 +183,109 @@ async function call(path, params, { userId, label } = {}) {
   }
 }
 
+// ── the same call, but READ AS IT ARRIVES ───────────────────────────────────
+// One phone number can hold ten people, and each needs its own page fetch
+// upstream. /api/lookup stays silent for ~33s and then answers everything;
+// /api/lookup/stream sends NDJSON -- the names and addresses of all N within a
+// few seconds, then each full person as their page lands.
+//
+// So this must never buffer: it reads the body chunk by chunk, splits on
+// newlines, and hands each parsed object to `onLine` the moment it exists.
+//
+// NO TOTAL TIMEOUT. `call` aborts at cfg.timeoutMs, which is right for a single
+// answer and fatal here -- a healthy stream legitimately runs longer. The guard
+// is IDLE time instead: the service sends a `waiting` keep-alive while a slow
+// page is in flight, so silence, not duration, is the failure.
+//
+// A line we cannot parse is skipped, never fatal, and an event we do not
+// recognise is passed on: the service adds events over time, and the client is
+// the one that decides what to ignore.
+const STREAM_IDLE_MS = 120_000;
+
+async function stream(path, params, { userId, label, onLine, signal } = {}) {
+  const cfg = await settings();
+  if (!cfg.enabled) return { ok: false, status: 503, error: 'Customer lookup is turned off' };
+  if (!cfg.baseUrl) return { ok: false, status: 503, error: cfg.baseError || 'No lookup base URL configured' };
+  const key = await getApiKey();
+  if (!key)         return { ok: false, status: 503, error: 'No lookup API key configured' };
+
+  let url;
+  try {
+    url = new URL(cfg.baseUrl + path);
+    for (const [k, v] of Object.entries(params || {})) {
+      if (v !== undefined && v !== null && String(v).trim() !== '') url.searchParams.set(k, String(v).trim());
+    }
+  } catch { return { ok: false, status: 500, error: 'Could not build the lookup URL' }; }
+
+  const t0 = Date.now();
+  const ac = new AbortController();
+  const onAbort = () => ac.abort();
+  signal?.addEventListener('abort', onAbort);
+  let idled = false;
+  let idle = setTimeout(() => { idled = true; ac.abort(); }, STREAM_IDLE_MS);
+  const keepAlive = () => {
+    clearTimeout(idle);
+    idle = setTimeout(() => { idled = true; ac.abort(); }, STREAM_IDLE_MS);
+  };
+
+  try {
+    const r = await fetch(url, {
+      headers: { 'X-API-Key': key, Accept: 'application/x-ndjson' },
+      signal: ac.signal,
+      redirect: 'manual',
+    });
+    logger.info('CUSTOMER_LOOKUP', `${label || path} by ${userId || 'unknown'} -> ${r.status} (stream)`);
+
+    if (r.status === 401 || r.status === 403) return { ok: false, status: 502, error: 'The lookup service rejected the API key' };
+    if (r.status === 429) {
+      // Their daily quota, not ours, and it is not retryable today.
+      let body = null; try { body = await r.json(); } catch { /* not json */ }
+      return { ok: false, status: 429, error: body?.error || 'The lookup service has hit its daily quota' };
+    }
+    if (r.status >= 300 && r.status < 400) return { ok: false, status: 502, error: 'The lookup service asked for a login — check the API key and base URL' };
+    if (!r.ok) {
+      let body = null; try { body = await r.json(); } catch { /* not json */ }
+      return { ok: false, status: 502, error: body?.error || `Lookup service error (${r.status})` };
+    }
+    if (!r.body) return { ok: false, status: 502, error: 'The lookup service sent no stream' };
+
+    let buf = '';
+    let lines = 0;
+    for await (const chunk of r.body) {
+      keepAlive();
+      buf += Buffer.from(chunk).toString('utf8');
+      let nl;
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (!line) continue;
+        let obj; try { obj = JSON.parse(line); } catch { continue; }   // half a line, or noise
+        lines += 1;
+        await onLine?.(obj);
+      }
+    }
+    const tail = buf.trim();
+    if (tail) { try { const obj = JSON.parse(tail); lines += 1; await onLine?.(obj); } catch { /* ignore */ } }
+
+    logger.info('CUSTOMER_LOOKUP', `${label || path} streamed ${lines} events in ${Date.now() - t0}ms`);
+    return { ok: true, status: 200, lines };
+  } catch (e) {
+    const cancelled = !!signal?.aborted && !idled;
+    logger.warn('CUSTOMER_LOOKUP', `${label || path} stream ended after ${Date.now() - t0}ms: ${cancelled ? 'client left' : e.message}`);
+    if (cancelled) return { ok: false, status: 499, error: 'Cancelled', cancelled: true };
+    return {
+      ok: false,
+      status: idled ? 504 : 502,
+      error: idled
+        ? 'The lookup service went quiet. Try again — the second attempt is usually cached.'
+        : 'Could not reach the lookup service',
+    };
+  } finally {
+    clearTimeout(idle);
+    signal?.removeEventListener('abort', onAbort);
+  }
+}
+
 // Digits-only, last 10 — then hyphenated, the form the service's own examples
 // use (772-475-7074).
 function normPhone(p) {
@@ -347,7 +450,7 @@ module.exports = {
   KEY_NAME, DEFAULT_BASE,
   getApiKey, setApiKey, normalizeBase, settings,
   userMap, accessFor, setAccess,
-  rateLimit, call, normPhone,
+  rateLimit, call, stream, normPhone,
   globalQuota, setGlobalQuota, quotaFor, setUserQuota,
   quotaStatus, consume, refund, resetUsage, readUsage,
 };

@@ -134,6 +134,67 @@ router.get('/person', asyncHandler(async (req, res) => {
   await finish(req, res, r, 'people');
 }));
 
+// ── person lookup, STREAMED ──────────────────────────────────────────────────
+// The same search as /person, read as it arrives. The browser gets the names
+// and addresses of everyone on the number within a few seconds and fills each
+// row in as that person's detail page lands, instead of watching a spinner for
+// ~33 seconds.
+//
+// NDJSON straight through, one object per line, in the order the service sent
+// them -- including events this code has never heard of, because the service
+// adds events over time and the client is the one that decides what to ignore.
+// The only line we mint ourselves is an `error` when the upstream never opens.
+//
+// The API key stays here. That is the whole reason this is a proxy rather than
+// a direct call from the browser.
+router.get('/person/stream', asyncHandler(async (req, res) => {
+  if (!await guard(req, res, 'people')) return;
+  const phone = cl.normPhone(req.query.phone);
+  if (!phone) {
+    await cl.refund(req.user.id, 'people');
+    return res.status(422).json({ error: 'Enter a 10-digit US phone number' });
+  }
+
+  res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  // A proxy buffers a response by default, which would hold every line back
+  // until the end and undo the entire point of streaming.
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders?.();
+
+  // The browser navigating away must stop the upstream work, not leak a socket.
+  const ac = new AbortController();
+  res.on('close', () => ac.abort());
+
+  let sawEnd = false;
+  const r = await cl.stream('/api/lookup/stream', {
+    phone,
+    name: req.query.name,
+    mode: req.query.mode === 'quick' ? 'quick' : undefined,
+    scrape: req.query.scrape === '0' ? '0' : undefined,
+    refresh: req.query.refresh === '1' ? '1' : undefined,
+  }, {
+    userId: req.user.id,
+    label: `person stream ${phone}`,
+    signal: ac.signal,
+    onLine: (obj) => {
+      if (obj?.event === 'done' || obj?.event === 'error') sawEnd = true;
+      if (!res.writableEnded) res.write(JSON.stringify(obj) + '\n');
+    },
+  });
+
+  // A search that produced nothing is not one the person should be charged for
+  // -- the same rule finish() applies to the blocking route.
+  if (!r.ok && !sawEnd) {
+    await cl.refund(req.user.id, 'people');
+    if (!r.cancelled && !res.writableEnded) {
+      res.write(JSON.stringify({ event: 'error', error: r.error, status: r.status }) + '\n');
+    }
+  }
+  if (!res.writableEnded) res.end();
+}));
+
 // ── free-text search ─────────────────────────────────────────────────────────
 router.get('/search', asyncHandler(async (req, res) => {
   if (!await guard(req, res, 'people')) return;

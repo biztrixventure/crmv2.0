@@ -97,6 +97,65 @@ function splitFullAddress(v) {
   return { street: parts.slice(0, Math.max(1, parts.length - 2)).join(', '), zip: m[2] };
 }
 
+// ── the phone lookup, read as it arrives ────────────────────────────────────
+// One number can hold ten people, and each of them needs a page fetch upstream.
+// The blocking endpoint said nothing for ~33 seconds and then answered
+// everything; the stream sends every name and address in a few seconds and then
+// each full person as their page lands.
+//
+// NDJSON over fetch rather than EventSource: EventSource cannot set an
+// Authorization header, and this route sits behind the same JWT as the rest.
+//
+// Two rules from the service, both load-bearing:
+//   * switch on `event` and IGNORE anything unrecognised -- they add events
+//     over time and that must never break this panel;
+//   * `waiting` is a keep-alive, NOT an error. Gaps of seconds are normal, so
+//     there is no client-side read timeout here at all; the only ways out are
+//     the stream ending, `done`, `error`, or the user starting another search.
+async function streamPersonLookup({ phone, name, cacheOnly, signal, onEvent }) {
+  const base = String(client.defaults.baseURL || '').replace(/\/+$/, '');
+  const qs = new URLSearchParams({ phone });
+  if (name) qs.set('name', name);
+  if (cacheOnly) qs.set('scrape', '0');
+
+  const token = localStorage.getItem('token');
+  const headers = { Accept: 'application/x-ndjson' };
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  const res = await fetch(`${base}/customer-lookup/person/stream?${qs.toString()}`, { headers, signal });
+
+  // The backend may not carry this route yet (it ships either side of this
+  // bundle): fall back to the blocking path rather than showing an error.
+  if (res.status === 404) return { unsupported: true };
+  if (!res.ok || !res.body) {
+    let msg = 'Lookup failed.';
+    try { const j = await res.json(); msg = j?.error || msg; } catch { /* not json */ }
+    const err = new Error(msg);
+    err.status = res.status;
+    throw err;
+  }
+
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '';
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let nl;
+    while ((nl = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      if (!line) continue;
+      let obj; try { obj = JSON.parse(line); } catch { continue; }   // half a line
+      onEvent(obj);
+    }
+  }
+  const tail = buf.trim();
+  if (tail) { try { onEvent(JSON.parse(tail)); } catch { /* ignore */ } }
+  return { unsupported: false };
+}
+
 // The service answers /lookup as { result } and /search as { results:[{data}] }.
 // Flatten either into one list of person objects, most complete first.
 function peopleFrom(data) {
@@ -761,6 +820,10 @@ export default function CustomerLookupPanel({ access: accessProp }) {
   const [vDob, setVDob]         = useState('');
   const [vMode, setVMode]       = useState('auto');    // cache | auto | fresh
   const [jobNote, setJobNote]   = useState('');        // live progress of a running search
+  // The stream in flight, so a second search (or leaving the panel) stops the
+  // first instead of racing it into the same state.
+  const streamRef = useRef(null);
+  useEffect(() => () => streamRef.current?.abort(), []);
   const [quota, setQuota]       = useState(null);
   const [vins, setVins]         = useState({});   // vehicle row index -> VIN state
 
@@ -884,22 +947,82 @@ export default function CustomerLookupPanel({ access: accessProp }) {
         } else {
           setPData(r.data);
         }
-      } else {
-        const r = mode === 'phone'
-          ? await client.get('customer-lookup/person', { params: { phone: digits(phone), name: name.trim() || undefined, scrape: cacheOnly ? '0' : undefined } })
-          : await client.get('customer-lookup/search', { params: { q: q.trim() } });
-        // A phone that is not already on file is fetched through the job queue,
-        // so the answer may be a ticket rather than the record. A cached hit
-        // still comes back inline — one branch handles both.
-        if (r.data?.job) {
-          setJobNote('Searching…');
-          const done = await pollJob(r.data.job, (sec) => setJobNote(`Searching… ${sec}s`));
-          setPData(done);
-        } else {
-          setPData(r.data);
+      } else if (mode === 'phone') {
+        // STREAMED: rows appear as the service finds them.
+        streamRef.current?.abort();
+        const ac = new AbortController();
+        streamRef.current = ac;
+
+        let rows = [];            // what we have drawn so far, by index
+        let ended = false;        // a `done` or `error` line arrived
+        const draw = () => setPData({ result: { people: rows }, __partial: true });
+
+        const out = await streamPersonLookup({
+          phone: digits(phone),
+          name: name.trim() || undefined,
+          cacheOnly,
+          signal: ac.signal,
+          onEvent: (ev) => {
+            switch (ev.event) {
+              case 'accepted':
+                // A number already on file streams the same events, just all at
+                // once -- one code path, no special case.
+                setJobNote(ev.cached ? 'On file — reading…' : 'Searching…');
+                break;
+              case 'people':
+                rows = (ev.people || []).map(x => ({ ...x }));
+                draw();
+                setJobNote(rows.length ? `0 of ${ev.count ?? rows.length} filled in` : 'Searching…');
+                break;
+              case 'person': {
+                // Merge INTO the row already on screen, matched on index; the
+                // detail page is where the emails come from.
+                const i = ev.index;
+                if (Number.isInteger(i) && i >= 0) {
+                  rows = rows.slice();
+                  rows[i] = { ...(rows[i] || {}), ...(ev.person || {}) };
+                  draw();
+                }
+                if (ev.of) setJobNote(`${ev.done ?? 0} of ${ev.of} filled in`);
+                break;
+              }
+              case 'waiting':
+                break;                       // keep-alive, not an error
+              case 'done':
+                ended = true;
+                // done.result is the complete record and is exactly what the
+                // blocking endpoint returns, so everything downstream is unchanged.
+                setPData(ev.result ? { ...ev, result: ev.result } : { result: { people: rows } });
+                setJobNote('');
+                break;
+              case 'error':
+                ended = true;
+                setPErr(ev.error || 'Lookup failed.');
+                break;
+              default:
+                break;                       // unknown event: ignored, by design
+            }
+          },
+        });
+
+        if (out.unsupported) {
+          const r = await client.get('customer-lookup/person', { params: { phone: digits(phone), name: name.trim() || undefined, scrape: cacheOnly ? '0' : undefined } });
+          if (r.data?.job) {
+            setJobNote('Searching…');
+            setPData(await pollJob(r.data.job, (sec) => setJobNote(`Searching… ${sec}s`)));
+          } else {
+            setPData(r.data);
+          }
+        } else if (!ended && !rows.length) {
+          setPErr('The lookup service closed the connection before it answered. Try again.');
         }
+      } else {
+        const r = await client.get('customer-lookup/search', { params: { q: q.trim() } });
+        setPData(r.data);
       }
     } catch (e) {
+      // An aborted stream is this panel cancelling itself, not a failure.
+      if (e?.name === 'AbortError') return;
       setPErr(e?.response ? errText(e, 'Lookup failed.') : (e.message || 'Lookup failed.'));
     } finally { setPBusy(false); setJobNote(''); refreshQuota(); }
   }, [mode, phone, name, q, cacheOnly, withVehicles, canVehicles, pollJob]);
@@ -1102,6 +1225,14 @@ export default function CustomerLookupPanel({ access: accessProp }) {
           </Panel>
 
           {pErr && <Alert type="error" dismissible={false}>{pErr}</Alert>}
+
+          {/* The rows below are already readable; this says what is still
+              coming, so nobody waits on a finished-looking screen. */}
+          {pBusy && jobNote && (
+            <div className="flex items-center gap-2 text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>
+              <Loader2 size={11} className="animate-spin" /> {jobNote}
+            </div>
+          )}
 
           {pData && people.length === 0 && (
             <EmptyState icon={User} title="Nobody found for that search"
