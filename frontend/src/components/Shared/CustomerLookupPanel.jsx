@@ -957,6 +957,17 @@ export default function CustomerLookupPanel({ access: accessProp }) {
         let ended = false;        // a `done` or `error` line arrived
         const draw = () => setPData({ result: { people: rows }, __partial: true });
 
+        // A number nobody has looked up before has to be scraped upstream, and
+        // those seconds cannot be removed from here. What makes them feel broken
+        // is a screen that says nothing, so the clock runs from the first moment
+        // and the stage text is replaced as each event lands.
+        const t0 = Date.now();
+        let stage = 'Connecting';
+        const secs = () => Math.round((Date.now() - t0) / 1000);
+        const tick = setInterval(() => setJobNote(`${stage} · ${secs()}s`), 1000);
+        const say = (text) => { stage = text; setJobNote(`${stage} · ${secs()}s`); };
+        say('Connecting');
+
         const out = await streamPersonLookup({
           phone: digits(phone),
           name: name.trim() || undefined,
@@ -967,12 +978,12 @@ export default function CustomerLookupPanel({ access: accessProp }) {
               case 'accepted':
                 // A number already on file streams the same events, just all at
                 // once -- one code path, no special case.
-                setJobNote(ev.cached ? 'On file — reading…' : 'Searching…');
+                say(ev.cached ? 'On file — reading' : 'Searching the source');
                 break;
               case 'people':
                 rows = (ev.people || []).map(x => ({ ...x }));
-                draw();
-                setJobNote(rows.length ? `0 of ${ev.count ?? rows.length} filled in` : 'Searching…');
+                draw();                                   // names + addresses readable NOW
+                say(rows.length ? `Found ${rows.length} — filling in details` : 'Searching the source');
                 break;
               case 'person': {
                 // Merge INTO the row already on screen, matched on index; the
@@ -983,13 +994,14 @@ export default function CustomerLookupPanel({ access: accessProp }) {
                   rows[i] = { ...(rows[i] || {}), ...(ev.person || {}) };
                   draw();
                 }
-                if (ev.of) setJobNote(`${ev.done ?? 0} of ${ev.of} filled in`);
+                if (ev.of) say(`${ev.done ?? 0} of ${ev.of} filled in`);
                 break;
               }
               case 'waiting':
                 break;                       // keep-alive, not an error
               case 'done':
                 ended = true;
+                clearInterval(tick);
                 // done.result is the complete record and is exactly what the
                 // blocking endpoint returns, so everything downstream is unchanged.
                 setPData(ev.result ? { ...ev, result: ev.result } : { result: { people: rows } });
@@ -997,6 +1009,7 @@ export default function CustomerLookupPanel({ access: accessProp }) {
                 break;
               case 'error':
                 ended = true;
+                clearInterval(tick);
                 setPErr(ev.error || 'Lookup failed.');
                 break;
               default:
@@ -1004,6 +1017,8 @@ export default function CustomerLookupPanel({ access: accessProp }) {
             }
           },
         });
+
+        clearInterval(tick);
 
         if (out.unsupported) {
           const r = await client.get('customer-lookup/person', { params: { phone: digits(phone), name: name.trim() || undefined, scrape: cacheOnly ? '0' : undefined } });

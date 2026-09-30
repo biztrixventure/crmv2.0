@@ -30,15 +30,28 @@ const DEFAULT_TIMEOUT = 25_000;   // a cold lookup SCRAPES, so it is not fast
 const MAX_TIMEOUT     = 90_000;
 
 // ── secret ───────────────────────────────────────────────────────────────────
+// THE KEY IS READ ONCE, NOT ON EVERY CALL. app_secrets is a round trip, and
+// this database charges ~330ms for one -- measured 2026-09-30. accessFor() asks
+// for the key and then call()/stream() asks again, so a single lookup paid it
+// TWICE (~650ms) before its request had even left the building. A 30s memo cuts
+// that to nothing without making a rotated key wait: setApiKey clears it, and
+// the window is shorter than anyone can re-test a key by hand.
+let _keyCache = { at: 0, value: null };
+const KEY_TTL_MS = 30_000;
+
 async function getApiKey() {
+  if (_keyCache.value !== null && Date.now() - _keyCache.at < KEY_TTL_MS) return _keyCache.value;
   const { data } = await supabaseAdmin.from('app_secrets').select('value').eq('key', KEY_NAME).maybeSingle();
-  return data?.value || '';
+  const value = data?.value || '';
+  _keyCache = { at: Date.now(), value };
+  return value;
 }
 async function setApiKey(value, userId) {
   await supabaseAdmin.from('app_secrets').upsert(
     { key: KEY_NAME, value: value || null, updated_at: new Date().toISOString(), updated_by: userId || null },
     { onConflict: 'key' },
   );
+  _keyCache = { at: 0, value: null };   // a rotated key takes effect now, not in 30s
 }
 
 // ── base URL ─────────────────────────────────────────────────────────────────
@@ -135,10 +148,10 @@ function rateLimit(userId) {
 // ── the call ─────────────────────────────────────────────────────────────────
 // Returns { ok, status, data } or { ok:false, status, error }. Never throws.
 async function call(path, params, { userId, label } = {}) {
-  const cfg = await settings();
+  // Independent reads, so they wait together rather than one after the other.
+  const [cfg, key] = await Promise.all([settings(), getApiKey()]);
   if (!cfg.enabled) return { ok: false, status: 503, error: 'Customer lookup is turned off' };
   if (!cfg.baseUrl) return { ok: false, status: 503, error: cfg.baseError || 'No lookup base URL configured' };
-  const key = await getApiKey();
   if (!key)         return { ok: false, status: 503, error: 'No lookup API key configured' };
 
   let url;
@@ -203,10 +216,9 @@ async function call(path, params, { userId, label } = {}) {
 const STREAM_IDLE_MS = 120_000;
 
 async function stream(path, params, { userId, label, onLine, signal } = {}) {
-  const cfg = await settings();
+  const [cfg, key] = await Promise.all([settings(), getApiKey()]);
   if (!cfg.enabled) return { ok: false, status: 503, error: 'Customer lookup is turned off' };
   if (!cfg.baseUrl) return { ok: false, status: 503, error: cfg.baseError || 'No lookup base URL configured' };
-  const key = await getApiKey();
   if (!key)         return { ok: false, status: 503, error: 'No lookup API key configured' };
 
   let url;
@@ -415,8 +427,10 @@ async function quotaStatus(userId) {
 // cannot be walked past by firing several at once; refund() puts it back when
 // the call turns out to have failed.
 async function consume(userId, kind) {
-  const q = (await quotaFor(userId))[kind];
-  const usage = await readUsage(userId);
+  // The allowance and what has been used are separate rows and neither depends
+  // on the other -- read together. This sits in front of every search.
+  const [quotas, usage] = await Promise.all([quotaFor(userId), readUsage(userId)]);
+  const q = quotas[kind];
   const w = windowState(usage[kind], q.days);
   if (q.limit > 0 && w.used >= q.limit) {
     return { ok: false, limit: q.limit, days: q.days, used: w.used, resets_at: w.resetsAt };
