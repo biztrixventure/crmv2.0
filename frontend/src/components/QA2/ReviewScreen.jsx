@@ -362,12 +362,11 @@ export function ParameterInput({ param, answer, onChange }) {
         {(param.options || []).map(o => <option key={o.value} value={o.value}>{o.label || o.value}</option>)}
       </ThemedSelect>
     );
-  } else {
-    control = (
-      <input className="input" value={a.value_text || ''} disabled={a.is_na}
-        onChange={e => onChange({ value_text: e.target.value })} />
-    );
   }
+  // A free-text question ("Additional Comments", "Reason of rejection") is a
+  // sentence or two, not a word: it gets the full-width box under its label,
+  // like a comment, instead of a one-line input squeezed beside it.
+  const isText = !['yes_no', 'scale', 'choice'].includes(param.input_type);
 
   // The comment gets its OWN full-width row under the question rather than a
   // 220px box competing for space on the same line. A reviewer writes a sentence
@@ -380,9 +379,15 @@ export function ParameterInput({ param, answer, onChange }) {
     <div className="py-1.5">
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-sm flex-1 min-w-[160px]" style={{ color: 'var(--color-text)' }}>{param.label || param.key}</span>
-        {control}
+        {!isText && control}
         {param.allow_na && naToggle}
       </div>
+      {isText && (
+        <textarea className="input w-full mt-1.5" rows={3} placeholder={`${param.label || 'Comment'}…`}
+          style={{ resize: 'vertical', minHeight: 72, lineHeight: 1.45 }}
+          value={a.value_text || ''} disabled={a.is_na}
+          onChange={e => onChange({ value_text: e.target.value })} />
+      )}
       {(param.requires_comment !== 'never') && (
         <textarea className="input w-full mt-1.5" rows={2} placeholder="Comment…"
           style={{ resize: 'vertical', minHeight: 60, lineHeight: 1.45 }}

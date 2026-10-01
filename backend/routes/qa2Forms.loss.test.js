@@ -105,3 +105,17 @@ describe('formLossPlan', () => {
     expect(plan(next).clearing_options).toHaveLength(8);
   });
 });
+
+describe('optionValue -- an option never goes out with a blank value', () => {
+  const { optionValue } = require('./qa2Forms');
+  test('a typed value is kept as typed', () => {
+    expect(optionValue({ value: 'NI', label: 'Not interested' }, 0)).toBe('NI');
+  });
+  test('a blank value is derived from the label (the "Cx was NI" bug, mig 335)', () => {
+    expect(optionValue({ value: '', label: 'Cx was NI ' }, 0)).toBe('cx_was_ni');
+    expect(optionValue({ value: '   ', label: 'Prices Pitched, CX Not Interested' }, 3)).toBe('prices_pitched_cx_not_interested');
+  });
+  test('no value and no label still yields something unique per position', () => {
+    expect(optionValue({ value: '', label: '' }, 4)).toBe('option_5');
+  });
+});

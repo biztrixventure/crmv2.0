@@ -874,6 +874,30 @@ function ScorecardsSection({ params }) {
 
           <TruncatedBanner truncated={data.truncated} />
 
+          {/* How the reviewed calls ENDED -- one block per outcome question
+              (the Unclosed "Call Outcome"), counted from the same cells the
+              sheet below prints. */}
+          {(data.totals?.outcomes || []).map(o => {
+            const top = Math.max(1, ...o.items.map(i => i.n));
+            return (
+              <Panel key={o.question}>
+                <SectionHeader level="section" title={o.question}
+                  subtitle={`${NUM(o.answered)} call${o.answered === 1 ? '' : 's'} with an outcome${o.unanswered ? ` · ${NUM(o.unanswered)} left blank` : ''}, most common first.`} />
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-6 gap-y-1.5">
+                  {o.items.map(i => (
+                    <div key={i.label} className="flex items-center gap-2 text-xs min-w-0">
+                      <span className="w-40 sm:w-56 truncate" style={{ color: 'var(--color-text)' }} title={i.label}>{i.label}</span>
+                      <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ background: 'var(--color-bg-secondary)' }}>
+                        <div className="h-full rounded-full" style={{ width: `${(i.n / top) * 100}%`, background: 'var(--color-primary-600)' }} />
+                      </div>
+                      <span className="w-20 text-right tabular-nums" style={{ color: 'var(--color-text-secondary)' }}>{NUM(i.n)} · {i.pct}%</span>
+                    </div>
+                  ))}
+                </div>
+              </Panel>
+            );
+          })}
+
           {!rows.length ? (
             <EmptyState icon={ClipboardList} title={oneDay ? 'Nothing scored for that day' : 'Nothing scored in those dates'}
               subtitle={`No submitted evaluations for ${oneDay ? from : `${from} to ${to}`}${methodId ? ' on that method' : ''}. Try the other date setting, another method, or a wider range.`} />

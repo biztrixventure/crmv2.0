@@ -111,6 +111,19 @@ async function requireScoreViewer(req, res) {
 
 // ── /qa2/forms ───────────────────────────────────────────────────────────
 
+// AN OPTION ALWAYS HAS A VALUE. The answer stores the option's VALUE, not its
+// label, so an option saved with a blank value records a blank: the Unclosed
+// "Call Outcome" went out that way ('' / "Cx was NI"), and every review that
+// picked it read as unanswered in the reports (fixed by mig 335). The builder
+// leaves the value box empty by default, so derive one from the label when the
+// manager did not type it -- a stable slug, the same rule mig 335 used.
+function optionValue(o, index) {
+  const typed = o?.value == null ? '' : String(o.value).trim();
+  if (typed) return typed;
+  const slug = String(o?.label || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  return slug || `option_${index + 1}`;
+}
+
 router.get('/forms', asyncHandler(async (req, res) => {
   const scope = await requireViewer(req, res);
   if (!scope) return;
@@ -454,7 +467,7 @@ router.put('/versions/:vid', asyncHandler(async (req, res) => {
 
         if (Array.isArray(p.options) && p.options.length) {
           const { error: oErr } = await supabaseAdmin.from('qa2_parameter_option').insert(
-            p.options.map((o, oi) => ({ parameter_id: np.id, value: String(o.value), label: o.label, points: o.points, is_pass: !!o.is_pass, sort: o.sort ?? oi }))
+            p.options.map((o, oi) => ({ parameter_id: np.id, value: optionValue(o, oi), label: o.label, points: o.points, is_pass: !!o.is_pass, sort: o.sort ?? oi }))
           );
           if (oErr) return res.status(400).json({ error: `options for "${p.key}": ${oErr.message}` });
         }
@@ -522,3 +535,4 @@ module.exports.resolveActiveFormVersion = resolveActiveFormVersion;
 // Exported for its tests — see qa2Forms.loss.test.js. The rule is small and
 // has already been got wrong twice.
 module.exports.formLossPlan = formLossPlan;
+module.exports.optionValue = optionValue;     // see qa2Forms.loss.test.js -- a blank value records a blank answer

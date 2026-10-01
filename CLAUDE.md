@@ -554,6 +554,23 @@ from their own call.**
 - `wti_flexo` is retired: one day, 10 calls, host gone. It shared the WTI prefix
   with `wavetechpk`, so every WTI lookup disambiguated between two boxes.
 
+### QA2 Unclosed outcomes + comments (mig 335, applied 2026-10-01)
+The Unclosed scorecard (`qa2_method.code='unclosed_closer'`) is on **version 3**:
+`call_outcome` (choice, role `outcome`) holds the QA team's 39 outcomes, and a new
+`additional_comments` (text, role `info`, never scored, never required) is last.
+- v2 had scored reviews, so it was LOCKED; 335 cloned v2 -> v3 the way the
+  builder's "Edit as new version" does (lineage_id carried forward, so reports
+  keep ONE column per question) and published it. Never edit a version with
+  submitted reviews in place.
+- **An option's VALUE is what an answer stores.** v2's lone outcome had value ''
+  ("Cx was NI"), so picking it recorded a blank. `optionValue()` in
+  `routes/qa2Forms.js` now derives a slug from the label when the builder leaves
+  the value empty (tested in `qa2Forms.loss.test.js`).
+- Scorecards report: `role` `outcome` (like `info`) is never flagged red, and
+  `totals.outcomes` counts each outcome across the rows shown -- rendered as the
+  "Call Outcome" breakdown above the sheet in `ReportsTab.jsx`. Text questions
+  render as a full-width box in `ReviewScreen.jsx`.
+
 ### IP access control (mig 319, applied 2026-09-15)
 Which networks each user may use the CRM from. Ships OFF, and everyone is `anywhere`. README → "IP access control" has the operator steps.
 - **Mode lives in `user_ip_access` (sidecar), NEVER on `user_profiles`.** That table has RLS `users_can_update_own_profile`

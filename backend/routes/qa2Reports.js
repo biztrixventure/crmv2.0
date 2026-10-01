@@ -760,12 +760,12 @@ router.get('/reports/scorecards', asyncHandler(async (req, res) => {
       //   pass/fail verdicts → carry no points at all, so is_pass is the signal
       //                        there and only there.
       //   yes_no fallback    → an explicit N
-      //   info               → never flagged. It records context ("Status",
-      //                        "Reason of rejection"), it is not marked. Its
-      //                        options score nothing and carry is_pass=false,
-      //                        so the verdict rule below would have reddened
-      //                        every one of them.
-      const flagged = a.is_na || p.role === 'info' ? false
+      //   info / outcome     → never flagged. They record context ("Status",
+      //                        "Reason of rejection", the Call Outcome), they
+      //                        are not marked. Their options score nothing and
+      //                        carry is_pass=false, so the verdict rule below
+      //                        would have reddened every one of them.
+      const flagged = a.is_na || p.role === 'info' || p.role === 'outcome' ? false
         : ['autofail', 'penalty'].includes(p.role) ? isYes(a)
           : cellMax > 0 ? earned < cellMax
             : chosen ? chosen.is_pass === false
@@ -826,6 +826,29 @@ router.get('/reports/scorecards', asyncHandler(async (req, res) => {
     passes: rows.filter(r => (r.result || '').toLowerCase() === 'pass').length,
     fails: rows.filter(r => (r.result || '').toLowerCase() === 'fail').length,
     autofails: rows.filter(r => r.autofail_result && r.autofail_result !== 'none').length,
+    // How the calls ENDED, per outcome question (e.g. the Unclosed "Call
+    // Outcome"): each answer's label counted across the rows shown, most common
+    // first. Read from the same cells the sheet prints, so the two agree.
+    outcomes: columnList
+      .filter(c => c.role === 'outcome' && c.input_type === 'choice')
+      .map((c) => {
+        const counts = new Map();
+        for (const r of rows) {
+          const cell = r.cells[c.id];
+          if (!cell || cell.na || !cell.display || cell.display === '—') continue;
+          counts.set(cell.display, (counts.get(cell.display) || 0) + 1);
+        }
+        const answered = [...counts.values()].reduce((t, n) => t + n, 0);
+        return {
+          question: c.label,
+          answered,
+          unanswered: rows.length - answered,
+          items: [...counts.entries()]
+            .map(([label, n]) => ({ label, n, pct: Math.round((n / answered) * 1000) / 10 }))
+            .sort((x, y) => y.n - x.n || x.label.localeCompare(y.label)),
+        };
+      })
+      .filter(o => o.answered > 0),
   };
 
   res.json({
