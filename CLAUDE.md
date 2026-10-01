@@ -554,9 +554,10 @@ from their own call.**
 - `wti_flexo` is retired: one day, 10 calls, host gone. It shared the WTI prefix
   with `wavetechpk`, so every WTI lookup disambiguated between two boxes.
 
-### QA2 Unclosed outcomes + comments (mig 335, applied 2026-10-01)
-The Unclosed scorecard (`qa2_method.code='unclosed_closer'`) is on **version 3**:
-`call_outcome` (choice, role `outcome`) holds the QA team's 39 outcomes, and a new
+### QA2 Unclosed outcomes + comments (migs 335-336, applied 2026-10-02)
+The Unclosed scorecard (`qa2_method.code='unclosed_closer'`) is on **version 4**:
+`call_outcome` (choice, role `outcome`) holds the QA team's 41 outcomes (336 added
+Callback Date + Wrong Dispo the same clone-and-publish way), and a new
 `additional_comments` (text, role `info`, never scored, never required) is last.
 - v2 had scored reviews, so it was LOCKED; 335 cloned v2 -> v3 the way the
   builder's "Edit as new version" does (lineage_id carried forward, so reports
