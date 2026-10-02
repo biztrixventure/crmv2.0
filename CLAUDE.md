@@ -567,6 +567,12 @@ Callback Date + Wrong Dispo the same clone-and-publish way), and a new
   ("Cx was NI"), so picking it recorded a blank. `optionValue()` in
   `routes/qa2Forms.js` now derives a slug from the label when the builder leaves
   the value empty (tested in `qa2Forms.loss.test.js`).
+- **A reopened DRAFT follows the current scorecard** (`upgradeStaleDraft` in
+  `routes/qa2Evaluations.js`): answers move to the same question by lineage_id,
+  answers to dropped questions stay on the row unshown. Without it, old v1
+  Unclosed drafts reopened showing v1's yes/no "Wrong Dispo" and no Call Outcome
+  (2026-10-02). Submitted reviews never move. The Review screen now also READS
+  BACK a resumed draft's saved answers -- it used to open every draft blank.
 - Scorecards report: `role` `outcome` (like `info`) is never flagged red, and
   `totals.outcomes` counts each outcome across the rows shown -- rendered as the
   "Call Outcome" breakdown above the sheet in `ReportsTab.jsx`. Text questions

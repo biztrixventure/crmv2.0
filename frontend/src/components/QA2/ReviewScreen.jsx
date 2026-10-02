@@ -448,6 +448,27 @@ export default function ReviewScreen({ assignment, onDone, onNext, nextLabel, re
         const defRes = await client.get(`qa2/versions/${evalRes.data.evaluation.form_version_id}`);
         if (dead) return;
         setDef(defRes.data);
+
+        // A REOPENED DRAFT SHOWS WHAT WAS ALREADY FILLED IN. The answers were
+        // always saved (autosave), but the screen started from an empty form,
+        // so a Call Outcome picked yesterday looked gone and was easy to submit
+        // blank. Read them back -- after the server has moved the draft onto
+        // the current scorecard, so they line up with the questions shown.
+        if (evalRes.data.resumed) {
+          const saved = await client.get(`qa2/evaluations/${evalRes.data.evaluation.id}`).catch(() => null);
+          if (dead || !saved?.data?.answers) return;
+          const known = new Set((defRes.data.parameters || []).map(p => p.id));
+          const restored = {};
+          for (const a of saved.data.answers) {
+            if (!known.has(a.parameter_id)) continue;   // a question this version no longer has
+            restored[a.parameter_id] = {
+              value_num: a.value_num, value_text: a.value_text, value_bool: a.value_bool,
+              is_na: !!a.is_na, comment: a.comment,
+            };
+          }
+          setAnswers(restored);
+          setScore(evalRes.data.evaluation);
+        }
       } catch (e) { if (!dead) setLoadError(e.response?.data?.error || 'Could not open this call'); }
     })();
     return () => { dead = true; if (saveTimer.current) clearTimeout(saveTimer.current); };

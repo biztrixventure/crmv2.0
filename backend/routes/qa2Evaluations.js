@@ -19,6 +19,7 @@ const { resolveQa2Scope } = require('../utils/qa2ScopeResolver');
 const { companyInScope, methodInScope } = require('../utils/qa2Scope');
 const { computeEvaluation } = require('../utils/qa2Scoring');
 const { resolveActiveFormVersion } = require('./qa2Forms');
+const logger = require('../utils/logger');
 
 async function requireScope(req, res) {
   const scope = await resolveQa2Scope(req);
@@ -53,6 +54,62 @@ async function recomputeAndPersist(evaluationId, formVersionId) {
     .eq('id', evaluationId).select().single();
   if (error) throw error;
   return updated;
+}
+
+// ── A DRAFT FOLLOWS THE SCORECARD, a submitted review never does ──────────────
+//
+// A draft is pinned to the version it was STARTED on. When the form moves on,
+// reopening an old draft showed the OLD questions: on 2026-10-02 two Unclosed
+// drafts from August reopened on v1 -- a yes/no "Wrong Dispo" and no Call
+// Outcome list -- and were submitted that way minutes after v4 went live.
+// So a resumed draft is moved onto the current version, carrying every answer
+// to the same question there (matched by lineage_id, which every version of a
+// question shares). An answer whose question no longer exists stays on the row
+// untouched -- it simply is not shown or scored. Submitted reviews are never
+// moved: their score must keep meaning what it meant.
+function planDraftUpgrade(oldParams, newParams, answers) {
+  const lineageOf = new Map((oldParams || []).map(p => [p.id, p.lineage_id]));
+  const newByLineage = new Map((newParams || []).filter(p => p.lineage_id).map(p => [p.lineage_id, p.id]));
+  const moves = [];
+  const orphans = [];
+  for (const a of answers || []) {
+    const lineage = lineageOf.get(a.parameter_id);
+    const target = lineage ? newByLineage.get(lineage) : null;
+    if (target && target !== a.parameter_id) moves.push({ answer_id: a.id, parameter_id: target });
+    else if (!target) orphans.push(a.id);
+  }
+  return { moves, orphans };
+}
+
+async function upgradeStaleDraft(evaluation, callId) {
+  try {
+    const { data: call } = await supabaseAdmin
+      .from('qa2_call').select('method_id, company_id').eq('id', callId).maybeSingle();
+    if (!call?.method_id) return null;
+    const current = await resolveActiveFormVersion(call.method_id, call.company_id);
+    if (!current || current === evaluation.form_version_id) return null;
+
+    const [{ data: oldParams }, { data: newParams }, { data: answers }] = await Promise.all([
+      supabaseAdmin.from('qa2_parameter').select('id, lineage_id').eq('form_version_id', evaluation.form_version_id),
+      supabaseAdmin.from('qa2_parameter').select('id, lineage_id').eq('form_version_id', current),
+      supabaseAdmin.from('qa2_answer').select('id, parameter_id').eq('evaluation_id', evaluation.id),
+    ]);
+    const { moves } = planDraftUpgrade(oldParams, newParams, answers);
+    for (const m of moves) {
+      const { error } = await supabaseAdmin.from('qa2_answer').update({ parameter_id: m.parameter_id }).eq('id', m.answer_id);
+      if (error) throw error;
+    }
+    // Only a still-draft row moves (a submit racing this reopen wins).
+    const { data: moved, error: mErr } = await supabaseAdmin.from('qa2_evaluation')
+      .update({ form_version_id: current }).eq('id', evaluation.id).eq('status', 'draft').select().maybeSingle();
+    if (mErr) throw mErr;
+    if (!moved) return null;
+    return await recomputeAndPersist(evaluation.id, current);
+  } catch (e) {
+    // Never block a reviewer: on any failure they get their draft as it was.
+    logger.warn('QA2_EVAL', `draft ${evaluation.id} could not move to the current scorecard: ${e.message}`);
+    return null;
+  }
 }
 
 // ── GET /qa2/evaluations/:id — full record for override/calibration review ──
@@ -92,7 +149,10 @@ router.post('/evaluations', asyncHandler(async (req, res) => {
 
   const { data: existing } = await supabaseAdmin
     .from('qa2_evaluation').select('*').eq('assignment_id', assignment_id).eq('reviewer_id', req.user.id).eq('status', 'draft').maybeSingle();
-  if (existing) return res.json({ evaluation: existing, resumed: true });
+  if (existing) {
+    const upgraded = await upgradeStaleDraft(existing, assignment.call_id);
+    return res.json({ evaluation: upgraded || existing, resumed: true, upgraded: !!upgraded });
+  }
 
   const { data: call } = await supabaseAdmin
     .from('qa2_call').select('id, company_id, method_id, leg, agent_user_id').eq('id', assignment.call_id).maybeSingle();
@@ -272,3 +332,4 @@ router.post('/evaluations/:id/void', asyncHandler(async (req, res) => {
 }));
 
 module.exports = router;
+module.exports.planDraftUpgrade = planDraftUpgrade;   // tested in qa2Evaluations.draft.test.js
