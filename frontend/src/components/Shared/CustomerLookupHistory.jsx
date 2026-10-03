@@ -12,8 +12,8 @@
 // allowance. Only a result older than the 30-day payload retention has to be
 // run again, and the row says so rather than offering a button that fails.
 // ============================================================================
-import { useState, useEffect, useCallback } from 'react';
-import { History, RefreshCw, ExternalLink, Search } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { History, RefreshCw, ExternalLink, Search, X } from 'lucide-react';
 import client from '../../api/client';
 import { Panel, SectionHeader, EmptyState, PillTabs, Loading } from '../UI/kit';
 import { Badge, Button, Alert } from '../UI';
@@ -31,18 +31,30 @@ export default function CustomerLookupHistory({ access, onOpen, openingId, reloa
   const [err, setErr]     = useState('');
   const [kind, setKind]   = useState('');
 
+  // The box searches the WHOLE row, not just what was typed: the name that came
+  // back, the city, the car, the VIN. Debounced rather than Enter-to-search,
+  // because looking for a half-remembered name is a typing-and-watching job.
+  const [text, setText]   = useState('');
+  const [term, setTerm]   = useState('');
+  const timer = useRef(null);
+  useEffect(() => {
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => setTerm(text.trim()), 300);
+    return () => clearTimeout(timer.current);
+  }, [text]);
+
   const load = useCallback(async (offset = 0) => {
     setBusy(true); setErr('');
     try {
       const r = await client.get('customer-lookup/history', {
-        params: { limit: PAGE, offset, kind: kind || undefined },
+        params: { limit: PAGE, offset, kind: kind || undefined, q: term || undefined },
       });
       setRows(prev => (offset ? [...prev, ...(r.data.rows || [])] : (r.data.rows || [])));
       setTotal(r.data.total || 0);
     } catch (e) {
       setErr(e?.response?.data?.error || 'Could not load your search history.');
     } finally { setBusy(false); }
-  }, [kind]);
+  }, [kind, term]);
 
   // reloadKey changes every time the panel finishes a live search, so the list
   // already holds it when the agent switches over.
@@ -65,6 +77,21 @@ export default function CustomerLookupHistory({ access, onOpen, openingId, reloa
             <RefreshCw size={13} className={busy ? 'animate-spin' : ''} /> Refresh
           </Button>
         </div>
+        <div className="relative mt-3">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
+            style={{ color: 'var(--color-text-tertiary)' }} />
+          <input className="input pl-9 pr-9" value={text} autoComplete="off"
+            placeholder="Search your history — a number, a name, a city, a car, a VIN"
+            onChange={e => setText(e.target.value)} />
+          {text && (
+            <button type="button" onClick={() => setText('')} title="Clear"
+              className="absolute right-3 top-1/2 -translate-y-1/2"
+              style={{ color: 'var(--color-text-tertiary)' }}>
+              <X size={14} />
+            </button>
+          )}
+        </div>
+
         <div className="mt-3"><PillTabs items={filters} value={kind} onChange={setKind} /></div>
       </Panel>
 
@@ -73,8 +100,15 @@ export default function CustomerLookupHistory({ access, onOpen, openingId, reloa
       {busy && !rows.length ? (
         <Loading variant="rows" rows={4} label="Loading your searches" />
       ) : !rows.length ? (
-        <EmptyState icon={Search} title="No searches yet"
-          hint="Everything you look up here is kept for you, so you can come back to it." />
+        term || kind ? (
+          <EmptyState icon={Search} title="Nothing in your history matches that"
+            hint={term
+              ? `No search of yours mentions "${term}" — not in the number you typed, and not in what came back.`
+              : 'No searches of that kind yet. Clear the filter to see everything.'} />
+        ) : (
+          <EmptyState icon={Search} title="No searches yet"
+            hint="Everything you look up here is kept for you, so you can come back to it." />
+        )
       ) : (
         <div className="space-y-2">
           {rows.map(row => (

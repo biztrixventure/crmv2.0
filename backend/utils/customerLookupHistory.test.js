@@ -121,6 +121,69 @@ describe('placeOf', () => {
   });
 });
 
+describe('buildSearchText — the History search box searches the whole row', () => {
+  const build = (kind, query, params, data) =>
+    h.buildSearchText({ kind, query, params, summary: h.summarize(kind, data).summary });
+
+  test('a people search is findable by the name, the city and the number', () => {
+    const t = build('people', '(772) 475-7074', { phone: '7724757074' }, {
+      result: { people: [{ name: 'J. Doe', age: '47', current_address: { full: '1 Main St, Tampa, FL 33601' } }] },
+    });
+    expect(t).toContain('j. doe');
+    expect(t).toContain('tampa, fl');
+    expect(t).toContain('7724757074');
+    expect(t).toContain('(772) 475-7074');
+    expect(t).toBe(t.toLowerCase());
+  });
+
+  test('a vehicle search is findable by the car and the address', () => {
+    const t = build('vehicles', '1 Test St - 33601', { address: '1 Test St', zip: '33601' }, {
+      vehicles: [{ Year: '2015', Make: 'Ford', Model: 'F-150' }],
+    });
+    expect(t).toContain('2015 ford f-150');
+    expect(t).toContain('1 test st');
+    expect(t).toContain('33601');
+  });
+
+  test('a VIN search is findable by the VIN', () => {
+    const t = build('vin', '2015 Ford F-150 - 1 Test St', { year: '2015' }, { vin: '1FTEW1EF0FKD12345' });
+    expect(t).toContain('1ftew1ef0fkd12345');
+  });
+
+  test('the kind is searchable, so "vin" or "vehicles" narrows the list', () => {
+    expect(build('vin', 'x', {}, {})).toContain('vin');
+    expect(build('vehicles', 'x', {}, {})).toContain('vehicles');
+  });
+
+  test('a failure is findable by its reason', () => {
+    const t = h.buildSearchText({
+      kind: 'people', query: '(555) 000-0000', params: {}, summary: {},
+      error: 'The lookup service did not answer in time',
+    });
+    expect(t).toContain('did not answer in time');
+  });
+
+  test('it is capped, so one runaway row cannot bloat the column', () => {
+    const t = h.buildSearchText({ kind: 'people', query: 'q', params: { note: 'y'.repeat(5000) }, summary: {} });
+    expect(t.length).toBeLessThanOrEqual(2000);
+  });
+
+  test('nothing to say produces an empty string, never "undefined"', () => {
+    expect(h.buildSearchText({})).toBe('');
+    expect(h.buildSearchText({ kind: 'people', query: '', params: {}, summary: {} })).toBe('people');
+  });
+});
+
+describe('needle — the wildcards are ours, not the searcher’s', () => {
+  test('a typed % or _ is a character to find, not a pattern', () => {
+    expect(h.needle('100%')).toBe('%100\\%%');
+    expect(h.needle('a_b')).toBe('%a\\_b%');
+  });
+  test('it lowercases and trims, because the haystack is lowercase', () => {
+    expect(h.needle('  Tampa  ')).toBe('%tampa%');
+  });
+});
+
 describe('safeParams and capped', () => {
   test('empty values are dropped, long ones clipped', () => {
     const p = h.safeParams({ phone: '7724757074', name: '', zip: undefined, note: 'x'.repeat(500) });

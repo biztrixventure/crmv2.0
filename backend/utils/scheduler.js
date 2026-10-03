@@ -255,8 +255,10 @@ function startBackgroundJobs() {
   const lookupHistoryPrune = async () => {
     try {
       const r = await lookupHistory.prune({ resultDays: LOOKUP_HISTORY_RESULT_DAYS, historyDays: LOOKUP_HISTORY_DAYS });
-      if (r && (r.stripped || r.deleted)) {
-        logger.info('JOBS', `lookup history prune: ${r.stripped} results dropped, ${r.deleted} rows removed`);
+      if (r && (r.stripped || r.deleted || r.filled)) {
+        // `filled` is the search haystack (mig 338) being given to rows written
+        // without one — a row missing it cannot be found by the search box.
+        logger.info('JOBS', `lookup history: ${r.filled} made searchable, ${r.stripped} results dropped, ${r.deleted} rows removed`);
       }
     } catch (e) { logger.warn('JOBS', `lookup history prune error: ${e.message}`); }
   };

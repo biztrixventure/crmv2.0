@@ -10,7 +10,7 @@
 // here IS the result that agent was shown. Opening one is free and runs
 // nothing — see CustomerLookupHistory for why that matters.
 // ============================================================================
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Activity, RefreshCw, Users2, ExternalLink, Search, X } from 'lucide-react';
 import client from '../../api/client';
 import { Panel, SectionHeader, EmptyState, KpiTile, Loading, TableScroll } from '../UI/kit';
@@ -35,8 +35,17 @@ export default function CustomerLookupActivity({ onOpen, openingId }) {
   const [range, setRange] = useState(() => getPresetRange('7d'));
   const [kind, setKind]   = useState('');
   const [user, setUser]   = useState('');
+  // Searches the WHOLE row (mig 338) — the number typed, the name that came
+  // back, the city, the car, the VIN — debounced, the same as the agent's own
+  // History box. Enter-to-search was a second thing to learn for no gain.
   const [text, setText]   = useState('');
   const [applied, setApplied] = useState('');     // the text actually searched
+  const timer = useRef(null);
+  useEffect(() => {
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => setApplied(text.trim()), 350);
+    return () => clearTimeout(timer.current);
+  }, [text]);
 
   const [rows, setRows]   = useState([]);
   const [names, setNames] = useState({});
@@ -112,9 +121,9 @@ export default function CustomerLookupActivity({ onOpen, openingId }) {
           <div className="relative">
             <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
               style={{ color: 'var(--color-text-tertiary)' }} />
-            <input className="input pl-8 pr-8 text-xs py-1.5" value={text} placeholder="A number or a name that was searched"
-              onChange={e => setText(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') setApplied(text.trim()); }} />
+            <input className="input pl-8 pr-8 text-xs py-1.5" value={text} autoComplete="off"
+              placeholder="Anything in a search — number, name, city, car, VIN"
+              onChange={e => setText(e.target.value)} />
             {(text || applied) && (
               <button type="button" onClick={() => { setText(''); setApplied(''); }}
                 className="absolute right-2 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }}>
@@ -123,9 +132,9 @@ export default function CustomerLookupActivity({ onOpen, openingId }) {
             )}
           </div>
         </div>
-        {text.trim() && text.trim() !== applied && (
+        {applied && (
           <p className="text-[11px] mt-2 mb-0" style={{ color: 'var(--color-text-tertiary)' }}>
-            Press Enter to search for &ldquo;{text.trim()}&rdquo;.
+            Searching every part of a row for &ldquo;{applied}&rdquo; — what was typed and what came back.
           </p>
         )}
       </Panel>
@@ -197,8 +206,10 @@ export default function CustomerLookupActivity({ onOpen, openingId }) {
       {busy && !rows.length ? (
         <Loading variant="rows" rows={5} label="Loading searches" />
       ) : !rows.length ? (
-        <EmptyState icon={Search} title="No searches in this window"
-          hint="Widen the dates, or clear the filters above." />
+        <EmptyState icon={Search} title={applied ? 'Nothing matches that' : 'No searches in this window'}
+          hint={applied
+            ? `No search in this window mentions "${applied}" — not in what was typed, and not in what came back.`
+            : 'Widen the dates, or clear the filters above.'} />
       ) : (
         <div className="space-y-2">
           {rows.map(row => (

@@ -640,6 +640,23 @@ one server-log line per call.
   stats -> prune, then cleaned up (0 rows).
 - Surfaces: a **History** tab for everyone and an **Agent activity** tab for a
   superadmin (`/history/all` + `/history/users`), both inside Customer Lookup.
+- **Searching the history searches the WHOLE row (mig 338, applied 2026-10-03).**
+  `query` alone answers "which number did I look up" and nothing else -- the
+  name that came back, the city, the car and the VIN are inside `summary`, which
+  is jsonb, and PostgREST cannot ILIKE a jsonb document. So each row carries a
+  lowercased `search_text` haystack built by `buildSearchText()` in
+  `utils/customerLookupHistory.js`, BESIDE the summary it flattens so the two
+  cannot drift. GIN + `gin_trgm_ops`, because every search here is `%needle%`
+  and a b-tree cannot serve that. Both boxes (agent + admin) hit the same column.
+  Verified: name / city / `f-150` / VIN / number / kind all match, and a typed
+  `100%` matches nothing because `needle()` escapes the wildcards -- they are
+  ours, never the searcher's.
+- A row with NO haystack is invisible to the box, so filling it is a FUNCTION
+  (`fn_fill_customer_lookup_search_text`) the 12h job runs before every prune,
+  not a one-off backfill -- that repairs both a row written while the backend ran
+  ahead of 338 and any future write path that forgets. It stays its own
+  statement: fusing it into the prune would let two CTEs modify one row in a
+  single statement.
 - **Access has two layers now.** `customer_lookup.default_access` is what
   EVERYONE gets; a `customer_lookup.users` row overrides it in both directions,
   and an explicit `false` is how one person is shut out of a tool everyone else

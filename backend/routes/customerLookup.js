@@ -15,8 +15,8 @@
 //   POST /customer-lookup/quota/reset/:userId  superadmin — clear one user's usage
 //   GET  /customer-lookup/access/:userId       superadmin — one user's switches + quota
 //   PUT  /customer-lookup/access/:userId       superadmin — set them
-//   GET  /customer-lookup/history              the CALLER's own past searches
-//   GET  /customer-lookup/history/all          superadmin — everyone's searches
+//   GET  /customer-lookup/history              the CALLER's own past searches  ?q= &kind=
+//   GET  /customer-lookup/history/all          superadmin — everyone's searches ?q= &kind= &user_id= &from= &to=
 //   GET  /customer-lookup/history/users        superadmin — who is using the tool
 //   GET  /customer-lookup/history/:id          one search WITH the saved result
 //
@@ -754,6 +754,9 @@ router.get('/history', asyncHandler(async (req, res) => {
   const { rows, total } = await hist.list({
     userId: req.user.id,
     kind: req.query.kind,
+    // Searches the whole row (mig 338): the number that was typed, the name
+    // that came back, the city, the car, the VIN.
+    q: String(req.query.q || '').trim() || undefined,
     limit: clampInt(req.query.limit, 40, 1, 200),
     offset: clampInt(req.query.offset, 0, 0, 100000),
   });

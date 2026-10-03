@@ -181,6 +181,37 @@ function summarize(kind, data) {
   return { count: people.length, found: people.length > 0, summary: out };
 }
 
+// ── the haystack (mig 338) ───────────────────────────────────────────────────
+// The History search box searches ANYTHING in the row, not just the number that
+// was typed: the name that came back, the city, the car, the VIN. Those live
+// inside `summary`, which is jsonb, and PostgREST cannot ILIKE a jsonb
+// document — so the row carries its own lowercased text copy.
+//
+// It is built HERE, beside the summary it flattens, so the two can never drift.
+const SEARCH_MAX = 2000;
+
+function buildSearchText({ kind, query, params, summary, error }) {
+  const bits = [str(query), str(kind)];
+  for (const v of Object.values(params || {})) bits.push(str(v));
+
+  const s = summary || {};
+  for (const p of (s.people || [])) bits.push(str(p.name), str(p.place), str(p.age));
+  for (const v of (s.vehicles  || [])) bits.push(str(v));
+  for (const v of (s.vins      || [])) bits.push(str(v));
+  for (const a of (s.addresses || [])) bits.push(str(a));
+  if (error) bits.push(str(error));
+
+  // One space between every token, so a needle can never span two unrelated
+  // fields while "ford f-150" still matches a vehicle title.
+  return bits.filter(Boolean).join(' ').toLowerCase().slice(0, SEARCH_MAX);
+}
+
+// The database has not got the column yet (backend deployed ahead of 338). Drop
+// it and write the row anyway — a searchable history is worth less than having
+// a history at all.
+const missingColumn = (error) =>
+  !!error && (error.code === 'PGRST204' || error.code === '42703' || /search_text/.test(error.message || ''));
+
 // The parameters, minus anything empty. Everything here was typed by the user
 // or derived from it, so nothing is dropped for secrecy — only for size.
 function safeParams(params) {
@@ -228,8 +259,19 @@ function record({ userId, companyId, kind, query, params, ticket, data, status, 
     error: error ? clip(str(error), 400) : null,
     ms: Number.isFinite(ms) ? Math.max(0, Math.round(ms)) : null,
     completed_at: (ticket && !data && !error) ? null : new Date().toISOString(),
+    search_text: buildSearchText({ kind: k, query, params, summary: s.summary, error }),
   };
-  supabaseAdmin.from(TABLE).insert(row).then(({ error: e }) => failed('insert', e), e => failed('insert', e));
+  (async () => {
+    const { error: e } = await supabaseAdmin.from(TABLE).insert(row);
+    if (!e) return;
+    if (missingColumn(e)) {
+      const { search_text: _drop, ...plain } = row;
+      const { error: e2 } = await supabaseAdmin.from(TABLE).insert(plain);
+      failed('insert', e2);
+      return;
+    }
+    failed('insert', e);
+  })().catch(e => failed('insert', e));
 }
 
 // The ticket half of an async search: the row already exists, this is the
@@ -242,12 +284,16 @@ function complete({ userId, ticket, kind, data, error, status }) {
     // one endpoint finishes people, vehicle and VIN jobs alike — and the kind
     // decides how the payload is read. The pending row knows, so ask it.
     let k = KINDS.includes(kind) ? kind : null;
+    let pending = null;
     if (!k) {
+      // The row's own query and params are what the haystack is rebuilt from —
+      // this answer is the result half, which is only part of it.
       const { data: row, error: e } = await supabaseAdmin.from(TABLE)
-        .select('kind').eq('user_id', userId).eq('ticket', String(ticket))
+        .select('kind, query, params').eq('user_id', userId).eq('ticket', String(ticket))
         .is('completed_at', null).maybeSingle();
       if (e) { failed('complete', e); return; }
       if (!row) return;      // nothing pending under that ticket: already done
+      pending = row;
       k = row.kind;
     }
     const s = summarize(k, data);
@@ -259,9 +305,21 @@ function complete({ userId, ticket, kind, data, error, status }) {
       result: data ? capped(data) : null,
       error: error ? clip(str(error), 400) : null,
       completed_at: new Date().toISOString(),
+      // A pending row was written before its result existed, so its haystack
+      // held only what was typed. Rebuild it now that the names are known.
+      search_text: buildSearchText({
+        kind: k, query: pending?.query, params: pending?.params, summary: s.summary, error,
+      }),
     };
-    const { error: e2 } = await supabaseAdmin.from(TABLE).update(patch)
+    const where = () => supabaseAdmin.from(TABLE).update(patch)
       .eq('user_id', userId).eq('ticket', String(ticket)).is('completed_at', null);
+    const { error: e2 } = await where();
+    if (e2 && missingColumn(e2)) {
+      delete patch.search_text;
+      const { error: e3 } = await where();
+      failed('complete', e3);
+      return;
+    }
     failed('complete', e2);
   })().catch(e => failed('complete', e));
 }
@@ -271,31 +329,45 @@ function complete({ userId, ticket, kind, data, error, status }) {
 // page of them would be megabytes. One row's payload comes from getOne().
 const LIST_COLS = 'id,user_id,company_id,kind,query,params,ticket,status,found,result_count,summary,error,ms,created_at,completed_at';
 
-async function list({ userId, kind, limit = 40, offset = 0 } = {}) {
+// A needle for an ILIKE: the wildcards are ours, so a typed % or _ is a
+// character to look for and never a pattern of the user's own.
+const needle = (text) => `%${String(text).trim().toLowerCase().replace(/[%_\\]/g, m => '\\' + m)}%`;
+
+async function list({ userId, kind, q: text, limit = 40, offset = 0 } = {}) {
   const take = Math.min(Math.max(parseInt(limit, 10) || 40, 1), 200);
-  let q = supabaseAdmin.from(TABLE).select(LIST_COLS, { count: 'exact' })
-    .eq('user_id', userId)
-    .order('created_at', { ascending: false })
-    .range(offset, offset + take - 1);
-  if (kind && KINDS.includes(kind)) q = q.eq('kind', kind);
-  const { data, error, count } = await q;
+  const build = (column) => {
+    let q = supabaseAdmin.from(TABLE).select(LIST_COLS, { count: 'exact' })
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .range(offset, offset + take - 1);
+    if (kind && KINDS.includes(kind)) q = q.eq('kind', kind);
+    if (text) q = q.ilike(column, needle(text));
+    return q;
+  };
+  let { data, error, count } = await build('search_text');
+  // 338 not applied yet: searching what was TYPED still beats an empty list.
+  if (error && text && missingColumn(error)) ({ data, error, count } = await build('query'));
   if (error) { failed('list', error); return { rows: [], total: 0 }; }
   return { rows: data || [], total: count || 0 };
 }
 
 async function listAll({ userId, kind, q: text, from, to, limit = 50, offset = 0 } = {}) {
   const take = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 200);
-  let q = supabaseAdmin.from(TABLE).select(LIST_COLS, { count: 'exact' })
-    .order('created_at', { ascending: false })
-    .range(offset, offset + take - 1);
-  if (userId) q = q.eq('user_id', userId);
-  if (kind && KINDS.includes(kind)) q = q.eq('kind', kind);
-  if (from) q = q.gte('created_at', from);
-  if (to) q = q.lte('created_at', to);
-  // What was typed is what people look for ("who searched this number"), and
-  // the digits are in `query` as well as params.phone.
-  if (text) q = q.ilike('query', `%${String(text).replace(/[%_]/g, '')}%`);
-  const { data, error, count } = await q;
+  const build = (column) => {
+    let q = supabaseAdmin.from(TABLE).select(LIST_COLS, { count: 'exact' })
+      .order('created_at', { ascending: false })
+      .range(offset, offset + take - 1);
+    if (userId) q = q.eq('user_id', userId);
+    if (kind && KINDS.includes(kind)) q = q.eq('kind', kind);
+    if (from) q = q.gte('created_at', from);
+    if (to) q = q.lte('created_at', to);
+    // The SAME haystack the agent's own History searches — "who searched this
+    // number" and "who found this name" are one question asked two ways.
+    if (text) q = q.ilike(column, needle(text));
+    return q;
+  };
+  let { data, error, count } = await build('search_text');
+  if (error && text && missingColumn(error)) ({ data, error, count } = await build('query'));
   if (error) { failed('listAll', error); return { rows: [], total: 0 }; }
   return { rows: data || [], total: count || 0 };
 }
@@ -343,17 +415,31 @@ async function stats({ from, to } = {}) {
   };
 }
 
+// Any row whose haystack is NULL is invisible to the History search box, and
+// there are two ways to get one: a row written while the backend was still
+// ahead of mig 338, and any future write path that forgets. So the housekeeping
+// job fills them in rather than trusting that it never happens — one statement
+// of its own, never fused with the prune, because two data-modifying CTEs in
+// one statement must not be able to touch the same row.
+async function fillSearchText() {
+  const { data, error } = await supabaseAdmin.rpc('fn_fill_customer_lookup_search_text');
+  if (error) { failed('fill search_text', error); return 0; }
+  return Number(Array.isArray(data) ? data[0] : data) || 0;
+}
+
 async function prune({ resultDays = 30, historyDays = 180 } = {}) {
+  const filled = await fillSearchText();
   const { data, error } = await supabaseAdmin.rpc('fn_prune_customer_lookup_searches', {
     p_result_days: resultDays, p_history_days: historyDays,
   });
-  if (error) { failed('prune', error); return null; }
+  if (error) { failed('prune', error); return filled ? { filled, stripped: 0, deleted: 0 } : null; }
   const r = Array.isArray(data) ? data[0] : data;
-  return r || null;
+  return { ...(r || { stripped: 0, deleted: 0 }), filled };
 }
 
 module.exports = {
   KINDS, TABLE,
   summarize, peopleFrom, placeOf, vehicleTitle, vehicleRecords, safeParams, capped,
-  record, complete, list, listAll, getOne, stats, prune,
+  buildSearchText, needle,
+  record, complete, list, listAll, getOne, stats, prune, fillSearchText,
 };
