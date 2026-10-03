@@ -603,7 +603,7 @@ Which networks each user may use the CRM from. Ships OFF, and everyone is `anywh
 - Audit = `module_audit_log` module `access` (rules, mode changes only, `security.*` config). Last-seen stamps are NOT logged.
 - Tests run on `backend/testing/supabaseFake.js` (in-memory supabase-js; `fake.calls` proves "no queries when off").
 
-### Customer Lookup history + "everyone" access (mig 337, PENDING)
+### Customer Lookup history + "everyone" access (mig 337, applied 2026-10-03)
 The tool shipped storing NOTHING -- a result was proxied, drawn and forgotten.
 That lost an agent their previous result the moment they searched again (the
 only way back was to spend another search out of their allowance), and left a
@@ -629,6 +629,15 @@ one server-log line per call.
   `utils/scheduler.js`): the `result` payload is dropped after 30 days, the row
   after 180. `canReopen()` in `frontend/src/utils/lookupHistory.js` mirrors the
   30 days so an expired row says so instead of offering a dead button.
+  **The two windows must not overlap** -- both statements are data-modifying CTEs
+  in ONE statement and share a snapshot, so the UPDATE is bounded at both ends
+  and the DELETE owns everything past `p_history_days`. A row touched twice by
+  one statement is explicitly unpredictable in Postgres.
+- Applying it: `apply_migration` AND a multi-statement `execute_sql` were both
+  refused; one statement per call went through. Verified 2026-10-03: 16 columns,
+  6 indexes, RLS on, anon + authenticated cannot read, prune function present,
+  and a probe proved insert -> pending -> complete-by-ticket -> list -> getOne ->
+  stats -> prune, then cleaned up (0 rows).
 - Surfaces: a **History** tab for everyone and an **Agent activity** tab for a
   superadmin (`/history/all` + `/history/users`), both inside Customer Lookup.
 - **Access has two layers now.** `customer_lookup.default_access` is what

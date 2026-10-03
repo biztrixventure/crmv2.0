@@ -96,30 +96,33 @@ COMMENT ON TABLE customer_lookup_searches IS
 -- the convenience of re-opening a result is worth a month, the record of who
 -- ran it is worth half a year. The floors (1 day / 7 days) stop a bad argument
 -- from emptying the table.
+--
+-- THE TWO WINDOWS MUST NOT OVERLAP. Both statements are data-modifying CTEs in
+-- ONE statement, so they share a snapshot: a row old enough to be stripped AND
+-- deleted would be touched twice by the same statement, which Postgres
+-- explicitly leaves unpredictable. The UPDATE is therefore bounded at BOTH
+-- ends — strip what is past p_result_days but still inside p_history_days, and
+-- let the DELETE own everything beyond it.
 CREATE OR REPLACE FUNCTION fn_prune_customer_lookup_searches(
   p_result_days  INTEGER DEFAULT 30,
   p_history_days INTEGER DEFAULT 180
 ) RETURNS TABLE (stripped BIGINT, deleted BIGINT)
-LANGUAGE plpgsql
+LANGUAGE sql
 SECURITY DEFINER
 SET search_path = public, pg_temp
-AS $$
-DECLARE
-  v_stripped BIGINT := 0;
-  v_deleted  BIGINT := 0;
-BEGIN
-  UPDATE customer_lookup_searches
-     SET result = NULL
-   WHERE result IS NOT NULL
-     AND created_at < NOW() - (GREATEST(p_result_days, 1) || ' days')::INTERVAL;
-  GET DIAGNOSTICS v_stripped = ROW_COUNT;
-
-  DELETE FROM customer_lookup_searches
-   WHERE created_at < NOW() - (GREATEST(p_history_days, 7) || ' days')::INTERVAL;
-  GET DIAGNOSTICS v_deleted = ROW_COUNT;
-
-  RETURN QUERY SELECT v_stripped, v_deleted;
-END;
-$$;
+AS $func$
+  WITH s AS (
+    UPDATE customer_lookup_searches SET result = NULL
+     WHERE result IS NOT NULL
+       AND created_at <  NOW() - (GREATEST(p_result_days, 1) || ' days')::INTERVAL
+       AND created_at >= NOW() - (GREATEST(p_history_days, 7) || ' days')::INTERVAL
+    RETURNING 1
+  ), d AS (
+    DELETE FROM customer_lookup_searches
+     WHERE created_at < NOW() - (GREATEST(p_history_days, 7) || ' days')::INTERVAL
+    RETURNING 1
+  )
+  SELECT (SELECT COUNT(*) FROM s), (SELECT COUNT(*) FROM d);
+$func$;
 
 REVOKE ALL ON FUNCTION fn_prune_customer_lookup_searches(INTEGER, INTEGER) FROM anon, authenticated;
