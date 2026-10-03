@@ -20,6 +20,7 @@ const { companyInScope, methodInScope } = require('../utils/qa2Scope');
 const { computeEvaluation } = require('../utils/qa2Scoring');
 const { resolveActiveFormVersion } = require('./qa2Forms');
 const logger = require('../utils/logger');
+const cache = require('../utils/cache');
 
 async function requireScope(req, res) {
   const scope = await resolveQa2Scope(req);
@@ -30,30 +31,72 @@ async function requireScope(req, res) {
   return scope;
 }
 
-// Fetches parameters+options for a form_version and recomputes + persists
-// the score onto an evaluation from its CURRENT qa2_answer rows. Called after
-// every answer write so the stored score is never stale.
-async function recomputeAndPersist(evaluationId, formVersionId) {
-  const [{ data: version }, { data: parameters }, { data: answers }] = await Promise.all([
-    supabaseAdmin.from('qa2_form_version').select('*').eq('id', formVersionId).single(),
-    supabaseAdmin.from('qa2_parameter').select('*').eq('form_version_id', formVersionId),
+// ── SPEED: every round trip to this database costs ~0.45s ───────────────────
+// A review save used to pay for the whole scorecard definition (version,
+// questions, then their options -- two sequential reads) on EVERY autosave and
+// again on submit, plus one write PER ANSWER. Submitting a 7-question review
+// was ~20 sequential round trips: ten seconds of spinner.
+//
+// The definition is now read once and kept for a minute: a scorecard changes
+// when a manager edits it (qa2Forms.js invalidates 'qa2_def' on every save and
+// publish), not between two keystrokes of a review. Answers go in ONE upsert.
+const DEF_NS = 'qa2_def';
+const DEF_TTL_MS = 60 * 1000;
+
+async function loadDefinition(formVersionId) {
+  return cache.remember(DEF_NS, formVersionId, DEF_TTL_MS, async () => {
+    const [{ data: version, error: vErr }, { data: parameters, error: pErr }] = await Promise.all([
+      supabaseAdmin.from('qa2_form_version').select('*').eq('id', formVersionId).single(),
+      supabaseAdmin.from('qa2_parameter').select('*').eq('form_version_id', formVersionId),
+    ]);
+    if (vErr) throw vErr;
+    if (pErr) throw pErr;
+    const paramIds = (parameters || []).map(p => p.id);
+    const { data: options, error: oErr } = paramIds.length
+      ? await supabaseAdmin.from('qa2_parameter_option').select('*').in('parameter_id', paramIds)
+      : { data: [] };
+    if (oErr) throw oErr;
+    return { version, parameters: parameters || [], options: options || [] };
+  });
+}
+
+// All answers of one save in ONE statement (was one upsert per question).
+async function saveAnswers(evaluationId, answers) {
+  const rows = (Array.isArray(answers) ? answers : [])
+    .filter(a => a && a.parameter_id)
+    .map(a => ({
+      evaluation_id: evaluationId, parameter_id: a.parameter_id,
+      value_num: a.value_num ?? null, value_text: a.value_text ?? null, value_bool: a.value_bool ?? null,
+      is_na: !!a.is_na, comment: a.comment ?? null,
+    }));
+  if (!rows.length) return;
+  const { error } = await supabaseAdmin.from('qa2_answer').upsert(rows, { onConflict: 'evaluation_id,parameter_id' });
+  if (error) throw error;
+}
+
+function scoreFields(result) {
+  return {
+    base_sum: result.base_sum, base_pct: result.base_pct, penalty_total: result.penalty_total,
+    final_score: result.final_score, autofail_result: result.autofail_result, result: result.result,
+  };
+}
+
+// Recomputes the score from the evaluation's CURRENT qa2_answer rows (never a
+// client-sent score) and writes it -- together with any `extra` fields (notes,
+// status) -- in ONE update. Two round trips: read answers, write the row.
+async function recomputeAndPersist(evaluationId, formVersionId, extra = {}) {
+  const [def, { data: answers, error: aErr }] = await Promise.all([
+    loadDefinition(formVersionId),
     supabaseAdmin.from('qa2_answer').select('*').eq('evaluation_id', evaluationId),
   ]);
-  const paramIds = (parameters || []).map(p => p.id);
-  const { data: options } = paramIds.length
-    ? await supabaseAdmin.from('qa2_parameter_option').select('*').in('parameter_id', paramIds)
-    : { data: [] };
-
-  const result = computeEvaluation({ formVersion: version, parameters: parameters || [], options: options || [], answers: answers || [] });
+  if (aErr) throw aErr;
+  const result = computeEvaluation({ formVersion: def.version, parameters: def.parameters, options: def.options, answers: answers || [] });
   const { data: updated, error } = await supabaseAdmin
     .from('qa2_evaluation')
-    .update({
-      base_sum: result.base_sum, base_pct: result.base_pct, penalty_total: result.penalty_total,
-      final_score: result.final_score, autofail_result: result.autofail_result, result: result.result,
-    })
+    .update({ ...scoreFields(result), ...extra })
     .eq('id', evaluationId).select().single();
   if (error) throw error;
-  return updated;
+  return { updated, answers: answers || [], def };
 }
 
 // ── A DRAFT FOLLOWS THE SCORECARD, a submitted review never does ──────────────
@@ -104,7 +147,7 @@ async function upgradeStaleDraft(evaluation, callId) {
       .update({ form_version_id: current }).eq('id', evaluation.id).eq('status', 'draft').select().maybeSingle();
     if (mErr) throw mErr;
     if (!moved) return null;
-    return await recomputeAndPersist(evaluation.id, current);
+    return (await recomputeAndPersist(evaluation.id, current)).updated;
   } catch (e) {
     // Never block a reviewer: on any failure they get their draft as it was.
     logger.warn('QA2_EVAL', `draft ${evaluation.id} could not move to the current scorecard: ${e.message}`);
@@ -193,24 +236,14 @@ router.put('/evaluations/:id', asyncHandler(async (req, res) => {
   if (evaluation.reviewer_id !== req.user.id && !scope.managerAccess) return res.status(403).json({ error: 'Forbidden' });
   if (evaluation.status !== 'draft') return res.status(409).json({ error: 'Only a draft evaluation can be edited' });
 
-  if (Array.isArray(answers)) {
-    for (const a of answers) {
-      if (!a.parameter_id) continue;
-      await supabaseAdmin.from('qa2_answer').upsert({
-        evaluation_id: id, parameter_id: a.parameter_id,
-        value_num: a.value_num ?? null, value_text: a.value_text ?? null, value_bool: a.value_bool ?? null,
-        is_na: !!a.is_na, comment: a.comment ?? null,
-      }, { onConflict: 'evaluation_id,parameter_id' });
-    }
-  }
-
   const fieldUpdate = {};
   if (Number.isFinite(active_seconds)) fieldUpdate.active_seconds = active_seconds;
   if (overall_notes !== undefined) fieldUpdate.overall_notes = overall_notes;
-  if (Object.keys(fieldUpdate).length) await supabaseAdmin.from('qa2_evaluation').update(fieldUpdate).eq('id', id);
 
   try {
-    const updated = await recomputeAndPersist(id, evaluation.form_version_id);
+    await saveAnswers(id, answers);
+    // notes ride along with the score write: one update, not two
+    const { updated } = await recomputeAndPersist(id, evaluation.form_version_id, fieldUpdate);
     res.json({ evaluation: updated });
   } catch (e) { res.status(500).json({ error: e.message }); }
 }));
@@ -221,17 +254,25 @@ router.post('/evaluations/:id/submit', asyncHandler(async (req, res) => {
   const scope = await requireScope(req, res);
   if (!scope) return;
   const { id } = req.params;
+  // The Review screen sends its final answers + notes WITH the submit, so a
+  // submit is one request instead of "save, then submit".
+  const { answers: incoming, overall_notes } = req.body || {};
 
   const { data: evaluation } = await supabaseAdmin.from('qa2_evaluation').select('*').eq('id', id).maybeSingle();
   if (!evaluation) return res.status(404).json({ error: 'Evaluation not found' });
   if (evaluation.reviewer_id !== req.user.id && !scope.managerAccess) return res.status(403).json({ error: 'Forbidden' });
   if (evaluation.status !== 'draft') return res.status(409).json({ error: 'Already submitted' });
 
-  const { data: parameters } = await supabaseAdmin.from('qa2_parameter').select('id, key, role, requires_comment').eq('form_version_id', evaluation.form_version_id);
-  const { data: answers } = await supabaseAdmin.from('qa2_answer').select('*').eq('evaluation_id', id);
+  await saveAnswers(id, incoming);
+
+  const [def, { data: answers, error: aErr }] = await Promise.all([
+    loadDefinition(evaluation.form_version_id),
+    supabaseAdmin.from('qa2_answer').select('*').eq('evaluation_id', id),
+  ]);
+  if (aErr) return res.status(500).json({ error: aErr.message });
   const byParam = new Map((answers || []).map(a => [a.parameter_id, a]));
 
-  const missingComment = (parameters || []).find(p => {
+  const missingComment = def.parameters.find(p => {
     if (p.requires_comment === 'never') return false;
     const a = byParam.get(p.id);
     const hasComment = a && a.comment && a.comment.trim();
@@ -244,20 +285,26 @@ router.post('/evaluations/:id/submit', asyncHandler(async (req, res) => {
     }
     return false;
   });
-  if (missingComment) return res.status(400).json({ error: `"${missingComment.key}" requires a comment before submitting` });
-
-  // recomputeAndPersist commits the score fields first; the status update
-  // below returns the FULL row (score fields included), so that response
-  // alone is complete — no need to merge two partial snapshots.
-  await recomputeAndPersist(id, evaluation.form_version_id);
-  const now = new Date().toISOString();
-  const { data: submitted, error } = await supabaseAdmin
-    .from('qa2_evaluation').update({ status: 'submitted', submitted_at: now }).eq('id', id).select().single();
-  if (error) return res.status(500).json({ error: error.message });
-
-  if (evaluation.assignment_id) {
-    await supabaseAdmin.from('qa2_assignment').update({ status: 'scored' }).eq('id', evaluation.assignment_id);
+  if (missingComment) {
+    // the answers are saved either way, so nothing typed is lost
+    if (overall_notes !== undefined) await supabaseAdmin.from('qa2_evaluation').update({ overall_notes }).eq('id', id);
+    return res.status(400).json({ error: `"${missingComment.key}" requires a comment before submitting` });
   }
+
+  // Score, notes and status in ONE write; the assignment flips alongside it.
+  // .eq('status','draft') keeps a double-click from submitting twice.
+  const result = computeEvaluation({ formVersion: def.version, parameters: def.parameters, options: def.options, answers: answers || [] });
+  const now = new Date().toISOString();
+  const final = { ...scoreFields(result), status: 'submitted', submitted_at: now };
+  if (overall_notes !== undefined) final.overall_notes = overall_notes;
+  const [{ data: submitted, error }] = await Promise.all([
+    supabaseAdmin.from('qa2_evaluation').update(final).eq('id', id).eq('status', 'draft').select().maybeSingle(),
+    evaluation.assignment_id
+      ? supabaseAdmin.from('qa2_assignment').update({ status: 'scored' }).eq('id', evaluation.assignment_id)
+      : Promise.resolve(),
+  ]);
+  if (error) return res.status(500).json({ error: error.message });
+  if (!submitted) return res.status(409).json({ error: 'Already submitted' });
   res.json({ evaluation: submitted });
 }));
 
@@ -296,21 +343,12 @@ router.post('/evaluations/:id/override', asyncHandler(async (req, res) => {
     .select().single();
   if (error) return res.status(500).json({ error: error.message });
 
-  if (Array.isArray(answers)) {
-    for (const a of answers) {
-      if (!a.parameter_id) continue;
-      await supabaseAdmin.from('qa2_answer').insert({
-        evaluation_id: overriding.id, parameter_id: a.parameter_id,
-        value_num: a.value_num ?? null, value_text: a.value_text ?? null, value_bool: a.value_bool ?? null,
-        is_na: !!a.is_na, comment: a.comment ?? null,
-      });
-    }
-  }
-  await recomputeAndPersist(overriding.id, original.form_version_id);
-  const { data: submitted } = await supabaseAdmin
-    .from('qa2_evaluation').update({ status: 'submitted', submitted_at: now }).eq('id', overriding.id).select().single();
-
-  await supabaseAdmin.from('qa2_evaluation').update({ status: 'superseded', superseded_by: overriding.id }).eq('id', original.id);
+  await saveAnswers(overriding.id, answers);
+  // score + status in one write, the original superseded alongside it
+  const [{ updated: submitted }] = await Promise.all([
+    recomputeAndPersist(overriding.id, original.form_version_id, { status: 'submitted', submitted_at: now }),
+    supabaseAdmin.from('qa2_evaluation').update({ status: 'superseded', superseded_by: overriding.id }).eq('id', original.id),
+  ]);
 
   res.status(201).json({ evaluation: submitted });
 }));

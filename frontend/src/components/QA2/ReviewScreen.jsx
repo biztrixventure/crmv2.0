@@ -12,7 +12,7 @@
 // ============================================================================
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { ArrowLeft, Play, Pause, Phone, Building2, User, Clock, Send, SkipForward, Car, Hash, CheckCircle2, ArrowRight } from 'lucide-react';
+import { ArrowLeft, Play, Pause, Phone, Building2, User, Clock, Send, SkipForward, Car, Hash, CheckCircle2, ArrowRight, RotateCcw, RotateCw } from 'lucide-react';
 import { toast } from 'sonner';
 import client from '../../api/client';
 import ThemedSelect from '../UI/Select';
@@ -247,6 +247,15 @@ function AudioPlayer({ call }) {
     if (a.paused) a.play().catch(() => {}); else a.pause();
   };
 
+  // Jump back/forward by a few seconds -- re-hearing a phrase without dragging
+  // the seek bar. Clamped to the clip so it never runs off either end.
+  const jump = (sec) => {
+    const a = audioRef.current; if (!a) return;
+    const end = Number.isFinite(a.duration) ? a.duration : (dur || 0);
+    a.currentTime = Math.min(Math.max(0, (a.currentTime || 0) + sec), end || 0);
+    setCur(a.currentTime);
+  };
+
   if (!hasAudio) {
     return (
       <Panel tone="inset" className="text-center py-6 space-y-2">
@@ -283,6 +292,21 @@ function AudioPlayer({ call }) {
             className="absolute inset-0 w-full opacity-0 cursor-pointer" />
         </div>
         {cached && <span className="text-[10px] font-semibold" style={{ color: 'var(--color-success-600)' }}>cached</span>}
+      </div>
+
+      {/* Jump. Back on the left, forward on the right, nearest step in the
+          middle -- the two you press most sit next to each other. */}
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <span className="text-[10px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-tertiary)' }}>Jump</span>
+        {[-10, -5, -2, 2, 5, 10].map(sec => (
+          <button key={sec} type="button" onClick={() => jump(sec)} disabled={loading}
+            title={sec < 0 ? `Back ${-sec} seconds` : `Forward ${sec} seconds`}
+            aria-label={sec < 0 ? `Back ${-sec} seconds` : `Forward ${sec} seconds`}
+            className="inline-flex items-center gap-0.5 text-[11px] font-bold px-2 py-0.5 rounded-full tabular-nums disabled:opacity-50"
+            style={{ background: 'var(--color-surface)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}>
+            {sec < 0 ? <><RotateCcw size={11} />{-sec}s</> : <>{sec}s<RotateCw size={11} /></>}
+          </button>
+        ))}
       </div>
 
       {/* Speed. Its own row so the transport above keeps the exact layout it
@@ -513,10 +537,17 @@ export default function ReviewScreen({ assignment, onDone, onNext, nextLabel, re
   };
 
   const submit = async () => {
+    if (submitting) return;
+    // ONE request: the final answers + notes travel WITH the submit (was a
+    // full save, then the submit -- two round trips and a re-score each).
+    // A pending autosave is dropped: the submit carries everything it would.
+    if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; }
     setSubmitting(true);
     try {
-      await client.put(`qa2/evaluations/${evaluation.id}`, { answers: Object.entries(answers).map(([parameter_id, v]) => ({ parameter_id, ...v })), overall_notes: notes });
-      const r = await client.post(`qa2/evaluations/${evaluation.id}/submit`);
+      const r = await client.post(`qa2/evaluations/${evaluation.id}/submit`, {
+        answers: Object.entries(answers).map(([parameter_id, v]) => ({ parameter_id, ...v })),
+        overall_notes: notes,
+      });
       toast.success('Submitted');
       // Landing back on the queue after every single review meant finding your
       // place again, opening the next one, waiting for it to load — for every

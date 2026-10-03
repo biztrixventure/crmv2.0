@@ -573,6 +573,12 @@ Callback Date + Wrong Dispo the same clone-and-publish way), and a new
   Unclosed drafts reopened showing v1's yes/no "Wrong Dispo" and no Call Outcome
   (2026-10-02). Submitted reviews never move. The Review screen now also READS
   BACK a resumed draft's saved answers -- it used to open every draft blank.
+- **Review save/submit speed** (2026-10-03): submit is ONE request carrying the
+  final answers + notes (was save-then-submit, ~20 sequential round trips). All
+  answers go in one upsert (`saveAnswers`); the scorecard definition is cached
+  60s (`loadDefinition`, ns `qa2_def`, invalidated by qa2Forms PUT/publish); the
+  QA2 scope is cached 30s per user+role (`qa2ScopeResolver`, ns `qa2_scope`).
+  Player has Jump -10/-5/-2/+2/+5/+10s.
 - Scorecards report: `role` `outcome` (like `info`) is never flagged red, and
   `totals.outcomes` counts each outcome across the rows shown -- rendered as the
   "Call Outcome" breakdown above the sheet in `ReportsTab.jsx`. Text questions

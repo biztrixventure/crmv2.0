@@ -29,6 +29,7 @@ const { resolveQa2Scope } = require('../utils/qa2ScopeResolver');
 const { companyInScope } = require('../utils/qa2Scope');
 const { computeEvaluation, maxPoints } = require('../utils/qa2Scoring');
 const logger = require('../utils/logger');
+const cache = require('../utils/cache');   // 'qa2_def' = qa2Evaluations' scorecard cache
 
 // Which form_version an evaluation should score against for a given
 // (method, company) — company-specific active form first, else the global
@@ -475,6 +476,8 @@ router.put('/versions/:vid', asyncHandler(async (req, res) => {
     }
   }
 
+  // the review screen scores against a cached copy of this definition
+  cache.invalidate('qa2_def', vid);
   res.json({ ok: true });
 }));
 
@@ -510,6 +513,7 @@ router.post('/versions/:vid/publish', asyncHandler(async (req, res) => {
   if (error) return res.status(500).json({ error: error.message });
 
   await supabaseAdmin.from('qa2_form').update({ status: 'active' }).eq('id', form.id);
+  cache.invalidate('qa2_def', vid);
   res.json({ version: published });
 }));
 

@@ -8,8 +8,19 @@
 const { supabaseAdmin } = require('../config/database');
 const { isSuperAdmin } = require('../models/helpers');
 const { deriveScope } = require('./qa2Scope');
+const cache = require('./cache');
+
+// Every QA2 request resolves this -- including each autosave while a reviewer
+// types -- and for a QA agent it is two to three sequential reads (~0.45s each).
+// Grants change when a manager rewires the team, not between keystrokes, so the
+// answer is kept 30s per user+role (the same window hasPermission uses).
+const SCOPE_TTL_MS = 30 * 1000;
 
 async function resolveQa2Scope(req) {
+  return cache.remember('qa2_scope', `${req.user.id}|${req.user.role}`, SCOPE_TTL_MS, () => resolveQa2ScopeUncached(req));
+}
+
+async function resolveQa2ScopeUncached(req) {
   const userId = req.user.id;
   const role = req.user.role;
   const superadmin = role === 'superadmin' || await isSuperAdmin(userId);
