@@ -22,6 +22,7 @@ const { syncAllCompanies: syncAttendance } = require('./attendanceSync');
 const { runAllEnabled: syncRevenue } = require('./revenueSync');
 const { runBatchExpiry } = require('./batchExpiry');
 const ipAccess = require('./ipAccess');
+const lookupHistory = require('./customerLookupHistory');
 
 const REFRESH_SEGMENTS_MS = 10 * 60 * 1000;     // every 10 min
 const CACHE_SWEEP_MS      = 5  * 60 * 1000;      // every 5 min
@@ -96,6 +97,13 @@ const IP_LOG_PRUNE_INIT = 10 * 60 * 1000;
 const DIALER_EVENT_DAYS       = 14;
 const DIALER_EVENT_PRUNE_MS   = 6 * 60 * 60 * 1000;
 const DIALER_EVENT_PRUNE_INIT = 12 * 60 * 1000;
+// Customer Lookup history (mig 337). Two clocks: the saved RESULT is only
+// worth keeping while somebody might re-open it, while the record of who
+// searched what is worth keeping far longer.
+const LOOKUP_HISTORY_RESULT_DAYS = 30;
+const LOOKUP_HISTORY_DAYS        = 180;
+const LOOKUP_HISTORY_PRUNE_MS    = 12 * 60 * 60 * 1000;
+const LOOKUP_HISTORY_PRUNE_INIT  = 15 * 60 * 1000;
 
 let _timers = [];
 
@@ -240,6 +248,20 @@ function startBackgroundJobs() {
   };
   _timers.push(setTimeout(dialerEventPrune, DIALER_EVENT_PRUNE_INIT));
   _timers.push(setInterval(dialerEventPrune, DIALER_EVENT_PRUNE_MS));
+
+  // Customer Lookup history (mig 337). The row survives; the saved payload is
+  // dropped first, because that is the part that holds a page of names and
+  // addresses. A missing function (migration not applied) warns and no-ops.
+  const lookupHistoryPrune = async () => {
+    try {
+      const r = await lookupHistory.prune({ resultDays: LOOKUP_HISTORY_RESULT_DAYS, historyDays: LOOKUP_HISTORY_DAYS });
+      if (r && (r.stripped || r.deleted)) {
+        logger.info('JOBS', `lookup history prune: ${r.stripped} results dropped, ${r.deleted} rows removed`);
+      }
+    } catch (e) { logger.warn('JOBS', `lookup history prune error: ${e.message}`); }
+  };
+  _timers.push(setTimeout(lookupHistoryPrune, LOOKUP_HISTORY_PRUNE_INIT));
+  _timers.push(setInterval(lookupHistoryPrune, LOOKUP_HISTORY_PRUNE_MS));
 
   logger.info('JOBS', `background jobs started — segments refresh ${REFRESH_SEGMENTS_MS / 60000}m, cache sweep ${CACHE_SWEEP_MS / 60000}m, payment scan ${PAYMENT_SCAN_MS / 3600000}h, qa materialize ${QA_MATERIALIZE_MS / 60000}m, milestone sweep ${MILESTONE_SWEEP_MS / 60000}m, qa2 recording poll ${QA2_REC_POLL_MS / 1000}s, qa2 TRA vendor-code backfill ${QA2_TRA_VENDOR_MS / 60000}m, qa2 auto-assign ${QA2_AUTOASSIGN_MS / 60000}m, qa2 retention ${QA2_RETENTION_MS / 3600000}h, qa2 crm-day ${QA2_CRMDAY_MS / 3600000}h, attendance ${ATTENDANCE_SYNC_MS / 3600000}h, revenue ${REVENUE_SYNC_MS / 3600000}h, batch expiry ${BATCH_EXPIRY_MS / 60000}m, ip switch ${IP_SWITCH_MS / 1000}s, ip log prune ${IP_LOG_PRUNE_MS / 3600000}h`);
 }

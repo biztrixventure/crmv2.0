@@ -9,10 +9,13 @@
 // on the next search. The key is write-only — it is stored server-side in
 // app_secrets and only ever comes back as a masked tail.
 //
-// Both user switches default OFF. Turning the service on globally still shows
-// the tool to nobody until a switch is flipped for a named person.
+// ACCESS HAS TWO LAYERS. "Everyone gets it" is one write that applies to the
+// whole estate; a person's own switches override it in either direction, which
+// is how one agent is shut out of a tool everybody else has. A switch that
+// matches the default says so, so "on for everyone" never reads the same as
+// "on for this person".
 import { useState, useEffect, useCallback } from 'react';
-import { Search, User, Car, Link2, KeyRound, Timer, Plug, CheckCircle2, XCircle, Gauge, RotateCcw, Fingerprint } from 'lucide-react';
+import { Search, User, Car, Link2, KeyRound, Timer, Plug, CheckCircle2, XCircle, Gauge, RotateCcw, Fingerprint, Users } from 'lucide-react';
 import client from '../../../api/client';
 import { Alert } from '../../../components/UI';
 import { Panel, SectionHeader, Loading, Toggle, Field, useFlash } from '../../UI/kit';
@@ -87,6 +90,9 @@ function AdminUsage({ label, q }) {
 export default function CustomerLookupSection({ account }) {
   const userId = account?.user_id;
   const [access, setAccess]   = useState({ people: false, vehicles: false, vin: false });
+  // What EVERYONE gets, and which of this person's switches overrides it.
+  const [defaults, setDefaults] = useState({ people: false, vehicles: false, vin: false });
+  const [explicit, setExplicit] = useState({});
   const [cfg, setCfg]         = useState(null);
   const [loading, setLoading] = useState(true);
   const [allowed, setAllowed] = useState(true);
@@ -102,6 +108,7 @@ export default function CustomerLookupSection({ account }) {
 
   const hydrate = useCallback((settings) => {
     setCfg(settings);
+    if (settings?.default_access) setDefaults(settings.default_access);
     setBaseUrl(settings.base_url || settings.default_base_url || '');
     setTimeoutMs(settings.timeout_ms || 25000);
   }, []);
@@ -124,6 +131,8 @@ export default function CustomerLookupSection({ account }) {
     try {
       const r = await client.get(`customer-lookup/access/${userId}`);
       setAccess({ people: !!r.data.people, vehicles: !!r.data.vehicles, vin: !!r.data.vin });
+      setDefaults(r.data.defaults || { people: false, vehicles: false, vin: false });
+      setExplicit(r.data.explicit || {});
       hydrate(r.data.settings);
       takeQuota(r.data);
       setAllowed(true);
@@ -182,13 +191,32 @@ export default function CustomerLookupSection({ account }) {
     try {
       const r = await client.put(`customer-lookup/access/${userId}`, { [key]: next });
       setAccess({ people: !!r.data.people, vehicles: !!r.data.vehicles, vin: !!r.data.vin });
+      setDefaults(r.data.defaults || defaults);
+      setExplicit(r.data.explicit || {});
       hydrate(r.data.settings);
-      const what = key === 'people' ? 'People search' : 'Vehicle search';
+      const what = key === 'people' ? 'People search' : key === 'vin' ? 'VIN lookup' : 'Vehicle search';
       flash('success', next
-        ? `${what} is on for this user. It appears in their Staff shell as "Customer Lookup".`
-        : `${what} is off for this user.`);
+        ? `${what} is on for this user. It appears in their shell as "Customer Lookup".`
+        : `${what} is off for this user${defaults[key] ? ', even though everyone else has it' : ''}.`);
     } catch (e) {
       flash('error', e.response?.data?.error || 'Could not save that switch.');
+    } finally { setBusy(null); }
+  };
+
+  // One write for the whole estate. It does NOT touch anybody's own switches,
+  // so an agent deliberately blocked earlier stays blocked.
+  const saveDefault = async (key, next) => {
+    setBusy('default-' + key);
+    try {
+      const r = await client.put('customer-lookup/settings', { default_access: { [key]: next } });
+      hydrate(r.data);
+      await load();
+      const what = key === 'people' ? 'People search' : key === 'vin' ? 'VIN lookup' : 'Vehicle search';
+      flash('success', next
+        ? `${what} is now on for everyone. Anyone switched off below stays off.`
+        : `${what} is no longer given to everyone — only to the people switched on for it.`);
+    } catch (e) {
+      flash('error', e.response?.data?.error || 'Could not change what everyone gets.');
     } finally { setBusy(null); }
   };
 
@@ -243,21 +271,56 @@ export default function CustomerLookupSection({ account }) {
         </Alert>
       )}
 
-      {/* ── who ─────────────────────────────────────────────────────────────── */}
-      {SWITCHES.map(s => (
-        <Panel key={s.key} tone="inset" radius="xl">
-          <Toggle
-            checked={access[s.key]}
-            onChange={(next) => saveSwitch(s.key, next)}
-            busy={busy === s.key}
-            label={s.label}
-            hint={s.hint} />
-        </Panel>
-      ))}
+      {/* ── everyone ──────────────────────────────────────────────── */}
+      <Panel radius="xl">
+        <SectionHeader level="sub" icon={Users} title="Give it to everyone"
+          subtitle="Applies to every user in the CRM. The switches below still override it for this person." />
+        <div className="space-y-2">
+          {SWITCHES.map(s => (
+            <Toggle key={s.key}
+              checked={!!defaults[s.key]}
+              onChange={(next) => saveDefault(s.key, next)}
+              busy={busy === 'default-' + s.key}
+              label={s.label}
+              hint={s.key === 'vin'
+                ? 'The most expensive of the three. The allowance below is what keeps it in hand.'
+                : undefined} />
+          ))}
+        </div>
+        <p className="text-[11px] m-0 mt-2" style={{ color: 'var(--color-text-secondary)' }}>
+          {cfg?.blocked_users
+            ? `${cfg.blocked_users} user${cfg.blocked_users === 1 ? ' is' : 's are'} switched off individually and keep${cfg.blocked_users === 1 ? 's' : ''} that setting.`
+            : 'Nobody is switched off individually, so this is what every user has.'}
+        </p>
+      </Panel>
+
+      {/* ── this person ───────────────────────────────────────────── */}
+      {SWITCHES.map(s => {
+        const own = explicit[s.key] !== undefined;
+        return (
+          <Panel key={s.key} tone="inset" radius="xl">
+            <Toggle
+              checked={access[s.key]}
+              onChange={(next) => saveSwitch(s.key, next)}
+              busy={busy === s.key}
+              label={s.label}
+              hint={s.hint} />
+            <p className="text-[11px] m-0 mt-1.5" style={{ color: 'var(--color-text-tertiary)' }}>
+              {own
+                ? (!!explicit[s.key] === !!defaults[s.key]
+                    ? 'Set for this person, and it matches what everyone gets.'
+                    : 'Set for this person — it overrides what everyone else gets.')
+                : (defaults[s.key]
+                    ? 'Following the default: everyone has this.'
+                    : 'Following the default: nobody has this unless you switch it on here.')}
+            </p>
+          </Panel>
+        );
+      })}
 
       <p className="text-[11px] m-0" style={{ color: 'var(--color-text-secondary)' }}>
-        Both are off for everyone until you turn them on, one person at a time. The tool never writes to the CRM —
-        results are shown and forgotten — but every search is written to the server log against this user's name.
+        The tool never writes to the CRM. Every search IS kept though — what was typed, what came back and who ran
+        it — shown on that user's own History tab and on the superadmin Agent activity tab inside Customer Lookup.
       </p>
 
       {/* ── how much ────────────────────────────────────────────────────────── */}

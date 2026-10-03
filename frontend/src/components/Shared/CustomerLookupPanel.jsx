@@ -14,16 +14,24 @@
 // (zippopotam.us, 24h cached) so the searcher sees the city/state they are
 // actually searching before they spend a lookup on a typo.
 //
-// Nothing is stored. Every result here is fetched, shown, and forgotten.
+// EVERY SEARCH IS KEPT (mig 337). It used to be fetched, shown and forgotten,
+// which meant the next search wiped the one before it — so an agent working
+// through a list lost it and had to spend another search to get it back. The
+// History tab lists what they have searched and re-opens a saved result for
+// free; a superadmin also gets an Activity tab over everyone's searches.
 // ============================================================================
 import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import {
   Search, Phone, User, MapPin, Car, Loader2, Copy, Check, Home, Users2,
   Mail, Building2, Hash, ChevronRight, Info, AlertTriangle, Database, CalendarClock, RefreshCw, Gauge, Fingerprint,
+  History, Activity, X,
 } from 'lucide-react';
 import client from '../../api/client';
 import { Panel, SectionHeader, EmptyState, Field, PillTabs, Toggle, Loading, accent } from '../UI/kit';
 import { Badge, Alert, Button } from '../UI';
+import CustomerLookupHistory from './CustomerLookupHistory';
+import CustomerLookupActivity from './CustomerLookupActivity';
+import { KIND_TAB, KIND_LABEL, exactText } from '../../utils/lookupHistory';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 const digits = (s) => String(s || '').replace(/\D/g, '');
@@ -784,7 +792,14 @@ export default function CustomerLookupPanel({ access: accessProp }) {
   const canPeople   = !!access?.people;
   const canVehicles = !!access?.vehicles;
   const canVin      = !!access?.vin;
+  const isSuper     = !!access?.superadmin;
   const [tab, setTab] = useState('people');
+
+  // A result opened out of the history is NOT a live search, and the panel has
+  // to say so — otherwise a result from last Tuesday reads as today's.
+  const [savedView, setSavedView] = useState(null);   // { at, kind, query, by }
+  const [openingId, setOpeningId] = useState(null);
+  const [histKey, setHistKey]     = useState(0);      // bumped after a live search
 
   // Land on whichever search they actually hold once the answer arrives.
   // Land on the first tab this person actually holds, whichever that is.
@@ -895,6 +910,7 @@ export default function CustomerLookupPanel({ access: accessProp }) {
   // The standalone VIN search. Same call the Get VIN button makes, driven by a
   // form instead of a row that was already found.
   const runVinSearch = useCallback(async () => {
+    setSavedView(null);
     setVnErr(''); setVnData(null); setVnNote('');
     const address = vnAddress.trim();
     const zip = digits(vnZip).slice(0, 5);
@@ -925,10 +941,12 @@ export default function CustomerLookupPanel({ access: accessProp }) {
       setVnData(d);
     } catch (e) {
       setVnErr(e?.response ? errText(e, 'VIN lookup failed.') : (e.message || 'VIN lookup failed.'));
-    } finally { setVnBusy(false); setVnNote(''); refreshQuota(); }
+    } finally { setVnBusy(false); setVnNote(''); refreshQuota(); setHistKey(k => k + 1); }
   }, [vnAddress, vnZip, vnYear, vnMake, vnModel, vnFirst, vnLast, vnMode, pollJob, refreshQuota]);
 
   const runPeople = useCallback(async () => {
+    // A live search is no longer a saved one, and the history has a new row.
+    setSavedView(null);
     setPErr(''); setPData(null); setPIdx(0);
     if (mode === 'phone' && digits(phone).length < 10) { setPErr('Enter a 10-digit US phone number.'); return; }
     if (mode === 'name'  && q.trim().length < 3)       { setPErr('Type at least 3 characters.'); return; }
@@ -1039,7 +1057,7 @@ export default function CustomerLookupPanel({ access: accessProp }) {
       // An aborted stream is this panel cancelling itself, not a failure.
       if (e?.name === 'AbortError') return;
       setPErr(e?.response ? errText(e, 'Lookup failed.') : (e.message || 'Lookup failed.'));
-    } finally { setPBusy(false); setJobNote(''); refreshQuota(); }
+    } finally { setPBusy(false); setJobNote(''); refreshQuota(); setHistKey(k => k + 1); }
   }, [mode, phone, name, q, cacheOnly, withVehicles, canVehicles, pollJob]);
 
   const runVehicles = useCallback(async (override = {}) => {
@@ -1049,6 +1067,7 @@ export default function CustomerLookupPanel({ access: accessProp }) {
     const dob     = (override.dob ?? vDob).trim();
     const mode    = override.mode ?? vMode;
 
+    setSavedView(null);
     setVErr(''); setVData(null); setJobNote(''); setVins({});
     if (!address) { setVErr('Enter a street address, or find one from a name or phone below.'); return; }
     // Only a cache read can work without a name — a new search fills a quote
@@ -1072,7 +1091,7 @@ export default function CustomerLookupPanel({ access: accessProp }) {
       }
     } catch (e) {
       setVErr(e?.response ? errText(e, 'Vehicle search failed.') : (e.message || 'Vehicle search failed.'));
-    } finally { setVBusy(false); setJobNote(''); refreshQuota(); }
+    } finally { setVBusy(false); setJobNote(''); refreshQuota(); setHistKey(k => k + 1); }
   }, [vAddress, vZip, vName, vDob, vMode, pollJob]);
 
   // Name / phone → candidate addresses (server returns addresses only).
@@ -1137,10 +1156,76 @@ export default function CustomerLookupPanel({ access: accessProp }) {
     setTab('vehicles');
   }, [canVehicles]);
 
+  // Re-open a search out of the history. NOTHING IS SENT TO THE SERVICE: the
+  // saved payload is dropped into the same state a live search fills, so every
+  // renderer, every copy button and every vehicle jump works unchanged.
+  const openSaved = useCallback(async (row) => {
+    setOpeningId(row.id);
+    try {
+      const r = await client.get(`customer-lookup/history/${row.id}`);
+      const saved = r.data?.row;
+      const payload = saved?.result;
+      const p = saved?.params || {};
+      if (!saved) throw new Error('That search is no longer in the history.');
+
+      const dest = KIND_TAB[saved.kind] || 'people';
+      setSavedView({
+        at: saved.created_at, kind: saved.kind, query: saved.query,
+        by: r.data?.names?.[saved.user_id] || null,
+        missing: !payload,
+      });
+
+      if (dest === 'people') {
+        // Put the form back the way it was, so "Search again" is one click.
+        setMode(p.q ? 'name' : 'phone');
+        if (p.phone) setPhone(p.phone);
+        if (p.q) setQ(p.q);
+        setName(p.name || '');
+        setWithVehicles(saved.kind === 'enrich');
+        setPIdx(0);
+        setPErr(payload ? '' : 'The saved result for this search has been cleared. Run it again to see it.');
+        setPData(payload || null);
+      } else if (dest === 'vehicles') {
+        setVAddress(p.address || '');
+        setVZip(p.zip || '');
+        setVName(p.name || '');
+        setVDob(p.dob || '');
+        setVins({});
+        if (saved.kind === 'addresses') {
+          // An address lookup's "result" is the candidate list, not vehicles.
+          setCands(payload?.addresses || []);
+          setVData(null);
+          setVErr(payload ? '' : 'The saved result for this search has been cleared. Run it again to see it.');
+        } else {
+          setCands(null);
+          setVErr(payload ? '' : 'The saved result for this search has been cleared. Run it again to see it.');
+          setVData(payload || null);
+        }
+      } else {
+        setVnAddress(p.address || '');
+        setVnZip(p.zip || '');
+        setVnYear(p.year || '');
+        setVnMake(p.make || '');
+        setVnModel(p.model || '');
+        setVnFirst(p.first_name || '');
+        setVnLast(p.last_name || '');
+        setVnErr(payload ? '' : 'The saved result for this search has been cleared. Run it again to see it.');
+        setVnData(payload || null);
+      }
+      setTab(dest);
+    } catch (e) {
+      // The history tab stays on screen, so the message belongs there — not in
+      // a tab the person has not been moved to.
+      setSavedView({ error: e?.response?.data?.error || e.message || 'Could not open that search.' });
+    } finally { setOpeningId(null); }
+  }, []);
+
   const tabs = [
     ...(canPeople   ? [{ key: 'people',   label: 'People',   icon: User }] : []),
     ...(canVehicles ? [{ key: 'vehicles', label: 'Vehicles', icon: Car  }] : []),
     ...(canVin      ? [{ key: 'vin',      label: 'VIN',      icon: Fingerprint }] : []),
+    { key: 'history', label: 'History', icon: History },
+    ...(isSuper ? [{ key: 'activity', label: 'Agent activity', icon: Activity }] : []),
   ];
 
   if (!access) return <Loading variant="rows" rows={3} label="Checking your access" />;
@@ -1170,6 +1255,27 @@ export default function CustomerLookupPanel({ access: accessProp }) {
       )}
 
       {tabs.length > 1 && <PillTabs items={tabs} value={tab} onChange={setTab} />}
+
+      {/* A saved result is not today's result, and the banner is the only thing
+          on screen that can say which one you are looking at. */}
+      {savedView && !savedView.error && tab !== 'history' && tab !== 'activity' && (
+        <Alert type="info" dismissible={false}>
+          <div className="flex items-start justify-between gap-3">
+            <span className="text-xs">
+              Saved {KIND_LABEL[savedView.kind]?.toLowerCase() || ''} search for <strong>{savedView.query}</strong>
+              {savedView.by ? <> by <strong>{savedView.by}</strong></> : ''} &middot; {exactText(savedView.at)}.
+              {savedView.missing
+                ? ' The result itself has been cleared — run it again to see it.'
+                : ' Nothing was searched again, so this cost you nothing.'}
+            </span>
+            <button type="button" onClick={() => setSavedView(null)} title="Dismiss"
+              style={{ color: 'var(--color-text-tertiary)' }}><X size={14} /></button>
+          </div>
+        </Alert>
+      )}
+      {savedView?.error && tab === 'history' && (
+        <Alert type="error" onDismiss={() => setSavedView(null)}>{savedView.error}</Alert>
+      )}
 
       {/* ── PEOPLE ─────────────────────────────────────────────────────────── */}
       {tab === 'people' && canPeople && (
@@ -1544,9 +1650,20 @@ export default function CustomerLookupPanel({ access: accessProp }) {
         </div>
       )}
 
+      {/* ── HISTORY ────────────────────────────────────────────────────────── */}
+      {tab === 'history' && (
+        <CustomerLookupHistory access={access} onOpen={openSaved} openingId={openingId} reloadKey={histKey} />
+      )}
+
+      {/* ── AGENT ACTIVITY (superadmin) ────────────────────────────────────── */}
+      {tab === 'activity' && isSuper && (
+        <CustomerLookupActivity onOpen={openSaved} openingId={openingId} />
+      )}
+
       <p className="m-0 text-[11px] flex items-start gap-1.5" style={{ color: 'var(--color-text-tertiary)' }}>
         <AlertTriangle size={12} className="flex-shrink-0 mt-px" />
-        Use this only to verify a customer you are already working with. Every search is logged against your name.
+        Use this only to verify a customer you are already working with. Every search is kept against your name and
+        is visible to a superadmin.
       </p>
     </div>
   );

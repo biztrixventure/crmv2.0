@@ -602,3 +602,40 @@ Which networks each user may use the CRM from. Ships OFF, and everyone is `anywh
 - Break-glass: `npm run ip-access -- disable | anywhere <email>` (backend/), or `IP_RESTRICTION_FORCE_OFF=true` + restart.
 - Audit = `module_audit_log` module `access` (rules, mode changes only, `security.*` config). Last-seen stamps are NOT logged.
 - Tests run on `backend/testing/supabaseFake.js` (in-memory supabase-js; `fake.calls` proves "no queries when off").
+
+### Customer Lookup history + "everyone" access (mig 337, PENDING)
+The tool shipped storing NOTHING -- a result was proxied, drawn and forgotten.
+That lost an agent their previous result the moment they searched again (the
+only way back was to spend another search out of their allowance), and left a
+superadmin handing out a PII tool with no record of what it was used for beyond
+one server-log line per call.
+- Every search now writes `customer_lookup_searches` via
+  `backend/utils/customerLookupHistory.js`: who, what was typed, a SMALL summary
+  (names + place / vehicle titles / VINs) and the payload the browser received.
+  Service-role only (RLS on, no policies, revoked from anon + authenticated) --
+  it is the one table in the CRM holding lookup-service output.
+- **Recording never breaks a search.** Every write is fire-and-forget and every
+  error is swallowed to a log line; a missing table (backend ahead of 337) mutes
+  writes for 5 minutes instead of hammering the database once per search.
+- **An async search is written twice**: a scrape or a VIN run answers with a
+  ticket, so the row is inserted `pending` and completed from `/job/:ticket` --
+  the only place that run's real answer appears. Keyed on (user, ticket) and
+  only while `completed_at IS NULL`, so repeated polling cannot rewrite it.
+- **Re-opening a saved search spends nothing**: `GET /customer-lookup/history/:id`
+  hands back the payload and `openSaved()` drops it into the same state a live
+  search fills, so every renderer works unchanged. A banner says it is saved,
+  because a result from last Tuesday must not read as today's.
+- Retention is TWO clocks (`fn_prune_customer_lookup_searches`, every 12h from
+  `utils/scheduler.js`): the `result` payload is dropped after 30 days, the row
+  after 180. `canReopen()` in `frontend/src/utils/lookupHistory.js` mirrors the
+  30 days so an expired row says so instead of offering a dead button.
+- Surfaces: a **History** tab for everyone and an **Agent activity** tab for a
+  superadmin (`/history/all` + `/history/users`), both inside Customer Lookup.
+- **Access has two layers now.** `customer_lookup.default_access` is what
+  EVERYONE gets; a `customer_lookup.users` row overrides it in both directions,
+  and an explicit `false` is how one person is shut out of a tool everyone else
+  has. Code fallback stays all-off, so a fresh install grants nothing.
+  Set 2026-10-03 to people+vehicles+VIN for everyone; the limits were NOT
+  touched (people 50/day, vehicles 50/day, VIN 300/30 days).
+  `setUserQuota` must test `row[k] !== undefined`, never truthiness -- dropping
+  a row because every switch is `false` would silently re-grant a blocked user.

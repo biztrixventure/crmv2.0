@@ -85,23 +85,49 @@ async function settings() {
 }
 
 // ── per-user access ──────────────────────────────────────────────────────────
-// Absent user → both false. That IS the "off by default" the tool ships with:
-// turning the service on globally still shows it to nobody until a superadmin
-// flips a switch for a named person.
+// TWO LAYERS, AND THE PERSON'S OWN ROW ALWAYS WINS.
+//
+// It shipped as one layer: a name in `customer_lookup.users`, or nothing. That
+// is the right default for a tool nobody has decided about yet, and the wrong
+// one the moment the whole floor should have it — granting it sixty times by
+// hand and again for every new hire is not a policy, it is a chore.
+//
+// So `customer_lookup.default_access` says what EVERYONE gets, and a user row
+// overrides it in both directions: an explicit `false` against an all-on
+// default is how one person is shut out. An absent key follows the default.
+// The code fallback is still all-off, so a fresh install hands out nothing
+// until a superadmin says otherwise.
+const ACCESS_KINDS = ['people', 'vehicles', 'vin'];
+
 async function userMap() {
   const m = await getConfig(null, 'customer_lookup.users', {});
   return (m && typeof m === 'object' && !Array.isArray(m)) ? m : {};
 }
 
+async function defaultAccess() {
+  const d = await getConfig(null, 'customer_lookup.default_access', null);
+  const o = (d && typeof d === 'object' && !Array.isArray(d)) ? d : {};
+  return { people: !!o.people, vehicles: !!o.vehicles, vin: !!o.vin };
+}
+
+async function setDefaultAccess(patch, updatedBy) {
+  const next = { ...(await defaultAccess()) };
+  for (const k of ACCESS_KINDS) if (patch && patch[k] !== undefined) next[k] = !!patch[k];
+  await setConfig('global', 'customer_lookup.default_access', next, updatedBy);
+  return next;
+}
+
 async function accessFor(userId, { superadmin = false } = {}) {
-  const [cfg, key, map] = await Promise.all([settings(), getApiKey(), userMap()]);
+  const [cfg, key, map, dflt] = await Promise.all([settings(), getApiKey(), userMap(), defaultAccess()]);
   const configured = !!cfg.baseUrl && !!key;
   const row = map[userId] || {};
   // A superadmin administers the tool, so they can always exercise it — the
-  // same rule the DNC lookup uses. Everyone else needs their own switch.
-  const people   = superadmin || !!row.people;
-  const vehicles = superadmin || !!row.vehicles;
-  const vin      = superadmin || !!row.vin;
+  // same rule the DNC lookup uses. Everyone else gets the default unless their
+  // own row says otherwise.
+  const resolve = (k) => superadmin || (row[k] === undefined ? dflt[k] : !!row[k]);
+  const people   = resolve('people');
+  const vehicles = resolve('vehicles');
+  const vin      = resolve('vin');
   const live = cfg.enabled && configured;
   return {
     people:   live && people,
@@ -110,18 +136,22 @@ async function accessFor(userId, { superadmin = false } = {}) {
     // Diagnostics, so the UI can say WHY it is closed instead of just vanishing.
     enabled: cfg.enabled, configured, superadmin,
     granted: { people, vehicles, vin },
+    defaults: dflt,
+    // Which of the three this person was named for, either way. The admin UI
+    // needs "following the default" to read as a different state from "off".
+    explicit: Object.fromEntries(ACCESS_KINDS.filter(k => row[k] !== undefined).map(k => [k, !!row[k]])),
   };
 }
 
 async function setAccess(userId, patch, updatedBy) {
-  const map = await userMap();
+  const [map, dflt] = await Promise.all([userMap(), defaultAccess()]);
   const row = { ...(map[userId] || {}) };
-  if (patch.people   !== undefined) row.people   = !!patch.people;
-  if (patch.vehicles !== undefined) row.vehicles = !!patch.vehicles;
-  if (patch.vin      !== undefined) row.vin      = !!patch.vin;
-  // Drop the key entirely when nothing is granted — keeps the config row from
-  // growing a tombstone for every user ever toggled.
-  if (!row.people && !row.vehicles && !row.vin) delete map[userId];
+  for (const k of ACCESS_KINDS) if (patch && patch[k] !== undefined) row[k] = !!patch[k];
+  // Drop the key when it no longer says anything the default does not already
+  // say — that keeps the config row from growing a tombstone for every user
+  // ever toggled. A quota override IS something it says, so it keeps the row.
+  const redundant = ACCESS_KINDS.every(k => row[k] === undefined || !!row[k] === !!dflt[k]);
+  if (redundant && !row.quota) delete map[userId];
   else map[userId] = row;
   await setConfig('global', 'customer_lookup.users', map, updatedBy);
   return row;
@@ -374,8 +404,11 @@ async function setUserQuota(userId, patch, updatedBy) {
     else quota[kind] = oneQuota(patch[kind], 30);
   }
   if (Object.keys(quota).length) row.quota = quota; else delete row.quota;
-  // Keep the row only while it still says something.
-  if (!row.people && !row.vehicles && !row.vin && !row.quota) delete map[userId];
+  // Keep the row only while it still says something. An access key that is
+  // present and FALSE says plenty now that there is a default to override —
+  // testing truthiness here would have quietly re-granted a blocked user the
+  // next time their quota was edited.
+  if (!ACCESS_KINDS.some(k => row[k] !== undefined) && !row.quota) delete map[userId];
   else map[userId] = row;
   await setConfig('global', 'customer_lookup.users', map, updatedBy);
   return row.quota || {};
@@ -463,7 +496,7 @@ async function resetUsage(userId, kind) {
 module.exports = {
   KEY_NAME, DEFAULT_BASE,
   getApiKey, setApiKey, normalizeBase, settings,
-  userMap, accessFor, setAccess,
+  userMap, accessFor, setAccess, defaultAccess, setDefaultAccess, ACCESS_KINDS,
   rateLimit, call, stream, normPhone,
   globalQuota, setGlobalQuota, quotaFor, setUserQuota,
   quotaStatus, consume, refund, resetUsage, readUsage,

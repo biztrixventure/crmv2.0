@@ -15,15 +15,27 @@
 //   POST /customer-lookup/quota/reset/:userId  superadmin — clear one user's usage
 //   GET  /customer-lookup/access/:userId       superadmin — one user's switches + quota
 //   PUT  /customer-lookup/access/:userId       superadmin — set them
+//   GET  /customer-lookup/history              the CALLER's own past searches
+//   GET  /customer-lookup/history/all          superadmin — everyone's searches
+//   GET  /customer-lookup/history/users        superadmin — who is using the tool
+//   GET  /customer-lookup/history/:id          one search WITH the saved result
 //
-// Nothing here writes a lookup result anywhere. The API key never leaves the
-// server: settings only ever return a masked tail.
+// EVERY SEARCH IS NOW RECORDED (mig 337). It used to be fetched, shown and
+// forgotten, which cost an agent their previous result the moment they ran a
+// second search, and left a superadmin with no way to see what the tool was
+// being used for. utils/customerLookupHistory.js writes who searched what, a
+// small summary, and the payload the browser received — so History re-opens a
+// result for free instead of spending another search on it.
+//
+// The API key never leaves the server: settings only ever return a masked tail.
 // ============================================================================
 const express = require('express');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { isSuperAdmin } = require('../models/helpers');
+const { supabaseAdmin } = require('../config/database');
 const { setConfig } = require('../utils/businessConfig');
 const cl = require('../utils/customerLookup');
+const hist = require('../utils/customerLookupHistory');
 
 const router = express.Router();
 
@@ -77,13 +89,47 @@ async function finish(req, res, r, kind) {
   return res.status(r.status).json({ error: r.error });
 }
 
+// "(772) 475-7074" — the history list is read by people, not by machines.
+const showPhone = (v) => {
+  const d = String(v || '').replace(/\D/g, '');
+  return d.length === 10 ? `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}` : String(v || '');
+};
+
+// One history row per search, written as the answer goes out and never awaited
+// — the record is a by-product and must not be able to fail a lookup.
+//
+// A call that answers with a ticket has not finished: it is written `pending`
+// with that ticket and completed later from /job/:ticket, which is the only
+// place the real result of a scrape or a VIN run ever appears.
+function remember(req, kind, query, params, r, t0) {
+  const ticket = r.ok ? (r.data?.job || null) : null;
+  hist.record({
+    userId: req.user.id,
+    companyId: req.user.company_id || null,
+    kind,
+    query,
+    params,
+    ticket,
+    data: (r.ok && !ticket) ? r.data : null,
+    error: r.ok ? null : r.error,
+    ms: Date.now() - t0,
+  });
+}
+
 const send = (res, r) => (r.ok ? res.json(r.data) : res.status(r.status).json({ error: r.error }));
 
 // ── my-access ────────────────────────────────────────────────────────────────
 router.get('/my-access', asyncHandler(async (req, res) => {
   const a = await myAccess(req);
   const quota = (a.people || a.vehicles || a.vin) ? await cl.quotaStatus(req.user.id) : null;
-  res.json({ people: a.people, vehicles: a.vehicles, vin: a.vin, any: a.people || a.vehicles || a.vin, quota });
+  // `superadmin` is what the panel keys the Activity tab off — the browser
+  // cannot work that out, and it must not have to guess.
+  res.json({
+    people: a.people, vehicles: a.vehicles, vin: a.vin,
+    any: a.people || a.vehicles || a.vin,
+    superadmin: a.superadmin,
+    quota,
+  });
 }));
 
 // Just the allowance — polled after a search so the bars move without a reload.
@@ -119,6 +165,7 @@ router.get('/person', asyncHandler(async (req, res) => {
   const phone = cl.normPhone(req.query.phone);
   if (!phone) return res.status(422).json({ error: 'Enter a 10-digit US phone number' });
   const cacheOnly = req.query.scrape === '0';
+  const t0 = Date.now();
   const r = await cl.call('/api/lookup', {
     phone,
     name: req.query.name,
@@ -131,6 +178,7 @@ router.get('/person', asyncHandler(async (req, res) => {
     // async=1 set, so this costs nothing when the record is already there.
     async: cacheOnly ? undefined : '1',
   }, { userId: req.user.id, label: `person ${phone}` });
+  remember(req, 'people', showPhone(phone), { phone, name: req.query.name, scrape: cacheOnly ? '0' : undefined }, r, t0);
   await finish(req, res, r, 'people');
 }));
 
@@ -168,18 +216,26 @@ router.get('/person/stream', asyncHandler(async (req, res) => {
   res.on('close', () => ac.abort());
 
   let sawEnd = false;
-  const r = await cl.stream('/api/lookup/stream', {
+  // `done` carries the complete record — the same object the blocking endpoint
+  // returns — so it is what the history keeps. The row and the browser then
+  // hold exactly the same thing, which is what makes re-opening it honest.
+  let doneEvent = null;
+  let streamError = null;
+  const t0 = Date.now();
+  const params = {
     phone,
     name: req.query.name,
     mode: req.query.mode === 'quick' ? 'quick' : undefined,
     scrape: req.query.scrape === '0' ? '0' : undefined,
     refresh: req.query.refresh === '1' ? '1' : undefined,
-  }, {
+  };
+  const r = await cl.stream('/api/lookup/stream', params, {
     userId: req.user.id,
     label: `person stream ${phone}`,
     signal: ac.signal,
     onLine: (obj) => {
-      if (obj?.event === 'done' || obj?.event === 'error') sawEnd = true;
+      if (obj?.event === 'done') { sawEnd = true; doneEvent = obj; }
+      else if (obj?.event === 'error') { sawEnd = true; streamError = obj.error || 'Lookup failed'; }
       if (!res.writableEnded) res.write(JSON.stringify(obj) + '\n');
     },
   });
@@ -192,6 +248,15 @@ router.get('/person/stream', asyncHandler(async (req, res) => {
       res.write(JSON.stringify({ event: 'error', error: r.error, status: r.status }) + '\n');
     }
   }
+
+  // A stream the browser walked away from is still a search that was run and
+  // charged, so it is recorded either way — with whatever it had reached.
+  remember(req, 'people', showPhone(phone), params,
+    doneEvent
+      ? { ok: true, data: doneEvent }
+      : { ok: false, error: streamError || (r.cancelled ? 'Cancelled before it answered' : (r.ok ? 'The stream ended before it answered' : r.error)) },
+    t0);
+
   if (!res.writableEnded) res.end();
 }));
 
@@ -200,7 +265,9 @@ router.get('/search', asyncHandler(async (req, res) => {
   if (!await guard(req, res, 'people')) return;
   const q = String(req.query.q || '').trim();
   if (q.length < 3) return res.status(422).json({ error: 'Type at least 3 characters' });
+  const t0 = Date.now();
   const r = await cl.call('/api/search', { q }, { userId: req.user.id, label: `search "${q}"` });
+  remember(req, 'search', q, { q }, r, t0);
   await finish(req, res, r, 'people');
 }));
 
@@ -243,9 +310,13 @@ router.get('/vehicles', asyncHandler(async (req, res) => {
     if (v) params[k] = v;
   }
 
+  const label = [street, zip].filter(Boolean).join(' · ');
+
   if (mode === 'cache') {
     params.run = '0';
+    const t0 = Date.now();
     const r = await cl.call('/api/vehicles', params, { userId: req.user.id, label: `vehicles cache ${street}` });
+    remember(req, 'vehicles', label, { ...params, mode }, r, t0);
     if (!r.ok) { await cl.refund(req.user.id, 'vehicles'); return res.status(r.status).json({ error: r.error }); }
     return res.json({ ...r.data, mode });
   }
@@ -263,7 +334,9 @@ router.get('/vehicles', asyncHandler(async (req, res) => {
   if (mode === 'fresh') params.refresh = '1';
   params.async = '1';
 
+  const t0 = Date.now();
   const r = await cl.call('/api/vehicles', params, { userId: req.user.id, label: `vehicles ${mode} ${street}` });
+  remember(req, 'vehicles', label, { ...params, mode }, r, t0);
   if (!r.ok) { await cl.refund(req.user.id, 'vehicles'); return res.status(r.status).json({ error: r.error }); }
   res.json({ ...r.data, mode, address: street, zip });
 }));
@@ -325,7 +398,9 @@ router.get('/vin', asyncHandler(async (req, res) => {
   }
 
   const label = 'vin ' + year + ' ' + make + ' ' + model + ' @ ' + address;
+  const t0 = Date.now();
   const r = await cl.call('/api/vin', params, { userId: req.user.id, label });
+  remember(req, 'vin', `${year} ${make} ${model} · ${address}`, { ...params, mode }, r, t0);
   if (!r.ok) { await cl.refund(req.user.id, 'vin'); return res.status(r.status).json({ error: r.error }); }
   res.json({ ...r.data, mode });
 }));
@@ -347,6 +422,22 @@ router.get('/job/:ticket', asyncHandler(async (req, res) => {
   // A job that finished in failure searched nothing, so hand the quota back —
   // but polling repeats, so only the first terminal look refunds.
   const failed = r.data?.status === 'error' || r.data?.vehicles_status === 'error' || r.data?.result?.status === 'error';
+
+  // The pending history row written when the search STARTED is finished here —
+  // this is the only place a scrape's or a VIN run's real answer appears. The
+  // update is keyed on (user, ticket) and only matches a row that is still
+  // open, so the browser's repeated polling cannot rewrite a finished one.
+  if (r.data?.status === 'done' || r.data?.status === 'error') {
+    hist.complete({
+      userId: req.user.id,
+      ticket,
+      data: r.data?.status === 'error' ? null : r.data,
+      error: r.data?.status === 'error'
+        ? (r.data?.error || r.data?.result?.error || 'The search did not complete')
+        : null,
+    });
+  }
+
   if (failed && !refunded.has(ticket)) {
     refunded.add(ticket);
     if (refunded.size > 500) refunded.clear();
@@ -407,7 +498,9 @@ router.get('/enrich', asyncHandler(async (req, res) => {
   // The vehicle half can run Progressive, so anything but cache-only goes async.
   if (mode !== 'cache' && acc.vehicles) params.async = '1';
 
+  const t0 = Date.now();
   const r = await cl.call('/api/enrich', params, { userId: req.user.id, label: `enrich ${phone}` });
+  remember(req, 'enrich', showPhone(phone), { ...params, mode }, r, t0);
   if (!r.ok) {
     for (const kind of spent) await cl.refund(req.user.id, kind);
     return res.status(r.status).json({ error: r.error });
@@ -453,6 +546,7 @@ router.get('/addresses', asyncHandler(async (req, res) => {
   // Finding someone's addresses IS a search. Charge it to the allowance the
   // caller actually holds, so a vehicles-only user is not billed for people.
   const kind = acc.people ? 'people' : 'vehicles';
+  const t0 = Date.now();
   const spend = await cl.consume(req.user.id, kind);
   if (!spend.ok) {
     return res.status(429).json({
@@ -465,7 +559,11 @@ router.get('/addresses', asyncHandler(async (req, res) => {
     ? await cl.call('/api/lookup', { phone, name: name || undefined, scrape: req.query.scrape === '0' ? '0' : undefined },
         { userId: req.user.id, label: `addresses ${phone}` })
     : await cl.call('/api/search', { q: name }, { userId: req.user.id, label: `addresses "${name}"` });
-  if (!r.ok) { await cl.refund(req.user.id, kind); return res.status(r.status).json({ error: r.error }); }
+  if (!r.ok) {
+    remember(req, 'addresses', phone ? showPhone(phone) : name, { phone: phone || undefined, name: name || undefined }, r, t0);
+    await cl.refund(req.user.id, kind);
+    return res.status(r.status).json({ error: r.error });
+  }
 
   // Both shapes carry the same person object — /lookup as `result`, /search as
   // `results[].data` — so flatten to one list either way.
@@ -486,15 +584,25 @@ router.get('/addresses', asyncHandler(async (req, res) => {
       addresses.push({ ...parsed, person: p.name || null });
     }
   }
-  res.json({ found: addresses.length > 0, count: addresses.length, addresses: addresses.slice(0, 40) });
+  const payload = { found: addresses.length > 0, count: addresses.length, addresses: addresses.slice(0, 40) };
+  // Turning a name or a number into an address IS a search, and it spends an
+  // allowance, so it belongs in the history like any other.
+  remember(req, 'addresses', phone ? showPhone(phone) : name, { phone: phone || undefined, name: name || undefined },
+    { ok: true, data: payload }, t0);
+  res.json(payload);
 }));
 
 // ── settings (superadmin) ────────────────────────────────────────────────────
 async function masked() {
-  const [cfg, key, map] = await Promise.all([cl.settings(), cl.getApiKey(), cl.userMap()]);
+  const [cfg, key, map, dflt] = await Promise.all([cl.settings(), cl.getApiKey(), cl.userMap(), cl.defaultAccess()]);
   const granted = Object.values(map).filter(v => v?.people || v?.vehicles);
+  const blocked = Object.values(map).filter(v => cl.ACCESS_KINDS.some(k => v?.[k] === false)).length;
   return {
     enabled: cfg.enabled,
+    // What EVERYONE gets without being named. The named rows below override it
+    // in both directions, so "blocked_users" is a real number, not a rounding.
+    default_access: dflt,
+    blocked_users: blocked,
     base_url: cfg.baseUrl || '',
     base_error: cfg.baseError,
     default_base_url: cl.DEFAULT_BASE,
@@ -526,6 +634,12 @@ router.put('/settings', asyncHandler(async (req, res) => {
   }
   if (b.enabled !== undefined) await setConfig('global', 'customer_lookup.enabled', !!b.enabled, req.user.id);
 
+  // "Everyone gets it" — one write instead of a switch per person. A user who
+  // was explicitly turned off stays off: their row overrides this.
+  if (b.default_access && typeof b.default_access === 'object') {
+    await cl.setDefaultAccess(b.default_access, req.user.id);
+  }
+
   if (b.clear_key) {
     await cl.setApiKey('', req.user.id);
     // A service with no key can serve nobody — say so by switching it off
@@ -554,18 +668,29 @@ router.get('/settings/test', asyncHandler(async (req, res) => {
 }));
 
 // ── per-user access (superadmin) ─────────────────────────────────────────────
+// The three switches now report the EFFECTIVE answer (default, unless this
+// person's own row overrides it) and say which of the two it came from, so the
+// admin screen can show "on for everyone" differently from "on for them".
+async function accessPayload(userId) {
+  const [a, quota, gq, cfg, map] = await Promise.all([
+    cl.accessFor(userId, { superadmin: await isSuperAdmin(userId) }),
+    cl.quotaStatus(userId), cl.globalQuota(), masked(), cl.userMap(),
+  ]);
+  const row = map[userId] || {};
+  return {
+    user_id: userId,
+    people: a.granted.people, vehicles: a.granted.vehicles, vin: a.granted.vin,
+    defaults: a.defaults,
+    explicit: a.explicit,
+    is_superadmin: a.superadmin,
+    quota_override: row.quota || {},
+    quota, global_quota: gq, settings: cfg,
+  };
+}
+
 router.get('/access/:userId', asyncHandler(async (req, res) => {
   if (!await superadminOnly(req, res)) return;
-  const map = await cl.userMap();
-  const row = map[req.params.userId] || {};
-  res.json({
-    user_id: req.params.userId,
-    people: !!row.people, vehicles: !!row.vehicles, vin: !!row.vin,
-    quota_override: row.quota || {},
-    quota: await cl.quotaStatus(req.params.userId),
-    global_quota: await cl.globalQuota(),
-    settings: await masked(),
-  });
+  res.json(await accessPayload(req.params.userId));
 }));
 
 router.put('/access/:userId', asyncHandler(async (req, res) => {
@@ -579,16 +704,105 @@ router.put('/access/:userId', asyncHandler(async (req, res) => {
   if (b.people !== undefined || b.vehicles !== undefined || b.vin !== undefined) await cl.setAccess(req.params.userId, b, req.user.id);
   if (b.quota !== undefined) await cl.setUserQuota(req.params.userId, b.quota, req.user.id);
 
-  const map = await cl.userMap();
-  const row = map[req.params.userId] || {};
-  res.json({
-    user_id: req.params.userId,
-    people: !!row.people, vehicles: !!row.vehicles, vin: !!row.vin,
-    quota_override: row.quota || {},
-    quota: await cl.quotaStatus(req.params.userId),
-    global_quota: await cl.globalQuota(),
-    settings: await masked(),
+  res.json(await accessPayload(req.params.userId));
+}));
+
+// ── history ──────────────────────────────────────────────────────────────────
+// Who looked at whom. Reading is gated the same way searching is: your own
+// history needs a switch on the tool, everyone else's needs superadmin.
+
+// user_profiles first/last → auth email → the raw id, never nothing. A history
+// row outlives the profile it names (no FK, by design in mig 337), so a name
+// that cannot be resolved must still list.
+async function userNames(ids) {
+  const out = {};
+  const uniq = [...new Set((ids || []).filter(Boolean))];
+  if (!uniq.length) return out;
+  // PostgREST puts an .in() list in the URL, so it is chunked at the estate's
+  // usual 150 rather than risking a 22,000-character request.
+  for (let i = 0; i < uniq.length; i += 150) {
+    const { data } = await supabaseAdmin.from('user_profiles')
+      .select('user_id, first_name, last_name').in('user_id', uniq.slice(i, i + 150));
+    for (const p of (data || [])) {
+      const n = `${p.first_name || ''} ${p.last_name || ''}`.trim();
+      if (n) out[p.user_id] = n;
+    }
+  }
+  // user_profiles has no email column, so an unnamed or missing profile is
+  // resolved from auth — per id, which is why it is capped.
+  const missing = uniq.filter(id => !out[id]).slice(0, 25);
+  await Promise.all(missing.map(async (id) => {
+    try {
+      const { data } = await supabaseAdmin.auth.admin.getUserById(id);
+      if (data?.user?.email) out[id] = data.user.email;
+    } catch { /* a name we cannot resolve is not a reason to fail the list */ }
+  }));
+  for (const id of uniq) if (!out[id]) out[id] = 'Unknown user';
+  return out;
+}
+
+const clampInt = (v, d, min, max) => {
+  const n = parseInt(v, 10);
+  return Number.isFinite(n) ? Math.min(Math.max(n, min), max) : d;
+};
+
+router.get('/history', asyncHandler(async (req, res) => {
+  const acc = await myAccess(req);
+  if (!acc.people && !acc.vehicles && !acc.vin && !acc.superadmin) {
+    return res.status(403).json({ error: 'Customer lookup is not enabled for you' });
+  }
+  const { rows, total } = await hist.list({
+    userId: req.user.id,
+    kind: req.query.kind,
+    limit: clampInt(req.query.limit, 40, 1, 200),
+    offset: clampInt(req.query.offset, 0, 0, 100000),
   });
+  res.json({ rows, total });
+}));
+
+// Everyone's searches. Defined BEFORE /history/:id — Express matches in the
+// order routes are declared, and "all" would otherwise be read as an id.
+router.get('/history/all', asyncHandler(async (req, res) => {
+  if (!await superadminOnly(req, res)) return;
+  const { rows, total } = await hist.listAll({
+    userId: req.query.user_id || undefined,
+    kind: req.query.kind,
+    q: String(req.query.q || '').trim() || undefined,
+    from: req.query.from || undefined,
+    to: req.query.to || undefined,
+    limit: clampInt(req.query.limit, 50, 1, 200),
+    offset: clampInt(req.query.offset, 0, 0, 100000),
+  });
+  res.json({ rows, total, names: await userNames(rows.map(r => r.user_id)) });
+}));
+
+// Who is using the tool, over a window — the header of the Activity tab.
+router.get('/history/users', asyncHandler(async (req, res) => {
+  if (!await superadminOnly(req, res)) return;
+  const s = await hist.stats({ from: req.query.from || undefined, to: req.query.to || undefined });
+  res.json({ ...s, names: await userNames(s.users.map(u => u.user_id)) });
+}));
+
+// One search WITH the result the browser was given. This is what makes History
+// worth having: re-opening a search spends no allowance and runs nothing.
+router.get('/history/:id', asyncHandler(async (req, res) => {
+  const acc = await myAccess(req);
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id)) return res.status(422).json({ error: 'Bad history reference' });
+  if (!acc.people && !acc.vehicles && !acc.vin && !acc.superadmin) {
+    return res.status(403).json({ error: 'Customer lookup is not enabled for you' });
+  }
+  const row = await hist.getOne(id, { userId: req.user.id, superadmin: acc.superadmin });
+  if (!row) return res.status(404).json({ error: 'That search is no longer in the history' });
+  // A vehicles-only user must not read the people half of an old enrich, the
+  // same rule /job/:ticket applies to a live one.
+  if (row.result && !acc.superadmin) {
+    if (!acc.people) { delete row.result.person; delete row.result.result; delete row.result.results; }
+    if (!acc.vehicles) { delete row.result.vehicles; delete row.result.vehicles_status; }
+    if (!acc.vin) delete row.result.vin;
+  }
+  const names = acc.superadmin ? await userNames([row.user_id]) : {};
+  res.json({ row, names });
 }));
 
 module.exports = router;
