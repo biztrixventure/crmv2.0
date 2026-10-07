@@ -584,6 +584,46 @@ Callback Date + Wrong Dispo the same clone-and-publish way), and a new
   "Call Outcome" breakdown above the sheet in `ReportsTab.jsx`. Text questions
   render as a full-width box in `ReviewScreen.jsx`.
 
+### Unclosed: one row per transfer, Wrong Dispo, manual verdict (migs 339-340, applied 2026-10-07)
+**ONE CLOSER REVIEW ROW PER TRANSFER, PER METHOD** -- the closer-leg twin of 298.
+A closer who MANUALLY DIALS a customer made its own ingest row instead of landing
+on the transfer already there, so Unclosed listed far more records than there
+were transfers. Measured over 14 days: `crm_day` 1,168 rows / 1,162 transfers
+(~1:1, correct) vs `ingest` 2,477 / 1,450 -- 476 extra on a transfer that already
+had a row, plus 551 carrying none.
+- 339 adds the fronter pair's two clauses to `app_qa2_duplicate_starved()` for
+  `leg='closer'`, **scoped by `method_id`, which the fronter clauses do not need
+  to be**: the fronter leg only holds TRA, but the closer leg holds Closed AND
+  Unclosed and **17 transfers legitimately hold one of each**. Deduping on
+  (transfer, leg) alone would park one of those two at random and quietly damage
+  the Closed scorecard. Same method, or leave it.
+- Parking is `qa_relevant=false`, never a delete -- row, audio and disposition all
+  survive, and anything started/scored/evaluated is excluded by the function's
+  tail (42 of 488 matches were protected that way on the first run). The parked
+  call's clip is still reachable from the surviving row through the Review
+  screen's clip picker (mig 328).
+- **Do not set `qa_relevant=false` by hand without first clearing the pending
+  assignments.** `windowed` requires `qa_relevant IS TRUE`, so parking a row
+  first makes the function stop returning it and the scheduler can never clean
+  up its assignment. `parkDuplicateStarvedCalls` deletes then updates, in that
+  order, hourly -- let it do both.
+- 340 publishes Unclosed **v6**: `wrong_dispo` (Yes/No) and `final_status`
+  (Pass/Fail). v4 had 117 submitted reviews and a scored version is immutable.
+- **Wrong Dispo is `choice`, NOT `yes_no`.** v1 already had a `yes_no` Wrong Dispo
+  and it never appeared in any report, because the Scorecards outcome breakdown
+  aggregates `role='outcome' AND input_type='choice'` (qa2Reports.js) and the
+  frontend maps one Panel per outcome question. As a choice it counts itself. It
+  keeps v1's lineage_id and v1's `Y`/`N` values so the seven historical answers
+  thread onto the new column instead of reading as a second question.
+- **Manual pass/fail needed no code**: a `verdict` parameter's mere presence hands
+  `result` to the reviewer (mig 242). It was badly needed -- every one of the 128
+  submitted Unclosed reviews had scored FAIL, because threshold 90 against scale
+  scoring can never pass. Caveat: an unanswered verdict leaves `result` NULL
+  (TRA runs ~1.6% that way), so the reviewer must actually pick.
+- `call_outcome` still carries its own "Wrong Dispo" OPTION from 336 -- now
+  redundant beside the dedicated question, and left in place deliberately: removing
+  an option from a published version needs another clone-and-publish.
+
 ### IP access control (mig 319, applied 2026-09-15)
 Which networks each user may use the CRM from. Ships OFF, and everyone is `anywhere`. README → "IP access control" has the operator steps.
 - **Mode lives in `user_ip_access` (sidecar), NEVER on `user_profiles`.** That table has RLS `users_can_update_own_profile`
