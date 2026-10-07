@@ -102,6 +102,78 @@ async function remoteAgents(account) {
   };
 }
 
+// ── which of a contact's calls is THIS transfer ─────────────────────────────
+//
+// Nearest-by-start is wrong, and it put another conversation in front of a
+// reviewer. Measured 2026-10-07 on contact 38381440: the fronter's real
+// transfer call ran 21:29:25 → 21:44:04 (879s, dispo 3428 "XFER Transfered"),
+// and the XFER webhook fired at 21:42:29 — INSIDE it, because CallTools
+// disposes a transfer while the agent is still on the line. Scoring |start −
+// call_at| put the real call 184s away and the 21:40:30 leg forwarded TO THE
+// CLOSER 119s away, so the closer's own conversation won and was filed as the
+// transfer call. Three rules, in order:
+//
+//   1. the row's own call id wins outright when that call has a clip;
+//   2. a call whose span CONTAINS call_at wins, longest first — a disposition
+//      stamped mid-call is the normal case for a transfer, and the agent's own
+//      conversation is the one that encloses the forwarded leg, not the other
+//      way round;
+//   3. otherwise score against start AND end (the mig 328 rule, same reason)
+//      and CAP it, so an unrelated call later in the day cannot win by merely
+//      being the nearest thing on the contact.
+//
+// A ZERO-LENGTH clip is never a candidate: CallTools writes a 0-second
+// `internal` leg beside the real one, sharing its file id, and that leg is
+// what wrote talk_sec = 0 — making the row read like a call that never
+// connected and removing the only signal a mis-pick leaves behind.
+const MAX_CLIP_DISTANCE_MS = 30 * 60 * 1000;
+
+function clipSeconds(c) {
+  const secs = c && (c.billsec != null ? c.billsec : c.duration);
+  const n = Number(secs);
+  return Number.isFinite(n) ? Math.round(n) : null;
+}
+
+// CallTools timestamps are ISO-8601 with a Z, so these are real instants — the
+// naive-local trap mig 328 fixed is a VICIdial problem, not one here.
+function callSpan(c) {
+  const s = Date.parse(c.start || c.created_on || '');
+  const e = Date.parse(c.end || '');
+  if (!Number.isFinite(s)) return null;
+  return [s, Number.isFinite(e) ? e : s];
+}
+
+function pickContactCall(calls, { at, prefer } = {}) {
+  const withClip = (calls || []).filter(c => c.call_recording_fsfile_id && (clipSeconds(c) || 0) > 0);
+  if (!withClip.length) return null;
+
+  if (prefer) {
+    const exact = withClip.find(c => String(c.uuid || '') === String(prefer));
+    if (exact) return exact;
+  }
+
+  const want = at ? Date.parse(at) : NaN;
+  if (!Number.isFinite(want)) return withClip[0];
+
+  const covering = withClip.filter(c => {
+    const span = callSpan(c);
+    return span && want >= span[0] && want <= span[1];
+  });
+  if (covering.length) {
+    return covering.sort((a, b) => (clipSeconds(b) || 0) - (clipSeconds(a) || 0))[0];
+  }
+
+  const ranked = withClip
+    .map(c => {
+      const span = callSpan(c);
+      if (!span) return null;
+      return { c, d: Math.min(Math.abs(span[0] - want), Math.abs(span[1] - want)) };
+    })
+    .filter(x => x && x.d <= MAX_CLIP_DISTANCE_MS)
+    .sort((a, b) => a.d - b.d);
+  return ranked.length ? ranked[0].c : null;
+}
+
 // ── finding a clip when the call id is no good ──────────────────────────────
 //
 // The button-press trigger has no call uuid of its own — the press happens
@@ -110,37 +182,25 @@ async function remoteAgents(account) {
 // calls, while the contact's real call sat there with a recording on it.
 //
 // What the press DOES give us is the contact, which is also what the CRM keeps
-// as the lead code. So ask for that contact's calls and take the one nearest
-// the transfer. The duration comes back with it — the only place a
-// button-press call can get one, since the press carries no talk time either.
-async function recordingForContact(account, contactId, { at } = {}) {
+// as the lead code. So ask for that contact's calls and pick by the rules
+// above. The duration comes back with it — the only place a button-press call
+// can get one, since the press carries no talk time either.
+async function recordingForContact(account, contactId, { at, prefer } = {}) {
   const id = String(contactId || '').replace(/\D/g, '');
   if (!id) return { ok: false, url: null, error: 'no contact id on the row' };
 
   const res = await apiGet(account, '/api/contactcalls/', { params: { contact_id: id, limit: 50 } });
   if (!res.ok) return { ok: false, url: null, error: res.error };
   const calls = (res.data && res.data.results) || [];
-  const withClip = calls.filter(c => c.call_recording_fsfile_id);
-  if (!withClip.length) return { ok: false, url: null, error: `contact ${id} has no recorded call yet` };
-
-  // Nearest in time to the transfer, so a customer who was called twice does
-  // not hand the reviewer the wrong conversation.
-  const want = at ? new Date(at).getTime() : null;
-  let pick = withClip[0];
-  if (want) {
-    const ranked = withClip
-      .map(c => ({ c, d: Math.abs(new Date(c.created_on || c.start || 0).getTime() - want) }))
-      .filter(x => Number.isFinite(x.d))
-      .sort((a, b) => a.d - b.d);
-    if (ranked.length) pick = ranked[0].c;
-  }
+  const pick = pickContactCall(calls, { at, prefer });
+  if (!pick) return { ok: false, url: null, error: `contact ${id} has no recorded call near this transfer` };
 
   const acct = withPreset(account);
   const api = (acct.settings || {}).api || {};
   const base = String(acct.base_url || '').replace(/\/+$/, '');
   const rel = String(api.recording_file_path || '/api/filesystemfiles/{file_id}/download/')
     .replace('{file_id}', encodeURIComponent(pick.call_recording_fsfile_id));
-  const secs = pick.billsec != null ? pick.billsec : pick.duration;
+  const secs = clipSeconds(pick);
 
   return {
     ok: true,
@@ -315,4 +375,6 @@ async function setActive(account, { hookUrl, active }) {
 module.exports = {
   remoteDispositions, remoteAgents, readWiring, provisionWiring, setActive,
   webhookBody, apiWrite, recordingForContact,
+  // exported for the test that pins the 2026-10-07 mis-pick
+  pickContactCall, clipSeconds,
 };

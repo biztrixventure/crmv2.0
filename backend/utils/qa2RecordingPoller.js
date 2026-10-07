@@ -44,6 +44,13 @@ const { clipDistanceMs } = require('./dialerTime');
 const MAX_ATTEMPTS = 10;
 const BATCH_SIZE = 60; // capped per tick
 
+// How long after a provider call ends we still believe its clip is merely slow
+// rather than absent. Inside this window the contact-route fallback is held
+// back, because guessing early is what filed the closer's leg as the transfer
+// call. 10 attempts at the poll interval outlasts it, so a genuinely
+// unrecorded call still gets the fallback and still finishes as 'missing'.
+const CLIP_GRACE_MS = 15 * 60 * 1000;
+
 // Rank the clips this lead returned and hand back the one that belongs to THIS
 // leg: never a clip another row already owns, then the agent's own clip, then
 // the one closest in time to the call.
@@ -292,6 +299,22 @@ async function pollProviderRow(row) {
   let found = null;
   let duration = null;
   let recId = callId;
+  // THE CLIP IS NOT LATE, THE CALL IS STILL UP.
+  //
+  // CallTools disposes a transfer while the agent is still talking: measured
+  // 2026-10-07, the XFER webhook for contact 38381440 fired at 21:42:29 on a
+  // call that ran to 21:44:04. So the first poll asks for a clip that cannot
+  // exist yet, and the contact fallback below then hands back the nearest
+  // FINISHED call — which is the leg forwarded to the closer. That is how a
+  // TRA row ended up holding the closer's conversation, permanently, because
+  // 'found' takes the row out of this queue for good.
+  //
+  // `recordingForCall` already tells the two cases apart: a call it could not
+  // find at all, versus one it found with no clip on it yet. The second is a
+  // WAIT, not a miss, so the fallback is held back while the call is still
+  // live or only just ended — after that the contact route is allowed again,
+  // because a call that will never be recorded must not be stuck pending.
+  let clipNotReadyYet = false;
   if (account && callId) {
     try {
       const res = await recordingForCall(account, callId);
@@ -305,6 +328,14 @@ async function pollProviderRow(row) {
       const call = res.raw && Array.isArray(res.raw.results) ? res.raw.results[0] : res.raw;
       const secs = call && (call.billsec ?? call.duration ?? call.talk_time);
       if (Number.isFinite(Number(secs))) duration = Math.round(Number(secs));
+
+      // The call exists but carries no clip. Wait for it rather than guess,
+      // but only while waiting is still plausible: no end time means it is
+      // live, and a clip normally appears within a few minutes of hangup.
+      if (!found && call) {
+        const endedMs = Date.parse(call.end || '');
+        clipNotReadyYet = !Number.isFinite(endedMs) || (Date.now() - endedMs) < CLIP_GRACE_MS;
+      }
     } catch (e) { logger.warn('QA2_REC_POLL', `${row.id}: provider lookup — ${e.message}`); }
   }
 
@@ -316,11 +347,16 @@ async function pollProviderRow(row) {
   // real call sat there with a recording on it. The contact id is what the
   // press does carry, and it is what the CRM stores as the lead code, so ask
   // for that contact's calls and take the one nearest this transfer.
-  if (!found && account && row.dialer_lead_id) {
+  if (!found && !clipNotReadyYet && account && row.dialer_lead_id) {
     try {
       const integration = require('./dialers/calltools');
       if (account.provider === 'calltools' && integration.recordingForContact) {
-        const alt = await integration.recordingForContact(account, row.dialer_lead_id, { at: row.call_at });
+        const alt = await integration.recordingForContact(account, row.dialer_lead_id, {
+          at: row.call_at,
+          // If the row's own call turns up among the contact's calls WITH a
+          // clip, it is the answer — no scoring needed.
+          prefer: callId,
+        });
         if (alt.ok && alt.url) {
           found = alt.url;
           // The clip's own id, so uq_qa2_call_recording still means one clip
@@ -343,7 +379,16 @@ async function pollProviderRow(row) {
     };
     // Only FILL a missing duration — never overwrite one the webhook supplied,
     // which is the agent-facing number.
-    if (duration != null && row.talk_sec == null) updates.talk_sec = duration;
+    // A ZERO IS A MISSING DURATION, NOT A MEASURED ONE. The 0-second
+    // `internal` leg CallTools writes beside the real call used to win the
+    // scoring and stamp talk_sec = 0; once stamped, `== null` was false
+    // forever, so the row kept reading as a call that never connected even
+    // after the real duration (879s on the 2026-10-07 case) became available.
+    // This duration comes off the CALL record, not off a clip file, so it is
+    // the agent-facing number — unlike the VICIdial paths below, which must
+    // keep their null-only guard (mig 328: a clip's length must never
+    // overwrite talk_sec, or a mis-pick stops leaving a trace).
+    if (duration != null && !row.talk_sec) updates.talk_sec = duration;
     const { error } = await supabaseAdmin.from('qa2_call').update(updates).eq('id', row.id);
     if (!error) return;
     logger.warn('QA2_REC_POLL', `${row.id}: could not attach provider clip — ${error.message}`);

@@ -371,6 +371,115 @@ describe('recording resolution', () => {
   });
 });
 
+// ── the transfer call, not the leg that followed it ────────────────────────
+//
+// Reported by QA on 2026-10-07: "6467345770 transfer call miss". That TRA row
+// held a recording, had already been reviewed, and the audio was the CLOSER
+// talking rather than the fronter.
+//
+// CallTools disposes a transfer WHILE THE AGENT IS STILL ON THE LINE. The XFER
+// webhook for contact 38381440 fired at 21:42:29 on a call that ran
+// 21:29:25 -> 21:44:04, so at that moment the call had no clip yet, the
+// contact fallback ran, and it scored every call by distance from its START:
+//
+//   the real transfer call  21:29:25   184s away
+//   the leg to the closer   21:40:30   119s away   <- won
+//
+// The closer leg was filed as the transfer call and recording_state 'found'
+// took the row out of the retry queue for good. A 0-second `internal` leg
+// sharing that same file id also stamped talk_sec = 0, which is why the row
+// read like a call that never connected and why nothing ever flagged it.
+//
+// The fixture is the dialer's own answer for that contact, and the expectation
+// is the only defensible pick: the call whose span contains the disposition.
+describe('which of a contacts calls is the transfer', () => {
+  const { pickContactCall, clipSeconds } = require('./calltools');
+
+  const REAL_TRANSFER_CALL = {
+    uuid: '89154404-2c72-4e67-941a-c341476de6f5',
+    start: '2026-10-06T21:29:25Z', end: '2026-10-06T21:44:04Z',
+    call_type: 'inbound', billsec: 879, call_disposition: 3428,
+    call_recording_fsfile_id: 1549593,
+  };
+  const INTERNAL_ZERO_LEG = {
+    uuid: 'aaaaaaaa-0000-0000-0000-000000000001',
+    start: '2026-10-06T21:40:30Z', end: '2026-10-06T21:40:31Z',
+    call_type: 'internal', billsec: 0, call_recording_fsfile_id: 1549368,
+  };
+  const LEG_TO_THE_CLOSER = {
+    uuid: 'aaaaaaaa-0000-0000-0000-000000000002',
+    start: '2026-10-06T21:40:30Z', end: '2026-10-06T21:44:04Z',
+    call_type: 'external-forward', billsec: 213, call_recording_fsfile_id: 1549368,
+  };
+  const UNRECORDED = [
+    { uuid: 'b1', start: '2026-10-05T23:55:45Z', end: '2026-10-05T23:56:05Z', billsec: 2, call_recording_fsfile_id: null },
+    { uuid: 'b2', start: '2026-10-06T21:02:14Z', end: '2026-10-06T21:02:55Z', billsec: 22, call_recording_fsfile_id: null },
+  ];
+  const CONTACT = [...UNRECORDED, REAL_TRANSFER_CALL, INTERNAL_ZERO_LEG, LEG_TO_THE_CLOSER];
+  const DISPOSED_AT = '2026-10-06T21:42:29.000Z';
+
+  test('picks the fronter transfer call, not the leg forwarded to the closer', () => {
+    const pick = pickContactCall(CONTACT, { at: DISPOSED_AT });
+    expect(pick.call_recording_fsfile_id).toBe(1549593);
+    expect(pick.uuid).toBe(REAL_TRANSFER_CALL.uuid);
+  });
+
+  test('nearest-by-start would have picked the closer leg', () => {
+    // Proves the fixture reproduces the reported bug, so this block cannot
+    // pass for the wrong reason if the rules are ever loosened back.
+    const want = Date.parse(DISPOSED_AT);
+    const byStart = CONTACT
+      .filter(c => c.call_recording_fsfile_id)
+      .map(c => ({ c, d: Math.abs(Date.parse(c.start) - want) }))
+      .sort((a, b) => a.d - b.d)[0].c;
+    expect(byStart.call_recording_fsfile_id).toBe(1549368);
+  });
+
+  test('a zero-length internal leg is never a candidate', () => {
+    expect(pickContactCall([INTERNAL_ZERO_LEG], { at: '2026-10-06T21:40:30.500Z' })).toBeNull();
+  });
+
+  test('among calls that both contain the disposition, the longer one wins', () => {
+    const pick = pickContactCall([LEG_TO_THE_CLOSER, REAL_TRANSFER_CALL], { at: DISPOSED_AT });
+    expect(pick.call_recording_fsfile_id).toBe(1549593);
+  });
+
+  test('the rows own call id wins outright when that call has a clip', () => {
+    const pick = pickContactCall(CONTACT, {
+      at: '2026-10-06T21:40:30.000Z', // scoring alone would favour the closer leg
+      prefer: REAL_TRANSFER_CALL.uuid,
+    });
+    expect(pick.call_recording_fsfile_id).toBe(1549593);
+  });
+
+  test('nothing within 30 minutes returns null, so the row stays pending', () => {
+    expect(pickContactCall(CONTACT, { at: '2026-10-07T04:00:00.000Z' })).toBeNull();
+  });
+
+  test('a call whose END is the nearer edge still matches', () => {
+    // call_at is stamped at the DISPOSITION on an ingest row, so the end of the
+    // call is often the nearer edge -- scoring only the start misses it.
+    const pick = pickContactCall([REAL_TRANSFER_CALL], { at: '2026-10-06T21:45:00.000Z' });
+    expect(pick.call_recording_fsfile_id).toBe(1549593);
+  });
+
+  test('no usable timestamp falls back to the first clipped call, not a crash', () => {
+    expect(pickContactCall(CONTACT, { at: null }).call_recording_fsfile_id).toBe(1549593);
+  });
+
+  test('a contact with no recorded call yields null', () => {
+    expect(pickContactCall(UNRECORDED, { at: DISPOSED_AT })).toBeNull();
+    expect(pickContactCall([], { at: DISPOSED_AT })).toBeNull();
+  });
+
+  test('clipSeconds prefers billsec, falls back to duration, else null', () => {
+    expect(clipSeconds({ billsec: 879, duration: 1200 })).toBe(879);
+    expect(clipSeconds({ billsec: null, duration: 213 })).toBe(213);
+    expect(clipSeconds({ billsec: 0 })).toBe(0); // reported, so the caller can reject it
+    expect(clipSeconds({})).toBeNull();
+  });
+});
+
 describe('webhook signatures', () => {
   const secret = 'shhh';
   const body = JSON.stringify({ a: 1 });
