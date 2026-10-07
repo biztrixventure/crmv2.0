@@ -554,6 +554,35 @@ from their own call.**
 - `wti_flexo` is retired: one day, 10 calls, host gone. It shared the WTI prefix
   with `wavetechpk`, so every WTI lookup disambiguated between two boxes.
 
+### A CONNECTED DIALER DISPOSES A TRANSFER MID-CALL (fixed 2026-10-07, 61953b2)
+Same symptom as 328, different cause, so the 328 fix did not cover it. Reported
+as one number ("6467345770 transfer call miss"); it was **51 of the 53 CallTools
+TRA rows filled by the contact-route fallback**, 42 already evaluated.
+- The XFER webhook for contact 38381440 fired at **21:42:29 on a call running
+  21:29:25 → 21:44:04**. The first poll therefore asks for a clip that cannot
+  exist yet, `recordingForCall` returns no URL, and the fallback scored by
+  distance from each call's **start** — putting the 21:40:30 leg forwarded TO
+  THE CLOSER (119 s) ahead of the real call (184 s). `recording_state='found'`
+  then took the row out of the retry queue permanently.
+- **"No clip yet" is a WAIT, not a miss.** `recordingForCall` already tells a
+  call it cannot find from one it found with no clip on it; only the first
+  justifies a fallback. `CLIP_GRACE_MS` (15 min past hangup) holds the fallback
+  back, then releases it so a never-recorded call still ends as `missing`.
+- `pickContactCall` (`utils/dialers/calltools.js`): own call id wins outright;
+  else the call whose span **contains** `call_at`, **longest first** (the
+  agent's conversation encloses the forwarded leg, not the reverse); else
+  start-AND-end distance capped at 30 min. **A zero-length clip is never a
+  candidate** — CallTools writes a 0 s `internal` leg sharing the real leg's
+  file id.
+- **A zero is a missing duration, not a measured one.** That 0 s leg stamped
+  `talk_sec = 0`, after which `== null` was false forever and the true 879 s
+  never landed. Treat 0 as missing ONLY where the number comes off the CALL
+  record; the VICIdial paths keep the null-only guard, per 328.
+- **The audit**: on a provider row `recording_id` should equal
+  `dialer_call_id`; anything else came from the fallback and is suspect. 296 of
+  298 now match — the 2 that do not are a call with no recording and a
+  code-less button press.
+
 ### QA2 Unclosed outcomes + comments (migs 335-336, applied 2026-10-02)
 The Unclosed scorecard (`qa2_method.code='unclosed_closer'`) is on **version 4**:
 `call_outcome` (choice, role `outcome`) holds the QA team's 41 outcomes (336 added
