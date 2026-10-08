@@ -160,6 +160,25 @@ passes the numbers leave the holder on their own. The loan lives on
   (+ `utils/expiry.js` for the countdown wording). `datetime-local` → UTC before
   sending, same rule as `callback_at`.
 
+### A number belongs to its HOLDER, not to a role (2026-10-09, fd5e0bf)
+Distribution is role-agnostic by design — `distributionBatches.js`:
+"**Recipients can be ANY user regardless of role**". `/recipients` filters on
+rank + company only (`roleRank` has `closer: 6`, strictly below every manager),
+and `/my-numbers` + `/received` key purely on `sent_to_user_id`. The ONLY thing
+that was fronter-only was the screen: `StaffShell` gated Batches on
+`isFronter`, so a manager could deal a closer numbers that the closer could
+never see. Two closers were already holding **75 live numbers** that way.
+- Batches + the floating "My Numbers" launcher are now `isFronter || isCloser`.
+  `BatchInbox` needed nothing: `canSend` comes from `SENDER_ROLES`, which
+  excludes closer exactly as it excludes fronter, so a closer gets the
+  workspace minus the forward/assign controls.
+- **The "My Numbers" TAB has no renderer in StaffShell** (grep `'numbers'`:
+  the nav entry and the notification deep-link, nothing in the content area),
+  so it paints an empty panel. Pre-existing on the fronter side, deliberately
+  NOT extended to closers. Fix it or drop it, but do not copy it.
+- The two floating launchers coexist: numbers at `bottom-20`, the closer's
+  call-checklist at `bottom-4`.
+
 ### Unique numbers per agent (mig 323)
 Two agents calling one customer is the failure distribution exists to prevent, so
 the SAME check runs at every door a number can enter: `phoneHolderMap()` in
