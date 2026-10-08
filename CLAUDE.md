@@ -583,6 +583,40 @@ TRA rows filled by the contact-route fallback**, 42 already evaluated.
   298 now match — the 2 that do not are a call with no recording and a
   code-less button press.
 
+### A manager hears the call a review was scored on (2026-10-09, ed046de)
+Scorecards printed every answer but no audio, so "Fail, 62%" could not be told
+apart from bad marking. Clicking a number in `ReportsTab.jsx` opens
+`ReviewDrawer`: player, call context, every question + answer + points +
+comment, then the notes.
+- **LISTENING FOLLOWS THE REPORTING SCOPE; SCORING FOLLOWS THE OPERATIONAL
+  ONE.** The ticket route is `POST /qa2/reports/scorecards/:evaluationId/
+  recording-ticket` in `qa2Reports.js`, behind the same `requireViewer` door
+  and re-fetching the evaluation under the same `scopedCompanyIds` /
+  `scopedMethodIds` filters the report applied. `/calls/:id/recording-ticket`
+  CANNOT serve this: it authorises via `canSeeCall` (the operational scope),
+  which is EMPTY for a compliance_manager who has not been toggled — they would
+  get a full sheet and a 403 on every play button. Widening `canSeeCall` would
+  have handed them claim + score as well.
+- Keyed on the EVALUATION, not the call: it proves the caller is listening to a
+  review their own report contains.
+- **Reuse the reviewer's player, never write a second one.** `AudioPlayer` is a
+  named export of `ReviewScreen.jsx`; `ticketUrl` (a PLAIN STRING — an object
+  prop is a new ref each render and the load effect depends on it) and
+  `readOnly` both default to existing behaviour. `readOnly` hides the clip
+  picker: re-pointing audio from a report would change what an already
+  SUBMITTED review refers to.
+- **Speed is the caches, not new code**: IndexedDB per browser (`audioCache.js`)
+  + `qaMedia`'s 30-min LRU byte cache with shared in-flight fetches and real 206
+  ranges. Opening the drawer runs NO query — every field is already on the
+  report row.
+- **`box_id` + `recording_id` must be on the row.** `clipKey(box, rec)`
+  collapses to `'?|?'` without them, so sending only `call_id` makes every clip
+  share one cache entry and play the previous call's audio.
+- **No `qa2_listen_log` write.** That table answers "did the REVIEWER listen
+  before scoring"; logging a manager's audit listening there corrupts the only
+  metric it exists for. (Nothing writes it yet at all — the reviewer column
+  reads zero.)
+
 ### QA2 Unclosed outcomes + comments (migs 335-336, applied 2026-10-02)
 The Unclosed scorecard (`qa2_method.code='unclosed_closer'`) is on **version 4**:
 `call_outcome` (choice, role `outcome`) holds the QA team's 41 outcomes (336 added
