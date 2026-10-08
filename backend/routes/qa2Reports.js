@@ -27,9 +27,14 @@ const { isYes, fieldPoints, maxPoints, optionsByParam } = require('../utils/qa2S
 // The per-call scorecard report resolves its day exactly the way Load Day does
 // — an Eastern day, not a UTC one. See /reports/scorecards below.
 const { etDateToUtcStart, etDateToUtcEnd } = require('../utils/etUtils');
+const { issueTicket } = require('../utils/mediaTicket');
 const logger = require('../utils/logger');
 
 const LIVE_STATUSES = ['submitted', 'flagged'];
+
+// A non-uuid reaching a uuid column is a Postgres 22P02, which surfaces as a
+// 500 on what is really a bad request. Same shape as columnFilter.js's.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // Every section below fetches at most this many rows and aggregates in Node —
 // there was no signal at all when a busy company/date-range quietly exceeded
@@ -646,6 +651,7 @@ router.get('/reports/scorecards', asyncHandler(async (req, res) => {
              companies(name),
              qa2_call!inner(id, customer_phone, call_at, agent_user, agent_user_id, leg,
                             method_id, dispo_raw, talk_sec, recording_state,
+                            box_id, recording_id,
                             dialer_provider, dialer_account_id, qa2_method(label))`)
     .in('status', LIVE_STATUSES)
     .limit(SCORECARD_CAP);
@@ -790,6 +796,17 @@ router.get('/reports/scorecards', asyncHandler(async (req, res) => {
       talk_sec: call.talk_sec ?? null,
       method: call.qa2_method?.label || null,
       company: e.companies?.name || null,
+      // THE CLIP'S IDENTITY, SO A MANAGER CAN LISTEN TO WHAT WAS SCORED.
+      // All three were already being selected or are free alongside what was;
+      // none of them costs another query. `box_id` + `recording_id` are not
+      // decoration: the player's IndexedDB cache is keyed on the pair
+      // (`clipKey` in utils/audioCache.js) and falls back to '?|?' when they
+      // are missing, so WITHOUT them every clip a manager played would share
+      // one cache entry and the second call would play the first one's audio.
+      // The ticket is still signed server-side; these only name the cache row.
+      recording_state: call.recording_state || null,
+      box_id: call.box_id || null,
+      recording_id: call.recording_id || null,
       // provider + account only. `dialer_box` is a TRANSFERS/SALES column
       // (migs 325-327) and does not exist on qa2_call — selecting it here was a
       // 42703 that surfaced as a blank 500 on the whole report. It is left
@@ -857,6 +874,77 @@ router.get('/reports/scorecards', asyncHandler(async (req, res) => {
     date_field: byScoredDay ? 'scored' : 'call',
     columns: columnList, rows, totals, ...capInfo(rowsRaw, SCORECARD_CAP),
   });
+}));
+
+// ── POST /qa2/reports/scorecards/:evaluationId/recording-ticket ────────────
+//
+// Listen to the call a review was scored on, from the report that shows the
+// score. A manager reading "Fail, 62%" cannot tell a bad call from a bad
+// marking without hearing it, and the sheet already shows every answer the
+// reviewer gave — the audio was the one thing missing.
+//
+// WHY THIS LIVES HERE AND NOT ON /calls/:id/recording-ticket.
+// That route authorises through `canSeeCall`, which is the OPERATIONAL scope:
+// the companies a manager was assigned in qa2_manager_company. The report
+// authorises through `scopedCompanyIds`, which also lets a compliance_manager
+// see every company (that is their job — cross-team reporting — toggle or
+// not). Pointing the report's player at the operational route would hand a
+// compliance manager a sheet full of rows and a 403 on every play button.
+//
+// So LISTENING FOLLOWS THE REPORTING SCOPE AND SCORING FOLLOWS THE
+// OPERATIONAL ONE, and the rule is not copied: the evaluation is re-fetched
+// here under the very same two filters the report applied, so a row that
+// could not have appeared in the caller's report cannot be played by them
+// either. Widening `canSeeCall` instead would have quietly handed every
+// compliance manager the claim and score endpoints as well.
+//
+// Keyed on the EVALUATION, not the call: the question being answered is
+// "what was this review scored on", and it proves the caller is listening to
+// a review their report contains rather than naming any call id they like.
+//
+// Cost is one lookup by primary key, and NOTHING is written. In particular no
+// qa2_listen_log row: that table answers "did the REVIEWER listen before
+// scoring" (qa2Reports.js reads it per reviewer), so logging a manager's
+// audit listening there would corrupt the only metric it exists for.
+// The id is a PATH parameter rather than a body field so the player can be
+// handed one plain string. A props object would be a fresh reference on every
+// render, and the player's load effect depends on it — which would re-mint a
+// ticket and re-source the <audio> element on each render instead of playing.
+router.post('/reports/scorecards/:evaluationId/recording-ticket', asyncHandler(async (req, res) => {
+  // The SAME door the report itself uses, not a second copy of the rule.
+  const scope = await requireViewer(req, res);
+  if (!scope) return;
+
+  const evaluationId = String(req.params.evaluationId || '').trim();
+  if (!UUID_RE.test(evaluationId)) return res.status(400).json({ error: 'A valid evaluation id is required' });
+
+  let q = supabaseAdmin.from('qa2_evaluation')
+    .select('id, company_id, qa2_call!inner(id, method_id, box_id, dialer_lead_id, recording_id, recording_state)')
+    .eq('id', evaluationId)
+    .in('status', LIVE_STATUSES);
+  const companyIds = scopedCompanyIds(scope);
+  if (companyIds !== null) q = q.in('company_id', companyIds);
+  const methodIds = scopedMethodIds(scope);
+  if (methodIds !== null) q = q.in('qa2_call.method_id', methodIds);
+
+  const { data: ev, error } = await q.maybeSingle();
+  if (error) return res.status(500).json({ error: error.message });
+  // Out of scope and not a review at all are deliberately the same answer: a
+  // 403 here would confirm the row exists to someone who may not see it.
+  if (!ev) return res.status(404).json({ error: 'That review is not in your reports' });
+
+  const call = ev.qa2_call;
+  if (!call || call.recording_state !== 'found' || !call.recording_id) {
+    return res.status(404).json({ error: 'No recording is attached to that call' });
+  }
+
+  const ticket = issueTicket({
+    userId: req.user.id,
+    box_id: call.box_id,
+    lead_id: call.dialer_lead_id,
+    recording_id: call.recording_id,
+  });
+  res.json({ url: `/api/qa-media/stream?ticket=${ticket}` });
 }));
 
 module.exports = router;

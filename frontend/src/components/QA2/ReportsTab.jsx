@@ -13,13 +13,16 @@ import {
   LineElement, ArcElement, Tooltip, Legend, Filler,
 } from 'chart.js';
 import { Bar } from 'react-chartjs-2';
-import { BarChart3, Users, ListChecks, Gavel, ShieldAlert, Scale as ScaleIcon, Layers, Download, Activity, ClipboardList, MessageSquare } from 'lucide-react';
+import { BarChart3, Users, ListChecks, Gavel, ShieldAlert, Scale as ScaleIcon, Layers, Download, Activity, ClipboardList, MessageSquare, Headphones } from 'lucide-react';
 import client from '../../api/client';
 import ThemedSelect from '../UI/Select';
 import ThemedDate from '../UI/ThemedDate';
 import { Panel, SectionHeader, TableScroll, EmptyState, Loading, KpiTile, PillTabs } from '../UI/kit';
 import { downloadCSV } from '../../utils/recordFormat';
 import { todayET } from '../../utils/timezone';
+import DrawerShell from '../Shared/DrawerShell';
+import DialerBadge from '../Shared/DialerBadge';
+import { AudioPlayer } from './ReviewScreen';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, PointElement, LineElement, ArcElement, Tooltip, Legend, Filler);
 
@@ -747,6 +750,157 @@ function CoverageSection({ params }) {
 //
 // A RANGE, not one day: a week's marking is one question. Both pickers open on
 // today, so the default is the single day it always was.
+// ── the review, played and read side by side ────────────────────────────────
+//
+// A manager looking at "Fail, 62%" cannot tell a bad CALL from bad MARKING
+// without hearing it. The sheet already prints every answer the reviewer gave,
+// so the audio was the only thing missing — and the two belong on one screen,
+// because the question is always whether the mark matches the call.
+//
+// NOTHING IS FETCHED TO OPEN THIS. Every field below is already in the row the
+// report returned, so the drawer costs one render and no query. The only
+// request is the signed media ticket, minted when the player mounts.
+//
+// The player is the reviewer's own `AudioPlayer`, which is what makes it fast:
+// it keeps the clip in IndexedDB, so a second listen plays with no network at
+// all, and the server-side proxy holds the bytes for 30 minutes and lets
+// concurrent listeners share one fetch. `readOnly` hides the clip picker — a
+// report records what WAS scored, and re-pointing the audio from here would
+// change what an already-submitted review refers to.
+function ReviewDrawer({ row, cols, dateField, onClose }) {
+  const fmtSecs = (s) => (Number.isFinite(s) ? `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}` : '—');
+  const when = (v) => { try { return v ? new Date(v).toLocaleString() : '—'; } catch { return '—'; } };
+
+  // The player needs the clip's identity, not just the call id: its cache key
+  // is (box_id, recording_id) and collapses to '?|?' without them, which would
+  // make every clip share one cache entry.
+  const call = {
+    id: row.call_id,
+    box_id: row.box_id,
+    recording_id: row.recording_id,
+    recording_state: row.recording_state,
+  };
+
+  const answered = cols
+    .map(c => ({ col: c, cell: row.cells?.[c.id] }))
+    .filter(x => x.cell);
+
+  const tone = (cell) => (cell.na ? 'var(--color-text-tertiary)'
+    : cell.flagged ? 'var(--color-error-600)' : 'var(--color-text)');
+
+  const Meta = ({ label, children }) => (
+    <div className="min-w-0">
+      <div className="text-[10px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-text-tertiary)' }}>{label}</div>
+      <div className="text-xs truncate" style={{ color: 'var(--color-text)' }}>{children}</div>
+    </div>
+  );
+
+  return (
+    <DrawerShell
+      icon={<Headphones size={16} />}
+      title={row.phone || 'Scored call'}
+      subtitle="Reviewed call"
+      recordKey={row.evaluation_id}
+      width={560}
+      onClose={onClose}
+      chrome={(
+        <div className="flex items-center gap-3 px-4 py-2 flex-wrap"
+          style={{ borderBottom: '1px solid var(--color-border)', background: 'var(--color-surface)' }}>
+          <span className="text-sm font-bold" style={{ color: String(row.result || '').toLowerCase() === 'pass' ? 'var(--color-success-600)' : String(row.result || '').toLowerCase() === 'fail' ? 'var(--color-error-600)' : 'var(--color-text-secondary)' }}>
+            {row.result || 'No verdict'}
+          </span>
+          <span className="text-sm font-bold tabular-nums" style={{ color: 'var(--color-text)' }}>
+            {row.final_score == null ? '—' : `${row.final_score}%`}
+          </span>
+          {row.penalty_total ? (
+            <span className="text-[11px] font-bold" style={{ color: 'var(--color-error-600)' }}>−{row.penalty_total} penalty</span>
+          ) : null}
+          {row.autofail_result && row.autofail_result !== 'none' && (
+            <span className="text-[11px] font-bold px-2 py-0.5 rounded-full"
+              style={{ background: 'var(--color-error-600)', color: 'var(--color-text-inverse)' }}>Autofail</span>
+          )}
+          {/* The row carries dialer_provider + dialer_account_id and
+              deliberately NOT dialer_box (that column is on transfers/sales,
+              not qa2_call), which is exactly the shape the badge reads. */}
+          <DialerBadge record={row} />
+        </div>
+      )}
+    >
+      <div className="space-y-3">
+        <AudioPlayer
+          call={call}
+          ticketUrl={`qa2/reports/scorecards/${row.evaluation_id}/recording-ticket`}
+          readOnly
+        />
+
+        <Panel tone="inset">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <Meta label="Agent">{row.agent_name || '—'}</Meta>
+            <Meta label="Evaluator">{row.reviewer_name || '—'}</Meta>
+            <Meta label="Method">{row.method || '—'}</Meta>
+            <Meta label="Company">{row.company || '—'}</Meta>
+            <Meta label="Leg">{row.leg || '—'}</Meta>
+            <Meta label="Disposition">{row.dispo || '—'}</Meta>
+            <Meta label="Talk time">{fmtSecs(row.talk_sec)}</Meta>
+            <Meta label="Call at">{when(row.call_at)}</Meta>
+            <Meta label="Scored at">{when(row.scored_at)}</Meta>
+          </div>
+          {dateField === 'scored' && (
+            <p className="text-[10px] m-0 mt-2" style={{ color: 'var(--color-text-tertiary)' }}>
+              The sheet is grouped by the day it was scored, not the day of the call.
+            </p>
+          )}
+        </Panel>
+
+        <Panel>
+          <SectionHeader level="section" title="What the evaluator marked"
+            subtitle={answered.length
+              ? `${answered.length} answered question${answered.length === 1 ? '' : 's'} — red is a marked-down answer.`
+              : 'This review has no recorded answers.'} />
+          {answered.length > 0 && (
+            <div className="space-y-1.5">
+              {answered.map(({ col, cell }) => (
+                <div key={col.id} className="flex items-start gap-2 text-xs">
+                  <div className="flex-1 min-w-0">
+                    <div className="truncate" style={{ color: 'var(--color-text-secondary)' }} title={col.label}>
+                      {col.section ? <span style={{ color: 'var(--color-text-tertiary)' }}>{col.section} · </span> : null}
+                      {col.label}
+                      {col.role === 'autofail' ? <span className="ml-1 text-[10px] font-bold" style={{ color: 'var(--color-error-600)' }}>autofail</span> : null}
+                      {col.role === 'penalty' ? <span className="ml-1 text-[10px] font-bold" style={{ color: 'var(--color-warning-600)' }}>penalty</span> : null}
+                    </div>
+                    {cell.comment && (
+                      <div className="text-[11px] italic mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>
+                        <MessageSquare size={9} className="inline mr-1" />{cell.comment}
+                      </div>
+                    )}
+                  </div>
+                  <div className="text-right flex-shrink-0 max-w-[45%]">
+                    <span className="font-semibold break-words" style={{ color: tone(cell) }}>
+                      {cell.na ? 'N/A' : cell.display}
+                    </span>
+                    {!cell.na && cell.points != null && cell.max ? (
+                      <span className="ml-1 tabular-nums text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>
+                        {cell.points}/{cell.max}
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
+
+        {row.notes && (
+          <Panel>
+            <SectionHeader level="section" title="Evaluator notes" />
+            <p className="text-xs m-0 whitespace-pre-wrap" style={{ color: 'var(--color-text)' }}>{row.notes}</p>
+          </Panel>
+        )}
+      </div>
+    </DrawerShell>
+  );
+}
+
 function ScorecardsSection({ params }) {
   const [from, setFrom] = useState(() => todayET());
   const [to, setTo] = useState(() => todayET());
@@ -755,6 +909,9 @@ function ScorecardsSection({ params }) {
   const [methodId, setMethodId] = useState('');
   const [data, setData] = useState(null);
   const [err, setErr] = useState(null);
+  // Which review is open. The row object itself, not an id — everything the
+  // drawer shows is already on it, so opening costs no request.
+  const [openRow, setOpenRow] = useState(null);
 
   useEffect(() => {
     client.get('qa2/methods')
@@ -904,7 +1061,7 @@ function ScorecardsSection({ params }) {
           ) : (
             <Panel>
               <SectionHeader level="section" title={`${rows.length} number${rows.length === 1 ? '' : 's'} scored`}
-                subtitle="One row per evaluation — the number, who was on it, who marked it, and every question's answer. Red is a marked-down answer; the last row averages each question across everything shown." />
+                subtitle="One row per evaluation — the number, who was on it, who marked it, and every question's answer. Click a number to hear the call beside its marking. Red is a marked-down answer; the last row averages each question across everything shown." />
               <TableScroll>
                 <table className="w-full text-xs" style={{ minWidth: 'max-content' }}>
                   <thead>
@@ -931,7 +1088,22 @@ function ScorecardsSection({ params }) {
                   <tbody>
                     {rows.map(r => (
                       <tr key={r.evaluation_id} style={{ borderTop: '1px solid var(--color-border)' }}>
-                        <td className={`${td} tabular-nums font-semibold`} style={{ ...stick(0), color: 'var(--color-text)' }}>{r.phone || '—'}</td>
+                        {/* The number opens the review: the recording and the
+                            marking together. The headphone glyph is the state
+                            of the AUDIO, so a manager can see at a glance which
+                            rows they can listen to without opening each one. */}
+                        <td className={`${td} tabular-nums font-semibold`} style={{ ...stick(0), color: 'var(--color-text)' }}>
+                          <button type="button" onClick={() => setOpenRow(r)}
+                            title={r.recording_state === 'found' ? 'Listen and see what was marked' : 'See what was marked (no recording attached)'}
+                            className="inline-flex items-center gap-1.5 tabular-nums font-semibold hover:underline"
+                            style={{ color: 'var(--color-text)', background: 'none', border: 0, padding: 0, cursor: 'pointer' }}>
+                            <Headphones size={11} style={{
+                              color: r.recording_state === 'found' ? 'var(--color-primary-600)' : 'var(--color-text-tertiary)',
+                              flexShrink: 0,
+                            }} />
+                            {r.phone || '—'}
+                          </button>
+                        </td>
                         <td className={td} style={{ ...stick(112), color: 'var(--color-text)' }}>
                           <div className="max-w-[110px] truncate" title={r.agent_name || ''}>{r.agent_name || '—'}</div>
                         </td>
@@ -1003,6 +1175,10 @@ function ScorecardsSection({ params }) {
             </Panel>
           )}
         </>
+      )}
+
+      {openRow && (
+        <ReviewDrawer row={openRow} cols={cols} dateField={dateField} onClose={() => setOpenRow(null)} />
       )}
     </div>
   );

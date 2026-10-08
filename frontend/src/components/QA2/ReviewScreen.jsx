@@ -172,7 +172,22 @@ function ClipPicker({ callId, currentId, onPicked }) {
   );
 }
 
-function AudioPlayer({ call }) {
+// Exported so the manager's Scorecards report plays a reviewed call with the
+// SAME player the reviewer used — the speed memory, the jump buttons and the
+// IndexedDB clip cache are the reason a replay is instant, and a second
+// hand-rolled <audio> next to this one would have none of them.
+//
+//   ticketUrl — which endpoint mints the signed URL. A plain string, because
+//     the load effect depends on it: an object would be a new reference every
+//     render and would re-source the <audio> element instead of playing it.
+//     Defaults to the reviewer's own route, so the call sites below are
+//     untouched. The report passes its own, because listening from a report is
+//     authorised by the REPORT's scope (see qa2Reports.js), not by assignment
+//     ownership.
+//   readOnly  — hides the clip picker. A report is a record of what was
+//     scored; re-pointing the audio from there would change what a SUBMITTED
+//     review refers to, under a reviewer who has already signed it off.
+export function AudioPlayer({ call, ticketUrl = null, readOnly = false }) {
   const audioRef = useRef(null);
   const urlRef = useRef(null);
   // A clip the reviewer chose by hand. Kept here rather than refetching the
@@ -225,7 +240,7 @@ function AudioPlayer({ call }) {
         setCached(true);
         return;
       }
-      const r = await client.post(`qa2/calls/${call.id}/recording-ticket`);
+      const r = await client.post(ticketUrl || `qa2/calls/${call.id}/recording-ticket`);
       const apiBase = String(client.defaults.baseURL || '').replace(/\/api\/?$/, '');
       const url = apiBase + r.data.url;
       a.src = url;
@@ -238,7 +253,7 @@ function AudioPlayer({ call }) {
       a.addEventListener('playing', startCopy);
     } catch { toast.error('Could not load the recording'); }
     finally { setLoading(false); }
-  }, [call.id, effBox, effRec, hasAudio]);
+  }, [call.id, effBox, effRec, hasAudio, ticketUrl]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -266,7 +281,7 @@ function AudioPlayer({ call }) {
             matched it closely enough, and the audio is often sitting on the
             lead under another leg — which is a click away rather than a
             support request. */}
-        <ClipPicker callId={call.id} currentId={null} onPicked={setPicked} />
+        {!readOnly && <ClipPicker callId={call.id} currentId={null} onPicked={setPicked} />}
       </Panel>
     );
   }
@@ -353,7 +368,7 @@ function AudioPlayer({ call }) {
         )}
       </div>
 
-      <ClipPicker callId={call.id} currentId={effRec} onPicked={setPicked} />
+      {!readOnly && <ClipPicker callId={call.id} currentId={effRec} onPicked={setPicked} />}
     </Panel>
   );
 }
