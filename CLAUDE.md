@@ -583,6 +583,34 @@ TRA rows filled by the contact-route fallback**, 42 already evaluated.
   298 now match — the 2 that do not are a call with no recording and a
   code-less button press.
 
+### The client portal picker (mig 341, applied 2026-10-09)
+"Clients this login can see" (Chat Control → Client Portal) is fed by
+`GET /portal/admin/sale-clients`, and it did NOT read the catalogue clients are
+added to. Clients & Plans writes `sale_configs` (type='client'); the endpoint
+read only `form_fields.options` for `sale_client` (**NULL** in this estate, so
+it contributed nothing) and distinct `sales.client_name`. A new client was
+therefore unofferable **until its first sale existed** — which is exactly when
+its portal login gets set up.
+- **A list built from `sales` cannot contain a client that has none.** The
+  catalogue is now source 1. Hidden `sale_configs` rows are skipped (that is
+  how a retired client leaves the pickers) but still arrive via sales, so an
+  existing login keeps working.
+- **`.limit(8000)` to find 9 distinct names**, on a table that reached 8,122
+  rows. It had started truncating with no ORDER BY, so a client could silently
+  vanish as the table grew. Mig 341 = `app_sale_client_names`
+  (`SELECT DISTINCT`, service_role only): 9 rows instead of 8,122, correct and
+  cheaper. The old scan remains as a deploy-order fallback, newest-first.
+- **THE SPELLING ON SALES WINS.** The scope filter is exact and case-sensitive
+  (`clients.includes(sale.client_name)` in `portal.js`), and the catalogue has
+  drifted: `James MTM` (catalogue, 0 sales) vs `James Mtm` (1,006 sales). A
+  catalogue name is offered only when no sales spelling matches it
+  case-insensitively, or the picker invites you to scope a login to nothing.
+  Two spellings that BOTH appear on sales are both kept — `Moxy Mtm` (351) and
+  `Moxy MTM` (126) are two real values, and hiding one hides those sales.
+- Known data drift to clean up by hand (not touched — re-spelling a row moves
+  which client owns a sale): Moxy Mtm/Moxy MTM, Steve Mtm/Steve MTM,
+  James Mtm, James Vsc.
+
 ### A manager hears the call a review was scored on (2026-10-09, ed046de)
 Scorecards printed every answer but no audio, so "Fail, 62%" could not be told
 apart from bad marking. Clicking a number in `ReportsTab.jsx` opens
