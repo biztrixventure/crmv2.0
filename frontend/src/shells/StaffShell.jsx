@@ -1004,11 +1004,32 @@ const StaffShell = () => {
       ? [{ key: 'team_callbacks', label: 'Team Callbacks',  icon: Phone      }] : []),
     ...((hasPermission('manage_callback_numbers') || hasPermission('view_team_callback_numbers') || hasPermission('reassign_callback_numbers')) && isEnabled('callback_numbers')
       ? [{ key: 'tracked_numbers', label: 'Tracked Numbers', icon: Hash      }] : []),
+    // NUMBERS ARE NOT A FRONTER THING — THEY BELONG TO WHOEVER HOLDS THEM.
+    //
+    // Both of these were gated on isFronter, while everything underneath was
+    // already role-agnostic: distributionBatches.js states "Recipients can be
+    // ANY user regardless of role", /recipients filters only by rank + company
+    // (roleRank puts closer strictly below every manager, so managers could
+    // always pick one), and /my-numbers + /received key purely on
+    // sent_to_user_id. So a manager could hand a closer numbers and the closer
+    // had no screen to see them on. Measured 2026-10-09: two closers were
+    // already holding 75 live numbers across 2 active batches, invisible to
+    // them.
+    //
+    // isCloser is added rather than the gate removed: these tabs mean "numbers
+    // dealt to me", and the shell also serves people who are neither (the
+    // callbacks-only roles), who have no inbox to show.
+    // NOT extended to closers, deliberately: this tab key has no renderer in
+    // the content area below (grep 'numbers' — the only other hit is the
+    // notification deep-link), so selecting it shows an empty panel. That is a
+    // pre-existing fault on the fronter side and is left exactly as it is
+    // rather than copied onto another floor. A holder's numbers are reachable
+    // through Batches and the floating widget, both of which do render.
     ...(isFronter && isEnabled('number_assignment')
       ? [{ key: 'numbers',        label: 'My Numbers',      icon: Hash       }] : []),
-    // Batches assigned to this fronter — the same workspace their manager sees,
+    // Batches assigned to this agent — the same workspace their manager sees,
     // minus the assign controls: work the numbers, disposition them, add notes.
-    ...(isFronter ? [{ key: 'batches',        label: 'Batches',         icon: Hash       }] : []),
+    ...((isFronter || isCloser) ? [{ key: 'batches',        label: 'Batches',         icon: Hash       }] : []),
     ...(hasPermission('search_sales') && isEnabled('search_sales')
       ? [{ key: 'search',         label: 'Search Sales',    icon: Search     }] : []),
     { key: 'faqs',              label: 'FAQs',            icon: HelpCircle },
@@ -2540,8 +2561,13 @@ const StaffShell = () => {
 
       {/* Closers only — floating call-checklist mini-panel */}
       {isCloser && <CallChecklistWidget />}
-      {/* Fronters only — floating "My Numbers" PiP (copy + work numbers over the dialer) */}
-      {isFronter && <FronterNumbersWidget user={user} />}
+      {/* Any number HOLDER — floating "My Numbers" PiP (copy + work numbers
+          over the dialer). Closers can be dealt numbers like anyone else, and
+          this is the surface that actually dials them, so withholding it would
+          leave them reading a list they cannot work. Safe to stack: this
+          launcher sits at bottom-20 and the checklist above at bottom-4, so
+          the two 48px buttons never overlap. */}
+      {(isFronter || isCloser) && <FronterNumbersWidget user={user} />}
     </div>
   );
 };
