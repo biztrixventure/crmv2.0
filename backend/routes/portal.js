@@ -216,15 +216,75 @@ router.patch('/admin/fronters/:id/alias', authMiddleware, superOnly, asyncHandle
 // Selectable clients (sales.client_name) — configured sale_client options merged
 // with the distinct values actually on sales, so a selection always matches.
 router.get('/admin/sale-clients', authMiddleware, superOnly, asyncHandler(async (req, res) => {
-  const set = new Set();
+  // A name is only USEFUL here if it matches sales the way the scope filter
+  // matches them, and that comparison is exact and case-sensitive
+  // (`clients.includes(sale.client_name)` below). So the spelling that appears
+  // ON SALES always wins, and a catalogue spelling is offered only when no
+  // sales spelling means the same thing case-insensitively.
+  //
+  // Without that rule this picker would list "James Mtm" (1,006 sales) beside
+  // "James MTM" (the catalogue's spelling, 0 sales) and quietly invite a
+  // superadmin to choose the one that scopes a login to nothing.
+  const fromSales = new Set();
+  const fromCatalog = new Set();
+  const clean = (v) => { const c = String(v == null ? '' : v).trim(); return c && c !== '-' ? c : null; };
+  const addSales = (v) => { const c = clean(v); if (c) fromSales.add(c); };
+  const addCatalog = (v) => { const c = clean(v); if (c) fromCatalog.add(c); };
+
+  // 1. THE CATALOG — the list a superadmin actually maintains.
+  //
+  // This is the source that was MISSING, and it is the whole reported bug: a
+  // client added in Clients & Plans is written to sale_configs (type='client'),
+  // and this endpoint never looked there. The picker therefore only ever
+  // offered clients that already appeared ON A SALE, so a brand-new client was
+  // unofferable until its first sale existed — which is precisely when someone
+  // needs to set its portal login up. Reported 2026-10-09 for "BeeCovered AW",
+  // added the day before with zero sales.
+  //
+  // Hidden entries are skipped: hiding one in Clients & Plans is how a retired
+  // client is taken out of the pickers. It can still reach the list below if it
+  // has sales, which is correct — an existing login must keep working.
+  const { data: catalog } = await supabaseAdmin
+    .from('sale_configs').select('value, hidden').eq('type', 'client');
+  for (const c of (catalog || [])) if (!c.hidden) addCatalog(c.value);
+
+  // 2. The sale form's own options, when an admin configured them there.
   const { data: ff } = await supabaseAdmin.from('form_fields').select('options').eq('field_type', 'sale_client');
   for (const f of (ff || [])) for (const o of (f.options || [])) {
-    const c = typeof o === 'string' ? o : (o?.client || o?.value || o?.label);
-    if (c && String(c).trim()) set.add(String(c).trim());
+    addCatalog(typeof o === 'string' ? o : (o?.client || o?.value || o?.label));
   }
-  const { data: rows } = await supabaseAdmin.from('sales').select('client_name').not('client_name', 'is', null).limit(8000);
-  for (const r of (rows || [])) { const c = (r.client_name || '').trim(); if (c && c !== '-') set.add(c); }
-  res.json({ clients: [...set].sort((a, b) => a.localeCompare(b)) });
+
+  // 3. Names that are only on sales — legacy spellings and anything typed
+  //    before the catalog existed. An existing portal login may be scoped to
+  //    one of these, so they must stay offerable.
+  //
+  //    Via the view (mig 341), because the query this replaced read sales with
+  //    `.limit(8000)` to find NINE distinct names: at 8,122 rows it had begun
+  //    truncating, with no ORDER BY to say which rows it kept. The fallback is
+  //    the old scan so the backend can ship before 341 is applied — raised
+  //    past the current table size and newest-first, so the cap can only ever
+  //    cost an old name that the catalog above already covers.
+  const { data: names, error: viewErr } = await supabaseAdmin
+    .from('app_sale_client_names').select('client_name');
+  if (viewErr) {
+    logger.warn('PORTAL', `app_sale_client_names unavailable (${viewErr.message}) — falling back to a sales scan`);
+    const { data: rows } = await supabaseAdmin.from('sales')
+      .select('client_name').not('client_name', 'is', null)
+      .order('created_at', { ascending: false }).limit(50000);
+    for (const r of (rows || [])) addSales(r.client_name);
+  } else {
+    for (const r of (names || [])) addSales(r.client_name);
+  }
+
+  // Every spelling that is actually on a sale, plus the catalogue names that
+  // nothing on a sale already covers. Two spellings that BOTH appear on sales
+  // are both kept — they are two real values in the column, and dropping one
+  // would hide those sales from a login scoped to it.
+  const seen = new Set([...fromSales].map(c => c.toLowerCase()));
+  const out = [...fromSales];
+  for (const c of fromCatalog) if (!seen.has(c.toLowerCase())) out.push(c);
+
+  res.json({ clients: out.sort((a, b) => a.localeCompare(b)) });
 }));
 
 // list client logins (+ assigned closer names + listen count)
