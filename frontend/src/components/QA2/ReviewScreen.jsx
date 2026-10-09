@@ -16,6 +16,7 @@ import { ArrowLeft, Play, Pause, Phone, Building2, User, Clock, Send, SkipForwar
 import { toast } from 'sonner';
 import client from '../../api/client';
 import ThemedSelect from '../UI/Select';
+import ThemedDate from '../UI/ThemedDate';
 import { Panel, SectionHeader, Loading } from '../UI/kit';
 import { getClip, putClip, clipKey } from '../../utils/audioCache';
 import DialerBadge from '../Shared/DialerBadge';
@@ -377,7 +378,7 @@ export function AudioPlayer({ call, ticketUrl = null, readOnly = false }) {
 // rejection") is a sentence or two, not a word. Defined once so the renderer
 // below and the left-column mover agree on what "a text box" is — two copies
 // of this list would drift the moment a new input type is added.
-const isTextParam = (p) => !['yes_no', 'scale', 'choice'].includes(p?.input_type);
+const isTextParam = (p) => !['yes_no', 'scale', 'choice', 'date'].includes(p?.input_type);
 
 export function ParameterInput({ param, answer, onChange }) {
   const a = answer || {};
@@ -406,6 +407,17 @@ export function ParameterInput({ param, answer, onChange }) {
         <option value="">—</option>
         {(param.options || []).map(o => <option key={o.value} value={o.value}>{o.label || o.value}</option>)}
       </ThemedSelect>
+    );
+  } else if (param.input_type === 'date') {
+    // A DAY, NOT AN INSTANT. The calendar hands back 'YYYY-MM-DD' and that
+    // exact string is what gets stored, so a callback date does not shift a
+    // day for a reviewer in another timezone the way a parsed timestamp
+    // would. Clearing the box writes null rather than '', so an answered-then-
+    // cleared date reads as unanswered. Never required — mig 342 gives it
+    // role 'info'.
+    control = (
+      <ThemedDate value={a.value_text || ''} disabled={a.is_na}
+        onChange={e => onChange({ value_text: e.target.value || null })} />
     );
   }
   // A free-text question ("Additional Comments", "Reason of rejection") is a

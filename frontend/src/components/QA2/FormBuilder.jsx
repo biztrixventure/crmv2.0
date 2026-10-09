@@ -16,7 +16,11 @@ import ThemedSelect from '../UI/Select';
 import { Panel, SectionHeader, Field, Loading, IconButton } from '../UI/kit';
 import { Toggle } from '../UI/kit';
 
-const INPUT_TYPES = ['yes_no', 'scale', 'choice', 'number', 'text'];
+// 'date' (mig 342) stores the calendar's own 'YYYY-MM-DD' in value_text, so it
+// scores nothing (qa2Scoring's switches default to 0) and the reports print it
+// as written. Offered here so a manager can add their own date question
+// without another migration.
+const INPUT_TYPES = ['yes_no', 'scale', 'choice', 'number', 'text', 'date'];
 const ROLES = ['score', 'autofail', 'penalty', 'outcome', 'info', 'verdict'];
 const COMMENT_RULES = ['never', 'on_fail', 'always'];
 const ROUNDING_MODES = ['truncate_1', 'round_1', 'round_2'];
@@ -152,6 +156,11 @@ function LivePreview({ versionId, parameters }) {
                 <option value="">—</option>
                 {(p.options || []).map(o => <option key={o.value} value={o.value}>{o.label || o.value}</option>)}
               </ThemedSelect>
+            )}
+            {p.input_type === 'date' && (
+              <input type="date" className="input" style={{ maxWidth: 170 }}
+                value={answers[p.id]?.value_text || ''}
+                onChange={e => setAnswer(p.id, { value_text: e.target.value || null })} />
             )}
             {(p.input_type === 'number' || p.input_type === 'text') && (
               <input className="input" style={{ maxWidth: 160 }} value={answers[p.id]?.value_text || ''} onChange={e => setAnswer(p.id, { value_text: e.target.value })} />

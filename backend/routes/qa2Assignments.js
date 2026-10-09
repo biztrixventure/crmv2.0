@@ -595,7 +595,27 @@ router.get('/calls/:id/recordings', asyncHandler(async (req, res) => {
       rank: rankOf.has(key) ? rankOf.get(key) : null,   // null = outside the match window
       held_by: h ? { call_id: h.id, leg: h.leg, agent: h.agent_user, call_at: h.call_at } : null,
     };
-  }).sort((a, b) => (a.rank ?? 1e9) - (b.rank ?? 1e9) || String(a.started_at).localeCompare(String(b.started_at)));
+  // NEWEST CALL FIRST, because this list is READ, not obeyed.
+  //
+  // It used to lead with the matcher's own ranking — but the reviewer only
+  // opens this list when the matcher already got it wrong, so ordering by its
+  // opinion puts the clip it already mis-picked at the top and scatters the
+  // lead's calls out of sequence. A human scanning for "the one from this
+  // afternoon" wants the day in order, latest first.
+  //
+  // The ranking is NOT lost: `rank` still rides on every row, the UI still
+  // dims rank:null (outside the match window) and highlights is_current, so
+  // the matcher's verdict is still visible — it just no longer decides the
+  // order. A clip whose start could not be read sorts last rather than
+  // claiming the top spot, which string-comparing a null did.
+  }).sort((a, b) => {
+    const ta = Date.parse(a.started_at || '');
+    const tb = Date.parse(b.started_at || '');
+    const aOk = Number.isFinite(ta), bOk = Number.isFinite(tb);
+    if (aOk && bOk) return tb - ta;          // latest first
+    if (aOk !== bOk) return aOk ? -1 : 1;    // unreadable start goes last
+    return (a.rank ?? 1e9) - (b.rank ?? 1e9);
+  });
 
   res.json({ clips: out, call_at: call.call_at, agent: call.agent_user, leg: call.leg });
 }));
