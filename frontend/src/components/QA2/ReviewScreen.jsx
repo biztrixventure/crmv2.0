@@ -373,6 +373,12 @@ export function AudioPlayer({ call, ticketUrl = null, readOnly = false }) {
   );
 }
 
+// A free-text question ("Comments", "Additional Comments", "Reason of
+// rejection") is a sentence or two, not a word. Defined once so the renderer
+// below and the left-column mover agree on what "a text box" is — two copies
+// of this list would drift the moment a new input type is added.
+const isTextParam = (p) => !['yes_no', 'scale', 'choice'].includes(p?.input_type);
+
 export function ParameterInput({ param, answer, onChange }) {
   const a = answer || {};
   const naToggle = (
@@ -405,7 +411,7 @@ export function ParameterInput({ param, answer, onChange }) {
   // A free-text question ("Additional Comments", "Reason of rejection") is a
   // sentence or two, not a word: it gets the full-width box under its label,
   // like a comment, instead of a one-line input squeezed beside it.
-  const isText = !['yes_no', 'scale', 'choice'].includes(param.input_type);
+  const isText = isTextParam(param);
 
   // The comment gets its OWN full-width row under the question rather than a
   // 220px box competing for space on the same line. A reviewer writes a sentence
@@ -583,16 +589,36 @@ export default function ReviewScreen({ assignment, onDone, onNext, nextLabel, re
     } catch (e) { toast.error(e.response?.data?.error || 'Could not skip'); }
   };
 
+  // ── THE LONG WRITING BOXES BELONG WHERE THERE IS ROOM ────────────────────
+  //
+  // "Comments", "Additional Comments" and "Reason of rejection" are free-text
+  // questions that carry no section, so they fell into the "Other" bucket at
+  // the very BOTTOM of the scorecard column — the reviewer had to scroll past
+  // every scored question to write the one thing they always write, while the
+  // left column sat half empty under the player.
+  //
+  // So they move up beside the overall notes. Only SECTION-LESS text questions
+  // move: a text box a form puts INSIDE a scored section is there for that
+  // section's sake, and pulling it out would strand it from the questions it
+  // explains. Nothing else changes — same `setAnswer`, same ParameterInput,
+  // same payload, so scoring and autosave never notice.
+  const sideTextParams = useMemo(
+    () => (def?.parameters || []).filter(p => !p.section_id && isTextParam(p)),
+    [def],
+  );
+  const sideTextIds = useMemo(() => new Set(sideTextParams.map(p => p.id)), [sideTextParams]);
+
   const bySection = useMemo(() => {
     if (!def) return new Map();
     const map = new Map(def.sections.map(s => [s.id, []]));
     map.set(null, []);
     for (const p of def.parameters) {
+      if (sideTextIds.has(p.id)) continue;      // rendered on the left instead
       if (!map.has(p.section_id)) map.set(p.section_id, []);
       map.get(p.section_id).push(p);
     }
     return map;
-  }, [def]);
+  }, [def, sideTextIds]);
 
   if (loadError) return (
     <div className="max-w-3xl mx-auto space-y-3">
@@ -812,10 +838,24 @@ export default function ReviewScreen({ assignment, onDone, onNext, nextLabel, re
           )}
 
           <Panel>
-            <SectionHeader level="section" title="Comments" subtitle="Overall notes on this call — separate from each question's own comment box below." />
-            <textarea className="input w-full" rows={7} placeholder="Additional comments…"
+            <SectionHeader level="section" title="Comments"
+              subtitle={sideTextParams.length
+                ? "Overall notes, and this scorecard's own written questions — each question still keeps its own comment box beside it."
+                : "Overall notes on this call — separate from each question's own comment box."} />
+            <textarea className="input w-full" rows={7} placeholder="Overall notes on this call…"
               style={{ resize: 'vertical', minHeight: 140, lineHeight: 1.45 }}
               value={notes} onChange={e => setNotesDebounced(e.target.value)} />
+
+            {/* The scorecard's free-text questions, moved up out of the
+                bottom-of-the-column "Other" bucket. They are real answers, so
+                they go through ParameterInput exactly as they did before. */}
+            {sideTextParams.length > 0 && (
+              <div className="mt-3 pt-3 divide-y" style={{ borderTop: '1px solid var(--color-border)', borderColor: 'var(--color-border)' }}>
+                {sideTextParams.map(p => (
+                  <ParameterInput key={p.id} param={p} answer={answers[p.id]} onChange={patch => setAnswer(p.id, patch)} />
+                ))}
+              </div>
+            )}
           </Panel>
         </div>
 

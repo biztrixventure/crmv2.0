@@ -90,14 +90,43 @@ async function loadTeam(managerId, scope) {
     rows = all || [];
   }
 
+  // ── A MANAGER REVIEWS CALLS TOO, AND HAD NO WAY TO TAKE ANY ──────────────
+  //
+  // Every layer below this already accepts a manager as a reviewer:
+  // qa2Evaluations' requireScope admits managerAccess and every ownership
+  // check carries `|| scope.managerAccess`; /pool is scoped by
+  // operationalCompanyIds with methods 'all'; /assignments/:id/claim adds no
+  // further gate; and qa_manager already holds qa2.view_queue + qa2.score, so
+  // My Queue and Pool are already on their nav.
+  //
+  // The one thing missing was a way to GET work: this list is built from
+  // qa2_team_member where manager_id = me, and a manager is not a member of
+  // their own team, so they never appeared in the allocation matrix and /bulk
+  // answered 'not_on_your_team'. Measured 2026-10-10: the one qa_manager had 0
+  // assignments and 0 evaluations ever.
+  //
+  // So the caller is offered as a reviewer — themselves. Two details make this
+  // need NO change in /bulk:
+  //   • method_ids = every active method, which is what operationalMethodIds
+  //     'all' already means for a manager;
+  //   • company_ids = [] , which /bulk already reads as "unrestricted within
+  //     this manager's own companies" (its own comment says so).
+  // Their rank is not involved: this is not assigning DOWN to someone else,
+  // it is picking up work, so roleRank has nothing to say about it.
+  const selfId = scope?.managerAccess ? managerId : null;
   const agentIds = [...new Set(rows.map(t => t.agent_id))];
-  if (!agentIds.length) return [];
+  const lookupIds = [...new Set(selfId ? [...agentIds, selfId] : agentIds)];
+  // A manager with no team still gets their own row — returning [] here is
+  // what left the matrix empty for exactly the person who can fill it.
+  if (!lookupIds.length) return [];
 
-  const [{ data: methods }, { data: companies }, { data: load }, names] = await Promise.all([
-    supabaseAdmin.from('qa2_agent_method').select('agent_id, method_id').in('agent_id', agentIds),
-    supabaseAdmin.from('qa2_agent_company').select('agent_id, company_id').in('agent_id', agentIds),
-    supabaseAdmin.from('qa2_assignment').select('assigned_to, status').in('assigned_to', agentIds),
-    nameMap(agentIds),
+  const [{ data: methods }, { data: companies }, { data: load }, names, { data: allMethods }] = await Promise.all([
+    supabaseAdmin.from('qa2_agent_method').select('agent_id, method_id').in('agent_id', lookupIds),
+    supabaseAdmin.from('qa2_agent_company').select('agent_id, company_id').in('agent_id', lookupIds),
+    supabaseAdmin.from('qa2_assignment').select('assigned_to, status').in('assigned_to', lookupIds),
+    nameMap(lookupIds),
+    // Only needed for the self row, and cheap — a handful of rows.
+    selfId ? supabaseAdmin.from('qa2_method').select('id').eq('is_active', true) : Promise.resolve({ data: [] }),
   ]);
 
   const byAgent = (rows, key) => {
@@ -120,13 +149,28 @@ async function loadTeam(managerId, scope) {
     loadBy.set(a.assigned_to, cur);
   }
 
-  return rows.map(t => ({
+  const roster = rows.map(t => ({
     agent_id: t.agent_id,
     name: names.get(t.agent_id) || 'Unknown',
     method_ids: methodsBy.get(t.agent_id) || [],
     company_ids: companiesBy.get(t.agent_id) || [],
     workload: loadBy.get(t.agent_id) || { open: 0, in_review: 0, done: 0 },
   }));
+
+  // The caller last, and only if they are not already on their own roster (a
+  // superadmin's fallback list is every agent, and one of them could be them).
+  if (selfId && !roster.some(a => a.agent_id === selfId)) {
+    roster.push({
+      agent_id: selfId,
+      name: `${names.get(selfId) || 'Me'} (me)`,
+      is_self: true,
+      method_ids: (allMethods || []).map(m => m.id),
+      company_ids: [],                            // = this manager's own companies
+      workload: loadBy.get(selfId) || { open: 0, in_review: 0, done: 0 },
+    });
+  }
+
+  return roster;
 }
 
 // ── GET /qa2/assign/workbench ──────────────────────────────────────────────
