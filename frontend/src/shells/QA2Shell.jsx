@@ -67,7 +67,21 @@ export default function QA2Shell() {
   const isCompliance = !!scope?.isCompliance;
   const managerAccess = !!scope?.managerAccess || hasPermission('qa2.manage_methods');
 
-  const canQueue = hasPermission('qa2.view_queue');
+  // MY QUEUE AND POOL FOLLOW QA AUTHORITY, NOT JUST THE AGENT PERMISSION.
+  //
+  // `qa2.view_queue` is seeded on qa_agent and qa_manager only. A
+  // compliance_manager toggled into QA manager authority (a live
+  // qa2_manager_access grant) holds neither it nor qa2.score, so these two
+  // tabs never rendered for them: they could hand themselves work on Load Day
+  // and then had nowhere to open it. Measured 2026-10-10 for Hamza Qamar —
+  // compliance_manager, 1 access grant, 3 companies managed, view_queue false.
+  //
+  // Keyed on managerAccess rather than bare isCompliance on purpose: an
+  // UNTOGGLED compliance manager has no operational companies, so the pool
+  // would be empty and the queue theirs-only — two dead tabs. The backend
+  // already admits both (qa2Assignments' requireScope takes isCompliance ||
+  // managerAccess || qa_agent), so this only stops hiding what was allowed.
+  const canQueue = hasPermission('qa2.view_queue') || managerAccess;
   const canViewReports = hasPermission('qa2.view_reports') || isCompliance;
 
   const tabs = [
