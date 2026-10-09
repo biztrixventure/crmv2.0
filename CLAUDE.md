@@ -685,18 +685,24 @@ not in their own team, so they never appeared in the allocation matrix and
   list is every agent). A manager with no team now sees themselves instead of
   the "No agents on your team yet" dead end.
 
-### The long writing boxes live on the LEFT (2026-10-10, 0c25ccc)
+### The writing sits under the marking (2026-10-10, 0c25ccc → cfacc47)
 `Comments`, `Additional Comments` and `Reason of rejection` carry **no
-section**, so they landed in the "Other" bucket at the very BOTTOM of the
-scorecard column — past every scored question — while the left column sat half
-empty under the player. They now render beside the overall notes in
-`ReviewScreen.jsx`.
+section**, so they landed in the "Other" bucket among the scorecard panels,
+and the overall-notes box was a separate panel in the left column. They are
+now ONE "Comments" panel at the END of the scoring column: overall notes, then
+those free-text questions, directly below the questions they refer to.
+- Tried the left column first (`0c25ccc`) and it was wrong: the scoring column
+  ends higher than the left one, so the whole right side went blank on a wide
+  screen while the boxes read as a second narrow stack under the player.
+  `cfacc47` moved them into that empty space.
 - **Only SECTION-LESS text questions move.** A text box a form puts INSIDE a
   scored section explains that section; pulling it out would strand it.
 - `isTextParam` is defined ONCE and used by both `ParameterInput` and the
   mover, so the two cannot disagree when an input type is added.
 - Position only: same `ParameterInput`, same `setAnswer`, same payload, so
   scoring, autosave and the Scorecards report are untouched.
+- On the current versions this is TRA v6 (`Comments`, `Reason of rejection`)
+  and Unclosed v6 (`Additional Comments`) — all three section-less.
 
 ### QA2 Unclosed outcomes + comments (migs 335-336, applied 2026-10-02)
 The Unclosed scorecard (`qa2_method.code='unclosed_closer'`) is on **version 4**:
