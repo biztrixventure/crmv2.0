@@ -837,26 +837,6 @@ export default function ReviewScreen({ assignment, onDone, onNext, nextLabel, re
             </Panel>
           )}
 
-          <Panel>
-            <SectionHeader level="section" title="Comments"
-              subtitle={sideTextParams.length
-                ? "Overall notes, and this scorecard's own written questions — each question still keeps its own comment box beside it."
-                : "Overall notes on this call — separate from each question's own comment box."} />
-            <textarea className="input w-full" rows={7} placeholder="Overall notes on this call…"
-              style={{ resize: 'vertical', minHeight: 140, lineHeight: 1.45 }}
-              value={notes} onChange={e => setNotesDebounced(e.target.value)} />
-
-            {/* The scorecard's free-text questions, moved up out of the
-                bottom-of-the-column "Other" bucket. They are real answers, so
-                they go through ParameterInput exactly as they did before. */}
-            {sideTextParams.length > 0 && (
-              <div className="mt-3 pt-3 divide-y" style={{ borderTop: '1px solid var(--color-border)', borderColor: 'var(--color-border)' }}>
-                {sideTextParams.map(p => (
-                  <ParameterInput key={p.id} param={p} answer={answers[p.id]} onChange={patch => setAnswer(p.id, patch)} />
-                ))}
-              </div>
-            )}
-          </Panel>
         </div>
 
         <div className="space-y-3">
@@ -874,6 +854,34 @@ export default function ReviewScreen({ assignment, onDone, onNext, nextLabel, re
               </Panel>
             );
           })}
+
+          {/* ── the writing, directly under the marking ────────────────────
+              The scoring column ends before the left one does, so everything
+              below it was dead space on a wide screen. The overall notes and
+              the scorecard's own free-text questions sit in it: still the
+              last thing you fill in, now beside the questions they refer to
+              rather than stacked under the player in a narrow column.
+
+              Same ParameterInput, same setAnswer, same payload — only the
+              position differs, so scoring, autosave and the Scorecards report
+              are untouched. */}
+          <Panel>
+            <SectionHeader level="section" title="Comments"
+              subtitle={sideTextParams.length
+                ? "Overall notes, and this scorecard's own written questions — each question still keeps its own comment box beside it."
+                : "Overall notes on this call — separate from each question's own comment box."} />
+            <textarea className="input w-full" rows={7} placeholder="Overall notes on this call…"
+              style={{ resize: 'vertical', minHeight: 140, lineHeight: 1.45 }}
+              value={notes} onChange={e => setNotesDebounced(e.target.value)} />
+
+            {sideTextParams.length > 0 && (
+              <div className="mt-3 pt-3 divide-y" style={{ borderTop: '1px solid var(--color-border)', borderColor: 'var(--color-border)' }}>
+                {sideTextParams.map(p => (
+                  <ParameterInput key={p.id} param={p} answer={answers[p.id]} onChange={patch => setAnswer(p.id, patch)} />
+                ))}
+              </div>
+            )}
+          </Panel>
         </div>
       </div>
     </div>
