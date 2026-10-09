@@ -664,6 +664,40 @@ comment, then the notes.
   metric it exists for. (Nothing writes it yet at all — the reviewer column
   reads zero.)
 
+### A manager reviews calls too (2026-10-10, 0c25ccc)
+**Everything already accepted a manager as a reviewer except the way in.**
+`qa2Evaluations`'s `requireScope` admits `managerAccess` and every ownership
+check carries `|| scope.managerAccess`; `/pool` is scoped by
+`operationalCompanyIds` with methods `'all'`; `/assignments/:id/claim` adds no
+gate; and `qa_manager` already holds `qa2.view_queue` + `qa2.score`, so My
+Queue and Pool were already on their nav. The block was `loadTeam()` in
+`qa2Assign.js`: it reads `qa2_team_member WHERE manager_id = me`, a manager is
+not in their own team, so they never appeared in the allocation matrix and
+`/bulk` answered `not_on_your_team`. The one qa_manager had 0 assignments and
+0 evaluations ever.
+- The caller is appended to the workbench roster as `"<name> (me)"`.
+  **`/bulk` needed no change**: `method_ids` = every active method (what
+  `operationalMethodIds: 'all'` already means) and `company_ids: []`, which
+  `/bulk` already treats as "unrestricted within this manager's companies".
+- `roleRank` is deliberately NOT consulted — this is picking work UP, not
+  assigning it down, so "strictly lower rank" has nothing to say.
+- Skipped when the caller is already on the roster (a superadmin's fallback
+  list is every agent). A manager with no team now sees themselves instead of
+  the "No agents on your team yet" dead end.
+
+### The long writing boxes live on the LEFT (2026-10-10, 0c25ccc)
+`Comments`, `Additional Comments` and `Reason of rejection` carry **no
+section**, so they landed in the "Other" bucket at the very BOTTOM of the
+scorecard column — past every scored question — while the left column sat half
+empty under the player. They now render beside the overall notes in
+`ReviewScreen.jsx`.
+- **Only SECTION-LESS text questions move.** A text box a form puts INSIDE a
+  scored section explains that section; pulling it out would strand it.
+- `isTextParam` is defined ONCE and used by both `ParameterInput` and the
+  mover, so the two cannot disagree when an input type is added.
+- Position only: same `ParameterInput`, same `setAnswer`, same payload, so
+  scoring, autosave and the Scorecards report are untouched.
+
 ### QA2 Unclosed outcomes + comments (migs 335-336, applied 2026-10-02)
 The Unclosed scorecard (`qa2_method.code='unclosed_closer'`) is on **version 4**:
 `call_outcome` (choice, role `outcome`) holds the QA team's 41 outcomes (336 added
