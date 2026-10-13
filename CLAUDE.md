@@ -774,6 +774,30 @@ had a row, plus 551 carrying none.
   redundant beside the dedicated question, and left in place deliberately: removing
   an option from a published version needs another clone-and-publish.
 
+### A SPIFF counted nothing because the DEFAULT said Manual (mig 343, applied 2026-10-13)
+`spiff_campaigns.metric_source` decides where a score comes from: `manual`
+reads hand-typed `spiff_entries`, and only an auto source (`sales` /
+`transfers` / `revenue`) goes through `spiffMetrics.getProgress`, which
+computes LIVE from the real tables. SpiffManager's new-campaign form opened on
+**`manual`**, so a spiff created without touching the Source dropdown ran its
+whole window on an empty leaderboard while the targeted agents really were
+closing sales.
+- Measured 2026-10-13: of **9** campaigns ever created, **6 were manual and
+  every one finished with ZERO entries**. The only three that ever scored are
+  the three where someone happened to change that field. 343 repaired the six
+  — **82 sales** had gone uncredited (Weekly Deal for July alone was 52).
+- **The default is now `sales`**, and picking Manual shows a red callout. The
+  old grey 11px hint already warned and six campaigns still ran empty.
+- **An auto campaign writes NO `spiff_entries`** — 0 rows there is correct for
+  it, not a symptom. Progress is recomputed per request (60 s in-process
+  cache), so flipping `metric_source` fills a past window retroactively.
+- Credit goes to the **closer AND the fronter** (`fronter_id`, else the linked
+  transfer's `created_by`), windowed on `sale_date` converted to ET — not
+  `created_at`, which is the bulk-upload day. Post-dates excluded.
+- Repairs like this go **BY ID, never by rule**: "convert every manual campaign
+  with no entries" would, on a later re-run, convert one somebody deliberately
+  created as manual and had not scored yet.
+
 ### IP access control (mig 319, applied 2026-09-15)
 Which networks each user may use the CRM from. Ships OFF, and everyone is `anywhere`. README → "IP access control" has the operator steps.
 - **Mode lives in `user_ip_access` (sidecar), NEVER on `user_profiles`.** That table has RLS `users_can_update_own_profile`
