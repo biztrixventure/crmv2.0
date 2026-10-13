@@ -37,7 +37,20 @@ const METRIC_SOURCES = [
 const SOURCE_LABEL = Object.fromEntries(METRIC_SOURCES.map(s => [s.v, s.l]));
 const isAuto = (s) => s && s !== 'manual';
 
-const blank = { title: '', description: '', metric: 'deals_closed', metric_source: 'manual', target_value: 10, reward_amount: '', reward_description: '', target_company_ids: [], target_roles: [], target_user_ids: [], status: 'active', starts_at: '', ends_at: '' };
+// THE DEFAULT HAS TO BE THE ONE THAT COUNTS.
+//
+// This opened on 'manual', which scores NOTHING until a superadmin types a
+// number in per participant — so a spiff created without touching the Source
+// dropdown sat at an empty leaderboard for its whole run, while the agents it
+// targeted really were closing sales. Measured 2026-10-13: six of the nine
+// campaigns ever created were manual, and every one of them finished with ZERO
+// entries; the only three that ever scored were the three where someone
+// happened to change this field.
+//
+// A spiff is a sales contest, so it now opens on "Auto: Sales closed" and
+// fills itself from the sales table. Manual is still there for activity the
+// CRM genuinely does not track — it just is not what you get by accident.
+const blank = { title: '', description: '', metric: 'sales_closed', metric_source: 'sales', target_value: 10, reward_amount: '', reward_description: '', target_company_ids: [], target_roles: [], target_user_ids: [], status: 'active', starts_at: '', ends_at: '' };
 const MEDAL = ['#f59e0b', '#94a3b8', '#b45309'];
 
 const Modal = ({ row, reference, onClose, onSave, viewer }) => {
@@ -95,6 +108,17 @@ const Modal = ({ row, reference, onClose, onSave, viewer }) => {
               if (preset?.label) { setMetricSel('custom'); setCustomMetric(preset.label); }
             }} className="input">{METRIC_SOURCES.map(s => <option key={s.v} value={s.v}>{s.l}</option>)}</ThemedSelect>
             <p className="text-[11px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>{METRIC_SOURCES.find(s => s.v === form.metric_source)?.hint}</p>
+            {/* Manual scores nothing on its own. The hint above said so in grey
+                11px and six campaigns still ran their whole window on an empty
+                board, so picking it now costs an explicit acknowledgement. */}
+            {!isAuto(form.metric_source) && (
+              <p className="text-[11px] mt-1.5 px-2 py-1.5 rounded-lg m-0"
+                style={{ background: 'rgba(220,38,38,0.12)', color: 'var(--color-error-600)' }}>
+                <strong>Nothing will count automatically.</strong> With Manual entry the leaderboard
+                stays empty until someone types each participant&rsquo;s score in by hand. For a sales
+                contest pick <strong>Auto: Sales closed</strong> instead.
+              </p>
+            )}
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div><label className="block text-[11px] font-bold uppercase tracking-wide mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Label</label>
