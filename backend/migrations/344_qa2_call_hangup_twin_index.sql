@@ -1,0 +1,47 @@
+-- ============================================================================
+-- 344_qa2_call_hangup_twin_index.sql — the index behind 60% of the database's
+-- CPU.
+--
+-- Compute sat at 95% for a week. pg_stat_statements, 2026-10-13:
+--
+--   60.3% of ALL database CPU   1,280,430 s   8,305,634 calls   154 ms each
+--     SELECT hangup_label, hangup_reason, hangup_status FROM qa2_call
+--      WHERE hangup_label IS NOT NULL AND leg = $1 AND id <> $2
+--        AND dialer_lead_id = $3 LIMIT 1
+--
+-- `dialer_lead_id` had NO index — the only dialer index on the table is
+-- idx_qa2_call_dialer_call, on dialer_call_id, a different column. So every
+-- one of those 8.3 million calls sequentially scanned all 1.49 million rows.
+-- pg_stat_user_tables agreed: 15,281,350 sequential scans and
+-- 6,284,009,183,582 — six and a quarter TRILLION — rows read sequentially.
+--
+-- The caller is pollHangups() PASS 1 in utils/qa2RecordingPoller.js, an N+1
+-- that runs one lookup per candidate row every 60 seconds. 120 candidates a
+-- tick x 1,440 ticks a day = 172,800 full table scans per day.
+--
+-- Partial on `hangup_label IS NOT NULL` because the query always carries that
+-- predicate, and it is what keeps the index at 34 MB (997k of 1.49M rows)
+-- rather than indexing the whole table for a lookup that only ever wants rows
+-- which already have an answer.
+--
+-- Measured after: 154 ms -> 0.12 ms, Index Scan, 4 buffers. ~1,300x.
+--
+-- Created CONCURRENTLY, which DOES work through the Supabase MCP execute_sql
+-- (it is not wrapped in a transaction, unlike the dashboard SQL editor — see
+-- the supabase_mcp_readonly memory). A plain CREATE INDEX would have taken an
+-- ACCESS EXCLUSIVE lock on a 1 GB table while production was already at 95%
+-- CPU. IF NOT EXISTS so a re-run is a no-op; if a run is ever interrupted,
+-- drop the leftover invalid index before retrying:
+--     SELECT indexrelid::regclass FROM pg_index WHERE NOT indisvalid;
+--
+-- The index makes the work CHEAP; it does not make it NECESSARY. The companion
+-- code change narrows PASS 1's candidate window from 14 days to 3, because a
+-- twin is the same call seen from the crm_day side and is built the next
+-- morning — of the newest 120 rows being retried, ZERO had a twin that could
+-- ever be found, so twelve days of permanently unresolvable rows were being
+-- re-scanned 1,440 times a day.
+-- ============================================================================
+
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_qa2_call_hangup_twin
+  ON public.qa2_call (dialer_lead_id, leg)
+  WHERE hangup_label IS NOT NULL;

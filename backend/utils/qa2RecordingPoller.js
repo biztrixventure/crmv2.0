@@ -640,10 +640,29 @@ async function pollHangups() {
   // the next morning, when the box's log is already archived. Same lead + leg
   // (or same phone + same leg within the same day) is the same call: copy it.
   // This also rescues rows stamped 'unavailable' by the old day-late lookup.
+  // THE WINDOW IS THE WHOLE COST CONTROL, AND 14 DAYS WAS NOT ONE.
+  //
+  // This pass is an N+1: one twin lookup PER CANDIDATE ROW, every 60s. A row
+  // that finds no twin keeps hangup_label NULL, so it is picked again on the
+  // next tick — forever, because the candidate list is ordered newest-first
+  // and capped. Measured 2026-10-13 on production: of the newest 120 rows it
+  // was retrying, ZERO had a twin that could ever be found, and it had run
+  // 8.3 MILLION of those lookups — 60% of the entire database's CPU, against
+  // an unindexed `dialer_lead_id` (6.28 trillion rows read sequentially).
+  //
+  // Two things fix it and both are needed. The index
+  // (idx_qa2_call_hangup_twin on (dialer_lead_id, leg) WHERE hangup_label IS
+  // NOT NULL) took the lookup from 154ms to 0.12ms. This window stops the
+  // pointless work existing at all: a twin is the SAME call seen from the
+  // crm_day side, built the next morning, so one that has not appeared within
+  // a couple of days is never going to. 14 days meant twelve days of
+  // permanently unresolvable rows were re-scanned 1,440 times a day — 2,929
+  // candidates where 392 is the real recent set.
+  const HANGUP_TWIN_DAYS = 3;
   const { data: want } = await supabaseAdmin.from('qa2_call')
     .select('id, leg, dialer_lead_id, customer_phone, call_at, hangup_status')
     .is('hangup_label', null).eq('qa_relevant', true).not('method_id', 'is', null)
-    .gte('call_at', new Date(Date.now() - 14 * 86400000).toISOString())
+    .gte('call_at', new Date(Date.now() - HANGUP_TWIN_DAYS * 86400000).toISOString())
     .order('call_at', { ascending: false }).limit(HANGUP_BATCH * 3);
   for (const r of (want || [])) {
     try {
