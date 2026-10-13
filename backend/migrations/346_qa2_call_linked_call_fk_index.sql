@@ -1,0 +1,56 @@
+-- ============================================================================
+-- 346_qa2_call_linked_call_fk_index.sql — the unindexed self-FK that made the
+-- retention purge impossible.
+--
+-- THE SYMPTOM. qa2_call had grown to 1,496,892 rows with 1,080,822 of them
+-- purgeable, and the hourly retention job was deleting NOTHING — every run
+-- timed out. The backlog grew ~32,000 rows a day and never shrank.
+--
+-- It was not the batch size. A 5,000-row batch timed out; so did 500. Yet the
+-- SELECT half of the purge — finding the 500 doomed ids, three NOT EXISTS
+-- checks and all — ran in 171 ms. The DELETE was the whole cost.
+--
+-- THE CAUSE. `qa2_call.linked_call_id` REFERENCES `qa2_call.id` — a SELF-
+-- referencing foreign key — and nothing indexed `linked_call_id`. Postgres
+-- must prove no surviving row still points at a row being deleted, so each
+-- deleted row cost a full scan of the table doing the referencing... which is
+-- this same 1.49-million-row table. A 500-row batch therefore scanned about
+-- 747 MILLION rows, and a 5,000-row batch ten times that.
+--
+-- This is also a large share of the 15,281,350 sequential scans on qa2_call:
+-- every delete, from any path, triggered one.
+--
+-- AN UNINDEXED FOREIGN KEY IS A DELETE-TIME TIME BOMB. It costs nothing while
+-- rows are only inserted and read, so it stays invisible until the first bulk
+-- delete — by which point the table is large enough that the scan it forces
+-- can no longer complete. Postgres indexes the REFERENCED side (the primary
+-- key) automatically and never the referencing side; that is on us.
+--
+-- Measured 2026-10-13, same function, same predicate, same batch:
+--     before   500 rows   TIMED OUT
+--     before 5,000 rows   TIMED OUT
+--     after    500 rows   < 1 ms
+--     after  5,000 rows   < 1 ms
+--     after 100,000 rows  < 1 s
+--
+-- With that, the EXISTING hourly job (10 batches x 5,000 = 50,000/hour) clears
+-- the remaining backlog on its own in under a day against a ~32,000/day
+-- inflow. No code change was needed: the job was never wrong, it was being
+-- asked to do an impossible amount of work per row.
+--
+-- Partial on `linked_call_id IS NOT NULL` because the FK check only ever looks
+-- for a concrete id, and the column is null on the overwhelming majority of
+-- rows — the partial index is a fraction of the size and serves the check
+-- identically.
+--
+-- CONCURRENTLY, as with 344/345: it works through the Supabase MCP and never
+-- locks the table. Re-running is a no-op.
+--
+-- WORTH CHECKING ELSEWHERE: `dialer_webhook_events.qa2_call_id` also
+-- references qa2_call unindexed. Left alone deliberately — that table holds
+-- 134 rows, so the scan it forces is free. If it ever grows, index it.
+-- ============================================================================
+
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_qa2_call_linked_call
+  ON public.qa2_call (linked_call_id)
+  WHERE linked_call_id IS NOT NULL;
