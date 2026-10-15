@@ -4,6 +4,7 @@ import NotificationBell from '../UI/NotificationBell';
 import BackButton from '../UI/BackButton';
 import ChatLauncher from '../Chat/ChatLauncher';
 import MailLauncher from '../Mail/MailLauncher';
+import ScratchpadLauncher from '../Scratchpad/ScratchpadLauncher';
 import ProfileModal from '../Profile/ProfileModal';
 import { usePushNotifications } from '../../hooks/usePushNotifications';
 import { useFocus } from '../../contexts/FocusContext';
@@ -186,6 +187,10 @@ const AppHeader = ({
             {/* Control cluster */}
             <MailLauncher />
             <ChatLauncher />
+            {/* Private spreadsheet + notepad. Lazy all the way down: this is
+                one button until it is clicked, and the editor itself is a
+                dynamic import inside the panel. */}
+            <ScratchpadLauncher />
             <NotificationBell
               notifications={notifications}
               unreadCount={unreadCount}

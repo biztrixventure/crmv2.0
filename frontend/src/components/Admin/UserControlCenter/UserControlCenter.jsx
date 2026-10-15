@@ -20,7 +20,7 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   UserCog, ShieldCheck, Building2, Users2, Headphones, LayoutTemplate,
   Lock, Activity, Download, RefreshCw, Mail, Clock, Circle, ClipboardCheck, ArrowLeft, Briefcase,
-  Smartphone, Layers, Search, Globe, Wrench, BarChart3,
+  Smartphone, Layers, Search, Globe, Wrench, BarChart3, NotebookPen,
 
 } from 'lucide-react';
 import client from '../../../api/client';
@@ -47,6 +47,7 @@ import ToolAccessSection from './ToolAccessSection';
 import ReportsSection from './ReportsSection';
 import ModulesSection from './ModulesSection';
 import CustomerLookupSection from './CustomerLookupSection';
+import ScratchpadSection from './ScratchpadSection';
 import IpAccessSection from './IpAccessSection';
 
 // compliance_manager is here so the QA tab shows for them: they are the users a
@@ -92,6 +93,9 @@ const TABS = [
   // rename (tab ids are stored).
   { id: 'reports',      label: 'Reports',        icon: BarChart3,      scope: 'user' },
   { id: 'customer_lookup', label: 'Customer Lookup', icon: Search,      scope: 'user' },
+  // Private spreadsheet + notepad (mig 347). scope:'user' -- the documents
+  // belong to the login, never to a company. NEW id -- never rename.
+  { id: 'scratchpad',   label: 'Scratchpad',     icon: NotebookPen,    scope: 'user' },
   // Which networks this person may use the CRM from (mig 319). scope:'user' --
   // the rules follow the login, not a company.
   { id: 'ip_access',    label: 'IP Access',      icon: Globe,          scope: 'user' },
@@ -275,6 +279,7 @@ export default function UserControlCenter() {
             {tab === 'tools'        && <ToolAccessSection account={account} />}
             {tab === 'reports'      && <ReportsSection account={account} />}
             {tab === 'customer_lookup' && <CustomerLookupSection account={account} />}
+            {tab === 'scratchpad' && <ScratchpadSection account={account} />}
             {tab === 'ip_access'    && <IpAccessSection account={account} />}
             {tab === 'governance'   && <GovernanceSection account={account} isReadonlyAdmin={isReadonlyAdmin} />}
             {tab === 'egress'       && <EgressSection account={account} assignment={activeAssignment} />}
