@@ -798,6 +798,36 @@ closing sales.
   with no entries" would, on a later re-run, convert one somebody deliberately
   created as manual and had not scored yet.
 
+### Chat + email attachments: one cap, one lifetime (2026-10-16, 68daabe)
+The size limit was `MAX_FILE_BYTES = 10 * 1024 * 1024` written out in BOTH
+`routes/chat.js` and `routes/emails.js`, so "the file will not upload" had no
+setting behind it. `utils/attachments.js` is now the only place that answers how
+big a file may be and how long it lives, for both surfaces. No migration —
+`business_config` `attachments.max_mb` (25) + `attachments.retention_hours` (24,
+0 = keep forever). Admin -> Chat Control -> **Attachments**, superadmin only.
+- **The ceiling on the ceiling is real.** A file travels base64 inside a JSON
+  body (+33%), so `express.json` on `/api/chat/upload` + `/api/emails/upload` is
+  36mb and `MAX_SETTABLE_MB` is what the parser was configured for. Raising the
+  setting past it would give a bare 413, not bigger uploads. Beyond ~25 MB the
+  answer is a signed direct-to-storage upload, not a bigger body.
+- **Expiry blanks the FILE, never the message.** `purgeExpired` deletes the
+  storage object and rewrites the metadata to `{name,type,size,kind,expired:true}`,
+  so "here is the recording" still reads. Hourly, bounded, from `scheduler.js`.
+- **An oldest-first bounded scan MUST exclude the rows it already did, in SQL.**
+  Skipping them in JS meant every run re-read the same oldest 300 rows and never
+  reached row 301 — the backlog could not drain. The filter is
+  `.not('attachments','cs','[{"expired":true}]')` (+ `.neq('attachments','[]')`).
+- **Unset is not zero.** `Number(null)` is 0 and 0 means "keep forever", so an
+  estate that had never saved the setting read as retention OFF and nothing would
+  ever have expired. `clampHours`/`clampMb` test for absence BEFORE converting.
+  `utils/attachments.test.js` is what caught it.
+- **Retention is retroactive**, so `pendingPurge()` (its own function — `settings()`
+  is on the upload hot path via `maxBytes()`) rides along with the GET and the
+  screen states the count before the save.
+- `objectPath(url, bucket)` splits on `/public/<bucket>/` and answers null for
+  anything else, including a url from the OTHER bucket: it decides which key gets
+  deleted, and a guess deletes a stranger's object.
+
 ### IP access control (mig 319, applied 2026-09-15)
 Which networks each user may use the CRM from. Ships OFF, and everyone is `anywhere`. README → "IP access control" has the operator steps.
 - **Mode lives in `user_ip_access` (sidecar), NEVER on `user_profiles`.** That table has RLS `users_can_update_own_profile`
