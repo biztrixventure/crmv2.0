@@ -4,7 +4,7 @@ import {
   MessageSquare, Activity, Users, Lock, Unlock, Trash2, Pencil, Send, Shield, Search, X,
   Megaphone, ScrollText, Building2, Ban, RotateCcw, Clock, Download, VolumeX, Volume2,
   UserMinus, Crown, TrendingUp, Hash, MessagesSquare, Mail, RefreshCw, Palette,
-  Link2, Power, Copy, Check, UserPlus, ChevronRight, Headphones,
+  Link2, Power, Copy, Check, UserPlus, ChevronRight, Headphones, Paperclip,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button, Alert, Badge } from '../../UI';
@@ -12,6 +12,7 @@ import client from '../../../api/client';
 import { useAuth } from '../../../contexts/AuthContext';
 import Composer from '../../Chat/Composer';
 import ClientPortalTab from './ClientPortalTab';
+import AttachmentsTab from './AttachmentsTab';
 import { Loading, SectionHeader, PillTabs } from '../../UI/kit';
 import { TableScroll } from "../../UI/kit";
 import { buildFilename } from '../../../utils/downloadFilename';
@@ -63,6 +64,7 @@ const TABS = [
   { id: 'log',           label: 'Moderation Log', icon: ScrollText },
   { id: 'companies',     label: 'Rollout',        icon: Building2 },
   { id: 'portal',        label: 'Client Portal',  icon: Headphones },
+  { id: 'attachments',   label: 'Attachments',    icon: Paperclip },
 ];
 
 // ── Overview ────────────────────────────────────────────────────────────────
@@ -880,6 +882,7 @@ const ChatAdmin = () => {
       {tab === 'log' && <ModerationTab />}
       {tab === 'companies' && <CompaniesTab />}
       {tab === 'portal' && <ClientPortalTab />}
+      {tab === 'attachments' && <AttachmentsTab />}
     </div>
   );
 };

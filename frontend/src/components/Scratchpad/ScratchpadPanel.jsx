@@ -141,6 +141,11 @@ export default function ScratchpadPanel({ onClose }) {
             height: () => sheetHostRef.current?.clientHeight || 480,
             width: () => sheetHostRef.current?.clientWidth || 800,
           },
+          // 1000 rows (x-spreadsheet ships 100). This costs nothing at rest:
+          // only cells that actually hold something are stored or sent — an
+          // empty row is absent from getData(), not a row of nulls — so the
+          // grid gets bigger without the document getting bigger.
+          row: { len: 1000, height: 25 },
         });
         api.loadData(sheetDataRef.current || EMPTY_SHEET);
         // change() fires on every edit; getData() is the whole document.

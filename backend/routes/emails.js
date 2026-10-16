@@ -33,13 +33,16 @@ const { asyncHandler } = require('../middleware/errorHandler');
 const { isSuperAdmin } = require('../models/helpers');
 const { searchDirectory, getUserCards } = require('../utils/chatService');
 const notifications = require('../utils/notificationService');
+const attachments = require('../utils/attachments');
 const logger = require('../utils/logger');
 
 const router = express.Router();
 
 const MAX_HTML = 100000;
 const MAX_SUBJECT = 300;
-const MAX_FILE_BYTES = 10 * 1024 * 1024;   // 10MB (chat's cap)
+// The file cap is a superadmin setting now — see utils/attachments.js. Left as
+// a comment rather than a stale constant so a second source of truth cannot
+// creep back in.
 const ATTACH_BUCKET = 'email-attachments';
 const PAGE_MAX = 100;
 
@@ -124,7 +127,11 @@ router.post('/upload', asyncHandler(async (req, res) => {
   let buffer;
   try { buffer = Buffer.from(b64, 'base64'); } catch { return res.status(400).json({ error: 'Bad file data' }); }
   if (!buffer.length) return res.status(400).json({ error: 'Empty file' });
-  if (buffer.length > MAX_FILE_BYTES) return res.status(400).json({ error: 'File exceeds the 10MB limit' });
+  // Same superadmin setting chat uses (utils/attachments.js), read per upload.
+  const capBytes = await attachments.maxBytes();
+  if (buffer.length > capBytes) {
+    return res.status(400).json({ error: `File exceeds the ${Math.round(capBytes / 1048576)}MB limit` });
+  }
   const safeName = String(name || 'file').replace(/[^\w.\-]+/g, '_').slice(0, 120);
   const path = `${req.user.id}/${Date.now()}_${safeName}`;
   const contentType = String(type || 'application/octet-stream').slice(0, 120);

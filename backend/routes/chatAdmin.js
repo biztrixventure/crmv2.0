@@ -13,6 +13,7 @@ const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { isSuperAdmin } = require('../models/helpers');
 const { getUserCards, searchDirectory, logModeration, ensureMembers, pushNewMessage } = require('../utils/chatService');
+const attachments = require('../utils/attachments');
 
 const router = express.Router();
 
@@ -680,6 +681,35 @@ router.delete('/guests/:id', asyncHandler(async (req, res) => {
   const { error } = await supabaseAdmin.from('chat_guests').delete().eq('id', req.params.id);
   if (error) return res.status(500).json({ error: error.message });
   res.json({ message: 'Guest removed' });
+}));
+
+// ── attachment settings — size cap + how long files live ───────────────────
+// These govern BOTH chat and email, because they are the same two buckets and
+// the same base64 upload path; splitting them into two screens would let one
+// drift from the other for no reason. Superadmin only: a delegated Chat
+// Control viewer may moderate conversations, not change estate storage policy.
+router.get('/attachment-settings', asyncHandler(async (req, res) => {
+  if (!(req.user.role === 'superadmin' || await isSuperAdmin(req.user.id))) {
+    return res.status(403).json({ error: 'Superadmin only' });
+  }
+  // The pending count travels with the settings so the screen can say exactly
+  // how many already-shared files the next sweeps will delete — turning 24h on
+  // is retroactive, and that has to be visible before it runs, not after.
+  const [cfg, pending] = await Promise.all([attachments.settings(), attachments.pendingPurge()]);
+  res.json({ ...cfg, pending_purge: pending.total, pending_by_table: pending.by_table });
+}));
+
+router.put('/attachment-settings', asyncHandler(async (req, res) => {
+  if (!(req.user.role === 'superadmin' || await isSuperAdmin(req.user.id))) {
+    return res.status(403).json({ error: 'Superadmin only' });
+  }
+  // Values are clamped in the util, so a typo cannot set a cap the body parser
+  // was never raised for, or a negative retention.
+  const saved = await attachments.setSettings(req.body || {}, req.user.id);
+  // Same shape as the GET: the new retention changes how many files are
+  // already past it, so the count has to be re-read, not carried over.
+  const pending = await attachments.pendingPurge();
+  res.json({ ...saved, pending_purge: pending.total, pending_by_table: pending.by_table });
 }));
 
 module.exports = router;

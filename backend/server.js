@@ -305,9 +305,13 @@ app.use(helmet({
 // Chat attachment uploads carry a base64-encoded file (≤10MB binary ≈ 13.3MB
 // encoded) — give this one route a larger JSON limit before the global parser
 // below claims the body. Registered first so it wins for this path.
-app.use('/api/chat/upload', express.json({ limit: '16mb' }));
+// 36mb, not 25: a file travels as base64 inside JSON, which inflates it by
+// 4/3, so the 25 MB ceiling in utils/attachments.js is a ~33.4 MB body. These
+// two limits and MAX_SETTABLE_MB must move together or a superadmin raising
+// the setting just buys users a confusing 413 from a parser nobody told.
+app.use('/api/chat/upload', express.json({ limit: '36mb' }));
 // Email attachments use the same base64 upload flow — same raised limit.
-app.use('/api/emails/upload', express.json({ limit: '16mb' }));
+app.use('/api/emails/upload', express.json({ limit: '36mb' }));   // see the chat note above
 // Kanban image attachments (+ annotations) are base64 data URLs — raised limit.
 app.use('/api/kanban', express.json({ limit: '14mb' }));
 // Batch uploads post parsed spreadsheet rows (the browser does the parsing).

@@ -20,6 +20,7 @@ const { supabaseAdmin } = require('../config/database');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { findOrCreateDM, ensureMembers, pushNewMessage, pushMentions, createInvites, getUserCards, searchDirectory } = require('../utils/chatService');
 const { getConfig, setConfig } = require('../utils/businessConfig');
+const attachments = require('../utils/attachments');
 const { isSuperAdmin } = require('../models/helpers');
 
 const router = express.Router();
@@ -39,7 +40,9 @@ async function chatMessageSettings() {
 const withinWindow = (createdAt, minutes) =>
   !minutes || minutes <= 0 || (Date.now() - new Date(createdAt).getTime()) <= minutes * 60000;
 const MAX_HTML = 40000;
-const MAX_FILE_BYTES = 10 * 1024 * 1024;   // 10MB
+// The file cap lives in utils/attachments.js now — it is a superadmin setting,
+// not a constant. Left as a comment rather than a stale number so nobody
+// reintroduces a second source of truth here.
 const ATTACH_BUCKET = 'chat-attachments';
 
 // Defence-in-depth server-side scrub. The authoritative XSS control is the
@@ -371,8 +374,14 @@ router.post('/upload', [
   const raw = req.body.data.includes(',') ? req.body.data.split(',').pop() : req.body.data;
   let buffer;
   try { buffer = Buffer.from(raw, 'base64'); } catch { return res.status(400).json({ error: 'Invalid file data' }); }
-  if (!buffer.length)               return res.status(400).json({ error: 'Empty file' });
-  if (buffer.length > MAX_FILE_BYTES) return res.status(400).json({ error: 'File exceeds the 10MB limit' });
+  if (!buffer.length) return res.status(400).json({ error: 'Empty file' });
+  // The cap is a SETTING now (utils/attachments.js), read per upload so a
+  // superadmin raising it takes effect immediately. The old hard-coded 10 MB
+  // is what users were hitting when a file "would not upload".
+  const capBytes = await attachments.maxBytes();
+  if (buffer.length > capBytes) {
+    return res.status(400).json({ error: `File exceeds the ${Math.round(capBytes / 1048576)}MB limit` });
+  }
 
   const type = String(req.body.type || 'application/octet-stream').slice(0, 120);
   const safeName = req.body.name.replace(/[^\w.\-]+/g, '_').slice(0, 120) || 'file';

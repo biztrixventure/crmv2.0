@@ -23,6 +23,7 @@ const { runAllEnabled: syncRevenue } = require('./revenueSync');
 const { runBatchExpiry } = require('./batchExpiry');
 const ipAccess = require('./ipAccess');
 const lookupHistory = require('./customerLookupHistory');
+const attachments = require('./attachments');
 
 const REFRESH_SEGMENTS_MS = 10 * 60 * 1000;     // every 10 min
 const CACHE_SWEEP_MS      = 5  * 60 * 1000;      // every 5 min
@@ -92,6 +93,11 @@ const BATCH_EXPIRY_INIT = 2 * 60 * 1000;
 const IP_SWITCH_MS     = 60 * 1000;
 // Access-log pruning (security.ip_restriction.log_retention_days, default 90).
 const IP_LOG_PRUNE_MS   = 6 * 60 * 60 * 1000;
+
+// Chat + email attachment expiry. Hourly, first run 7 min after boot so it
+// never competes with the heavier start-up jobs.
+const ATTACH_PURGE_MS   = 60 * 60 * 1000;
+const ATTACH_PURGE_INIT = 7 * 60 * 1000;
 const IP_LOG_PRUNE_INIT = 10 * 60 * 1000;
 // Connected-dialer webhook log (mig 320) — raw payloads, so a short retention.
 const DIALER_EVENT_DAYS       = 14;
@@ -265,7 +271,20 @@ function startBackgroundJobs() {
   _timers.push(setTimeout(lookupHistoryPrune, LOOKUP_HISTORY_PRUNE_INIT));
   _timers.push(setInterval(lookupHistoryPrune, LOOKUP_HISTORY_PRUNE_MS));
 
-  logger.info('JOBS', `background jobs started — segments refresh ${REFRESH_SEGMENTS_MS / 60000}m, cache sweep ${CACHE_SWEEP_MS / 60000}m, payment scan ${PAYMENT_SCAN_MS / 3600000}h, qa materialize ${QA_MATERIALIZE_MS / 60000}m, milestone sweep ${MILESTONE_SWEEP_MS / 60000}m, qa2 recording poll ${QA2_REC_POLL_MS / 1000}s, qa2 TRA vendor-code backfill ${QA2_TRA_VENDOR_MS / 60000}m, qa2 auto-assign ${QA2_AUTOASSIGN_MS / 60000}m, qa2 retention ${QA2_RETENTION_MS / 3600000}h, qa2 crm-day ${QA2_CRMDAY_MS / 3600000}h, attendance ${ATTENDANCE_SYNC_MS / 3600000}h, revenue ${REVENUE_SYNC_MS / 3600000}h, batch expiry ${BATCH_EXPIRY_MS / 60000}m, ip switch ${IP_SWITCH_MS / 1000}s, ip log prune ${IP_LOG_PRUNE_MS / 3600000}h`);
+  // Chat + email attachments past their retention (default 24h, superadmin
+  // setting). Hourly rather than daily so "gone after a day" is true within an
+  // hour, and bounded per run so a long-disabled retention being switched back
+  // on cannot turn into one enormous delete across two buckets.
+  const attachmentPurge = async () => {
+    try {
+      const r = await attachments.purgeExpired();
+      if (r && r.removed) logger.info('JOBS', `attachments: expired ${r.removed} file(s)`);
+    } catch (e) { logger.warn('JOBS', `attachment purge error: ${e.message}`); }
+  };
+  _timers.push(setTimeout(attachmentPurge, ATTACH_PURGE_INIT));
+  _timers.push(setInterval(attachmentPurge, ATTACH_PURGE_MS));
+
+  logger.info('JOBS', `background jobs started — segments refresh ${REFRESH_SEGMENTS_MS / 60000}m, cache sweep ${CACHE_SWEEP_MS / 60000}m, payment scan ${PAYMENT_SCAN_MS / 3600000}h, qa materialize ${QA_MATERIALIZE_MS / 60000}m, milestone sweep ${MILESTONE_SWEEP_MS / 60000}m, qa2 recording poll ${QA2_REC_POLL_MS / 1000}s, qa2 TRA vendor-code backfill ${QA2_TRA_VENDOR_MS / 60000}m, qa2 auto-assign ${QA2_AUTOASSIGN_MS / 60000}m, qa2 retention ${QA2_RETENTION_MS / 3600000}h, qa2 crm-day ${QA2_CRMDAY_MS / 3600000}h, attendance ${ATTENDANCE_SYNC_MS / 3600000}h, revenue ${REVENUE_SYNC_MS / 3600000}h, batch expiry ${BATCH_EXPIRY_MS / 60000}m, ip switch ${IP_SWITCH_MS / 1000}s, ip log prune ${IP_LOG_PRUNE_MS / 3600000}h, attachment purge ${ATTACH_PURGE_MS / 3600000}h`);
 }
 
 function stopBackgroundJobs() {
