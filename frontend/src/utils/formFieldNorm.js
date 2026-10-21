@@ -139,3 +139,54 @@ export const isCarYear = (f) => classify(f) === 'car_year';
 export const isDateField = (f) => classify(f) === 'date';
 export const isCarMake  = (f) => classify(f) === 'car_make';
 export const isCarModel = (f) => classify(f) === 'car_model';
+
+// ── What a date field STARTS on ─────────────────────────────────────────────
+// Every date field used to open on today, because CalendarDateInput seeded
+// today and nothing could say otherwise. A first monthly payment is not due
+// today — it is due next month — so the closer had to re-pick it on every
+// sale, and whatever they forgot to re-pick was wrong.
+//
+// The rule lives in the field's own `form_fields.default_value`, NOT in a
+// field name: "Monthly Date" can be renamed or added per company, and a rule
+// keyed on the label would silently stop working the day somebody edits it.
+//
+//   null / '' / 'today'  → today            (every pre-existing field: unchanged)
+//   'next_month'         → the same day, next month
+//   'blank'              → empty; the closer picks
+//   'YYYY-MM-DD'         → that fixed date
+//
+// Anything unrecognised falls back to today, so a typo in the column can never
+// leave a required field unfillable.
+export const DATE_SEED_RULES = [
+  { value: '',           label: 'Today' },
+  { value: 'next_month', label: 'Next month (same day)' },
+  { value: 'blank',      label: 'Leave blank' },
+];
+
+// A month later is the SAME DAY of the next month, and the 31st of a month the
+// next one does not have lands on that month's LAST day. `setMonth` spills
+// instead (Jan 31 + 1 month = Mar 3), which would quietly move a payment date
+// into the wrong month. Pure string arithmetic — no Date rollover, no timezone.
+export const addMonthsISO = (iso, n = 1) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ''));
+  if (!m) return '';
+  const day = Number(m[3]);
+  const months = Number(m[1]) * 12 + (Number(m[2]) - 1) + n;
+  const y = Math.floor(months / 12);
+  const mo = months - y * 12;                       // 0-11, correct for n < 0 too
+  const lastDay = new Date(Date.UTC(y, mo + 1, 0)).getUTCDate();
+  const d = Math.min(day, lastDay);
+  return `${String(y).padStart(4, '0')}-${String(mo + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+};
+
+export const dateSeedISO = (field, now = new Date()) => {
+  // The same base the form has always used, so 'today' stays byte-identical to
+  // what CalendarDateInput produced before this existed.
+  const today = now.toISOString().split('T')[0];
+  const rule = String(field?.default_value ?? '').trim().toLowerCase();
+  if (!rule || rule === 'today') return today;
+  if (rule === 'blank' || rule === 'none') return '';
+  if (rule === 'next_month') return addMonthsISO(today, 1);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(rule)) return rule;
+  return today;
+};

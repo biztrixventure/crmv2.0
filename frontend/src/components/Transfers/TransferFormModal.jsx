@@ -5,7 +5,7 @@ import ComboInput from '../UI/ComboInput';
 import ThemedSelect from '../UI/Select';
 import { canonicalizeFormData } from '../../utils/canonicalizeOption';
 import client from '../../api/client';
-import { normalize as normalizeField, maxLengthFor, inputModeFor, classify as classifyField, isCarMake, isCarModel, isCarYear, isDateField } from '../../utils/formFieldNorm';
+import { normalize as normalizeField, maxLengthFor, inputModeFor, classify as classifyField, isCarMake, isCarModel, isCarYear, isDateField, dateSeedISO } from '../../utils/formFieldNorm';
 import VehicleSelect from '../Form/VehicleSelect';
 import CalendarDateInput from '../Form/CalendarDateInput';
 import { useVehicleYearRange } from '../../hooks/useVehicleYearRange';
@@ -193,6 +193,7 @@ const TransferFormModal = ({
                           input = (
                             <CalendarDateInput value={val}
                               onChange={(iso) => setField(field.name, iso)}
+                              seedDate={dateSeedISO(field)}
                               required={field.is_required} />
                           );
                         } else if (isCarMake(field)) {

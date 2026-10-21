@@ -9,7 +9,7 @@ import { smartFormat, isSuggestable, suggestionsFor, rememberValues } from '../.
 import ComboInput from '../UI/ComboInput';
 import ThemedSelect from '../UI/Select';
 import { canonicalizeFormData } from '../../utils/canonicalizeOption';
-import { normalize as normalizeField, maxLengthFor, inputModeFor, isCarMake, isCarModel, isCarYear, isDateField, classify as classifyField } from '../../utils/formFieldNorm';
+import { normalize as normalizeField, maxLengthFor, inputModeFor, isCarMake, isCarModel, isCarYear, isDateField, dateSeedISO, classify as classifyField } from '../../utils/formFieldNorm';
 import VehicleSelect from '../Form/VehicleSelect';
 import CustomerHistoryBanner from './CustomerHistoryBanner';
 import CalendarDateInput from '../Form/CalendarDateInput';
@@ -593,12 +593,20 @@ const SaleForm = ({ user, transfer = null, existingSale = null, onSubmit, isLoad
       const curDispo = dispoField ? (formData[dispoField.name] || '') : '';
       const maxDate = (field.field_type === 'sale_date' && !isPostDateDispo(curDispo))
         ? new Date().toISOString().split('T')[0] : undefined;
+      // Which day the field opens on comes from the field itself (Form Builder
+      // → "Opens on"), so a Monthly Date starts a month out while a Sale Date
+      // still starts today. Clamped to the picker's own ceiling: seeding a date
+      // the calendar refuses to show would leave a required field holding a
+      // value nobody could re-pick.
+      const seed = dateSeedISO(field);
+      const seedDate = maxDate && seed > maxDate ? maxDate : seed;
       return (
         <CalendarDateInput
           value={val}
           onChange={(iso) => setValue(field.name, iso)}
           required={field.is_required}
           max={maxDate}
+          seedDate={seedDate}
           className={errClass}
         />
       );

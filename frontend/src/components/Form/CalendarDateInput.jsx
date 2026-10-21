@@ -22,20 +22,30 @@ const CalendarDateInput = ({
   className = '',
   required = false,
   defaultToday = true,
+  seedDate,            // ISO the field opens on; '' = blank. Undefined = today.
   id,
   max,                 // ISO yyyy-mm-dd — calendar can't pick a later date (block future)
   min,                 // ISO yyyy-mm-dd — calendar can't pick an earlier date
 }) => {
-  // Seed today's date once when the field mounts empty.
+  // WHAT THE FIELD OPENS ON. `seedDate` lets the form answer from the field's
+  // own config (a monthly payment opens next month, not today). It is checked
+  // against undefined, not truthiness: '' is a real answer — "leave it blank"
+  // — and `|| todayISO()` would overrule it with today, which is the whole
+  // behaviour being made configurable. No seedDate at all keeps the historical
+  // today, so every existing caller is untouched.
+  const seed = seedDate !== undefined ? seedDate : (defaultToday ? todayISO() : '');
+
+  // Seed once when the field mounts empty. Written back through onChange so
+  // the value is actually submitted, not just shown.
   useEffect(() => {
-    if (defaultToday && !value) onChange(todayISO());
+    if (seed && !value) onChange(seed);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
     <ThemedDate
       id={id}
-      value={value || (defaultToday ? todayISO() : '')}
+      value={value || seed}
       required={required}
       max={max || undefined}
       min={min || undefined}

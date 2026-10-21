@@ -26,6 +26,9 @@ import { toast, toastError } from '../../../utils/toast';
 import { useSaleConfigs } from '../../../hooks/useSaleConfigs';
 import ThemedSelect from '../../UI/Select';
 import { PillTabs } from '../../UI/kit';
+// ONE catalog for the date-seed rules: the builder offers exactly what the
+// sale and transfer forms know how to read, so the two cannot drift.
+import { DATE_SEED_RULES } from '../../../utils/formFieldNorm';
 
 // ── Base fields ───────────────────────────────────────────────────────────────
 const BASE_FIELDS = [
@@ -984,6 +987,29 @@ const FullEditPanel = ({ field, isSale, isCloserDeal, onPatch, onConfigureMappin
                   className="input text-sm py-2 w-full" />
               </div>
 
+              {/* WHICH DAY A DATE FIELD OPENS ON. Every date field used to open
+                  on today with no way to say otherwise, so a first monthly
+                  payment — due next month — had to be re-picked on every sale,
+                  and anything the closer forgot to re-pick was simply wrong.
+                  Stored in the field's own `default_value`, so the rule follows
+                  the field and survives a rename. */}
+              {(field.field_type === 'date' || field.field_type === 'sale_date') && (
+                <div className="sm:col-span-2">
+                  <label className="text-[11px] font-bold uppercase tracking-wide text-text-secondary mb-1 block">
+                    Opens on
+                  </label>
+                  <ThemedSelect value={DATE_SEED_RULES.some(r => r.value === (field.default_value || '')) ? (field.default_value || '') : ''}
+                    onChange={(e) => commit('default_value', e.target.value)}
+                    className="input text-sm py-2 w-full">
+                    {DATE_SEED_RULES.map(r => <option key={r.value || 'today'} value={r.value}>{r.label}</option>)}
+                  </ThemedSelect>
+                  <p className="text-[11px] text-text-tertiary mt-1">
+                    The day the calendar starts on — whoever fills the form can always pick another.
+                    {field.field_type === 'sale_date' && ' A Sale Date can never open later than today: a future date needs the Post Date disposition.'}
+                  </p>
+                </div>
+              )}
+
               {/* Behavior toggles */}
               <div className="sm:col-span-2">
                 <p className="text-[11px] font-bold uppercase tracking-wide text-text-secondary mb-2">
@@ -1087,7 +1113,7 @@ const FullEditPanel = ({ field, isSale, isCloserDeal, onPatch, onConfigureMappin
                   {field.field_type === 'sale_client'   && <>Sourced from <strong>Sale Config → Clients</strong>. Add or edit the list there to change what closers see.</>}
                   {field.field_type === 'sale_fronter'  && <>Closer-only. Auto-populated from the transfer's <code>created_by</code> when the closer opens the sale modal.</>}
                   {field.field_type === 'sale_reference_no' && <>Auto-generated on sale submit. Format is configurable in Sale Config.</>}
-                  {field.field_type === 'sale_date'     && <>Defaults to today on the sale modal. Closer can override per sale.</>}
+                  {field.field_type === 'sale_date'     && <>Opens on the day set above (today unless changed), never later than today. Closer can override per sale.</>}
                 </p>
               </div>
             )}
@@ -1460,6 +1486,11 @@ const FormLayoutPanel = ({ saleClients, salePlans }) => {
           placeholder: f.placeholder || '', options: f.options,
           section: f.section || 'default', show_to_fronter: f.show_to_fronter !== false,
           repeats_per_car: f.repeats_per_car === true,
+          // Carried through on purpose: this mapper is a WHITELIST and
+          // bulk-save writes `default_value: f.default_value || null`, so a
+          // key missing here is not merely unshown — the next Save erases it
+          // from the database for every field on the canvas.
+          default_value: f.default_value || '',
         }));
         dbSnapshot.current = mapped;
         const canvasNames = new Set(dbFields.map(f => f.name));
