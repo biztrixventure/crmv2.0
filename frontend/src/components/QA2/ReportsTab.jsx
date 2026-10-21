@@ -957,6 +957,27 @@ function ScorecardsSection({ params }) {
     return out;
   }, [cols, rows]);
 
+  // THE WRITING IS PART OF THE SHEET, SO IT IS PART OF THE FILE. A comment on
+  // a question is usually the only record of WHY a mark was given, and the
+  // export carried neither it nor the Evaluator notes the table's last column
+  // shows — so a report shared as "the file" lost every word the reviewer
+  // wrote. A comment column is added only for questions that actually carry
+  // one, so the file does not double its width with empty columns.
+  const commentCols = useMemo(
+    () => cols.filter(c => rows.some(r => r.cells?.[c.id]?.comment)),
+    [cols, rows]);
+  const hasComment = useMemo(() => new Set(commentCols.map(c => c.id)), [commentCols]);
+
+  // A cell's value as the file should read it. Points are appended only when
+  // the question is worth any — the screen does the same (`cell.max` guard),
+  // and without it a free-text answer exported as `Customer hung up (0)`.
+  const cellText = (cell) => {
+    if (!cell) return '';
+    if (cell.na) return 'N/A';
+    const pts = cell.points != null && cell.max ? ` (${cell.points}/${cell.max})` : '';
+    return `${cell.display}${pts}`;
+  };
+
   const fmtTime = (s) => { try { return s ? new Date(s).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) : '—'; } catch { return '—'; } };
   const resultTone = (r) => (String(r || '').toLowerCase() === 'pass' ? 'var(--color-success-600)'
     : String(r || '').toLowerCase() === 'fail' ? 'var(--color-error-600)' : 'var(--color-text-secondary)');
@@ -999,17 +1020,20 @@ function ScorecardsSection({ params }) {
         <div className="ml-auto">
           <ExportButton
             rows={rows}
-            headers={['Date', 'Number', 'Agent', 'Evaluator', 'Method', 'Company', 'Call time', 'Result', 'Score', ...cols.map(c => c.label)]}
+            headers={['Date', 'Number', 'Agent', 'Evaluator', 'Method', 'Company', 'Call time', 'Result', 'Score',
+              ...cols.flatMap(c => (hasComment.has(c.id) ? [c.label, `${c.label} — comment`] : [c.label])),
+              'Evaluator notes']}
             filename={`qa2-scorecards-${from}${oneDay ? '' : `_to_${to}`}${methodId ? '-' + (methods.find(m => m.id === methodId)?.label || '') : ''}.csv`}
             mapRow={r => [
               (rowDate(r) || '').slice(0, 10),
               r.phone || '', r.agent_name || '', r.reviewer_name || '', r.method || '', r.company || '',
               fmtTime(r.call_at), r.result || '', r.final_score == null ? '' : r.final_score,
-              ...cols.map(c => {
+              ...cols.flatMap(c => {
                 const cell = r.cells?.[c.id];
-                if (!cell) return '';
-                return cell.na ? 'N/A' : `${cell.display}${cell.points != null ? ` (${cell.points}${cell.max ? '/' + cell.max : ''})` : ''}`;
+                const val = cellText(cell);
+                return hasComment.has(c.id) ? [val, cell?.comment || ''] : [val];
               }),
+              r.notes || '',
             ]}
           />
         </div>
