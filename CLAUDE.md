@@ -798,6 +798,36 @@ closing sales.
   with no entries" would, on a later re-run, convert one somebody deliberately
   created as manual and had not scored yet.
 
+### A date field opens on the day it is DUE (2026-10-22, 9d0ae56)
+`CalendarDateInput` seeded TODAY for every date field and nothing could say
+otherwise, so "Monthly Date" — the first monthly payment, due next month — had
+to be re-picked on every sale and was wrong whenever it was not.
+- The rule is the field's own `form_fields.default_value`, read by
+  `dateSeedISO()` in `frontend/src/utils/formFieldNorm.js`:
+  `null`/`''`/`today` (every pre-existing field) / `next_month` / `blank` /
+  a literal `YYYY-MM-DD`. Set in Form Builder -> Edit field -> **Opens on**
+  (`DATE_SEED_RULES` is the ONE catalog the builder and both forms share).
+  `Monthly_Date` = `next_month`; `SaleDate` left on today.
+- **Keyed on the FIELD, never on its name or label.** A rule matching
+  "Monthly Date" stops working the day an admin renames it or a second company
+  adds its own.
+- **`seedDate` is tested against `undefined`, not truthiness.** `''` is a real
+  answer ("leave blank") and `|| todayISO()` would overrule exactly the
+  behaviour being made configurable. Omitting the prop keeps the historical
+  today, which is why DataCleanup's two callers needed no change.
+- A `sale_date` seed is **clamped to the picker's `max`** — seeding a date the
+  calendar refuses to show leaves a required field holding a value nobody can
+  re-pick.
+- `addMonthsISO` is string arithmetic: Jan 31 -> Feb 28 (29 in a leap year).
+  `setMonth` spills to Mar 3 and would move a payment into the wrong month.
+- **The trap that would have silently undone it:** FormBuilder's loader maps DB
+  rows through a WHITELIST and `POST /forms/fields/bulk-save` writes
+  `default_value: f.default_value || null`. A key missing from that mapper is
+  not merely unshown — the next **Save erases it for every field on the
+  canvas**. Any new `form_fields` column must be added in BOTH places.
+- `ManualEntryModal` renders date fields as a bare `<input type="date">` with no
+  default and is deliberately untouched; it never seeded today either.
+
 ### Chat + email attachments: one cap, one lifetime (2026-10-16, 68daabe)
 The size limit was `MAX_FILE_BYTES = 10 * 1024 * 1024` written out in BOTH
 `routes/chat.js` and `routes/emails.js`, so "the file will not upload" had no
