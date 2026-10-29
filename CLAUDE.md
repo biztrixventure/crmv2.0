@@ -798,6 +798,32 @@ closing sales.
   with no entries" would, on a later re-run, convert one somebody deliberately
   created as manual and had not scored yet.
 
+### Downloading a batch's numbers (2026-10-29, 3bec794)
+`BatchWorkspace` holds every number in a batch, its holder, its disposition, the
+fronter's note and every column the uploaded file carried — and nothing could
+get it out. A download button sits in the toolbar beside the row-count controls.
+- **The file is the view**: the same `params` the table loaded with (status tab +
+  search), so the two cannot disagree. **Page size is deliberately excluded** —
+  a file is the whole filtered set, not the 250 rows on screen.
+- Rows ticked ⇒ the file is exactly those. The tick **survives a page change
+  while `items` does not**, so the selection is matched against the DRAINED set;
+  filtering the current page drops anything ticked on a page scrolled past.
+- **The drain advances by the rows RECEIVED, not the page size requested.**
+  `GET /:id/items` clamps `limit` to 1000; if that ceiling ever drops, a loop
+  stepping by its own page size strides over rows it never got and the file
+  looks complete. (Same footgun as `GET /callbacks`, which clamps to 200 — see
+  `fetchAllForExport`.)
+- Time limit exports the **deadline**, not the "2d left" countdown the row
+  prints: a relative string in a file is wrong by tomorrow.
+- **`/api/distribution-batches` now runs `egressAudit`** — these are customer
+  phone numbers, so the download is row-capped and audited like every other
+  export. No `__egress` marker ⇒ the middleware returns immediately, so the
+  ordinary list is untouched; only offset 0 is judged.
+- `batch_numbers: 'items'` had to go in `DATASET_ROWS_KEY`, or a configured
+  column list for the dataset silently fails to apply to a payload whose rows
+  arrive under a different key.
+- Gated on `canExport('numbers')`, the existing export area.
+
 ### A TAB IS NOT A SCREEN (2026-10-29, 63a2cf8)
 "Customer Lookup is enabled for EasyTech's company admins but not showing."
 The grant was correct — both carry people+vehicles+VIN in
