@@ -22,7 +22,6 @@ import { Badge } from '../UI';
 import client from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 import { toast } from 'sonner';
-import ExportModal from './ExportModal';
 import TabStatsStrip from './TabStatsStrip';
 import FilterBar, { FilterSelect } from '../UI/FilterBar';
 import TransferFormModal from '../Transfers/TransferFormModal';
@@ -85,7 +84,6 @@ const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
   const statusOptions = TRANSFER_STATUSES.map(s => ({ value: s, label: STATUS_LABEL[s] || s }));
 
   const [detail, setDetail]         = useState(null);
-  const [exportOpen, setExportOpen] = useState(false);
   const [todayCount, setTodayCount] = useState(null);
 
   // Notification deep-link → scroll + highlight the matching transfer row 5s.
@@ -190,20 +188,43 @@ const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
     finally { setMgBusy(false); }
   };
 
-  const handleExport = async ({ dateFrom: df, dateTo: dt, company: co, userIds }) => {
-    const all = await fetchAllForExport('compliance/transfers',
-      { date_from: df || undefined, date_to: dt || undefined, company_id: co || undefined, user_ids: userIds.length ? userIds.join(',') : undefined },
-      'transfers');
-    const dupCount = all.filter(t => t.is_duplicate).length;
-    writeExport({
-      dataset: 'transfers', surface: 'compliance_transfers', allowed: allowedFor('transfers'),
-      rows: all,
-      // Trailing summary row so the duplicate count travels with the export.
-      // Keyed by COLUMN, not by position — a configured column list would shift
-      // a positional index and drop the totals into the wrong cells.
-      footer: () => [{}, { customer_name: `Total transfers: ${all.length}`, is_duplicate: `Duplicates: ${dupCount}` }],
-      filename: buildFilename({ dataset: 'transfers', scope: companyList.find(c => c.id === co)?.name, dateFrom: df, dateTo: dt }),
-    });
+  // THE EXPORT IS THE SCREEN — every filter load() sends, minus page/limit, so
+  // the file is the whole filtered set rather than the page being looked at.
+  // One function answers for both, or the two drift.
+  const exportParams = () => ({
+    status: status || undefined, company_id: company || undefined,
+    search: search.trim() || undefined,
+    date_from: dateFrom || undefined, date_to: dateTo || undefined,
+    // Column filters + sort. The export used to send neither, so a tab narrowed
+    // by status or a column filter still downloaded every transfer.
+    ...tq.params,
+  });
+
+  // Export CSV downloads what the table is showing, on the click. It used to
+  // open a dialog asking again for a date range, a company and a set of users —
+  // filters that REPLACED the applied ones, so three rows on screen exported as
+  // everything.
+  const [exporting, setExporting] = useState(false);
+  const handleExport = async () => {
+    if (exporting) return;                      // a second click is not a second file
+    setExporting(true);
+    try {
+      const all = await fetchAllForExport('compliance/transfers', exportParams(), 'transfers');
+      const dupCount = all.filter(t => t.is_duplicate).length;
+      writeExport({
+        dataset: 'transfers', surface: 'compliance_transfers', allowed: allowedFor('transfers'),
+        rows: all,
+        // Trailing summary row so the duplicate count travels with the export.
+        // Keyed by COLUMN, not by position — a configured column list would shift
+        // a positional index and drop the totals into the wrong cells.
+        footer: () => [{}, { customer_name: `Total transfers: ${all.length}`, is_duplicate: `Duplicates: ${dupCount}` }],
+        filename: buildFilename({ dataset: 'transfers', scope: companyList.find(c => c.id === company)?.name, dateFrom, dateTo }),
+      });
+    } catch (err) {
+      // Server-enforced egress limit — it had a home inside the dialog, so it
+      // needs one here.
+      toast.error(err?.egressBlocked ? err.message : (err?.response?.data?.error || 'Failed to export CSV'));
+    } finally { setExporting(false); }
   };
 
   return (
@@ -216,7 +237,8 @@ const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
             ? undefined
             : 'Read-only view of lead transfers across all companies'}
         onRefresh={() => { setPage(1); load(); }}
-        onExport={() => setExportOpen(true)}
+        onExport={handleExport}
+        exportArea="transfers"
         extra={<FetchAllDisposButton onDone={() => { setPage(1); load(); }} />}
       />
 
@@ -582,11 +604,6 @@ const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
             </div>
           </ModalBox>
         </Overlay>
-      )}
-
-      {exportOpen && (
-        <ExportModal tab="transfers" companyList={companyList}
-          onClose={() => setExportOpen(false)} onExport={handleExport} />
       )}
 
       {/* Compliance edit modal — reuses TransferFormModal in edit mode.

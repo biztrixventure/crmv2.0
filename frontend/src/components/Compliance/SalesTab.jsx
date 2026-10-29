@@ -9,7 +9,6 @@ import { toast } from 'sonner';
 import client from '../../api/client';
 import SaleDetailDrawer from '../Shared/SaleDetailDrawer';
 import SaleModal from '../Closer/SaleModal';
-import ExportModal from './ExportModal';
 import BulkPayoutUpdateModal from './BulkPayoutUpdateModal';
 import { TableScroll, KpiTile, accent } from '../UI/kit';
 import FilterBar, { FilterSelect, MultiFilterSelect } from '../UI/FilterBar';
@@ -300,7 +299,6 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
       try { focusRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch { /* noop */ }
     }
   }, [focusedId, sales]);
-  const [exportOpen, setExportOpen] = useState(false);
 
   // Return modal
   const [returnTarget, setReturnTarget] = useState(null);
@@ -511,32 +509,49 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
     catch { /* user retries */ } finally { setDeleting(false); }
   };
 
-  const handleExport = async ({ dateFrom: df, dateTo: dt, company: co, userIds }) => {
-    // Export mirrors the active tab: a disposition tab exports its own
-    // disposition; All Sales excludes un-charged post-date sales. Fetches ALL
-    // matching rows (paged), not just the first 5,000.
-    const allSales = await fetchAllForExport('compliance/sales',
-      { disposition: disposition || undefined, exclude_post_date: disposition ? undefined : 1,
-        date_from: df || undefined, date_to: dt || undefined, company_id: co || undefined, user_ids: userIds.length ? userIds.join(',') : undefined },
-      'sales');
-    // Columns come from the shared catalog. Unconfigured → the compliance_sales
-    // surface, which is this tab's existing twelve columns unchanged. labelOf is
-    // threaded through so Status keeps the configurable compliance workflow
-    // labels rather than the static fallback map.
-    writeExport({
-      dataset: 'sales', surface: 'compliance_sales', allowed: allowedFor('sales'),
-      rows: allSales, ctx: { labelOf },
-      filename: buildFilename({ dataset: disposition ? `sales-${disposition}` : 'sales', scope: companyList.find(c => c.id === co)?.name, dateFrom: df, dateTo: dt }),
-    });
+  // Export CSV downloads what the table is showing, there and then. It used to
+  // open a dialog asking for a date range, a company and a set of users — a
+  // second, emptier set of filters that REPLACED the ones already applied, so
+  // narrowing the screen to three rows and pressing Export produced a file of
+  // every sale. The filters are on the screen; the button only has to obey them.
+  const [exporting, setExporting] = useState(false);
+  const handleExport = async () => {
+    if (exporting) return;                      // a second click is not a second file
+    setExporting(true);
+    try {
+      // ALL matching rows, every page — not just the page on screen.
+      const allSales = await fetchAllForExport('compliance/sales', payoutExportParams(), 'sales');
+      // Columns come from the shared catalog. Unconfigured → the compliance_sales
+      // surface, which is this tab's existing twelve columns unchanged. labelOf is
+      // threaded through so Status keeps the configurable compliance workflow
+      // labels rather than the static fallback map.
+      writeExport({
+        dataset: 'sales', surface: 'compliance_sales', allowed: allowedFor('sales'),
+        rows: allSales, ctx: { labelOf },
+        filename: buildFilename({ dataset: disposition ? `sales-${disposition}` : 'sales', scope: soleCompanyName, dateFrom, dateTo }),
+      });
+    } catch (err) {
+      // The egress limit is server-enforced and has to stay visible — it was
+      // shown inside the dialog before, so it needs a home now.
+      toast.error(err?.egressBlocked ? err.message : (err?.response?.data?.error || 'Failed to export CSV'));
+    } finally { setExporting(false); }
   };
 
   // Payout report export (CSV + A4 PDF) — superadmin only. Pulls the same
   // rows the table is currently showing (current filters, not just the page).
+  // THE EXPORT IS THE SCREEN. Every filter load() sends, the file sends too —
+  // minus page/limit, because the file is the whole filtered set rather than
+  // the page being looked at. Anything missing here is a row that is on screen
+  // and not in the file, or the reverse, and the only way to keep the two from
+  // drifting is for one function to answer for both.
   const payoutExportParams = () => ({
     disposition: disposition || undefined, exclude_post_date: disposition ? undefined : 1,
     search: search || undefined, status: statuses.join(',') || undefined, company_id: companyIds.join(',') || undefined,
     user_ids: closerIds.join(',') || undefined,
     date_from: dateFrom || undefined, date_to: dateTo || undefined,
+    // The Post Date tab's charge-date window. load() has always sent it; the
+    // exports did not, so a narrowed charge window exported every post-date.
+    charge_from: chargeFrom || undefined, charge_to: chargeTo || undefined,
     payout_status: payoutStatuses.join(',') || undefined, payout_confirmed: payoutConfirmeds.join(',') || undefined,
     paid_to_closer: paidToCloserFilter ? 'true' : undefined, paid_to_partner: paidToPartnerFilter ? 'true' : undefined,
     // Column filters (Client, etc.) + sort — same params the on-screen table's
@@ -586,7 +601,8 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
               : `Sales with the “${prettyDispo(disposition)}” disposition, across all companies.`)
           : 'Closer sales across all companies — full management access'}
         onRefresh={() => { setPage(1); load(); }}
-        onExport={() => setExportOpen(true)}
+        onExport={handleExport}
+        exportArea="sales"
       />
 
       <FilterBar
@@ -1267,10 +1283,6 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
       )}
 
       <SaleDetailDrawer sale={detailSale} onClose={() => setDetailSale(null)} />
-      {exportOpen && (
-        <ExportModal tab="sales" companyList={companyList}
-          onClose={() => setExportOpen(false)} onExport={handleExport} />
-      )}
       {bulkModalOpen && (
         <BulkPayoutUpdateModal
           fetchParams={payoutExportParams()}

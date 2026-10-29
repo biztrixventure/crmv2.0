@@ -8,7 +8,6 @@ import { TableScroll } from '../UI/kit';
 import { useAuth } from '../../contexts/AuthContext';
 import { useFeatureFlags } from '../../contexts/FeatureFlagsContext';
 import { toast } from 'sonner';
-import ExportModal from './ExportModal';
 import TabStatsStrip from './TabStatsStrip';
 import ThemedSelect from '../UI/Select';
 import {
@@ -428,7 +427,6 @@ const CallbacksTab = ({ companyList }) => {
 
   const [detail,      setDetail]      = useState(null);
   const [phoneDrawer, setPhoneDrawer] = useState(null);
-  const [exportOpen,  setExportOpen]  = useState(false);
 
   // Fetch users when company changes
   useEffect(() => {
@@ -541,19 +539,36 @@ const CallbacksTab = ({ companyList }) => {
     n + ((c.status === 'pending' && c.callback_at && new Date(c.callback_at) < new Date()) ? 1 : 0)
   , 0);
 
-  const handleExport = async ({ dateFrom: df, dateTo: dt, company: co, userIds }) => {
-    const allCallbacks = await fetchAllForExport('compliance/callbacks', {
-      company_type: co ? undefined : cbType, company_id: co || undefined,
-      date_from: df || undefined, date_to: dt || undefined,
-      created_from: createdFrom || undefined, created_to: createdTo || undefined,
-      search: search || undefined, priority: priority || undefined,
-      user_ids: userIds.length ? userIds.join(',') : (selectedUser || undefined),
-    }, 'callbacks');
-    writeExport({
-      dataset: 'callbacks', surface: 'compliance_callbacks', allowed: allowedFor('callbacks'),
-      rows: allCallbacks,
-      filename: buildFilename({ dataset: `callbacks-${cbType}`, scope: companyList.find(c => c.id === co)?.name, dateFrom: df, dateTo: dt }),
-    });
+  // THE EXPORT IS THE SCREEN — every filter load() sends, minus page/limit, so
+  // the file is the whole filtered set rather than the page being looked at.
+  const exportParams = () => ({
+    company_type: company ? undefined : cbType, company_id: company || undefined,
+    // status and the column filters / sort were both missing: a tab narrowed to
+    // one status still exported every callback.
+    status: status || undefined, priority: priority || undefined,
+    search: search || undefined,
+    date_from: dateFrom || undefined, date_to: dateTo || undefined,
+    created_from: createdFrom || undefined, created_to: createdTo || undefined,
+    user_ids: selectedUser || undefined,
+    ...tq.params,
+  });
+
+  // Export CSV downloads what the table is showing, on the click — no dialog
+  // asking for a second set of filters that replaced the applied ones.
+  const [exporting, setExporting] = useState(false);
+  const handleExport = async () => {
+    if (exporting) return;                      // a second click is not a second file
+    setExporting(true);
+    try {
+      const allCallbacks = await fetchAllForExport('compliance/callbacks', exportParams(), 'callbacks');
+      writeExport({
+        dataset: 'callbacks', surface: 'compliance_callbacks', allowed: allowedFor('callbacks'),
+        rows: allCallbacks,
+        filename: buildFilename({ dataset: `callbacks-${cbType}`, scope: companyList.find(c => c.id === company)?.name, dateFrom, dateTo }),
+      });
+    } catch (err) {
+      toast.error(err?.egressBlocked ? err.message : (err?.response?.data?.error || 'Failed to export CSV'));
+    } finally { setExporting(false); }
   };
 
   return (
@@ -566,7 +581,7 @@ const CallbacksTab = ({ companyList }) => {
             ? undefined
             : 'Scheduled callbacks across all companies — read-only view'}
         onRefresh={view === 'callbacks' ? () => { setPage(1); load(); } : undefined}
-        onExport={view === 'callbacks' && canExport('callbacks') ? () => setExportOpen(true) : undefined}
+        onExport={view === 'callbacks' && canExport('callbacks') ? handleExport : undefined}
         extra={
           <div className="flex gap-1 p-1 rounded-lg"
             style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}>
@@ -854,11 +869,6 @@ const CallbacksTab = ({ companyList }) => {
               </div>
             </ModalBox>
           </Overlay>
-        )}
-
-        {exportOpen && (
-          <ExportModal tab="callbacks" companyList={sortedCompanies} cbType={cbType}
-            onClose={() => setExportOpen(false)} onExport={handleExport} />
         )}
 
         {phoneDrawer && (
