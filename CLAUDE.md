@@ -798,6 +798,35 @@ closing sales.
   with no entries" would, on a later re-run, convert one somebody deliberately
   created as manual and had not scored yet.
 
+### The export IS the screen (2026-10-29, e57f0e2)
+Compliance -> Records -> Sales / Transfers / Callbacks asked for the filters a
+SECOND time: Export CSV opened `ExportModal` with its own date range, company
+and user picker, and those REPLACED what was already applied — three rows on
+screen exported as every record. The dialog is gone from those three tabs; the
+click exports straight away.
+- **ONE params function per tab answers for both the table and the file**
+  (`payoutExportParams()` in SalesTab, `exportParams()` in the other two), equal
+  to `load()`'s params minus `page`/`limit` — the whole filtered set, not the
+  page. Every param added was one `load()` already sent, so no endpoint changed.
+  What the files had been ignoring: Sales — search, status pills, company,
+  closer, column filters, sort, all four payout filters, the Post Date
+  charge-date window; Transfers — status, search, column filters, sort;
+  Callbacks — status, column filters, sort.
+- **The per-area export permission lived in the dialog.** `TabHeader` checks
+  `canExport(exportArea)` and Sales/Transfers passed NO area, so
+  `export_perms.areas.<dataset> === false` was enforced only by the modal's own
+  Download button (`canExport(tab)`). Both pass `exportArea` now, which also
+  hides the button instead of opening a dialog that cannot download. Any new
+  `TabHeader` export must pass it.
+- **A 429 `EGRESS_LIMIT` needs somewhere to go.** It was rendered inside the
+  modal; it is a `toast.error(err.egressBlocked ? ... )` now. Governance itself
+  is untouched — `fetchAllForExport` still carries `__egress`/`__dataset`, so
+  the server caps rows and writes the audit row.
+- A busy flag guards the click: a second click is not a second file, and not a
+  second audited export.
+- `ExportModal` stays — Review Queue and Call Reviews still use it, and still
+  ask for filters they do not have on screen.
+
 ### A date field opens on the day it is DUE (2026-10-22, 9d0ae56)
 `CalendarDateInput` seeded TODAY for every date field and nothing could say
 otherwise, so "Monthly Date" — the first monthly payment, due next month — had
