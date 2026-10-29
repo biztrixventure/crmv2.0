@@ -43,7 +43,7 @@ const TAB_GROUPS = [
   { id: 'g_callbacks', label: 'Callbacks', icon: Phone,      tabs: ['callbacks', 'numbers', 'batches'] },
   { id: 'g_team',      label: 'Team',      icon: Users,      tabs: ['teams', 'quota_report'] },
   { id: 'g_resources', label: 'Resources', icon: HelpCircle, tabs: ['faqs', 'scripts', 'note_shortcodes'] },
-  { id: 'g_tools',     label: 'Tools',     icon: Shield,     tabs: ['tool_customer_profiles', 'tool_data_analyzer', 'tool_chat_control', 'dnc', 'card_validator'] },
+  { id: 'g_tools',     label: 'Tools',     icon: Shield,     tabs: ['tool_customer_profiles', 'tool_data_analyzer', 'tool_chat_control', 'dnc', 'card_validator', 'customer_lookup'] },
 ];
 import DateRangePicker, { getPresetRange } from "../components/UI/DateRangePicker";
 import { AppHeader } from "../components/Layout";
@@ -120,6 +120,14 @@ const ComplianceReviewPanel = lazy(() => import("../components/Workspace/Complia
 const BusinessRulesHub      = lazy(() => import("../components/Admin/BusinessRules/BusinessRulesHub"));
 const FeatureFlagsManager   = lazy(() => import("../components/Admin/FeatureFlagsManager"));
 const CompanyManagement     = lazy(() => import("../components/Admin/CompanyManagement").then(m => ({ default: m.CompanyManagement })));
+// Customer Lookup / DNC / Card Validator. StaffShell reaches these through
+// crossNavItems, which CrossRoleContent renders; this shell lists them as
+// dashboard TABS instead and the tab area had no branch for any of the three,
+// so each one painted an empty page. Same components, so the two shells cannot
+// show different tools under the same name.
+const CustomerLookupPanel   = lazy(() => import("../components/Shared/CustomerLookupPanel"));
+const DncLookupPanel        = lazy(() => import("../components/Shared/DncLookupPanel"));
+const CardValidator         = lazy(() => import("../components/Shared/CardValidator"));
 import TransferDetailDrawer from "../components/Shared/TransferDetailDrawer";
 import DialerBadge from "../components/Shared/DialerBadge";
 import SaleDetailDrawer from "../components/Shared/SaleDetailDrawer";
@@ -1419,6 +1427,28 @@ const ManagerShell = ({ workspaceMode = false }) => {
         {activeTab === 'tool_company_admin' && isEnabledStrict('tool_company_admin') && (
           <Suspense fallback={<Loading variant="block" height={200} />}>
             <CompanyManagement />
+          </Suspense>
+        )}
+        {/* THE TAB EXISTED AND NOTHING DREW IT. These three were added to
+            CODE_TABS and to the Tools group, so they appeared in the nav and
+            opened a blank page — Customer Lookup was granted to a company
+            admin who then had no screen to use it on. Each re-checks the same
+            gate its tab entry used: the nav list is rebuilt on every render,
+            but activeTab also comes back from localStorage and ?tab=, so a
+            revoked tool must not keep rendering for whoever was parked on it. */}
+        {activeTab === 'customer_lookup' && lookupAccess?.any && (
+          <Suspense fallback={<Loading variant="block" height={200} />}>
+            <CustomerLookupPanel />
+          </Suspense>
+        )}
+        {activeTab === 'dnc' && isEnabledStrict('tool_blacklist_lookup') && (
+          <Suspense fallback={<Loading variant="block" height={200} />}>
+            <DncLookupPanel />
+          </Suspense>
+        )}
+        {activeTab === 'card_validator' && isEnabledStrict('tool_card_validator') && (
+          <Suspense fallback={<Loading variant="block" height={200} />}>
+            <CardValidator />
           </Suspense>
         )}
         <DevCredit />
