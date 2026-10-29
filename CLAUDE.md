@@ -798,6 +798,29 @@ closing sales.
   with no entries" would, on a later re-run, convert one somebody deliberately
   created as manual and had not scored yet.
 
+### A TAB IS NOT A SCREEN (2026-10-29, 63a2cf8)
+"Customer Lookup is enabled for EasyTech's company admins but not showing."
+The grant was correct — both carry people+vehicles+VIN in
+`business_config customer_lookup.users` and `/customer-lookup/my-access`
+answered `any:true`, so the tab WAS in their nav. It drew nothing.
+- **StaffShell reaches these tools through `crossNavItems`, which
+  `CrossRoleContent` renders. ManagerShell lists them in `CODE_TABS`** (dashboard
+  tabs) and its tab area had no branch for them, so the content region fell
+  through to `<DevCredit/>`. `customer_lookup` appeared exactly ONCE in the whole
+  shell: the nav entry. Grep a new tab key — one hit means no renderer.
+- The same hole was open for `dnc` and `card_validator`. A fronter company's
+  admin never saw it because `sideAllowsTab` hides those two for them
+  (`CLOSER_SIDE_TABS`); a closer-side admin had two blank tools. Fixed together.
+- The three renderers use the **same lazy components CrossRoleContent uses**, so
+  two shells cannot show different tools under one name.
+- **Each renderer re-checks its tab entry's own gate.** `activeTab` is restored
+  from localStorage and settable by `?tab=`, so gating only the nav entry leaves
+  a revoked tool rendering for whoever was parked on it.
+- A key in no `TAB_GROUPS` entry is swept into the orphan **"More"** group, which
+  is where Customer Lookup had been sitting, away from the other tools.
+- `customer_lookup.default_access` is **all-off** now (not the everyone-on state
+  the mig 337 note below records): access is per user, 24 granted.
+
 ### The export IS the screen (2026-10-29, e57f0e2)
 Compliance -> Records -> Sales / Transfers / Callbacks asked for the filters a
 SECOND time: Export CSV opened `ExportModal` with its own date range, company
