@@ -4,9 +4,13 @@ import {
   X, Loader2, Users, Send, Trash2, GitBranch, RefreshCw, Search, StickyNote,
   PhoneForwarded, Clock, ThumbsDown, Voicemail, PhoneOff, CheckCircle2, Circle,
   Activity, ChevronLeft, ChevronRight, UserMinus, Timer, Undo2, UsersRound, ShieldCheck,
+  Download,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import client from '../../api/client';
+import { useAuth } from '../../contexts/AuthContext';
+import { downloadCSV } from '../../utils/recordFormat';
+import { buildFilename } from '../../utils/downloadFilename';
 import UserPicker from './UserPicker';
 import ExpiryPicker, { EMPTY_EXPIRY, expiryPayload } from './ExpiryPicker';
 import { Lineage } from './BatchLineage';
@@ -44,6 +48,7 @@ const TAB_ORDER = ['all', 'unassigned', 'assigned', 'new', 'called', 'callback',
 const fmt = (d) => { try { return d ? new Date(d).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : ''; } catch { return d || ''; } };
 
 export default function BatchWorkspace({ batch, me, canSend, isSuper, onClose, onChanged }) {
+  const { canExport } = useAuth();
   const [tab, setTab] = useState('all');
   const [items, setItems] = useState([]);
   const [cols, setCols] = useState([]);
@@ -111,6 +116,85 @@ export default function BatchWorkspace({ batch, me, canSend, isSuper, onClose, o
 
   // filter changes restart paging + drop a stale selection
   useEffect(() => { setPage(1); setSel(new Set()); }, [tab, q, limit]);
+
+  // ── Download what this view is showing ──────────────────────────────────
+  // THE FILE IS THE VIEW: the same `params` the table loaded with, so the tab,
+  // the search box and nothing else decide what lands in it. Page size does
+  // NOT — a file is the whole filtered set, not the 100 rows on screen, and
+  // somebody who picked "250" did not mean "export 250".
+  //
+  // With rows ticked, the file is exactly those. The selection survives a page
+  // change while the ids do not, so it is matched against the DRAINED set
+  // rather than `items` — filtering the current page would quietly drop every
+  // row ticked on a page since scrolled past.
+  const [dl, setDl] = useState(false);
+
+  const drainAll = async () => {
+    const PAGE = 1000;                               // the endpoint's own ceiling
+    const out = [];
+    // ADVANCE BY WHAT CAME BACK, never by what was asked for. The route clamps
+    // `limit` to 1000; the day that number drops, a loop stepping by PAGE would
+    // stride over the rows it never received and hand over a file that looks
+    // complete. Trust the server's `total` for the end.
+    for (let guard = 0; guard < 400; guard++) {
+      const r = await client.get(`distribution-batches/${batch.id}/items`, {
+        params: {
+          ...params, limit: PAGE, offset: out.length,
+          // Phone numbers leaving the building is what egress governance is
+          // for. The marker makes the row cap + the audit row the server's job;
+          // only offset 0 is judged, the rest ride on that one decision.
+          __egress: 'csv_export', __dataset: 'batch_numbers',
+        },
+      });
+      const rows = r.data.items || [];
+      out.push(...rows);
+      if (!rows.length) break;                       // nothing left
+      const t = r.data.total;
+      if (typeof t === 'number' && out.length >= t) break;
+    }
+    return out;
+  };
+
+  const exportCsv = async () => {
+    if (dl) return;                                  // one click, one file
+    setDl(true);
+    try {
+      const all = await drainAll();
+      const rows = sel.size ? all.filter(i => sel.has(i.id)) : all;
+      if (!rows.length) { toast.error('Nothing to download in this view'); return; }
+      // The columns on screen, in the same order, minus the tick box and the
+      // Outcome buttons (controls, not data). The file's own columns keep their
+      // own order, exactly as the table prints them.
+      const headers = ['#', 'Number', 'Name', 'Status', 'Holder', 'Time limit', 'Note', ...cols];
+      downloadCSV(
+        rows.map(it => [
+          it.position ?? '',
+          it.phone_number || '',
+          it.customer_name || '',
+          (STATUS_META[it.status] || {}).label || it.status || '',
+          it.assigned_to_name || '',
+          // The DEADLINE, not the "2d left" countdown the row shows: a date in
+          // a file still means something tomorrow.
+          fmtDeadline(it.assign_expires_at || meta?.expires_at) || '',
+          it.notes || '',
+          ...cols.map(c => it.data?.[c] ?? ''),
+        ]),
+        headers,
+        // The documented shape: the batch is the SCOPE, the tab is part of what
+        // the dataset is. `slug` sanitises and caps both, so a batch named
+        // "Evaluated Data … → Ahmed" cannot produce a broken filename.
+        buildFilename({
+          dataset: tab === 'all' ? 'batch-numbers' : `batch-numbers-${tab}`,
+          scope: meta?.name || null,
+        }),
+      );
+    } catch (e) {
+      // A refused export is server-enforced and must say why.
+      toast.error(e?.response?.status === 429
+        ? (e.response.data?.error || 'Export blocked by your limit.')
+        : (e?.response?.data?.error || 'Could not download these numbers'));
+    } finally { setDl(false); }
+  };
 
   const openActivity = async () => {
     setView('activity');
@@ -301,6 +385,16 @@ export default function BatchWorkspace({ batch, me, canSend, isSuper, onClose, o
             )}
             {sel.size > 0 && canSend && (
               <button onClick={unassign} disabled={busy} className="text-xs font-semibold px-2 py-1.5 rounded-lg flex items-center gap-1" style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}><UserMinus size={12} /> Unassign</button>
+            )}
+            {canExport('numbers') && (
+              <button onClick={exportCsv} disabled={dl || loading}
+                title={sel.size ? `Download the ${sel.size} selected number${sel.size === 1 ? '' : 's'}` : `Download these numbers${total ? ` (${total})` : ''}`}
+                aria-label="Download these numbers"
+                className="text-xs font-semibold px-2 py-1.5 rounded-lg flex items-center gap-1 disabled:opacity-50"
+                style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>
+                {dl ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+                {sel.size ? sel.size : ''}
+              </button>
             )}
             <div className="ml-auto flex items-center gap-1 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
               <span>{total ? `${(page - 1) * limit + 1}–${Math.min(page * limit, total)} of ${total}` : '0'}</span>

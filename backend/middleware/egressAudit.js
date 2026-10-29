@@ -34,6 +34,9 @@ const DATASET_ROWS_KEY = {
   sales: 'sales', transfers: 'transfers', callbacks: 'callbacks',
   callback_audit: 'entries', reviews: 'reviews', numbers: 'numbers',
   users: 'users',
+  // The batch workspace's own download. Its rows arrive under `items`, so
+  // without this line a configured column list for it would silently not apply.
+  batch_numbers: 'items',
   company_data: 'sales',   // CompanyDetail reuses list shapes
 };
 

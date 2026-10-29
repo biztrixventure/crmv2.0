@@ -612,7 +612,11 @@ app.use('/api/announcements',      authMiddleware, readonlyGuard, announcementsR
 app.use('/api/marquee',            authMiddleware, readonlyGuard, marqueeRoutes);
 app.use('/api/spiff',              authMiddleware, readonlyGuard, spiffRoutes);
 app.use('/api/data-analyzer',      authMiddleware, readonlyGuard, dataAnalyzerRoutes);
-app.use('/api/distribution-batches', authMiddleware, distributionBatchesRoutes);
+// egressAudit: the Batches workspace downloads the numbers it is showing, and
+// customer phone numbers leaving the building is exactly what the row cap and
+// the audit log exist for. A request without the `__egress` marker returns from
+// the middleware untouched, so the ordinary paged list is unaffected.
+app.use('/api/distribution-batches', authMiddleware, egressAudit, distributionBatchesRoutes);
 app.use('/api/note-shortcodes',    authMiddleware, noteShortcodesRoutes);
 app.use('/api/data-cleanup',       authMiddleware, readonlyGuard, dataCleanupRoutes);
 app.use('/api/vehicles',           authMiddleware, readonlyGuard, vehiclesRoutes);
