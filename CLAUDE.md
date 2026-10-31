@@ -798,6 +798,38 @@ closing sales.
   with no entries" would, on a later re-run, convert one somebody deliberately
   created as manual and had not scored yet.
 
+### THE BELL WAS LIVE, THE LIST WAS NOT (2026-11-01, c3866c7)
+"A closer completes a sale, the notification reaches the destination but it does
+not update there — we have to refresh the tab." The bell was already instant:
+`useNotifications` holds a Realtime channel on `notifications` filtered to the
+user and that table IS in the `supabase_realtime` publication (checked in SQL --
+check this first, a missing publication looks identical). Every LIST, though,
+loads on mount and never again: the only reload in compliance `QueueTab` is
+`onRefresh={load}`, a button.
+- The websocket frame was already received and parsed, so telling the lists costs
+  NOTHING. `utils/liveEvents.js` (in-process pub/sub + the `SALE_EVENTS` type
+  list, named once so a list cannot subscribe to a type the service stopped
+  emitting) + `hooks/useLiveRefresh.js`. **No interval, no heartbeat** — a quiet
+  floor issues no requests, and one real event costs one list fetch.
+- **Every subscriber is handed the list's OWN `load`**, the same function the
+  Refresh button calls and already carrying the active filters. That is what
+  makes it safe to add to a screen without reasoning about its internals.
+- Three rules in the hook, each guarding against becoming the load it avoids:
+  **coalesce 1.2s** (a bulk upload lands a dozen notifications in a second);
+  **never reload a hidden tab** (the socket keeps delivering in the background —
+  the event is remembered and spent once on return, which also fixes the
+  backgrounded-and-stale version of the complaint); **only the visible view**
+  (`enabled: activeTab === …`, so ManagerShell's Team Sales does not query while
+  the Overview is open).
+- `publishLive` runs **LAST** in the realtime handler and wraps each subscriber
+  in try/catch: the bell matters more than any list, and one throwing list must
+  not deafen the next.
+- Wired: compliance Queue + Sales, ManagerShell Overview + Team Sales
+  (company_admin is notified alongside compliance by
+  `onSaleSubmittedForReview`), and the closer's own list for the return leg.
+- `TRANSFER_EVENTS` is declared and **deliberately unwired** — the transfer lists
+  have the same staleness, as its own change.
+
 ### Downloading a batch's numbers (2026-10-29, 3bec794)
 `BatchWorkspace` holds every number in a batch, its holder, its disposition, the
 fronter's note and every column the uploaded file carried — and nothing could
