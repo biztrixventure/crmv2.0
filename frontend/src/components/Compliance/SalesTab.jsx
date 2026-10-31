@@ -23,6 +23,8 @@ import { useSaleHighlight } from '../../hooks/useSaleHighlight';
 import { salePaidTenure } from '../../utils/saleTenure';
 import { writeExport } from '../../utils/exportSpec';
 import { buildFilename } from '../../utils/downloadFilename';
+import { useLiveRefresh } from '../../hooks/useLiveRefresh';
+import { SALE_EVENTS } from '../../utils/liveEvents';
 import { useExportColumns } from '../../hooks/useExportColumns';
 import ThemedSelect from '../UI/Select';
 import ThemedDate from '../UI/ThemedDate';
@@ -382,6 +384,12 @@ const SalesTab = ({ companyList, initCompany = '', initStatus = '', disposition 
   }, [search, statuses, companyIds, closerIds, disposition, chargeFrom, chargeTo, dateFrom, dateTo, payoutStatuses, payoutConfirmeds, paidToCloserFilter, paidToPartnerFilter, page, tq.version, tq.params, abortable]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Live on the same realtime notification the bell uses — a submitted,
+  // approved, returned or edited sale appears here without a manual refresh.
+  // `load` already carries every active filter, so a live reload shows exactly
+  // what this view is meant to show and nothing more.
+  useLiveRefresh(SALE_EVENTS, load);
 
   // A new sort or filter re-windows the whole dataset, so page 2 of the old
   // result is meaningless — go back to page 1.

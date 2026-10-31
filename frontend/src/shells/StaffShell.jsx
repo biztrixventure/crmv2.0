@@ -5,6 +5,8 @@ import { toast } from "sonner";
 import { toastError } from "../utils/toast";
 import { useAuth } from "../contexts/AuthContext";
 import StaffExportModal from "../components/Staff/StaffExportModal";
+import { useLiveRefresh } from "../hooks/useLiveRefresh";
+import { SALE_EVENTS } from "../utils/liveEvents";
 import { useVersionCheck } from "../hooks/useVersionCheck";
 import UpdateBanner from "../components/UI/UpdateBanner";
 import DotGridBg from "../components/UI/DotGridBg";
@@ -647,6 +649,11 @@ const StaffShell = () => {
     if (!isCloser) return;
     fetchSales(closerSalesParams());
   }, [fetchSales, isCloser, closerSalesParams]);
+
+  // The return leg: compliance approving or sending a sale back notifies this
+  // closer, and the list under the bell now follows without a refresh. Only
+  // for a closer — nobody else has this list.
+  useLiveRefresh(SALE_EVENTS, () => fetchSales(closerSalesParams()), { enabled: isCloser });
   // Keep page within range when the date filter narrows the dataset.
   useEffect(() => { setTransfersPage(1); setCloserSalesPage(1); }, [date_from, date_to]);
 

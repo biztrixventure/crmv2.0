@@ -8,6 +8,8 @@ import { useExportColumns } from '../../hooks/useExportColumns';
 import client from '../../api/client';
 import SaleDetailDrawer from '../Shared/SaleDetailDrawer';
 import ExportModal from './ExportModal';
+import { useLiveRefresh } from '../../hooks/useLiveRefresh';
+import { SALE_EVENTS } from '../../utils/liveEvents';
 import {
   STATUS_LABEL, STATUS_BADGE, LIMIT, fmtDate, timeAgo, closerName,
   TabHeader, Spinner, Empty, Overlay, ModalBox, ModalHeader, FSelect, fetchAllForExport,
@@ -45,6 +47,12 @@ const QueueTab = ({ companyList }) => {
   }, [company]);
 
   useEffect(() => { load(); }, [load]);
+
+  // A closer finishing a sale rang this bell and left this queue untouched
+  // until somebody pressed Refresh. The same realtime event now reloads the
+  // queue — and the approve/return types too, so a colleague clearing an item
+  // stops two reviewers opening the same sale.
+  useLiveRefresh(SALE_EVENTS, load);
 
   const approve = async (sale) => {
     setApproving(sale.id); setApproveMsg('');

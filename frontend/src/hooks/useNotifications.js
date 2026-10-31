@@ -29,6 +29,7 @@ import { supabase, setRealtimeAuth } from '../api/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { loadCelebrationConfig } from './useCelebrationConfig';
 import { fireCelebration } from '../utils/celebration';
+import { publishLive } from '../utils/liveEvents';
 
 // Tiny notification chime via the Web Audio API.
 //
@@ -204,6 +205,11 @@ export const useNotifications = () => {
             setUnreadCount(prev => prev + 1);
             playNotificationSound();
             maybeCelebrate(payload.new.type);
+            // The open lists hear the same event the bell just did. This costs
+            // nothing — the frame has already been received and parsed — and it
+            // is what stops a ringing bell from pointing at a stale queue.
+            // Published LAST so a subscriber cannot interfere with the bell.
+            publishLive(payload.new);
           }
         )
         .subscribe((status) => {

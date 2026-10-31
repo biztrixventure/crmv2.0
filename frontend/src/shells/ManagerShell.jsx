@@ -59,6 +59,8 @@ import { useShellLayout } from "../hooks/useShellLayout";
 // transfers, so a full lifecycle breakdown was impossible at any config.
 import OverviewStats from "../components/Manager/OverviewStats";
 import Tooltip from "../components/UI/Tooltip";
+import { useLiveRefresh } from "../hooks/useLiveRefresh";
+import { SALE_EVENTS } from "../utils/liveEvents";
 
 // Column-header explanations — hover any header to learn what it means.
 const TRANSFER_COL_TIPS = {
@@ -710,6 +712,17 @@ const ManagerShell = ({ workspaceMode = false }) => {
   useEffect(() => { if (activeTab === 'activity_log') fetchActivityLogs(); }, [activeTab, fetchActivityLogs]);
   useEffect(() => { if (activeTab === 'transfers')  fetchXferTab();  }, [activeTab, fetchXferTab]);
   useEffect(() => { if (activeTab === 'team_sales') fetchSalesTab(); }, [activeTab, fetchSalesTab]);
+
+  // A closer finishing a sale reaches a company admin here. The realtime
+  // notification already arrived for the bell; these reload the list behind it
+  // instead of leaving it as it was until somebody pressed Refresh.
+  //
+  // `enabled` is the point: ONLY the view being looked at reloads. Both hooks
+  // exist on every render, but the Team Sales query does not run while the
+  // Overview is open, and neither runs on any other tab — one real event costs
+  // one query, not one per list in the file.
+  useLiveRefresh(SALE_EVENTS, fetchSalesTab, { enabled: activeTab === 'team_sales' });
+  useLiveRefresh(SALE_EVENTS, () => fetchSales({ date_from, date_to }), { enabled: activeTab === 'overview' });
   useEffect(() => {
     if (!companyId) return;
     client.get('users', { params: { company_id: companyId } })
