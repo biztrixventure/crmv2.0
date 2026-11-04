@@ -38,3 +38,22 @@ supabase/.env
 
 # stray WhatsApp/reset backup dumps — never commit
 backend/reset_w@a_backup_*.json
+
+# Generated, large, and rebuildable — never worth a commit.
+# graphify-out was 616 MB on 2026-11-05; rebuild with `graphify update .`
+graphify-out/
+backend/coverage/
+.playwright-mcp/
+backend/scratch/
+
+# CUSTOMER DATA lands in the working directory constantly — dialer exports,
+# spreadsheets people email over, debug dumps. None of it belongs in git:
+# `bulk_sale_template (2).csv` shipped a real customer's name, phone, address
+# and VIN inside what its filename calls a template. Ignored by extension at
+# the ROOT only, so backend/migrations and any committed fixture still work.
+/*.xlsx
+/*.xls
+/*.csv
+/*.json
+/*.png
+/context.txt
