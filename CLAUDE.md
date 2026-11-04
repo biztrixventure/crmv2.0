@@ -798,6 +798,30 @@ closing sales.
   with no entries" would, on a later re-run, convert one somebody deliberately
   created as manual and had not scored yet.
 
+### A REFUSED SALE HAS TO SAY WHY (2026-11-04, 340eabb)
+A closer's console: `POST /api/sales` -> **409, three times, one submit**. The
+server was right and specific; the closer saw nothing and pressed Submit again.
+- `SaleModal` is `fixed inset-0 z-50`. StaffShell set `saleError` correctly and
+  rendered it in the My Sales tab body — UNDER the overlay, and inside
+  `{activeTab === 'sales' && isCloser && …}`, so for a closer who opened the form
+  from a lead card or the dialer queue the component holding the message was not
+  even mounted. **Setting error state is not showing it: check what is on top of
+  it and whether its container is mounted.**
+- The thrown-away part is the useful part. `POST /sales` has three 409s, each
+  actionable: `REF_COLLISION` (names the sale already using that Reference No,
+  with customer + date), `DUP_FINGERPRINT` (same vehicle + client + sale_date on
+  this transfer -> use the Resell flow), `CANCEL_COOLDOWN` (cancelled within N
+  days -> Resell flow).
+- Shown twice now, each where it is strongest: a **banner at the top of the modal
+  body** carrying the whole sentence (prop `error`, defaults to `''`, so other
+  callers are untouched; `openSaleModal` already cleared the state so a reopened
+  modal cannot show a stale reason), and **`toast.error` at the click**, because a
+  closer at the bottom of a long form must be told NOW.
+- No guard was weakened — a duplicate ref and a double-keyed deal must still be
+  refused. Forensics while diagnosing: `disposition_actions` logs a
+  `'Blocked: cancel-cooldown'` row per cooldown refusal, so that 409 is checkable
+  after the fact (zero in 7 days, so it was one of the other two).
+
 ### THE BELL WAS LIVE, THE LIST WAS NOT (2026-11-01, c3866c7)
 "A closer completes a sale, the notification reaches the destination but it does
 not update there — we have to refresh the tab." The bell was already instant:
