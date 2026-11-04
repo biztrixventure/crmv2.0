@@ -752,7 +752,16 @@ const StaffShell = () => {
       fetchSales(closerSalesParams());
       setTimeout(() => setSaleSuccess(''), 5000);
     } catch (err) {
-      setSaleError(err.response?.data?.errors?.map(e => e.msg).join(', ') || err.response?.data?.error || 'Failed to create sale');
+      const msg = err.response?.data?.errors?.map(e => e.msg).join(', ')
+        || err.response?.data?.error || 'Failed to create sale';
+      setSaleError(msg);
+      // TWO places on purpose. The banner inside the modal carries the whole
+      // sentence (a 409 names the colliding sale, or sends you to the Resell
+      // flow) and stays put; the toast fires at the moment of the click, so a
+      // closer scrolled to the bottom of a long form is told NOW instead of
+      // pressing Submit again. Three identical POST /sales 409s in one console
+      // log is what silence looked like.
+      toast.error(msg);
     } finally {
       setSaleLoading(false);
     }
@@ -2396,11 +2405,13 @@ const StaffShell = () => {
       {dupOpen && <DuplicateRecordsModal onClose={() => setDupOpen(false)} title="My Duplicate Records" />}
 
       <SaleModal isOpen={modalOpen} onClose={() => setModalOpen(false)} user={user}
-        transfer={activeTransfer} onSubmit={handleSaleSubmit} isLoading={saleLoading} />
+        transfer={activeTransfer} onSubmit={handleSaleSubmit} isLoading={saleLoading}
+        error={saleError} />
 
       {/* Edit sale modal */}
       <SaleModal isOpen={!!editSale} onClose={() => { setEditSale(null); setEditSaleError(''); }} user={user}
-        existingSale={editSale} onSubmit={handleSaleEdit} isLoading={editSaleLoading} />
+        existingSale={editSale} onSubmit={handleSaleEdit} isLoading={editSaleLoading}
+        error={editSaleError} />
       {editSaleError && (
         <div className="fixed bottom-4 right-4 z-50 px-4 py-3 rounded-xl text-sm font-semibold text-white shadow-lg"
           style={{ backgroundColor: 'var(--color-error-600)' }}>

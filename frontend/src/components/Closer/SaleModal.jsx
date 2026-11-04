@@ -1,12 +1,21 @@
 import React from 'react';
-import { DollarSign } from 'lucide-react';
+import { DollarSign, AlertTriangle } from 'lucide-react';
 import SaleForm from './SaleForm';
 
 /**
  * SaleModal — wraps SaleForm in a full-screen overlay modal.
  * Handles its own scroll since the form is long.
+ *
+ * `error` — WHY THE SUBMIT WAS REFUSED, shown where the closer is working.
+ * This modal is `fixed inset-0 z-50`, and StaffShell rendered its submit error
+ * into the My Sales tab body UNDERNEATH it — on a tab a closer who came from a
+ * lead or the dialer queue is not even on, so the component holding the message
+ * was not mounted. The server's 409s are specific and actionable ("Reference No
+ * X already exists on sale Y", "go through the Resell flow"), and every word of
+ * that was being thrown away: the closer pressed Submit, saw nothing, and
+ * pressed it again. Defaults to '' so every existing caller is unchanged.
  */
-const SaleModal = ({ isOpen, onClose, user, transfer = null, existingSale = null, onSubmit, isLoading = false }) => {
+const SaleModal = ({ isOpen, onClose, user, transfer = null, existingSale = null, onSubmit, isLoading = false, error = '' }) => {
   if (!isOpen) return null;
 
   // Close on backdrop click
@@ -62,6 +71,20 @@ const SaleModal = ({ isOpen, onClose, user, transfer = null, existingSale = null
 
         {/* Form body */}
         <div className="p-6">
+          {/* Above the form, inside the card: the reason is next to the thing
+              that was refused, and it survives a re-submit because StaffShell
+              clears it only when the next attempt starts. */}
+          {error && (
+            <div role="alert" className="mb-5 rounded-xl px-4 py-3 flex items-start gap-2.5"
+              style={{
+                backgroundColor: 'var(--color-error-50, #fef2f2)',
+                border: '1px solid var(--color-error-300, #fca5a5)',
+                color: 'var(--color-error-700, #b91c1c)',
+              }}>
+              <AlertTriangle size={16} className="flex-shrink-0 mt-0.5" />
+              <div className="text-sm font-semibold leading-relaxed whitespace-pre-wrap">{error}</div>
+            </div>
+          )}
           <SaleForm
             user={user}
             transfer={transfer}
