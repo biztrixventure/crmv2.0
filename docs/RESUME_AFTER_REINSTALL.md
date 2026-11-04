@@ -101,6 +101,32 @@ untracked files listed in section 1. Recent shipped work, newest first:
 - Client-name drift to clean by hand: `Moxy Mtm`/`Moxy MTM`, `Steve Mtm`/
   `Steve MTM`, `James Mtm`, `James Vsc`.
 
+## 5b. Four files left untracked, and how to get them back
+
+Not losses — recorded here so nothing has to be remembered:
+
+- **`.claude/settings.json`** — local Claude Code settings (hooks, permissions).
+  Back it up with the other local files in section 1; it is not in git because
+  staging it was refused as a credential-leak risk and it is not worth arguing
+  with that guard over a settings file.
+- **`mcp-github.bat`** and **`mcp-supabase.bat`** — two-line launchers, no
+  secrets in them. Recreate verbatim if missing:
+
+  ```bat
+  @echo off
+  npx -y @modelcontextprotocol/server-github
+  ```
+
+  ```bat
+  @echo off
+  npx -y @supabase/mcp-server-supabase
+  ```
+
+  The credentials these servers need live in `.mcp.json`, which is gitignored —
+  see section 1.
+- **`SKILL (1).md`** — a byte-identical duplicate of the tracked `SKILL.md`.
+  Safe to delete.
+
 ## 6. Read this before touching code
 
 `CLAUDE.md` at the repo root is the real guide — stack, role hierarchy, the
