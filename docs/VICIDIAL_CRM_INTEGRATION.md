@@ -364,7 +364,7 @@ mapping.
 | Screen-pop / CRM not authenticated | VICIdial + CRM run in the **same Chrome**, agents logged into both → session shared. Routes also fall back to login-then-return |
 | CRM backend can't reach a dialer | Confirm HTTP reachability + VICIdial `api_allowed_ip` per dialer |
 | Wrong field captured (year in `province`, etc.) | Per-company field map; verify with a live lead before go-live |
-| Weak API credentials (`apiuser` / `apiuser123` seen in URLs) | **Rotate to a strong password**; credentials travel in URLs by VICIdial design, so restrict by IP |
+| Weak API credentials (`apiuser` / `(a short dictionary password)` seen in URLs) | **Rotate to a strong password**; credentials travel in URLs by VICIdial design, so restrict by IP |
 | Miles only in free-text `comments` | Don't auto-trust; fronter/closer confirms in the CRM |
 | Disposition token names differ by build | Verify `--A--dispo--B--` / `--A--talk_time--B--` on the actual VICIdial version |
 

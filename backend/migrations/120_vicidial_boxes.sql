@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS vicidial_boxes (
 
 -- Seed the three current boxes (no-op if already present).
 INSERT INTO vicidial_boxes (name, prefix, base_url, api_user, api_pass, sort_order) VALUES
-  ('wavetech', 'WTI', 'https://wavetechnew.i5.tel',  'apiuser', 'apiuser123', 1),
-  ('etc',      'ETC', 'https://wavetech3new.i5.tel', 'ceo',     'ceo',        2),
-  ('tmc',      'TMC', 'https://tmcsolihp.i5.tel',    '1002',    '1002',       3)
+  ('wavetech', 'WTI', 'https://wavetechnew.i5.tel',  'apiuser', 'SET-IN-SETTINGS', 1),
+  ('etc',      'ETC', 'https://wavetech3new.i5.tel', 'ceo',     'SET-IN-SETTINGS',        2),
+  ('tmc',      'TMC', 'https://tmcsolihp.i5.tel',    '1002',    'SET-IN-SETTINGS',       3)
 ON CONFLICT (name) DO NOTHING;

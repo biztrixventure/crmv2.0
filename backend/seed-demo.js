@@ -12,7 +12,7 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-const PASSWORD = '123@Qwerty';
+const PASSWORD = process.env.SEED_DEMO_PASSWORD || require('crypto').randomBytes(9).toString('base64url');
 const COMPANY_NAME = 'BLP Demo Co';
 const DOMAIN = 'blpdemo.com';
 

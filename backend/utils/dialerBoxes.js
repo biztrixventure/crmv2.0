@@ -22,9 +22,9 @@
 const DEFAULT_BOX_TZ = 'America/New_York';
 
 const FALLBACK_BOXES = [
-  { id: 'wavetechpk', base: process.env.WAVETECH_DIALER_URL || 'https://wavetechpk.i5.tel', user: process.env.WAVETECH_DIALER_USER || 'apiuser', pass: process.env.WAVETECH_DIALER_PASS || 'apiuser123', prefix: 'WTI', tz: DEFAULT_BOX_TZ },
-  { id: 'etc',      base: process.env.ETC_DIALER_URL      || 'https://wavetech3new.i5.tel', user: process.env.ETC_DIALER_USER      || 'ceo',     pass: process.env.ETC_DIALER_PASS      || 'ceo',        prefix: 'ETC', tz: DEFAULT_BOX_TZ },
-  { id: 'tmc',      base: process.env.TMC_DIALER_URL      || 'https://tmcsolihp.i5.tel',    user: process.env.TMC_DIALER_USER      || '1002',    pass: process.env.TMC_DIALER_PASS      || '1002',       prefix: 'TMC', tz: DEFAULT_BOX_TZ },
+  { id: 'wavetechpk', base: process.env.WAVETECH_DIALER_URL || 'https://wavetechpk.i5.tel', user: process.env.WAVETECH_DIALER_USER || 'apiuser', pass: process.env.WAVETECH_DIALER_PASS || '', prefix: 'WTI', tz: DEFAULT_BOX_TZ },
+  { id: 'etc',      base: process.env.ETC_DIALER_URL      || 'https://wavetech3new.i5.tel', user: process.env.ETC_DIALER_USER      || 'ceo',     pass: process.env.ETC_DIALER_PASS      || '',        prefix: 'ETC', tz: DEFAULT_BOX_TZ },
+  { id: 'tmc',      base: process.env.TMC_DIALER_URL      || 'https://tmcsolihp.i5.tel',    user: process.env.TMC_DIALER_USER      || '1002',    pass: process.env.TMC_DIALER_PASS      || '',       prefix: 'TMC', tz: DEFAULT_BOX_TZ },
 ];
 // Mutable live copies (the functions below read these synchronously).
 let BOXES = FALLBACK_BOXES.map(b => ({ ...b }));
