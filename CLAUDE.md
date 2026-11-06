@@ -1100,3 +1100,17 @@ CRM login. Guide: `docs/CONNECTIONS.md`. Admin -> System -> Connections.
   the header ModuleNavLinks carries the link. Pages and routes are NOT removed.
 - Audit: key/webhook changes -> `module_audit_log` module `access`, written by
   the route (secrets and hashes left out), not by trigger.
+
+## HR and Accounting removed from the CRM (2026-11-07)
+
+The owner asked for HR and Accounts to be taken out of the CRM. QA and QA2 stay exactly as they were.
+
+- People, attendance, leave, payroll and incentives now live in the HR system at https://hr.vertexpakistan.com. The CRM sends its approved sales there every hour (`utils/hrmsSync.js`).
+- The following were removed:
+  - frontend: `/hr` and `/accounting` and their shells and pages, "My HR" in every shell, the admin HR/Accounts entries, and the HR/Accounting designation switches (Training stays)
+  - backend: `routes/hr`, `routes/accounting` and `routes/moduleHistory`
+  - the attendance and revenue sync jobs, with their utils
+- The database is untouched. The `hr_*` and accounting tables, their data and their triggers are still in Supabase; nothing reads them now.
+  - The mig 314 trigger still writes an `hr_employees` row for each new login. That is harmless.
+  - Dropping these tables would be a separate, deliberate step. Back them up first.
+- To reach HR from the CRM, a company can turn on `external_hr` (Admin -> Connections -> External modules, mig 348). Its people then get a link to hr.vertexpakistan.com.

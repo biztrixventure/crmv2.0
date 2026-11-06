@@ -317,7 +317,6 @@ const ManagerShell = ({ workspaceMode = false }) => {
     { key: 'training', label: 'Training', icon: GraduationCap },
     // My HR (stage 2): the manager's OWN record, payslips, leave, attendance and
     // expense claims. Team HR stays in the HR module (the header link).
-    ...(ext.hr ? [] : [{ key: 'my_hr', label: 'My HR', icon: IdCard }]),
   ];
 
   // ── Tab logic ─────────────────────────────────────────────────────────────

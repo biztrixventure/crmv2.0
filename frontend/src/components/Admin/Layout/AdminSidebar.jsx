@@ -28,9 +28,6 @@ const NAV_SECTIONS = [
     items: [
       { id: 'cc-sales',     label: 'Records',       icon: DollarSign,     href: '/compliance', state: { tab: 'sales'    } },
       { id: 'cc-qa',        label: 'QA Department', icon: ClipboardCheck, href: '/compliance', state: { tab: 'qa_admin' } },
-      // The HR and Accounts modules (their own shells, company picker inside).
-      { id: 'cc-hr',        label: 'HR',            icon: IdCard,         href: '/hr' },
-      { id: 'cc-accounts',  label: 'Accounts',      icon: Scale,          href: '/accounting' },
     ],
   },
   {

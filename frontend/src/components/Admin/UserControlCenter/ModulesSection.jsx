@@ -28,20 +28,6 @@ import { Panel, SectionHeader, Loading, Toggle, CheckRow, useFlash } from '../..
 
 const MODULES = [
   {
-    key: 'accounting',
-    icon: Scale,
-    title: 'Accounting',
-    label: 'This user also works as the accountant',
-    hint: 'Opens /accounting in full -- chart of accounts, journal, invoices, expenses and reports -- without changing their role, their shell or any permission they already have.',
-  },
-  {
-    key: 'hr',
-    icon: IdCard,
-    title: 'HR',
-    label: 'This user also works as the HR manager',
-    hint: 'Opens /hr in full -- people, attendance, leave, payroll and performance reviews -- without changing their role, their shell or any permission they already have.',
-  },
-  {
     key: 'training',
     icon: GraduationCap,
     title: 'Training',
@@ -120,7 +106,7 @@ export default function ModulesSection({ account }) {
       <div className="max-w-2xl">
         <SectionHeader icon={Layers} title="Modules" />
         <Alert type="info" dismissible={false}>
-          Only a superadmin can grant Accounting, HR or Training module access.
+          Only a superadmin can grant Training module access.
         </Alert>
       </div>
     );

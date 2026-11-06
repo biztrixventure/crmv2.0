@@ -100,8 +100,6 @@ const trainingRoutes            = require('./routes/training');
 // Accounting + HR (migs 283-290). Each is a MODULE router: the sub-routers
 // (accounts/journal/invoices/expenses/reports, employees/attendance/leave/
 // payroll/reviews) hang off it, so the module mounts in one line instead of ten.
-const accountingRoutes          = require('./routes/accounting');
-const hrRoutes                  = require('./routes/hr');
 const moduleDesignationsRoutes  = require('./routes/moduleDesignations');
 const ipAccessRoutes            = require('./routes/ipAccess');
 const { egressAudit }           = require('./middleware/egressAudit');
@@ -575,8 +573,6 @@ app.use('/api/business-config',   authMiddleware, readonlyGuard, businessConfigR
 // personal data; readonlyGuard because a read-only admin must never write here.
 // Every handler additionally gates itself on its own permission string and
 // scopes by the caller company -- see backend/utils/moduleAccess.js.
-app.use('/api/accounting',        authMiddleware, readonlyGuard, egressAudit, accountingRoutes);
-app.use('/api/hr',                authMiddleware, readonlyGuard, egressAudit, hrRoutes);
 // Superadmin-only: who ALSO acts as an accountant or HR manager (mig 290).
 app.use('/api/module-designations', authMiddleware, readonlyGuard, moduleDesignationsRoutes);
 // Branding/SEO/social-preview: GET is PUBLIC (the frontend meta-injection server

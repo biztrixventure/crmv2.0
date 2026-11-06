@@ -31,11 +31,6 @@ const QA2Shell        = lazy(() => import("./shells/QA2Shell"));
 const ClientPortal    = lazy(() => import("./pages/ClientPortal"));
 const NotFound        = lazy(() => import("./pages/NotFound"));
 const KanbanBoard     = lazy(() => import("./pages/KanbanBoard"));
-// Accounting + HR modules. Isolated shells like /compliance and /qa2 -- they are
-// a place you go, not a role you have, so access is decided inside the shell
-// from GET /accounting/my-scope and /hr/my-scope rather than by role here.
-const AccountingShell = lazy(() => import("./shells/AccountingShell"));
-const HRShell         = lazy(() => import("./shells/HRShell"));
 const MascotAssistant = lazy(() => import("./components/Assistant/MascotAssistant"));
 
 // Branded loader replaces the old spinner everywhere a route is in flight or
@@ -138,16 +133,6 @@ const AppContent = () => {
           <Route path="/closer-manager/*"  element={<ProtectedRoute requiredRole="closer_manager"><ManagerShell /></ProtectedRoute>} />
           <Route path="/fronter-manager/*" element={<ProtectedRoute requiredRole="fronter_manager"><ManagerShell /></ProtectedRoute>} />
           <Route path="/operations/*"      element={<ProtectedRoute requiredRole="operations_manager"><ManagerShell /></ProtectedRoute>} />
-
-          {/* Accounting + HR. Deliberately NOT role-guarded: reach is granted by
-              a permission OR by a superadmin designation (mig 290,
-              module_designations), and a designation is invisible to the role
-              hierarchy. The shell asks the server what this person may see and
-              renders an explicit "no access" state when the answer is nothing;
-              every endpoint behind it re-checks. Guarding on a role here would
-              lock out exactly the people the designation exists for. */}
-          <Route path="/accounting/*" element={<ProtectedRoute><AccountingShell /></ProtectedRoute>} />
-          <Route path="/hr/*"         element={<ProtectedRoute><HRShell /></ProtectedRoute>} />
 
           {/* Client recording portal — isolated external login (no CRM chrome) */}
           <Route path="/portal/*" element={<ProtectedRoute requiredRole="portal_client"><ClientPortal /></ProtectedRoute>} />

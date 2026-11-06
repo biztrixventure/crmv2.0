@@ -350,7 +350,6 @@ const StaffShell = () => {
     // My HR (stage 2): own record, payslips, leave, attendance, expense claims.
     // Always listed -- every floor role holds the self-service grants, and the
     // component says so plainly if a role does not.
-    ...(ext.hr ? [] : [{ key: 'my_hr', label: 'My HR', icon: IdCard }]),
   ];
 
   // For a trainee the list is Training plus their own HR. Building the full list
@@ -358,14 +357,14 @@ const StaffShell = () => {
   // definition of every item, so a tool added later cannot accidentally reach a
   // trainee. My HR is allowed because a trainee is already an employee (mig 314).
   const navItems = isTrainee
-    ? crossNavItems.filter(i => i.key === 'training' || i.key === 'my_hr')
+    ? crossNavItems.filter(i => i.key === 'training')
     : crossNavItems;
 
   // What the shell actually renders. A trainee is pinned to Training: hiding the
   // tab is not enough on its own, because ?nav=dashboard survives in a bookmark,
   // a back button and a restored session, and would drop them onto a dashboard
   // they are not meant to have.
-  const effectiveNav = isTrainee && !['training', 'my_hr'].includes(activeNav) ? 'training' : activeNav;
+  const effectiveNav = isTrainee && !['training'].includes(activeNav) ? 'training' : activeNav;
 
   // Sale modal
   const [modalOpen, setModalOpen]               = useState(false);
