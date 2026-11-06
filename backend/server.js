@@ -33,6 +33,12 @@ const transfersRoutes = require('./routes/transfers');
 const salesRoutes = require('./routes/sales');
 const payoutsRoutes = require('./routes/payouts');
 const hrmsSyncRoutes = require('./routes/hrmsSync');
+// Connections (mig 348): machine API for other apps, its admin screen, and
+// where HR / QA live when a company runs them outside the CRM.
+const extRoutes               = require('./routes/ext');
+const connectionsRoutes       = require('./routes/connections');
+const externalModulesRoutes   = require('./routes/externalModules');
+const { integrationKey }      = require('./middleware/integrationKey');
 const statsRoutes = require('./routes/stats');
 const companyReportsRoutes = require('./routes/companyReports');
 const notificationsRoutes = require('./routes/notifications');
@@ -392,6 +398,11 @@ const isDialerIngest = (req) =>
   /\/api\/vicidial\/(fronter-xfer|closer-dispo|dispo-debug)\b/.test(req.originalUrl || req.url || '') ||
   /\/api\/dialer\/hook\//.test(req.originalUrl || req.url || '');
 const isVicidialIngest = isDialerIngest;   // kept: the name the skip below reads
+// The machine API (/api/ext/v1, mig 348) has no JWT either: its callers are
+// other apps' servers, keyed by integration key. middleware/integrationKey.js
+// rate-limits each key on its own (EXT_API_RATE_PER_MIN), so the per-user
+// bucket below would only make one office IP's apps share a limit with it.
+const isExtApi = (req) => /^\/api\/ext\//.test(req.originalUrl || req.url || '');
 
 app.use(['/api/vicidial/fronter-xfer', '/api/vicidial/closer-dispo', '/api/vicidial/dispo-debug', '/api/dialer/hook'],
   rateLimit({ windowMs: 15 * 60 * 1000, max: 20000, message: { error: 'Too many requests' } }));
@@ -400,7 +411,7 @@ app.use('/api/', rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 4000,
   keyGenerator: userIdFromToken,
-  skip: isVicidialIngest,
+  skip: (req) => isVicidialIngest(req) || isExtApi(req),
   message: { error: 'Too many requests' },
 }));
 
@@ -493,6 +504,10 @@ app.use('/api/guest',
 app.use('/api/kanban',
   rateLimit({ windowMs: 60 * 1000, max: 240, message: { error: 'Too many requests' } }),
   kanbanRoutes);
+// Machine API for other apps (mig 348) -- NOT a user session: the credential is
+// an integration key (Bearer crm_...), checked and rate-limited per key by
+// integrationKey. Before migration 348 it answers 503. docs/CONNECTIONS.md.
+app.use('/api/ext/v1', integrationKey, extRoutes);
 
 // ============================================================================
 // PROTECTED ROUTES (auth required)
@@ -539,6 +554,9 @@ app.use('/api/sales', authMiddleware, readonlyGuard, egressAudit, readonlyDataGu
 // blocks the PATCH for a readonly_admin, matching every other admin surface.
 app.use('/api/payouts', authMiddleware, readonlyGuard, payoutsRoutes);
 app.use('/api/hrms-sync', authMiddleware, readonlyGuard, hrmsSyncRoutes);
+// Connections admin (superadmin only, gate inside) + the HR / QA app URLs.
+app.use('/api/connections', authMiddleware, readonlyGuard, connectionsRoutes);
+app.use('/api/external-modules', authMiddleware, externalModulesRoutes);
 app.use('/api/sale-configs', authMiddleware, readonlyGuard, saleConfigsRoutes);
 app.use('/api/callbacks',   authMiddleware, readonlyGuard, egressAudit, readonlyDataGuard, callbacksRoutes);
 app.use('/api/payment-reminders', authMiddleware, readonlyGuard, paymentRemindersRoutes);

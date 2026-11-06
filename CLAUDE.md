@@ -1073,3 +1073,30 @@ one server-log line per call.
   touched (people 50/day, vehicles 50/day, VIN 300/30 days).
   `setUserQuota` must test `row[k] !== undefined`, never truthiness -- dropping
   a row because every switch is `false` would silently re-grant a blocked user.
+
+### Connections -- other apps in and out (mig 348, PENDING)
+Plug-and-play layer so any app (HRMS, QA platform, scripts) connects without a
+CRM login. Guide: `docs/CONNECTIONS.md`. Admin -> System -> Connections.
+- **Machine API** `/api/ext/v1` (`routes/ext.js`), mounted BEFORE the authed
+  groups and NOT behind authMiddleware/ipAccessGate: the credential is an
+  integration key (`middleware/integrationKey.js`, `Bearer crm_<43>`, sha256
+  stored, 30s lookup cache, per-key rate limit, 503 before the migration).
+  Exempt from the general `/api/` per-user limiter (`isExtApi`). Read-only
+  except `POST /metrics` -> `external_metrics`.
+- **One shape** for a sale / transfer (`utils/extData.js`): the API rows and
+  webhook payloads share it. No customer contact details without the `*_pii`
+  scope. People = `{user_id, vicidial_agent_ids}` (uppercase).
+- **Webhooks** `utils/webhookDispatcher.js`, every 30s from the scheduler:
+  `policy_events` -> `sale.<type>`, new `transfers` -> `transfer.created`.
+  Cursors in `integration_cursors` on (created_at, id), 15s lag, start from
+  NOW on first run (no backfill). Outbox `integration_deliveries`, at-least-
+  once, retries 1m..12h then gives up (next_attempt_at NULL), pruned at 14d.
+  Pure rules in `utils/integrations.js` (tested).
+- **Switches** `external_hr` / `external_qa` (feature flags, default OFF, read
+  with `isEnabledStrict` via `hooks/useExternalModules.js`): HR / QA nav
+  entries become one link out (`HR_APP_URL` / `QA_APP_URL`, served by
+  `GET /api/external-modules`). Hidden entries: My HR (Staff/Manager/
+  Compliance), QA Scores (Staff), QA Department (Compliance + admin sidebar);
+  the header ModuleNavLinks carries the link. Pages and routes are NOT removed.
+- Audit: key/webhook changes -> `module_audit_log` module `access`, written by
+  the route (secrets and hashes left out), not by trigger.

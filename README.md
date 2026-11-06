@@ -97,6 +97,10 @@ npm run ip-access -- anywhere someone@example.com   # one user back to "anywhere
 If the database itself is the problem, set `IP_RESTRICTION_FORCE_OFF=true` in
 the backend environment and restart. That overrides the database switch.
 
+## Connecting other apps
+
+Other apps (the HRMS, the QA platform, anything with an HTTP client) connect through **Admin -> System -> Connections**: API keys for the read-only machine API at `/api/ext/v1`, signed outbound webhooks for sale and transfer events, and `POST /api/ext/v1/metrics` for numbers pushed in. Two per-company switches (`external_hr`, `external_qa`) turn the CRM's own HR / QA navigation into one link out. Needs migration `348_connections.sql`. Full guide with curl examples and signature verification: [docs/CONNECTIONS.md](docs/CONNECTIONS.md).
+
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.

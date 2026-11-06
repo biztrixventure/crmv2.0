@@ -21,6 +21,7 @@ const { runCrmDayForAllCompanies } = require('./qa2CrmDay');
 const { syncAllCompanies: syncAttendance } = require('./attendanceSync');
 const { runAllEnabled: syncRevenue } = require('./revenueSync');
 const { pushSalesToHrms, hrmsConfig } = require('./hrmsSync');
+const { runWebhookDispatch, webhookInterval } = require('./webhookDispatcher');
 const { runBatchExpiry } = require('./batchExpiry');
 const ipAccess = require('./ipAccess');
 const lookupHistory = require('./customerLookupHistory');
@@ -239,6 +240,16 @@ function startBackgroundJobs() {
     _timers.push(setTimeout(pushHrms, 3 * 60 * 1000));
     _timers.push(setInterval(pushHrms, hrms.minutes * 60 * 1000));
     logger.info('JOBS', `hrms sales push every ${hrms.minutes}m to ${hrms.keys.map(k => k.slug).join(', ')}`);
+  }
+
+  // Connections (mig 348): CRM events out to other apps' webhooks. Each tick
+  // checks the tables exist first, so before the migration it warns once and
+  // does nothing. WEBHOOK_DISPATCH_SECONDS=0 turns it off.
+  const webhookSec = webhookInterval();
+  if (webhookSec > 0) {
+    const webhooks = () => runWebhookDispatch().catch(e => logger.warn('JOBS', `webhook dispatch error: ${e.message}`));
+    _timers.push(setTimeout(webhooks, 40 * 1000));
+    _timers.push(setInterval(webhooks, webhookSec * 1000));
   }
 
   // Numbers lent with a time limit go back to whoever dealt them, and everyone

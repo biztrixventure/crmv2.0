@@ -50,6 +50,7 @@ import TrainingPortal      from '../components/Training/TrainingPortal';
 // My HR (stage 2): the compliance manager's own record, payslips, leave,
 // attendance and expense claims -- same component every shell mounts.
 import MyHR                from '../components/Modules/MyHR';
+import useExternalModules  from '../hooks/useExternalModules';
 import { IdCard, BarChart3 } from 'lucide-react';
 // Company Reports (mig 332) -- per-agent performance, any company (compliance is estate-wide).
 import CompanyReports      from '../components/Reports/CompanyReports';
@@ -108,6 +109,12 @@ const ComplianceShell = () => {
   const notifHook = useNotifications();
   const updateAvailable = useVersionCheck();
   const { isEnabledStrict } = useFeatureFlags();
+  // Connections (mig 348): HR / QA run in another app for this company. The
+  // header's ModuleNavLinks carries the link out; My HR / QA Department drop
+  // out of the tabs. Flags off (the default) = nothing changes.
+  const ext = useExternalModules();
+  const extHr = !!ext.hr;
+  const extQa = !!ext.qa;
   const reportAccess = useReportAccess(user?.id);
 
   // Layer admin override onto the code-defined catalog. Feature-gated tabs
@@ -120,8 +127,10 @@ const ComplianceShell = () => {
       (!t.flag || isSuperadmin || isEnabledStrict(t.flag)) &&
       (!t.perm || isSuperadmin || hasPermission(t.perm)) &&
       // Company Reports: gone for a person a superadmin switched it off for.
-      (t.key !== 'company_reports' || !reportAccess || reportAccess.can))),
-    [applyComplianceLayout, isEnabledStrict, isSuperadmin, hasPermission, reportAccess],
+      (t.key !== 'company_reports' || !reportAccess || reportAccess.can) &&
+      !(extHr && t.key === 'my_hr') &&
+      !(extQa && t.key === 'qa_admin'))),
+    [applyComplianceLayout, isEnabledStrict, isSuperadmin, hasPermission, reportAccess, extHr, extQa],
   );
 
   // Dynamic disposition tabs (e.g. "Post Date") — one per non-"sale" disposition

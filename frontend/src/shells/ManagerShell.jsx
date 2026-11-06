@@ -137,6 +137,7 @@ import client from "../api/client";
 import DevCredit from "../components/DevCredit";
 import { getTransferDisplayStatus } from "../utils/transferStatus";
 import { fmtDateET, todayET, fmtSaleDate } from "../utils/timezone";
+import useExternalModules from "../hooks/useExternalModules";
 
 const SALE_BADGE  = { open: 'info', sold: 'success', cancelled: 'error', follow_up: 'warning', closed_won: 'success', closed_lost: 'error', pending_review: 'warning', needs_revision: 'error' };
 const SALE_LABEL  = { open: 'Pending', sold: 'Sold', cancelled: 'Cancelled', follow_up: 'Follow Up', closed_won: 'Approved', closed_lost: 'Lost', pending_review: 'In Review', needs_revision: 'Needs Revision' };
@@ -220,6 +221,9 @@ const ManagerShell = ({ workspaceMode = false }) => {
   const { user, logout, updateUser, hasPermission, canExport } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const { isEnabled, isEnabledStrict, loading: flagsLoading } = useFeatureFlags();
+  // Connections (mig 348): HR runs in another app for this company -> the
+  // header's ModuleNavLinks carries the link out and My HR drops out below.
+  const ext = useExternalModules();
   // Company Reports nav: the server's answer (it knows the per-person switch);
   // the role permissions stand in until it arrives so the item does not flicker.
   const reportAccess = useReportAccess(user?.id);
@@ -313,7 +317,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
     { key: 'training', label: 'Training', icon: GraduationCap },
     // My HR (stage 2): the manager's OWN record, payslips, leave, attendance and
     // expense claims. Team HR stays in the HR module (the header link).
-    { key: 'my_hr', label: 'My HR', icon: IdCard },
+    ...(ext.hr ? [] : [{ key: 'my_hr', label: 'My HR', icon: IdCard }]),
   ];
 
   // ── Tab logic ─────────────────────────────────────────────────────────────

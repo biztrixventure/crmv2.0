@@ -13,6 +13,7 @@ import DotGridBg from "../components/UI/DotGridBg";
 import { useTheme } from "../contexts/ThemeContext";
 import { useFeatureFlags } from "../contexts/FeatureFlagsContext";
 import { useReportAccess } from '../hooks/useReportAccess';
+import useExternalModules from '../hooks/useExternalModules';
 import { useNavigate } from "react-router-dom";
 import { vehicleFieldIssues } from "../utils/vehicleValidation";
 import { smartFormat, isSuggestable, suggestionsFor, rememberValues } from "../utils/formAssist";
@@ -207,6 +208,10 @@ const StaffShell = () => {
   const [exportOpen, setExportOpen] = useState(false);
   const { theme, toggleTheme } = useTheme();
   const { isEnabled, isEnabledStrict } = useFeatureFlags();
+  // Connections (mig 348): HR / QA run in another app for this company. The
+  // header's ModuleNavLinks then carries the one link out; the tabs below drop
+  // out. Flags off (the default) = nothing changes.
+  const ext = useExternalModules();
   // Company Reports nav: the server's answer (it knows the per-person switch);
   // the role permissions stand in until it arrives.
   const reportAccess = useReportAccess(user?.id);
@@ -320,7 +325,7 @@ const StaffShell = () => {
     // necessary but no longer sufficient: Business Rules -> QA Scores decides
     // whether this floor is shown its numbers at all, and the endpoint
     // enforces the same answer.
-    ...(hasPermission('qa2.view_own_scores') && qaScoresVisible
+    ...(hasPermission('qa2.view_own_scores') && qaScoresVisible && !ext.qa
       ? [{ key: 'qa2_scores', label: 'QA Scores', icon: Award }] : []),
     // Company Reports (mig 332/333): the role's report permission, unless a
     // superadmin decided for this person (User Control Center -> Reports).
@@ -345,7 +350,7 @@ const StaffShell = () => {
     // My HR (stage 2): own record, payslips, leave, attendance, expense claims.
     // Always listed -- every floor role holds the self-service grants, and the
     // component says so plainly if a role does not.
-    { key: 'my_hr', label: 'My HR', icon: IdCard },
+    ...(ext.hr ? [] : [{ key: 'my_hr', label: 'My HR', icon: IdCard }]),
   ];
 
   // For a trainee the list is Training plus their own HR. Building the full list

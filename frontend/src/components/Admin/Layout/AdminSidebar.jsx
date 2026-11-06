@@ -1,7 +1,8 @@
 import React, { useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, BarChart3, Users, Shield, Building2, FileText, ChevronRight, Zap, Network, HelpCircle, MessageSquareText, UploadCloud, Megaphone, Radio, Trophy, MessagesSquare, CalendarDays, DollarSign, ArrowRight, PhoneCall, Database, Car, Tag, Settings2, Eye, Eraser, UserCircle, Download, ClipboardCheck, Palette, Paintbrush, Hash, Send, LayoutGrid, BookOpen, Lock, Target, X, IdCard, Scale } from 'lucide-react';
+import { Search, BarChart3, Users, Shield, Building2, FileText, ChevronRight, Zap, Network, HelpCircle, MessageSquareText, UploadCloud, Megaphone, Radio, Trophy, MessagesSquare, CalendarDays, DollarSign, ArrowRight, PhoneCall, Database, Car, Tag, Settings2, Eye, Eraser, UserCircle, Download, ClipboardCheck, Palette, Paintbrush, Hash, Send, LayoutGrid, BookOpen, Lock, Target, X, IdCard, Scale, Plug, ExternalLink } from 'lucide-react';
 import { useBranding } from '../../../contexts/BrandingContext';
+import useExternalModules from '../../../hooks/useExternalModules';
 
 // Items with an `href` navigate to another shell instead of switching an
 // internal admin tab. `state.tab` pre-selects a tab inside the target shell.
@@ -71,6 +72,8 @@ const NAV_SECTIONS = [
     label: 'System',
     items: [
       { id: 'features',       label: 'Feature Flags',       icon: Zap       },
+      // Other apps in: API keys, webhooks, HR / QA switches (mig 348).
+      { id: 'connections',    label: 'Connections',         icon: Plug      },
       { id: 'business-rules', label: 'Business Rules',      icon: Settings2 },
       { id: 'blacklist',      label: 'Blacklist / DNC',     icon: Shield    },
       { id: 'hub-governance', label: 'Access & Governance', icon: Lock      },
@@ -102,6 +105,10 @@ const AdminSidebar = ({
 }) => {
   const navigate = useNavigate();
   const { siteName } = useBranding();
+  // Connections (mig 348): when HR / QA run in another app, the HR and QA
+  // Department rows open it in a new tab instead. Flags off = unchanged.
+  const ext = useExternalModules();
+  const externalHref = (id) => (id === 'cc-hr' ? ext.hr : id === 'cc-qa' ? ext.qa : null);
   const panelRef = useRef(null);
 
   // Escape closes the mobile drawer, and opening it moves focus inside so the
@@ -198,7 +205,9 @@ const AdminSidebar = ({
                   return (
                     <button
                       key={item.id}
-                      onClick={() => item.href ? (onClose?.(), navigate(item.href, { state: item.state })) : pick(item.id)}
+                      onClick={() => externalHref(item.id)
+                        ? (onClose?.(), window.open(externalHref(item.id), '_blank', 'noopener,noreferrer'))
+                        : item.href ? (onClose?.(), navigate(item.href, { state: item.state })) : pick(item.id)}
                       className="w-full text-left px-3 py-2.5 rounded-xl transition-all duration-150 flex items-center gap-3 group"
                       style={{
                         background: isActive ? 'var(--gradient-sidebar)' : 'transparent',
@@ -222,7 +231,8 @@ const AdminSidebar = ({
                           style={{ color: isActive ? 'white' : 'var(--color-text-secondary)' }} />
                       </div>
 
-                      <span className="flex-1">{item.label}</span>
+                      <span className="flex-1">{externalHref(item.id) && item.id === 'cc-qa' ? 'QA' : item.label}</span>
+                      {externalHref(item.id) && <ExternalLink size={12} style={{ color: 'var(--color-text-tertiary)' }} />}
 
                       {/* Badge */}
                       {badge > 0 && (
