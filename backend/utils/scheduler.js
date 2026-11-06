@@ -20,6 +20,7 @@ const { runQa2AutoAssign, purgeStaleQa2Assignments, purgeParkedQa2Calls, parkDup
 const { runCrmDayForAllCompanies } = require('./qa2CrmDay');
 const { syncAllCompanies: syncAttendance } = require('./attendanceSync');
 const { runAllEnabled: syncRevenue } = require('./revenueSync');
+const { pushSalesToHrms, hrmsConfig } = require('./hrmsSync');
 const { runBatchExpiry } = require('./batchExpiry');
 const ipAccess = require('./ipAccess');
 const lookupHistory = require('./customerLookupHistory');
@@ -229,6 +230,16 @@ function startBackgroundJobs() {
     .catch(e => logger.warn('JOBS', `revenue sync error: ${e.message}`));
   _timers.push(setTimeout(revenue, REVENUE_SYNC_INIT));
   _timers.push(setInterval(revenue, REVENUE_SYNC_MS));
+
+  // Approved sales -> HRMS for agent incentives (utils/hrmsSync.js). Off unless
+  // HRMS_URL and HRMS_API_KEYS are set; HRMS_SYNC_MINUTES=0 also turns it off.
+  const hrms = hrmsConfig();
+  if (hrms.enabled && hrms.minutes > 0) {
+    const pushHrms = () => pushSalesToHrms().catch(e => logger.warn('JOBS', `hrms sales push error: ${e.message}`));
+    _timers.push(setTimeout(pushHrms, 3 * 60 * 1000));
+    _timers.push(setInterval(pushHrms, hrms.minutes * 60 * 1000));
+    logger.info('JOBS', `hrms sales push every ${hrms.minutes}m to ${hrms.keys.map(k => k.slug).join(', ')}`);
+  }
 
   // Numbers lent with a time limit go back to whoever dealt them, and everyone
   // below that holder loses their copy too. Idempotent and a no-op for every

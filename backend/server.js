@@ -32,6 +32,7 @@ const formsRoutes = require('./routes/forms');
 const transfersRoutes = require('./routes/transfers');
 const salesRoutes = require('./routes/sales');
 const payoutsRoutes = require('./routes/payouts');
+const hrmsSyncRoutes = require('./routes/hrmsSync');
 const statsRoutes = require('./routes/stats');
 const companyReportsRoutes = require('./routes/companyReports');
 const notificationsRoutes = require('./routes/notifications');
@@ -537,6 +538,7 @@ app.use('/api/sales', authMiddleware, readonlyGuard, egressAudit, readonlyDataGu
 // Payouts — superadmin only (enforced inside the router); readonlyGuard still
 // blocks the PATCH for a readonly_admin, matching every other admin surface.
 app.use('/api/payouts', authMiddleware, readonlyGuard, payoutsRoutes);
+app.use('/api/hrms-sync', authMiddleware, readonlyGuard, hrmsSyncRoutes);
 app.use('/api/sale-configs', authMiddleware, readonlyGuard, saleConfigsRoutes);
 app.use('/api/callbacks',   authMiddleware, readonlyGuard, egressAudit, readonlyDataGuard, callbacksRoutes);
 app.use('/api/payment-reminders', authMiddleware, readonlyGuard, paymentRemindersRoutes);
