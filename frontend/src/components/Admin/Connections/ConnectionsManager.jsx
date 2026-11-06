@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   Plug, KeyRound, Send, Plus, Copy, Trash2, RefreshCw, Loader2, AlertTriangle, ExternalLink,
-  CheckCircle2, CircleSlash, Play, ScrollText, Boxes, ShieldOff,
+  CheckCircle2, CircleSlash, Play, ScrollText, Boxes, ShieldOff, Link2, Pencil, Server, UploadCloud,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button, Alert } from '../../UI';
@@ -17,6 +17,10 @@ import { Loading, SectionHeader, PillTabs, Panel, EmptyState, TableScroll, Toggl
 //             ...), signed with a secret that is also shown once.
 //   External  the two "runs in another app" switches (external_hr /
 //             external_qa), per company, through the existing feature-flag API.
+//   Outgoing  links FROM the CRM to other apps (migration 349). Today: the
+//             hourly approved-sales push to each HR company. Links set up
+//             here need no server change; HRMS_URL / HRMS_API_KEYS ones are
+//             shown read-only.
 //
 // Superadmin only (AdminPanel + routes/connections.js). How another app uses
 // all this: docs/CONNECTIONS.md.
@@ -26,6 +30,7 @@ const TABS = [
   { key: 'keys',     label: 'API keys',         icon: KeyRound },
   { key: 'webhooks', label: 'Webhooks',         icon: Send },
   { key: 'external', label: 'External modules', icon: Boxes },
+  { key: 'outgoing', label: 'Outgoing links',   icon: Link2 },
 ];
 
 const copy = (text, what = 'Copied') => {
@@ -574,6 +579,229 @@ const ExternalTab = ({ catalog }) => {
   );
 };
 
+// ── Outgoing links (mig 349) ────────────────────────────────────────────────
+const HR_DEFAULT_URL = 'https://hr.vertexpakistan.com';
+
+const LinkEditor = ({ link, onSaved, onCancel }) => {
+  const isNew = !link;
+  const [f, setF] = useState({ name: link?.name || '', url: link?.url || HR_DEFAULT_URL, api_key: '' });
+  const [busy, setBusy] = useState(false);
+
+  const save = async () => {
+    if (!f.name.trim()) return toast.error('Give the link a name (the HR company)');
+    if (!/^https:\/\//i.test(f.url.trim()) && !/^http:\/\/(localhost|127\.0\.0\.1)([:/]|$)/i.test(f.url.trim())) {
+      return toast.error('The HR address must start with https://');
+    }
+    if (isNew && !f.api_key.trim()) return toast.error('Paste the API key from the HR system');
+    setBusy(true);
+    try {
+      const body = { name: f.name.trim(), url: f.url.trim() };
+      if (f.api_key.trim()) body.api_key = f.api_key.trim();
+      if (isNew) await client.post('connections/links', { ...body, enabled: true });
+      else await client.patch(`connections/links/${link.id}`, body);
+      toast.success(isNew ? 'Link added — press Test to check it' : 'Saved');
+      onSaved();
+    } catch (e) { toast.error(errMsg(e, 'Save failed')); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <Panel className="p-4 space-y-4">
+      <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' }}>
+        <label className="text-sm">
+          <Label>Name</Label>
+          <input className="input w-full" value={f.name} onChange={e => setF(p => ({ ...p, name: e.target.value }))}
+            placeholder="WaveTech HR" maxLength={100} />
+        </label>
+        <label className="text-sm">
+          <Label>HR address</Label>
+          <input className="input w-full" value={f.url} onChange={e => setF(p => ({ ...p, url: e.target.value }))}
+            placeholder={HR_DEFAULT_URL} />
+        </label>
+        <label className="text-sm">
+          <Label>API key{!isNew && link?.key_last4 ? ` (now ••••${link.key_last4})` : ''}</Label>
+          <input className="input w-full" type="password" autoComplete="off" value={f.api_key}
+            onChange={e => setF(p => ({ ...p, api_key: e.target.value }))}
+            placeholder={isNew ? 'Paste the key from HR' : 'Leave empty to keep the current key'} />
+        </label>
+      </div>
+      <p className="text-xs m-0" style={{ color: 'var(--color-text-tertiary)' }}>
+        In HR → open the company → Admin → Integrations → CRM → Create key, then paste it here. One link per HR company.
+      </p>
+      <div className="flex gap-2">
+        <Button onClick={save} loading={busy}>{isNew ? <><Plus size={14} /> Add link</> : 'Save'}</Button>
+        <Button variant="secondary" onClick={onCancel}>Cancel</Button>
+      </div>
+    </Panel>
+  );
+};
+
+/** The last push to one link: counts, or the error. */
+const PushResult = ({ result, at }) => {
+  if (!result) return <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>Not pushed yet</span>;
+  if (result.error) {
+    return (
+      <div className="text-xs" style={{ color: 'var(--color-danger-600, #dc2626)' }}>
+        {result.error}{at && <span style={{ color: 'var(--color-text-tertiary)' }}> · {when(at)}</span>}
+      </div>
+    );
+  }
+  const parts = [
+    ['approved', result.approved], ['sent', result.sent], ['inserted', result.inserted], ['updated', result.updated],
+    ['voided', result.voided], ['not employees', result.unknown],
+  ].filter(([, v]) => v != null);
+  return (
+    <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+      {parts.map(([k, v]) => `${v} ${k}`).join(' · ')}
+      {at && <span style={{ color: 'var(--color-text-tertiary)' }}> · {when(at)}</span>}
+    </div>
+  );
+};
+
+const OutgoingTab = () => {
+  const [data, setData] = useState(null);
+  const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [busy, setBusy] = useState(null);
+  const [running, setRunning] = useState(false);
+
+  const reload = useCallback(() => {
+    client.get('connections/links').then(r => setData(r.data))
+      .catch(e => { setData({ ready: false, links: [] }); toast.error(errMsg(e, 'Could not load links')); });
+  }, []);
+  useEffect(() => { reload(); }, [reload]);
+
+  const setEnabled = async (l, enabled) => {
+    setBusy(l.id);
+    try { await client.patch(`connections/links/${l.id}`, { enabled }); reload(); }
+    catch (e) { toast.error(errMsg(e, 'Failed')); }
+    finally { setBusy(null); }
+  };
+
+  const test = async (l) => {
+    setBusy(l.id);
+    try {
+      const r = await client.post(`connections/links/${l.id}/test`);
+      if (r.data.ok) toast.success(`Connected to ${l.name} (${r.data.ms} ms)`);
+      else toast.error(r.data.message || 'Not connected');
+    } catch (e) { toast.error(errMsg(e, 'Test failed')); }
+    finally { setBusy(null); }
+  };
+
+  const remove = async (l) => {
+    if (!window.confirm(`Remove "${l.name}"?\n\nThe CRM stops sending sales to this HR company. Sales already in HR stay there.`)) return;
+    try { await client.delete(`connections/links/${l.id}`); toast.success('Removed'); reload(); }
+    catch (e) { toast.error(errMsg(e, 'Failed')); }
+  };
+
+  const pushNow = async () => {
+    setRunning(true);
+    try {
+      const r = await client.post('connections/links/run');
+      if (r.data.skipped) toast.message(`Nothing sent: ${r.data.skipped}`);
+      else {
+        const errors = (r.data.links || []).filter(x => x.result?.error).length;
+        if (errors) toast.error(`Pushed ${r.data.sent} sales — ${errors} link(s) failed, see below`);
+        else toast.success(`Pushed ${r.data.sent} approved sales to ${(r.data.links || []).length} HR link(s)`);
+      }
+      reload();
+    } catch (e) { toast.error(errMsg(e, 'Push failed')); }
+    finally { setRunning(false); }
+  };
+
+  const links = data?.links || [];
+  const web = links.filter(l => l.source === 'web');
+  const env = links.filter(l => l.source === 'env');
+
+  return (
+    <div className="space-y-4">
+      <Panel className="p-4 space-y-2">
+        <p className="text-sm m-0" style={{ color: 'var(--color-text)' }}>
+          Every {data?.everyMinutes || 60} minutes the CRM sends the sales compliance approved (last month and this month) to each HR link below,
+          credited to the closer and the fronter. A sale that is cancelled or charged back is withdrawn in HR at the next push.
+        </p>
+        <p className="text-xs m-0" style={{ color: 'var(--color-text-secondary)' }}>
+          In HR → open the company → Admin → Integrations → CRM → Create key, then paste it here. One link per HR company.
+        </p>
+      </Panel>
+
+      {data && !data.ready && (
+        <Alert type="warning" dismissible={false}>
+          Links cannot be added yet: apply <code>backend/migrations/349_outgoing_links.sql</code> in the Supabase SQL editor.
+          Until then the push uses the server settings only{env.length ? ' (listed below)' : ''}.
+        </Alert>
+      )}
+      {data && data.jobOn === false && (
+        <Alert type="info" dismissible={false}>The hourly push is switched off on the server (HRMS_SYNC_MINUTES=0). "Push sales now" still works.</Alert>
+      )}
+
+      {adding ? (
+        <LinkEditor onSaved={() => { setAdding(false); reload(); }} onCancel={() => setAdding(false)} />
+      ) : (
+        <div className="flex justify-end gap-2 flex-wrap">
+          <Button variant="secondary" onClick={pushNow} loading={running} disabled={!links.length}>
+            <UploadCloud size={14} /> Push sales now
+          </Button>
+          {data?.ready && <Button onClick={() => setAdding(true)}><Plus size={14} /> Add HR link</Button>}
+        </div>
+      )}
+
+      {data === null ? <Loading variant="rows" rows={3} /> : !links.length && !adding ? (
+        <EmptyState icon={Link2} title="No HR links yet"
+          hint="Add one per HR company so its people get their sales incentives." />
+      ) : (
+        <>
+          {web.map(l => (
+            <Panel key={l.id} className="p-4 space-y-3">
+              <div className="flex items-start gap-3 flex-wrap">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-medium" style={{ color: 'var(--color-text)' }}>{l.name}</span>
+                    {!l.enabled ? <Pill>off</Pill> : l.last_result?.error ? <Pill tone="bad">last push failed</Pill>
+                      : l.last_run_at ? <Pill tone="ok">OK</Pill> : <Pill>not pushed yet</Pill>}
+                  </div>
+                  <div className="text-xs mt-1 break-all" style={{ color: 'var(--color-text-tertiary)' }}>
+                    {l.url} · key {l.hasKey ? `••••${l.key_last4 || ''}` : 'missing'}
+                  </div>
+                  <div className="mt-1"><PushResult result={l.last_result} at={l.last_run_at} /></div>
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Toggle checked={l.enabled} busy={busy === l.id} onChange={(on) => setEnabled(l, on)} label={l.enabled ? 'On' : 'Off'} />
+                  <Button size="sm" variant="secondary" onClick={() => test(l)} disabled={busy === l.id}>
+                    {busy === l.id ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />} Test
+                  </Button>
+                  <Button size="sm" variant="secondary" onClick={() => setEditing(editing === l.id ? null : l.id)}><Pencil size={13} /> Edit</Button>
+                  <Button size="sm" variant="ghost" onClick={() => remove(l)}><Trash2 size={13} /></Button>
+                </div>
+              </div>
+              {editing === l.id && (
+                <LinkEditor link={l} onSaved={() => { setEditing(null); reload(); }} onCancel={() => setEditing(null)} />
+              )}
+            </Panel>
+          ))}
+          {env.map(l => (
+            <Panel key={l.id} className="p-4 space-y-1" style={{ opacity: 0.9 }}>
+              <div className="flex items-center gap-2 flex-wrap">
+                <Server size={14} style={{ color: 'var(--color-text-tertiary)' }} />
+                <span className="font-medium" style={{ color: 'var(--color-text)' }}>{l.name}</span>
+                <Pill>From server settings</Pill>
+                {l.same_as && <Pill tone="warn">same as "{l.same_as}" — sent once</Pill>}
+              </div>
+              <div className="text-xs break-all" style={{ color: 'var(--color-text-tertiary)' }}>
+                {l.url} · key {l.hasKey ? `••••${l.key_last4 || ''}` : 'missing'}
+              </div>
+              <PushResult result={l.last_result} at={l.last_run_at} />
+              <p className="text-[11px] m-0" style={{ color: 'var(--color-text-tertiary)' }}>
+                Set by HRMS_URL / HRMS_API_KEYS on the server; change it there. Adding the same company here as a link is fine — it is sent once.
+              </p>
+            </Panel>
+          ))}
+        </>
+      )}
+    </div>
+  );
+};
+
 // ── Shell ───────────────────────────────────────────────────────────────────
 export default function ConnectionsManager() {
   const [tab, setTab] = useState('keys');
@@ -615,6 +843,7 @@ export default function ConnectionsManager() {
           {tab === 'keys'     && (catalog.ready ? <KeysTab catalog={catalog} companies={companies} /> : null)}
           {tab === 'webhooks' && (catalog.ready ? <WebhooksTab catalog={catalog} companies={companies} /> : null)}
           {tab === 'external' && <ExternalTab catalog={catalog} />}
+          {tab === 'outgoing' && <OutgoingTab />}
         </>
       )}
     </div>

@@ -1101,6 +1101,29 @@ CRM login. Guide: `docs/CONNECTIONS.md`. Admin -> System -> Connections.
 - Audit: key/webhook changes -> `module_audit_log` module `access`, written by
   the route (secrets and hashes left out), not by trigger.
 
+### Outgoing links -- CRM -> HR set up on screen (mig 349, PENDING)
+The hourly approved-sales push to the HRMS (`utils/hrmsSync.js`) no longer
+needs env edits. Guide: `docs/CONNECTIONS.md` section 4. Admin -> System ->
+Connections -> Outgoing links.
+- **Table** `outgoing_links` (kind `hrms_sales`, name, url, api_key, enabled,
+  last_run_at, last_result). Service-role only like app_secrets /
+  vicidial_boxes; api_key is plaintext (no encryption helper exists) and the
+  API never returns it: `hasKey` + `key_last4` (only when the key is >= 12
+  chars). Audit rows say `(changed)`, never the key.
+- **Targets** = enabled web links + `HRMS_URL`/`HRMS_API_KEYS`, merged by
+  `mergeTargets` (same url+key = sent once, result written to every web id).
+  Read on EVERY run, so no restart. Table missing -> env only, warn once.
+- **Scheduler** now always schedules the job (unless `HRMS_SYNC_MINUTES=0`);
+  with no target a run is one select on `outgoing_links` and returns
+  `{skipped}`. `pushSalesToHrms()` keeps its shape (`companies` keyed by env
+  slug / link name) and adds `links[]`.
+- **Test** = POST `{url}/api/v1/connect/crm/sales` with `items: []` and NO
+  `window` (HRMS voids only when a window is given). 200 connected / 401
+  wrong key / 403 lacks sales.write.
+- Routes: `/api/connections/links*` in `routes/connections.js` (superadmin).
+  URL: https only, http only for localhost. Tests: `utils/hrmsSync.test.js`,
+  `routes/connections.links.test.js`.
+
 ## HR and Accounting removed from the CRM (2026-11-07)
 
 The owner asked for HR and Accounts to be taken out of the CRM. QA and QA2 stay exactly as they were.

@@ -7,6 +7,8 @@ a cron script all connect the same way.
 - **Pull**: the app calls the machine API at `/api/ext/v1` with an API key.
 - **Push**: the CRM POSTs signed events (a sale approved, a new transfer, ...)
   to a webhook URL in the other app.
+- **Outgoing links**: the CRM sends its approved sales to each HR company
+  every hour (see [Outgoing links](#4-outgoing-links-crm--hr)).
 
 Other apps can also **push numbers in** (QA scores, attendance hours, ...) with
 `POST /api/ext/v1/metrics`.
@@ -384,6 +386,89 @@ app.post('/crm-webhook', express.raw({ type: 'application/json' }), (req, res) =
 - Switching a webhook off pauses its queue. Switching it back on resumes the
   queue.
 - Deliveries are deleted after 14 days.
+
+---
+
+## 4. Outgoing links (CRM → HR)
+
+Every hour the CRM sends the sales compliance approved (status `closed_won`,
+from the 1st of last month to today) to the HR system (hr.vertexpakistan.com),
+so agents get their sales incentives. Each sale is credited to its closer and
+its fronter by their VICIdial users. Each HR company receives every sale and
+credits only its own employees. The rest come back as "not employees".
+
+The code is `backend/utils/hrmsSync.js`. Each link is one HR company with its
+own HR API key (permission `sales.write`).
+
+### Add a link (no server change, no restart)
+
+1. In HR, open the company, then go to **Admin → Integrations → CRM** and press
+   **Create key**. Copy the key.
+2. In the CRM, go to **Admin → System → Connections → Outgoing links** and press
+   **Add HR link**. Enter a name (for example "WaveTech HR"), the HR address
+   (default `https://hr.vertexpakistan.com`) and the key.
+3. Press **Test**. The result is one of:
+   - **Connected**: HTTP 200.
+   - **Wrong key**: HTTP 401. The key is wrong or was revoked.
+   - **No permission**: HTTP 403. The key lacks `sales.write`.
+   - **Not found**: HTTP 404. Check the address.
+4. Press **Push sales now**, or wait for the next hourly run.
+
+Add one link per HR company. The links are read at every run, so a new,
+edited, switched-off or removed link takes effect at the next run.
+
+The test sends `POST {url}/api/v1/connect/crm/sales` with
+`{"context":"","items":[]}`. It has no `window`. The HR system only voids
+sales when a `window` is given, and an empty list inserts nothing, so the test
+changes nothing in HR.
+
+The address must use `https://`. `http://` is accepted only for `localhost`.
+The key is stored in the `outgoing_links` table, which only the service role
+can read. The API and the screen never show it again: they show only its
+last 4 characters. The audit log (`module_audit_log`, module `access`) records
+"key changed", never the key.
+
+### Server settings (still supported)
+
+The original setup keeps working:
+
+| Variable | Meaning |
+|---|---|
+| `HRMS_URL` | The HR address, e.g. `https://hr.vertexpakistan.com` |
+| `HRMS_API_KEYS` | `slug=key,slug=key`: one HR API key per HR company |
+| `HRMS_SYNC_MINUTES` | Default `60`. Set `0` to turn off the hourly job. **Push sales now** still works. |
+
+These links appear on the screen as read-only, with the badge "From server
+settings". If a screen link has the same address and key as a server one,
+the sales are sent once.
+
+### Before migration 349
+
+Apply `backend/migrations/349_outgoing_links.sql` in the Supabase SQL editor.
+It is idempotent and registers itself in `schema_migrations`.
+
+Until it is applied:
+
+- The hourly push uses the server settings only. It logs one warning.
+- The Outgoing links tab shows the server links and a banner that says to run
+  migration 349. Adding a link answers 503.
+- If there are no server settings either, every run is one small query and
+  nothing is sent.
+
+### API (superadmin)
+
+| Call | Does |
+|---|---|
+| `GET /api/connections/links` | Screen links (no key: `hasKey`, `key_last4`) plus server links (`source: "env"`, `readonly: true`) |
+| `POST /api/connections/links` | `{ name, url, api_key, enabled }` |
+| `PATCH /api/connections/links/:id` | Any of `name`, `url`, `enabled`, `api_key`. Leave `api_key` out (or empty) to keep the current key. |
+| `DELETE /api/connections/links/:id` | Remove the link |
+| `POST /api/connections/links/:id/test` | `{ ok, status, result, message, ms }`, where `result` is `connected`, `wrong_key`, `no_permission`, `not_found`, `error` or `unreachable` |
+| `POST /api/connections/links/run` | Push now. Returns the run summary, with `links[]` holding one result per HR link. |
+
+After each run, every screen link stores its result in `last_run_at` and
+`last_result`. The result holds approved, sent, inserted, updated, voided,
+not employees, or the error.
 
 ---
 

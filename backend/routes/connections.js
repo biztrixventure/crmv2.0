@@ -15,9 +15,19 @@
 //   GET    /api/connections/webhooks/:id/deliveries recent outbox rows
 //   POST   /api/connections/deliveries/:id/retry    retry a failed / given-up row now
 //
+// Outgoing links (mig 349) -- the CRM -> HR sales push targets:
+//   GET    /api/connections/links                   web links (never the key) + env ones (read-only)
+//   POST   /api/connections/links                   { name, url, api_key, enabled }
+//   PATCH  /api/connections/links/:id               name, url, enabled; api_key optional (absent = keep)
+//   DELETE /api/connections/links/:id
+//   POST   /api/connections/links/:id/test          no-op call to the HR system: connected / wrong key / no permission
+//   POST   /api/connections/links/run               push approved sales to every HR link now
+//
 // Superadmin only (same gate as routes/hrmsSync.js). Every change is written
 // to module_audit_log (module 'access') with secrets and hashes left out.
 // Before migration 348: catalog says ready:false, everything else 503s.
+// Before migration 349: /links lists the env targets with ready:false, writes
+// 503 with "run migration 349".
 // ============================================================================
 const express = require('express');
 const { supabaseAdmin } = require('../config/database');
@@ -30,6 +40,10 @@ const {
 } = require('../utils/integrations');
 const { sendPing, lastDispatch } = require('../utils/webhookDispatcher');
 const { externalUrls } = require('./externalModules');
+const {
+  pushSalesToHrms, lastHrmsPush, testHrmsLink, envTargets, redactLink, keyLast4, normalizeHrmsUrl, targetKey,
+  LINK_KIND, LINKS_MIGRATION, LINKS_NOT_READY,
+} = require('../utils/hrmsSync');
 
 const router = express.Router();
 
@@ -47,7 +61,7 @@ router.use(async (req, res, next) => {
 });
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res)).catch((e) => {
-  if (e.notReady) return res.status(503).json({ error: NOT_READY, migration: MIGRATION });
+  if (e.notReady) return res.status(503).json({ error: e.notReadyMessage || NOT_READY, migration: e.migration || MIGRATION });
   if (e.status) return res.status(e.status).json({ error: e.message });
   next(e);
 });
@@ -252,6 +266,129 @@ router.post('/deliveries/:id/retry', wrap(async (req, res) => {
   check(error);
   if (!data || !data.length) return res.status(404).json({ error: 'Delivery not found or already delivered' });
   res.json({ queued: true });
+}));
+
+// -- outgoing links (mig 349): CRM -> HR sales push ----------------------------
+const LINK_COLS = 'id, kind, name, url, api_key, enabled, last_run_at, last_result, created_by, created_at, updated_at';
+
+/** throw on a supabase error; a missing outgoing_links table becomes a 503 (349) */
+function checkLinks(error) {
+  if (!error) return;
+  if (isMissingTable(error)) {
+    throw Object.assign(new Error(LINKS_NOT_READY), { notReady: true, notReadyMessage: LINKS_NOT_READY, migration: LINKS_MIGRATION });
+  }
+  throw new Error(error.message);
+}
+
+function linkUrl(v) {
+  try { return normalizeHrmsUrl(v); } catch (e) { throw bad(e.message); }
+}
+
+function linkKey(v) {
+  const s = typeof v === 'string' ? v.trim() : '';
+  if (!s) throw bad('api_key is required: create it in HR -> Admin -> Integrations -> CRM');
+  if (s.length < 8 || s.length > 500 || /\s/.test(s)) throw bad('api_key does not look like an HR API key');
+  return s;
+}
+
+/** What the audit log may keep about a link: no key, only whether it is set. */
+const auditView = (row) => {
+  const r = redactLink(row);
+  delete r.last_result;
+  return r;
+};
+
+router.get('/links', wrap(async (req, res) => {
+  const { data, error } = await supabaseAdmin.from('outgoing_links').select(LINK_COLS)
+    .eq('kind', LINK_KIND).order('created_at', { ascending: true });
+  let ready = true;
+  if (error) {
+    if (!isMissingTable(error)) throw new Error(error.message);
+    ready = false;
+  }
+  const rows = data || [];
+  const webKeys = new Map(rows.filter((r) => r.enabled).map((r) => [targetKey(r.url, r.api_key), r.name]));
+  const status = lastHrmsPush();
+  const last = status.last;
+  const web = rows.map(redactLink);
+  const env = envTargets().map((t) => {
+    const sentAs = webKeys.get(targetKey(t.url, t.key)) || null;
+    const run = last && last.links ? last.links.find((l) => l.slugs.includes(t.slug)) : null;
+    return {
+      id: `env:${t.slug}`, source: 'env', readonly: true, kind: LINK_KIND,
+      name: t.slug, url: t.url, enabled: true,
+      hasKey: !!t.key, key_last4: keyLast4(t.key),
+      same_as: sentAs,   // the web link it is merged with, if any (sent once)
+      last_run_at: run ? last.at : null,
+      last_result: run ? { ...run.result, approved: last.approved, sent: last.sent, noAgent: last.noAgent, window: last.window } : null,
+    };
+  });
+  res.json({
+    ready, migration: LINKS_MIGRATION,
+    links: [...web, ...env],
+    everyMinutes: status.everyMinutes, jobOn: status.jobOn, running: status.running,
+    lastRun: last ? { at: last.at, ms: last.ms, window: last.window, approved: last.approved, sent: last.sent, noAgent: last.noAgent } : null,
+  });
+}));
+
+router.post('/links', wrap(async (req, res) => {
+  const b = req.body || {};
+  const row = {
+    kind: LINK_KIND, name: name(b.name), url: linkUrl(b.url), api_key: linkKey(b.api_key),
+    enabled: b.enabled !== false, created_by: req.user.id,
+  };
+  const { data, error } = await supabaseAdmin.from('outgoing_links').insert(row).select(LINK_COLS).single();
+  checkLinks(error);
+  await audit(req, 'outgoing_links', data.id, 'INSERT', { snapshot: auditView(data) });
+  res.status(201).json({ link: redactLink(data) });
+}));
+
+router.patch('/links/:id', wrap(async (req, res) => {
+  if (!UUID.test(req.params.id)) throw bad('bad id');
+  const b = req.body || {};
+  const patch = {};
+  if (b.name !== undefined) patch.name = name(b.name);
+  if (b.url !== undefined) patch.url = linkUrl(b.url);
+  if (b.api_key !== undefined && b.api_key !== null && String(b.api_key).trim() !== '') patch.api_key = linkKey(b.api_key);
+  if (b.enabled !== undefined) patch.enabled = !!b.enabled;
+  if (!Object.keys(patch).length) throw bad('nothing to change');
+  patch.updated_at = new Date().toISOString();
+  const { data: before, error: e1 } = await supabaseAdmin.from('outgoing_links').select(LINK_COLS)
+    .eq('id', req.params.id).eq('kind', LINK_KIND).maybeSingle();
+  checkLinks(e1);
+  if (!before) return res.status(404).json({ error: 'Link not found' });
+  const { data, error } = await supabaseAdmin.from('outgoing_links').update(patch).eq('id', req.params.id).select(LINK_COLS).single();
+  checkLinks(error);
+  const changes = {};
+  for (const k of ['name', 'url', 'enabled']) {
+    if (k in patch && before[k] !== data[k]) changes[k] = { old: before[k], new: data[k] };
+  }
+  if ('api_key' in patch && before.api_key !== data.api_key) changes.api_key = { old: '(hidden)', new: '(changed)' };
+  if (Object.keys(changes).length) await audit(req, 'outgoing_links', data.id, 'UPDATE', changes);
+  res.json({ link: redactLink(data) });
+}));
+
+router.delete('/links/:id', wrap(async (req, res) => {
+  if (!UUID.test(req.params.id)) throw bad('bad id');
+  const { data, error } = await supabaseAdmin.from('outgoing_links').delete()
+    .eq('id', req.params.id).eq('kind', LINK_KIND).select(LINK_COLS);
+  checkLinks(error);
+  if (!data || !data.length) return res.status(404).json({ error: 'Link not found' });
+  await audit(req, 'outgoing_links', data[0].id, 'DELETE', { snapshot: auditView(data[0]) });
+  res.json({ deleted: true });
+}));
+
+router.post('/links/run', wrap(async (req, res) => {
+  res.json(await pushSalesToHrms());
+}));
+
+router.post('/links/:id/test', wrap(async (req, res) => {
+  if (!UUID.test(req.params.id)) throw bad('bad id');
+  const { data, error } = await supabaseAdmin.from('outgoing_links').select('id, url, api_key')
+    .eq('id', req.params.id).eq('kind', LINK_KIND).maybeSingle();
+  checkLinks(error);
+  if (!data) return res.status(404).json({ error: 'Link not found' });
+  res.json(await testHrmsLink(data.url, data.api_key));
 }));
 
 module.exports = router;

@@ -20,15 +20,24 @@
 // fronter in one company and a closer in another are both paid where they
 // work.
 //
-// Env:
-//   HRMS_URL        https://hr.vertexpakistan.com
-//   HRMS_API_KEYS   slug=key,slug=key   (one HRMS API key per HRMS company,
-//                                         scope sales.write)
+// Where it goes (the "targets"), two sources, merged:
+//   1. Outgoing links (mig 349, table outgoing_links, kind 'hrms_sales'),
+//      set up by a superadmin under Admin -> System -> Connections ->
+//      Outgoing links. Read on every run, so a link added there is used at
+//      the next run with no restart. Disabled links are skipped.
+//   2. Server settings (the original setup, still honoured):
+//        HRMS_URL        https://hr.vertexpakistan.com
+//        HRMS_API_KEYS   slug=key,slug=key   (one HRMS API key per HRMS
+//                                             company, scope sales.write)
+// A link that is in both (same URL and key) is sent once. Before migration
+// 349 the table is missing: the push uses the server settings only and warns
+// once. With no target at all a run is one tiny query and nothing else.
+//
 //   HRMS_SYNC_MINUTES  default 60; 0 turns the job off
-// Nothing runs unless both HRMS_URL and HRMS_API_KEYS are set.
 // ============================================================================
 const { supabaseAdmin } = require('../config/database');
 const logger = require('./logger');
+const { isMissingTable } = require('./integrations');
 
 const TZ = 'Asia/Karachi';
 const PAGE = 1000;
@@ -155,40 +164,197 @@ function pieces(win, items) {
   return out;
 }
 
-async function post(url, key, body) {
-  const res = await fetch(url + '/api/v1/connect/crm/sales', {
+const SALES_PATH = '/api/v1/connect/crm/sales';
+const LINK_KIND = 'hrms_sales';
+const LINKS_MIGRATION = '349_outgoing_links.sql';
+const LINKS_NOT_READY = 'Outgoing links are not set up yet: run migration 349';
+
+/** One HTTP call to the HRMS sales connector. Never throws on an HTTP status. */
+async function request(url, key, body, timeoutMs = 60_000) {
+  const res = await fetch(url + SALES_PATH, {
     method: 'POST',
     headers: { authorization: 'Bearer ' + key, 'content-type': 'application/json' },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(60_000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   const text = await res.text();
   let json = null;
   try { json = text ? JSON.parse(text) : null; } catch { /* not json */ }
-  if (!res.ok) throw new Error('HTTP ' + res.status + ': ' + ((json && json.message) || text.slice(0, 200)));
-  return json;
+  return { status: res.status, ok: res.ok, json, text };
+}
+
+async function post(url, key, body) {
+  const r = await request(url, key, body);
+  if (!r.ok) throw new Error('HTTP ' + r.status + ': ' + ((r.json && r.json.message) || r.text.slice(0, 200)));
+  return r.json;
+}
+
+// -- targets --------------------------------------------------------------------
+
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
+
+/**
+ * The base address of an HRMS, cleaned: https only (http only for localhost),
+ * no username/password, no query or #fragment, no trailing slash. Throws an
+ * Error whose message can be shown to the operator.
+ */
+function normalizeHrmsUrl(value) {
+  const raw = typeof value === 'string' ? value.trim() : '';
+  if (!raw) throw new Error('url is required, e.g. https://hr.vertexpakistan.com');
+  let u;
+  try { u = new URL(raw); } catch { throw new Error('url must be a full address, e.g. https://hr.vertexpakistan.com'); }
+  const local = LOCAL_HOSTS.has(u.hostname.toLowerCase());
+  if (u.protocol !== 'https:' && !(u.protocol === 'http:' && local)) {
+    throw new Error('url must start with https:// (http:// only for localhost)');
+  }
+  if (u.username || u.password) throw new Error('url must not contain a username or password');
+  if (u.search || u.hash) throw new Error('url must not contain ? or #');
+  const path = u.pathname.replace(/\/+$/, '');
+  return (u.protocol + '//' + u.host + path);
+}
+
+/** Same address + same key = same HRMS company: send once. */
+function targetKey(url, key) {
+  return String(url || '').replace(/\/+$/, '').toLowerCase() + '\u0000' + String(key || '');
+}
+
+/** Last 4 characters of a key, only when the key is long enough to spare them. */
+function keyLast4(key) {
+  const k = typeof key === 'string' ? key.trim() : '';
+  return k.length >= 12 ? k.slice(-4) : '';
+}
+
+/** A web link as the screen may see it: never the key. */
+function redactLink(row) {
+  if (!row) return row;
+  const { api_key: apiKey, ...rest } = row;
+  return { ...rest, source: 'web', hasKey: !!(apiKey && String(apiKey).trim()), key_last4: keyLast4(apiKey) };
+}
+
+/** HRMS_URL + HRMS_API_KEYS as targets. */
+function envTargets(cfg = config()) {
+  if (!cfg.url) return [];
+  return cfg.keys.map((k) => ({ source: 'env', slug: k.slug, name: k.slug, url: cfg.url, key: k.key }));
+}
+
+/**
+ * Pure. Enabled web links + env keys -> the list to send to, one entry per
+ * distinct (url, key). Each entry: { name, url, key, ids (web link ids),
+ * slugs (env slugs), sources }.
+ */
+function mergeTargets(webRows, envList) {
+  const out = [];
+  const byKey = new Map();
+  const add = (t) => {
+    const k = targetKey(t.url, t.key);
+    let cur = byKey.get(k);
+    if (!cur) {
+      cur = { name: t.name, url: t.url.replace(/\/+$/, ''), key: t.key, ids: [], slugs: [], sources: [] };
+      byKey.set(k, cur);
+      out.push(cur);
+    }
+    if (t.id) cur.ids.push(t.id);
+    if (t.slug) cur.slugs.push(t.slug);
+    if (!cur.sources.includes(t.source)) cur.sources.push(t.source);
+  };
+  for (const r of webRows || []) {
+    if (!r || r.enabled === false) continue;
+    const key = typeof r.api_key === 'string' ? r.api_key.trim() : '';
+    const url = typeof r.url === 'string' ? r.url.trim() : '';
+    if (!key || !url) continue;
+    add({ source: 'web', id: r.id, name: r.name || url, url, key });
+  }
+  for (const e of envList || []) {
+    if (!e || !e.url || !e.key) continue;
+    add({ source: 'env', slug: e.slug, name: e.slug, url: e.url, key: e.key });
+  }
+  return out;
+}
+
+let _warnedMissing = false;
+
+/**
+ * The HRMS links saved on screen (with keys: server use only).
+ * { ready: false } before migration 349. Never throws: a read error is logged
+ * and treated as "no web links", so the env targets still get their push.
+ */
+async function loadWebLinks() {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('outgoing_links')
+      .select('id, name, url, api_key, enabled')
+      .eq('kind', LINK_KIND);
+    if (error) {
+      if (isMissingTable(error)) {
+        if (!_warnedMissing) {
+          _warnedMissing = true;
+          logger.warn('HRMS', 'outgoing_links table missing (run migration 349): using HRMS_URL / HRMS_API_KEYS only');
+        }
+        return { ready: false, rows: [] };
+      }
+      logger.warn('HRMS', 'could not read outgoing links: ' + error.message);
+      return { ready: true, rows: [], error: error.message };
+    }
+    _warnedMissing = false;
+    return { ready: true, rows: data || [] };
+  } catch (e) {
+    logger.warn('HRMS', 'could not read outgoing links: ' + e.message);
+    return { ready: true, rows: [], error: e.message };
+  }
+}
+
+async function resolveTargets() {
+  const web = await loadWebLinks();
+  return { ready: web.ready, targets: mergeTargets(web.rows, envTargets()) };
+}
+
+/** Write each web link's result; failures only log. */
+async function saveResults(perTarget, at) {
+  for (const { target, result } of perTarget) {
+    for (const id of target.ids) {
+      try {
+        const { error } = await supabaseAdmin
+          .from('outgoing_links')
+          .update({ last_run_at: at, last_result: result })
+          .eq('id', id);
+        if (error) logger.warn('HRMS', 'could not save link result: ' + error.message);
+      } catch (e) {
+        logger.warn('HRMS', 'could not save link result: ' + e.message);
+      }
+    }
+  }
 }
 
 let _running = false;
 let _last = null;
 
-/** One full push. Returns a summary per HRMS company. Safe to call any time. */
+/**
+ * One full push to every target. Safe to call any time. Returns
+ * { at, ms, window, approved, sent, noAgent, companies, links } where
+ * companies is keyed by env slug / link name (as before) and links has one
+ * entry per target: { name, url, ids, slugs, sources, result }.
+ */
 async function pushSalesToHrms() {
-  const cfg = config();
-  if (!cfg.enabled) return { skipped: 'HRMS_URL and HRMS_API_KEYS are not set' };
   if (_running) return { skipped: 'already running' };
   _running = true;
   const started = Date.now();
   try {
+    const { targets } = await resolveTargets();
+    if (!targets.length) {
+      return { skipped: 'no HR links: add one under Connections -> Outgoing links (or set HRMS_URL and HRMS_API_KEYS)' };
+    }
     const win = windowNow();
     const { items, approved, noAgent } = await collect(win);
     const parts = pieces(win, items);
     const companies = {};
-    for (const { slug, key } of cfg.keys) {
+    const links = [];
+    const perTarget = [];
+    for (const t of targets) {
       const sum = { received: 0, inserted: 0, updated: 0, unchanged: 0, voided: 0, locked: 0, unknown: 0 };
+      let result;
       try {
         for (const p of parts) {
-          const r = await post(cfg.url, key, {
+          const r = await post(t.url, t.key, {
             context: '',
             window: { from: p.from, to: p.to },
             accounts: { system: 'vicidial', context: '' },
@@ -197,13 +363,20 @@ async function pushSalesToHrms() {
           for (const k of ['received', 'inserted', 'updated', 'unchanged', 'voided', 'locked']) sum[k] += Number((r && r[k]) || 0);
           sum.unknown += Array.isArray(r && r.unknown) ? r.unknown.length : Number((r && r.unknown) || 0);
         }
-        companies[slug] = sum;
+        result = sum;
       } catch (e) {
-        companies[slug] = { error: e.message };
-        logger.warn('HRMS', 'sales push to ' + slug + ' failed: ' + e.message);
+        result = { error: e.message };
+        logger.warn('HRMS', 'sales push to ' + t.name + ' failed: ' + e.message);
       }
+      let label = t.slugs[0] || t.name;
+      for (let n = 2; Object.prototype.hasOwnProperty.call(companies, label); n++) label = (t.slugs[0] || t.name) + ' (' + n + ')';
+      companies[label] = result;
+      links.push({ name: t.name, url: t.url, ids: t.ids, slugs: t.slugs, sources: t.sources, result });
+      perTarget.push({ target: t, result: { ...result, approved, sent: items.length, noAgent, window: win } });
     }
-    _last = { at: new Date().toISOString(), ms: Date.now() - started, window: win, approved, sent: items.length, noAgent, companies };
+    const at = new Date().toISOString();
+    await saveResults(perTarget, at);
+    _last = { at, ms: Date.now() - started, window: win, approved, sent: items.length, noAgent, companies, links };
     logger.info('HRMS', 'sales push ' + win.from + '..' + win.to + ': ' + approved + ' approved, ' + items.length + ' sent, ' + noAgent + ' with no dialer user | ' +
       Object.entries(companies).map(([s, r]) => s + ' ' + (r.error ? 'ERROR ' + r.error : '+' + r.inserted + ' ~' + r.updated + ' -' + r.voided + ' (' + r.unknown + ' not employees)')).join(' | '));
     return _last;
@@ -212,9 +385,36 @@ async function pushSalesToHrms() {
   }
 }
 
-function lastHrmsPush() {
-  const cfg = config();
-  return { enabled: cfg.enabled, url: cfg.url || null, companies: cfg.keys.map((k) => k.slug), everyMinutes: cfg.minutes, last: _last };
+/**
+ * Connection test: an EMPTY sales list with NO window. The HRMS only voids
+ * when a window is given, and an empty list inserts nothing, so this changes
+ * nothing on the HRMS side. 200 = connected, 401 = wrong key, 403 = the key
+ * lacks sales.write.
+ */
+async function testHrmsLink(url, key) {
+  const started = Date.now();
+  try {
+    const r = await request(url, key, { context: '', items: [] }, 15_000);
+    const ms = Date.now() - started;
+    const detail = (r.json && r.json.message) || (r.ok ? '' : r.text.slice(0, 200));
+    if (r.ok) return { ok: true, status: r.status, ms, result: 'connected', message: 'Connected' };
+    if (r.status === 401) return { ok: false, status: 401, ms, result: 'wrong_key', message: 'The HR system did not accept this key (wrong or revoked key)' };
+    if (r.status === 403) return { ok: false, status: 403, ms, result: 'no_permission', message: 'The key works but lacks the sales.write permission' };
+    if (r.status === 404) return { ok: false, status: 404, ms, result: 'not_found', message: 'Nothing answers at this address: check the HR URL' };
+    return { ok: false, status: r.status, ms, result: 'error', message: 'HTTP ' + r.status + (detail ? ': ' + detail : '') };
+  } catch (e) {
+    return { ok: false, status: null, ms: Date.now() - started, result: 'unreachable', message: 'Could not reach the HR system: ' + e.message };
+  }
 }
 
-module.exports = { pushSalesToHrms, lastHrmsPush, hrmsConfig: config };
+function lastHrmsPush() {
+  const cfg = config();
+  return { enabled: cfg.enabled, jobOn: cfg.minutes > 0, url: cfg.url || null, companies: cfg.keys.map((k) => k.slug), everyMinutes: cfg.minutes, last: _last, running: _running };
+}
+
+module.exports = {
+  pushSalesToHrms, lastHrmsPush, hrmsConfig: config, testHrmsLink,
+  // used by routes/connections.js and the tests
+  LINK_KIND, LINKS_MIGRATION, LINKS_NOT_READY,
+  normalizeHrmsUrl, keyLast4, redactLink, envTargets, mergeTargets, loadWebLinks, resolveTargets, targetKey,
+};
