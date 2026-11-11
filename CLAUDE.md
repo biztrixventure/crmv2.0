@@ -992,6 +992,92 @@ big a file may be and how long it lives, for both surfaces. No migration —
   anything else, including a url from the OTHER bucket: it decides which key gets
   deleted, and a guess deletes a stranger's object.
 
+### Card data pulled out of chat + email (mig 350, applied 2026-11-08)
+Agents had pasted customers' card numbers / expiry / CVV into chat and internal
+email: **306 messages + 7 emails**. The operator wanted them gone but restorable
+on their say-so, so they are in a vault, not deleted.
+- **`card_vault.items`** (own schema -- PostgREST does not expose it; every
+  grant revoked from anon/authenticated/public; RLS on). One row per source
+  row: `pgp_pub_encrypt(to_jsonb(original)::text, <public key>)`.
+- **The database holds only the PUBLIC key** (`card_vault.keys`). It can lock,
+  never unlock. The private key is OFF the database with the operator
+  (fingerprint `B7A6886D…7D7145`, folder `Documents\BizTrix-card-vault` on
+  their PC, README inside). A restore = decrypt locally with gpg, write the
+  original columns back, stamp `restored_at`. Never put the private key in SQL.
+- Sources are hidden, not deleted: messages get `deleted_at` + NULL
+  body/body_html/attachments/mentions (the chat already renders a deleted
+  message); emails get a removal-notice body.
+- Detection (reuse it for a re-sweep): a stand-alone 13-19 digit run, card IIN
+  prefix, Luhn-valid; OR `cvv|cvc|cv2|cid` followed by 3-4 digits; OR an
+  `exp…` keyword followed by a date. Sliding Luhn windows over long glued digit
+  runs were tried and rejected -- ~10% of random digit strings pass Luhn.
+- Second sweep (same day, operator's call): EVERY message mentioning CVV, even
+  conversational ("need the CVV from the last recording") -- 29 more, vault
+  `reason='cvv mention'`, 342 items total. Match on body text with `data:`
+  URIs stripped: base64 images contain "cVV" by chance (2 emails did).
+- **Mig 351 (2026-11-09): the 335 vaulted MESSAGES are now DELETED outright**
+  (operator: "as if they never existed" -- no "deleted" placeholder). Before
+  the delete, the rows pointing at them were saved encrypted in `extra`
+  (7 reactions that cascade away, 9 replies whose `reply_to` goes NULL);
+  `removed_at` marks them. A restore re-INSERTs the row, then its reactions,
+  then re-points the replies. The 7 vaulted EMAILS followed the same day:
+  each was alone in its own thread, so the THREAD was deleted (cascading the
+  email + its recipient rows); `extra` holds {recipients, thread, replied_by}.
+  Restore order: thread, email, recipients. All 342 items now `removed_at`.
+- Same day, a deep check of Waqar Zafar (`waqar@vertex.com` + `wz@vertex.com`,
+  alias Steve Morris; 241 msgs sent, 327 DM msgs received, 53 emails) found NO
+  card data: his 20/30/80-digit runs split exactly into US phone numbers, and
+  every attachment (13 images/PDFs) had already expired out of storage.
+- Re-sweep 2026-11-10: 3 NEW card messages (all sent 2026-11-09, after the
+  first sweep) vaulted + deleted, `reason='card data (sweep 2026-11-10)'` --
+  345 items now. One had been deleted in chat by its sender, which only sets
+  `deleted_at`: **a user-deleted message still holds its full body**, so a
+  sweep must never filter `deleted_at IS NULL`. Known false positive left in
+  place: `6c5ea0db…` (2026-10-29 "CALLBACKS"), ~2,800 glued phone digits where
+  a 13-digit slice passes Luhn by chance. Cards keep arriving -- re-sweep
+  until a send-time block exists.
+- **Not covered**: card PHOTOS in chat image attachments (225 image messages
+  are not text-searchable), and Supabase's own backups/PITR, which keep the old
+  rows until they age out. Nothing stops an agent pasting a card again --
+  there is no send-time block yet.
+
+### A transfer that carries a sale is never deleted (mig 352, applied 2026-11-12)
+A closed_won sale (Doretha Prince, `000002GS`, closer Zarar Ahmed) vanished
+2026-11-11 20:21 UTC. Nobody deleted the SALE: the fronter pressed **Confirm**
+on his still-pending dialer card, `POST /vicidial/pending/:id/confirm` judged
+the card a duplicate of ANOTHER fronter's manual transfer for the same phone,
+deleted the card, and `sales.transfer_id ON DELETE CASCADE` took the sale.
+`DELETE /transfers/:id` had a "linked to a sale" 409 -- the confirm path did
+not, and one guard in one route is a guard every other path has to remember.
+- **The rule lives in the database now**: `sales.transfer_id` is
+  `ON DELETE NO ACTION`. Deleting a transfer whose sale still exists fails with
+  23503 from ANY path. NO ACTION, not RESTRICT: it is checked at end of
+  statement, so an upload-batch or company delete that removes the transfer AND
+  its sale together (both cascade from those parents) still works.
+- Confirm-merge folds a card away only if: no closer has claimed it, it has no
+  sale, and the manual transfer is the SAME fronter's (`created_by`). It
+  deletes first and copies the lead code only on success; a refused delete
+  falls through to a normal confirm.
+- **End users cannot delete.** The "you created it" bypass is gone from
+  `DELETE /sales/:id` and `DELETE /transfers/:id`: `delete_sale` /
+  `delete_transfer` (role or per-user override) or compliance/superadmin only.
+  StaffShell's fronter "Delete this lead" button had NO gate -- it is now
+  `hasPermission('delete_transfer')`. RLS already let only service_role delete.
+- `.single()` on "does this transfer have a sale" returns data:null when there
+  are TWO (a resell) and waved the delete through -- use `.limit(1)`.
+- **A deleted sale/transfer is recoverable**: `audit_field_changes` writes a full
+  `to_jsonb(OLD)` snapshot to `field_audit_log` on DELETE (with
+  `changed_by=NULL` -- it cannot know who). Restore = insert the non-generated
+  columns from `jsonb_populate_record` (sales has generated `policy_number`,
+  `normalized_phone`), transfer first; triggers re-link QA rows and re-stamp
+  VIN supersession. NOT snapshotted (gone with a cascade): policy_events,
+  transfer_assignments, call_dispositions, disposition_actions, qa_assignments,
+  payment_followups, sale_recording_confirmations, post_date_attempts.
+- Restored 2026-11-12 with the transfer as `vicidial_pending=false`; its audit
+  INSERT rows carry `source='restore 2026-11-12: lost to vicidial
+  confirm-merge bug'`. Ahmed Ali's manual transfer `a5ed82f7` for the same
+  phone was left in place (no closer, no sale, now carries `TMC17957562`).
+
 ### IP access control (mig 319, applied 2026-09-15)
 Which networks each user may use the CRM from. Ships OFF, and everyone is `anywhere`. README → "IP access control" has the operator steps.
 - **Mode lives in `user_ip_access` (sidecar), NEVER on `user_profiles`.** That table has RLS `users_can_update_own_profile`
