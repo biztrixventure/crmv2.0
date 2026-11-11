@@ -2349,18 +2349,18 @@ router.delete(
       .from('sales').select('*').eq('id', id).single();
     if (fetchError || !existing) return res.status(404).json({ error: 'Sale not found' });
 
-    const isCreator = existing.created_by === userId || existing.closer_id === userId;
-    const superadmin = userRole === 'superadmin';
     const isCompliance = userRole === 'compliance_manager' || userRole === 'superadmin';
-    // Toggleable per user: delete_sale (role grant honored; per-user override
-    // wins). Creators may delete their own; compliance/superadmin always pass.
-    // Migration 131 keeps current role access intact.
-    const canDelete = superadmin || isCreator || isCompliance || await hasPermission(userId, req.user.company_id, 'delete_sale');
+    // delete_sale only (role grant, or a per-user override); compliance and
+    // superadmin always pass. There is NO "your own sale" bypass any more:
+    // until 2026-11-12 a closer could delete any sale they had keyed, which is
+    // the end-user delete access the operator revoked. A deleted sale is still
+    // restorable from its field_audit_log DELETE snapshot.
+    const canDelete = isCompliance || await hasPermission(userId, req.user.company_id, 'delete_sale');
     if (!canDelete) return res.status(403).json({ error: 'Permission denied' });
 
-    // Company scope guard: a non-creator, non-compliance deleter can only delete
-    // sales in their own company (compliance + superadmin see all).
-    if (!isCreator && !isCompliance && existing.company_id !== req.user.company_id) {
+    // Company scope guard: a non-compliance deleter can only delete sales in
+    // their own company (compliance + superadmin see all).
+    if (!isCompliance && existing.company_id !== req.user.company_id) {
       return res.status(403).json({ error: 'Sale not within your company scope' });
     }
 

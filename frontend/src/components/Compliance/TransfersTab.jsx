@@ -146,7 +146,7 @@ const TransfersTab = ({ companyList, initCompany = '', initStatus = '' }) => {
   // Superadmin cross-company management (backend allows superadmin to bypass scope).
   useEffect(() => { setMgStatus(detail?.status || ''); }, [detail]);
   const doDeleteTransfer = async () => {
-    if (!detail || !window.confirm('Delete this transfer? Any linked sale is removed too (cascade). This cannot be undone.')) return;
+    if (!detail || !window.confirm('Delete this transfer? A transfer that carries a sale cannot be deleted — delete or move the sale first. This cannot be undone.')) return;
     setMgBusy(true);
     try { await client.delete(`transfers/${detail.id}`); toast.success('Transfer deleted'); setDetail(null); load(); }
     catch (e) { toast.error(e.response?.data?.error || 'Delete failed'); }

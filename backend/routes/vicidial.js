@@ -1445,16 +1445,32 @@ api.post('/pending/:id/confirm', asyncHandler(async (req, res) => {
 
   const norm = normPhone(merged.cli_number || merged.Phone || merged.customer_phone || '');
 
-  // DEDUP (the "I hand-typed it AND clicked Confirm" double): if a real
-  // (non-pending) transfer for this same phone + company already exists — the
-  // fronter created it manually instead of confirming — don't make a second one.
-  // Fold this pending row's dialer code into that transfer and drop the pending.
-  if (norm) {
+  // DEDUP (the "I hand-typed it AND clicked Confirm" double): if THIS fronter
+  // already typed a real (non-pending) transfer for the same phone + company,
+  // don't make a second one — fold this pending row's dialer code into it and
+  // drop the pending row.
+  //
+  // Three conditions, each added after 2026-11-11, when this block deleted a
+  // closed_won sale (Doretha Prince, 000002GS): a closer had claimed the
+  // pending card and sold on it, ANOTHER fronter had typed a manual transfer
+  // for the same phone, and the card's owner pressed Confirm 48 min later.
+  //   1. Only the SAME fronter's own manual transfer is a duplicate of their
+  //      card. Someone else's transfer for that phone is a different record.
+  //   2. A card a closer has already claimed (assigned_closer_id) is a worked
+  //      lead, not a duplicate — confirm it normally, never fold it away.
+  //   3. A card that carries a sale is never deleted. Mig 352 enforces this in
+  //      the database too (sales.transfer_id ON DELETE NO ACTION), so a failed
+  //      delete falls through to the normal confirm below instead of answering
+  //      "merged" for a row that still exists.
+  if (norm && !tr.assigned_closer_id) {
+    const { data: hasSale } = await supabaseAdmin
+      .from('sales').select('id').eq('transfer_id', tr.id).limit(1);
     const since = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
-    const { data: dupe } = await supabaseAdmin
+    const { data: dupe } = hasSale?.length ? { data: null } : await supabaseAdmin
       .from('transfers')
       .select('id, vicidial_vendor_code')
       .eq('company_id', tr.company_id)
+      .eq('created_by', tr.created_by)
       .eq('normalized_phone', norm)
       .neq('vicidial_pending', true)
       .neq('id', tr.id)
@@ -1462,14 +1478,17 @@ api.post('/pending/:id/confirm', asyncHandler(async (req, res) => {
       .order('created_at', { ascending: false })
       .limit(1).maybeSingle();
     if (dupe) {
-      if (!dupe.vicidial_vendor_code && tr.vicidial_vendor_code) {
-        await supabaseAdmin.from('transfers')
-          .update({ vicidial_vendor_code: tr.vicidial_vendor_code }).eq('id', dupe.id);
-        await reconcileQueuedDispoForTransfer({ id: dupe.id, company_id: tr.company_id }, norm);
+      const { error: delErr } = await supabaseAdmin.from('transfers').delete().eq('id', tr.id);
+      if (!delErr) {
+        if (!dupe.vicidial_vendor_code && tr.vicidial_vendor_code) {
+          await supabaseAdmin.from('transfers')
+            .update({ vicidial_vendor_code: tr.vicidial_vendor_code }).eq('id', dupe.id);
+          await reconcileQueuedDispoForTransfer({ id: dupe.id, company_id: tr.company_id }, norm);
+        }
+        logger.success('VICIDIAL_XFER', `Confirm merged pending ${tr.id} into existing manual transfer ${dupe.id} (no duplicate)`);
+        return res.json({ transfer: { id: dupe.id }, merged: true, message: 'Merged with the transfer you already created — no duplicate.' });
       }
-      await supabaseAdmin.from('transfers').delete().eq('id', tr.id);
-      logger.success('VICIDIAL_XFER', `Confirm merged pending ${tr.id} into existing manual transfer ${dupe.id} (no duplicate)`);
-      return res.json({ transfer: { id: dupe.id }, merged: true, message: 'Merged with the transfer you already created — no duplicate.' });
+      logger.warn('VICIDIAL_XFER', `Confirm kept pending ${tr.id}: could not fold it into ${dupe.id} (${delErr.code || ''} ${delErr.message})`);
     }
   }
 

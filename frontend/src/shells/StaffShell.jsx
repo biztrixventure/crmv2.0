@@ -2383,7 +2383,9 @@ const StaffShell = () => {
 
                           <div className="flex items-center justify-between mt-3 pt-3" style={{ borderTop: '1px solid var(--color-border)' }}>
                             <p className="text-xs text-text-tertiary">{fmtDateET(t.created_at)}</p>
-                            {t.status !== 'completed' && !t.sale_id && (
+                            {/* delete_transfer only: the server no longer lets a fronter
+                                delete a transfer just because they created it (2026-11-12). */}
+                            {hasPermission('delete_transfer') && t.status !== 'completed' && !t.sale_id && (
                               <button onClick={e => { e.stopPropagation(); if (window.confirm('Delete this lead? This cannot be undone.')) { deleteTransfer(t.id).catch(err => toastError(err, 'Failed to delete lead')); } }}
                                 className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold transition-all hover:bg-error-50"
                                 style={{ color: 'var(--color-error-600)', border: '1px solid var(--color-error-200)' }}>

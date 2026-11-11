@@ -1522,17 +1522,18 @@ router.delete('/:id', asyncHandler(async (req, res) => {
 
   if (fetchErr || !existing) return res.status(404).json({ error: 'Transfer not found' });
 
-  const isCreator = existing.created_by === userId;
   const superadmin = userRole === 'superadmin';
-  // Toggleable per user: delete_transfer (role grant honored; per-user override
-  // wins). Creators may always delete their own. Migration 130 keeps current
-  // role access intact.
-  const canDelete = superadmin || isCreator || await hasPermission(userId, req.user.company_id, 'delete_transfer');
+  // delete_transfer only (role grant, or a per-user override in User Control
+  // Center). There is NO "you created it" bypass any more: until 2026-11-12 any
+  // fronter could delete their own transfer, which is exactly the end-user
+  // delete access the operator revoked. Grant delete_transfer to a person if
+  // they genuinely need it.
+  const canDelete = superadmin || await hasPermission(userId, req.user.company_id, 'delete_transfer');
   if (!canDelete) return res.status(403).json({ error: 'Permission denied' });
 
-  // Company scope guard for non-creator, non-superadmin deleters (mirrors PUT).
+  // Company scope guard for non-superadmin deleters (mirrors PUT).
   // Prevents deleting another company's transfer by id.
-  if (!isCreator && !superadmin) {
+  if (!superadmin) {
     const userCompanyId = req.user.company_id;
     const isCloserSide = ['closer_manager', 'compliance_manager'].includes(userRole);
     if (isCloserSide) {
@@ -1553,15 +1554,21 @@ router.delete('/:id', asyncHandler(async (req, res) => {
     }
   }
 
-  const { data: linkedSale } = await supabaseAdmin
+  // A transfer that carries a sale is never deleted. limit(1), NOT .single():
+  // .single() errors -- and hands back data:null -- the moment a transfer has
+  // TWO sales (a resell), which made this check pass for exactly the
+  // transfers with the most at stake. Mig 352 also enforces it in the database
+  // (sales.transfer_id ON DELETE NO ACTION), so the 23503 below is the backstop.
+  const { data: linkedSales, error: saleErr } = await supabaseAdmin
     .from('sales')
     .select('id')
     .eq('transfer_id', id)
-    .single();
-
-  if (linkedSale) return res.status(409).json({ error: 'Cannot delete a transfer linked to a sale' });
+    .limit(1);
+  if (saleErr) return res.status(500).json({ error: saleErr.message });
+  if (linkedSales?.length) return res.status(409).json({ error: 'Cannot delete a transfer linked to a sale' });
 
   const { error: delErr } = await supabaseAdmin.from('transfers').delete().eq('id', id);
+  if (delErr?.code === '23503') return res.status(409).json({ error: 'Cannot delete a transfer linked to a sale' });
   if (delErr) return res.status(500).json({ error: delErr.message });
 
   res.json({ message: 'Transfer deleted' });
