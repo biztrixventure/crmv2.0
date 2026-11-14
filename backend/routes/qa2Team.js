@@ -21,6 +21,7 @@ const { applySort } = require('../utils/sortHelper');
 const { applyColumnFilters, resolveColumnAccess } = require('../utils/columnFilter');
 const { QA2_CALL_COLUMNS } = require('../config/recordColumns');
 const logger = require('../utils/logger');
+const { excludePostDate } = require('../utils/postDate');
 
 async function requireManager(req, res) {
   const scope = await resolveQa2Scope(req);
@@ -438,9 +439,12 @@ router.get('/day-calls', asyncHandler(async (req, res) => {
     supabaseAdmin.from('transfers').select('id', { count: 'exact', head: true })
       .eq('company_id', company_id).eq('dialer_ghost', false)
       .gte('created_at', start).lte('created_at', end),
-    supabaseAdmin.from('sales').select('id', { count: 'exact', head: true })
+    // A post-date (PDS) is not a closed sale until it is charged -- and QA2's
+    // Closed method only takes dialer dispo SALE, so excluding it here keeps
+    // TRA - Closed = Unclosed true.
+    excludePostDate(supabaseAdmin.from('sales').select('id', { count: 'exact', head: true })
       .eq('company_id', company_id)
-      .gte('created_at', start).lte('created_at', end),
+      .gte('created_at', start).lte('created_at', end)),
   ]);
 
   res.json({

@@ -33,6 +33,10 @@ const router = express.Router();
 // their DP Status, Payout Status and Paid to Partner columns permanently blank
 // and unsettable. closed_won IS the approved state, so accept either.
 const APPROVED_FILTER = 'compliance_reviewed_at.not.is.null,status.eq.closed_won';
+// …and an un-charged post-date (PDS) is never payout-eligible, approved or not:
+// no card has been charged, so there is nothing to pay out yet. The same rule
+// keeps it out of the payout KPI tiles (mig 353) and the paid-flag counts.
+const { excludePostDate } = require('../utils/postDate');
 
 const PAYOUT_STATUSES = ['pending', 'paid', 'reverted'];
 const PAYOUT_CONFIRMED_STATUSES = ['pending', 'yes', 'no'];
@@ -86,14 +90,14 @@ router.patch('/bulk', asyncHandler(async (req, res) => {
   let updated = 0;
   for (let i = 0; i < ids.length; i += BULK_CHUNK) {
     const chunk = ids.slice(i, i + BULK_CHUNK);
-    const { data, error } = await supabaseAdmin
+    const { data, error } = await excludePostDate(supabaseAdmin
       .from('sales')
       .update(updates)
       .in('id', chunk)
       // Same eligibility gate as the single-row PATCH — a row that was never
-      // approved silently stays untouched rather than erroring the whole
-      // batch, so a mixed selection just reports it as skipped.
-      .or(APPROVED_FILTER)
+      // approved (or is still a post-date) silently stays untouched rather
+      // than erroring the whole batch, so a mixed selection reports it skipped.
+      .or(APPROVED_FILTER))
       .select('id');
     if (error) return res.status(500).json({ error: error.message, updated });
     updated += (data || []).length;
@@ -129,15 +133,15 @@ router.patch('/:id', asyncHandler(async (req, res) => {
   updates.payout_updated_at = new Date().toISOString();
   updates.payout_updated_by = req.user.id;
 
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await excludePostDate(supabaseAdmin
     .from('sales')
     .update(updates)
     .eq('id', id)
-    .or(APPROVED_FILTER)
+    .or(APPROVED_FILTER))
     .select('id, payout_status, payout_confirmed, paid_to_closer, paid_to_partner, payout_updated_at')
     .maybeSingle();
   if (error) return res.status(500).json({ error: error.message });
-  if (!data) return res.status(404).json({ error: 'Sale not found, or it has never been compliance-approved' });
+  if (!data) return res.status(404).json({ error: 'Sale not found, never compliance-approved, or still a post-date that has not been charged' });
 
   res.json({ sale: data });
 }));

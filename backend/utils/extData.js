@@ -12,12 +12,13 @@
 // ============================================================================
 const { supabaseAdmin } = require('../config/database');
 const { upper } = require('./integrations');
+const { isPostDateDispo } = require('./postDate');
 
 const SALE_COLS = [
   'id', 'company_id', 'status', 'sale_date', 'created_at', 'updated_at', 'reference_no', 'client_name', 'plan',
   'down_payment', 'monthly_payment', 'closer_id', 'fronter_id', 'vicidial_agent', 'transfer_id',
   'compliance_reviewed_at', 'cancellation_date', 'cancellation_reason_key', 'chargeback_date', 'chargeback_amount',
-  'superseded_at',
+  'superseded_at', 'closer_disposition', 'charge_at',
 ].join(', ');
 const SALE_PII_COLS = 'customer_name, customer_phone';
 
@@ -87,6 +88,11 @@ async function shapeSales(rows, { pii = false } = {}) {
       chargeback_date: s.chargeback_date,
       chargeback_amount: s.chargeback_amount,
       superseded_at: s.superseded_at,
+      // A post-date (PDS) is a reminder to charge a card later, NOT a sale. It
+      // stays status 'open' until charged, so status alone cannot tell it from
+      // a real open sale -- this flag can. charge_at = when it is due.
+      is_post_date: isPostDateDispo(s.closer_disposition),
+      charge_at: s.charge_at ?? null,
     };
     if (pii) {
       out.customer_name = s.customer_name ?? null;

@@ -16,6 +16,7 @@ const { requireToolAccess } = require('../utils/featureGate');
 const notifications = require('../utils/notificationService');
 const { getBatchRules, isDialerRecipient, ruleExclusions, summarize } = require('../utils/batchRules');
 const { etDateToUtcStart, etDateToUtcEnd } = require('../utils/etUtils');
+const { excludePostDate } = require('../utils/postDate');
 
 // Roles allowed to distribute a result set as a batch (analyzer access already
 // gates the router; readonly_admin can view but not send).
@@ -324,9 +325,10 @@ async function salesCountByUuid() {
   const map = new Map();
   let complete = true;
   for (let from = 0; from < 5_000_000; from += 1000) {
-    const { data, error } = await supabaseAdmin
+    // Not 'open', and not a post-date: a cancelled PDS was never a sale either.
+    const { data, error } = await excludePostDate(supabaseAdmin
       .from('sales').select('customer_uuid').not('customer_uuid', 'is', null)
-      .neq('status', 'open').range(from, from + 999);
+      .neq('status', 'open')).range(from, from + 999);
     if (error) { complete = false; console.error('[data-analyzer] salesCountByUuid page error', { from, message: error.message }); break; }
     for (const r of (data || [])) map.set(r.customer_uuid, (map.get(r.customer_uuid) || 0) + 1);
     if (!data || data.length < 1000) break;

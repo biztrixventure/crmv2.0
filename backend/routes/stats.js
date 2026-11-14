@@ -711,8 +711,11 @@ router.get('/team-trends', asyncHandler(async (req, res) => {
   const [trs, sls] = await Promise.all([
     pageAll(() => scopeT(supabaseAdmin.from('transfers').select('created_at, created_by')
       .gte('created_at', windowStart).lte('created_at', windowEnd)).order('created_at', { ascending: true })),
-    pageAll(() => scopeS(supabaseAdmin.from('sales').select('sale_date, created_at, status, closer_id, fronter_id')
-      .gte('created_at', windowStart).lte('created_at', windowEnd)).order('created_at', { ascending: true })),
+    // excludePostDate: an un-charged post-date (PDS) is a reminder, not a sale.
+    // It joins the count on the day it is charged -- the charge flips its
+    // disposition to "Sale" and moves sale_date to that day.
+    pageAll(() => excludePostDate(scopeS(supabaseAdmin.from('sales').select('sale_date, created_at, status, closer_id, fronter_id')
+      .gte('created_at', windowStart).lte('created_at', windowEnd))).order('created_at', { ascending: true })),
   ]);
 
   const dayOf = etDayOf;
@@ -803,8 +806,9 @@ router.get('/user-performance/:userId', asyncHandler(async (req, res) => {
 
   const sinceUtc = new Date(Date.now() - days * 86400000).toISOString();
   const [{ data: closerSales }, { data: fronterSales }, { data: xCreated }, { data: xAssigned }] = await Promise.all([
-    supabaseAdmin.from('sales').select('sale_date, created_at, status, cancellation_date').eq('closer_id', targetId).gte('created_at', sinceUtc).limit(8000),
-    supabaseAdmin.from('sales').select('sale_date, created_at, status, cancellation_date').eq('fronter_id', targetId).gte('created_at', sinceUtc).limit(8000),
+    // Un-charged post-dates are not sales (excludePostDate, NULL-safe).
+    excludePostDate(supabaseAdmin.from('sales').select('sale_date, created_at, status, cancellation_date').eq('closer_id', targetId).gte('created_at', sinceUtc)).limit(8000),
+    excludePostDate(supabaseAdmin.from('sales').select('sale_date, created_at, status, cancellation_date').eq('fronter_id', targetId).gte('created_at', sinceUtc)).limit(8000),
     supabaseAdmin.from('transfers').select('created_at').eq('created_by', targetId).neq('vicidial_pending', true).eq('dialer_ghost', false).gte('created_at', sinceUtc).limit(8000),
     supabaseAdmin.from('transfers').select('created_at').eq('assigned_closer_id', targetId).neq('vicidial_pending', true).eq('dialer_ghost', false).gte('created_at', sinceUtc).limit(8000),
   ]);
@@ -913,8 +917,11 @@ router.get('/agent-performance', asyncHandler(async (req, res) => {
   });
 
   const sales = await fetchAll(() => {
-    let q = supabaseAdmin.from('sales')
-      .select('fronter_id, closer_id, status, monthly_payment, down_payment, sale_date, created_at')
+    // Un-charged post-dates (PDS) are not sales: excluded from sales, approved,
+    // pending AND both revenue figures, so conversion never credits a lead
+    // whose card has not been charged yet.
+    let q = excludePostDate(supabaseAdmin.from('sales')
+      .select('fronter_id, closer_id, status, monthly_payment, down_payment, sale_date, created_at'))
       .order('created_at', { ascending: true });
     if (closerSide) q = q.in('closer_id', memberIds);
     else if (companyId) q = q.eq('company_id', companyId);

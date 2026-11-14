@@ -679,7 +679,9 @@ const StaffShell = () => {
     if (!user?.company_id) return;
     setSalesTabLoading(true);
     try {
-      const params = { company_id: user.company_id, page: salesPage, limit: PAGE_SIZE, date_from, date_to };
+      // exclude_post_date: an un-charged post-date (PDS) is a reminder, not a
+      // sale — same as ManagerShell's Team Sales and the closer's own list.
+      const params = { company_id: user.company_id, page: salesPage, limit: PAGE_SIZE, date_from, date_to, exclude_post_date: true };
       if (salesStatus) params.status  = salesStatus;
       if (salesAgent)  params.user_id = salesAgent;
       if (salesSearch) params.search  = salesSearch;

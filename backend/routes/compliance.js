@@ -11,7 +11,7 @@ const { applyColumnFilters, resolveColumnAccess, parseFilters } = require('../ut
 const { COMPLIANCE_SALE_COLUMNS, TRANSFER_COLUMNS, CALLBACK_COLUMNS } = require('../config/recordColumns');
 const { onSalesActivityChanged: spiffOnSalesChanged } = require('../utils/spiffMetrics');
 const { readonlyAllowedCompanyIds, scopeToCompanies, companyInScope, maskForReadonly, canViewRecordings } = require('../utils/readonlyGovernance');
-const { isPostDateDispo } = require('../utils/postDate');
+const { isPostDateDispo, excludePostDate } = require('../utils/postDate');
 const { statusCountsExact } = require('../utils/statusCounts');
 
 const { getConfig } = require('../utils/businessConfig');
@@ -586,11 +586,13 @@ router.get('/companies/:id/report', asyncHandler(async (req, res) => {
   const bySaleDate  = (q) => { if (date_from) q = q.gte('sale_date', date_from); if (date_to) q = q.lte('sale_date', date_to); return q; };
   const byCreatedAt = (q) => { if (date_from) q = q.gte('created_at', etDateToUtcStart(date_from)); if (date_to) q = q.lte('created_at', etDateToUtcEnd(date_to)); return q; };
 
-  // Sales for this company.
+  // Sales for this company. Un-charged post-dates (PDS) are not sales: they
+  // stay out of every count below (total, approved, agents, clients) until the
+  // charge turns them into one.
   let sq = isFronter
     ? supabaseAdmin.from('sales').select('id, status, client_name, closer_id, fronter_id, is_resell, cancellation_date, transfers!inner(company_id)').eq('transfers.company_id', id)
     : supabaseAdmin.from('sales').select('id, status, client_name, closer_id, fronter_id, is_resell, cancellation_date').eq('company_id', id);
-  const { data: salesData } = await bySaleDate(sq).limit(20000);
+  const { data: salesData } = await bySaleDate(excludePostDate(sq)).limit(20000);
   const S = salesData || [];
 
   // Transfers this company owns (fronter) / worked (closer).
@@ -1238,8 +1240,10 @@ router.get('/sales', asyncHandler(async (req, res) => {
         // the generic update route without ever getting compliance_reviewed_at,
         // and counting it as approved in the list while dropping it here is
         // what made the payout tiles disagree with MATCHES (mig 309).
-        let q = supabaseAdmin.from('sales').select('id', { count: 'exact', head: true })
-          .or('compliance_reviewed_at.not.is.null,status.eq.closed_won')
+        // excludePostDate: a post-date is not money owed until it is charged —
+        // same rule as payout_kpis (mig 353) and the payout write gate.
+        let q = excludePostDate(supabaseAdmin.from('sales').select('id', { count: 'exact', head: true })
+          .or('compliance_reviewed_at.not.is.null,status.eq.closed_won'))
           .eq(field, true);
         if (kpiCompanyIds)  q = q.in('company_id', kpiCompanyIds);
         if (kpiClientNames) q = q.in('client_name', kpiClientNames);

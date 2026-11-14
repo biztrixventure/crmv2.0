@@ -22,6 +22,7 @@ const express = require('express');
 const { supabaseAdmin } = require('../config/database');
 const logger = require('../utils/logger');
 const { requireScope, scopedCompanies } = require('../middleware/integrationKey');
+const { excludePostDate } = require('../utils/postDate');
 const {
   hasScope, parsePaging, parseTime, encodeCursor, badRequest, upper, isMissingTable, NOT_READY,
 } = require('../utils/integrations');
@@ -200,6 +201,10 @@ router.get('/sales', requireScope('sales.read'), wrap(async (req, res) => {
   const to = parseTime(req.query.to, 'to');
   const updatedSince = parseTime(req.query.updated_since, 'updated_since');
   const statuses = req.query.status ? String(req.query.status).split(',').map((s) => s.trim()).filter(Boolean) : null;
+  // Un-charged post-dates (PDS) are left out by default: a consumer counting
+  // sales (incentives, targets) must not count a card nobody has charged.
+  // ?include_post_date=true brings them back, flagged is_post_date:true.
+  const includePostDate = ['1', 'true', 'yes'].includes(String(req.query.include_post_date || '').toLowerCase());
   const pii = hasScope(req.integration.scopes, 'sales.read_pii');
   const cols = pii ? `${SALE_COLS}, ${SALE_PII_COLS}` : SALE_COLS;
   const sortCol = updatedSince ? 'updated_at' : 'created_at';
@@ -211,6 +216,7 @@ router.get('/sales', requireScope('sales.read'), wrap(async (req, res) => {
     if (to) q = q.lte('sale_date', to.slice(0, 10));
     if (updatedSince) q = q.gte('updated_at', updatedSince);
     if (statuses) q = q.in('status', statuses);
+    if (!includePostDate) q = excludePostDate(q);
     return q;
   }, sortCol, paging);
 

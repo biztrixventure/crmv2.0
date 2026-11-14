@@ -37,6 +37,7 @@
 // ============================================================================
 const { supabaseAdmin } = require('../config/database');
 const logger = require('./logger');
+const { excludePostDate } = require('./postDate');
 const { isMissingTable } = require('./integrations');
 
 const TZ = 'Asia/Karachi';
@@ -92,9 +93,11 @@ async function inChunks(ids, fn) {
 /** The approved sales in the window, as HRMS sale items. */
 async function collect(win) {
   const sales = await pageAll(() =>
-    supabaseAdmin
+    // closed_won AND not a post-date: an incentive is never paid on a card that
+    // has not been charged, even if a post-date was approved early.
+    excludePostDate(supabaseAdmin
       .from('sales')
-      .select('id, sale_date, reference_no, closer_id, fronter_id, transfer_id, vicidial_agent, superseded_at')
+      .select('id, sale_date, reference_no, closer_id, fronter_id, transfer_id, vicidial_agent, superseded_at'))
       .eq('status', 'closed_won')
       .gte('sale_date', win.from)
       .lte('sale_date', win.to)

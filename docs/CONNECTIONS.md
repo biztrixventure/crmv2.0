@@ -117,6 +117,14 @@ Every list answers:
 - `updated_since=<ISO>`: only rows updated since then, ordered by `updated_at`.
   Use it for incremental sync: save the newest `updated_at` you saw and pass it
   next time.
+- **Post-dates (PDS) are left out of `/sales` by default.** A post-date is a
+  reminder to charge a card on a later day, not a sale, and it stays status
+  `open` until it is charged. Charging turns it into a normal sale, and from
+  then on it is returned like any other. Pass `include_post_date=true` to get
+  the un-charged ones too. Every sale carries `is_post_date` (true for an
+  un-charged post-date) and `charge_at` (when it is due), so you can tell them
+  apart. The `sale.sold` webhook fires when a post-date is charged, not when
+  it is keyed; keying one fires `sale.post_dated`.
 
 People are given as `{ "user_id", "vicidial_agent_ids": ["ABC123"] }`.
 VICIdial users are uppercase. They are how the HRMS and the QA platform
