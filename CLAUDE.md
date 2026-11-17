@@ -1082,6 +1082,28 @@ not, and one guard in one route is a guard every other path has to remember.
   confirm-merge bug'`. Ahmed Ali's manual transfer `a5ed82f7` for the same
   phone was left in place (no closer, no sale, now carries `TMC17957562`).
 
+### A lead is searched by the WHOLE number (2026-11-17)
+The agent dashboard's "Search Lead" box (`components/Closer/PhoneSearch.jsx` ->
+`GET /transfers/search-by-phone`) substring-matched (`ilike %q%`) from 3
+characters across EVERY fronter company and returned up to 50 full transfer rows
+(`select('*')`, the whole form_data). "555" alone reached 571 leads -- a phone
+book of the shared pool.
+- **Everyone but compliance / superadmin / readonly_admin must send all 10
+  digits** (11 with a leading 1 is accepted), matched EXACTLY:
+  `normalized_phone.eq` OR `form_data->>customer_phone/Phone.eq`. Anything
+  shorter answers `400 {code:'FULL_NUMBER_REQUIRED'}`. The investigating roles
+  keep the 3+ substring search.
+- `normalized_phone` is filled on 106,009 of 106,014 transfers (the 5 without
+  one have no phone) and indexed; for 20 sampled numbers exact matching found
+  all 64 leads and missed 0 the old search found.
+- The server is the gate; the screen only says it first (`FULL_DIGITS`).
+- Left alone, deliberately: `/vicidial/closer-assignable` (the attach-a-
+  disposition picker) still partial-searches -- but it lists the last 36 h of
+  linked leads (max 40) even with an EMPTY box, by design, so the search adds
+  nothing. Other `ilike %q%` phone filters (sales list, callbacks, own
+  transfers, `/sales/search`, Lead Intelligence) only narrow records the caller
+  can already see in full.
+
 ### IP access control (mig 319, applied 2026-09-15)
 Which networks each user may use the CRM from. Ships OFF, and everyone is `anywhere`. README → "IP access control" has the operator steps.
 - **Mode lives in `user_ip_access` (sidecar), NEVER on `user_profiles`.** That table has RLS `users_can_update_own_profile`

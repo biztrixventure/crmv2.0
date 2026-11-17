@@ -9,6 +9,9 @@ import ManualEntryModal from './ManualEntryModal';
 import CustomerHistoryBanner from './CustomerHistoryBanner';
 import ThemedDate from '../UI/ThemedDate';
 
+// A lead is looked up by the WHOLE number the customer is calling from.
+const FULL_DIGITS = 10;
+
 // Case-insensitive scan of form_data KEYS (not labels — closer search has no
 // access to this company's form_fields config, only the raw JSONB a fronter's
 // form wrote). Same convention the rest of the app already relies on for
@@ -597,8 +600,12 @@ const PhoneSearch = ({ onCreateSale, companyTimezone, refreshTrigger = 0, onRese
       .catch(() => {});
   }, []);
 
+  // The FULL number, never a fragment (2026-11-17): 3 digits used to list up to
+  // 50 customers from every fronter company. The server enforces the same rule
+  // (transfers.js search-by-phone, FULL_NUMBER_REQUIRED) -- this only says so
+  // before the round trip.
   const runSearch = useCallback(async (q) => {
-    if (q.length < 3) return;
+    if (q.length !== FULL_DIGITS) return;
     setLoading(true);
     try {
       const res = await client.get('transfers/search-by-phone', { params: { phone: q } });
@@ -621,7 +628,7 @@ const PhoneSearch = ({ onCreateSale, companyTimezone, refreshTrigger = 0, onRese
 
   // Re-run last search when refreshTrigger increments (e.g. after sale created)
   useEffect(() => {
-    if (refreshTrigger > 0 && lastQuery.current.length >= 3 && results !== null) {
+    if (refreshTrigger > 0 && lastQuery.current.length === FULL_DIGITS && results !== null) {
       runSearch(lastQuery.current);
     }
   }, [refreshTrigger]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -629,7 +636,7 @@ const PhoneSearch = ({ onCreateSale, companyTimezone, refreshTrigger = 0, onRese
   const handleSearch = async (e) => {
     e.preventDefault();
     const q = phone.trim();
-    if (q.length < 3) { setError('Enter at least 3 characters.'); return; }
+    if (q.length !== FULL_DIGITS) { setError('Enter the full 10-digit phone number.'); return; }
     lastQuery.current = q;
     setError('');
     setResults(null);
@@ -678,7 +685,7 @@ const PhoneSearch = ({ onCreateSale, companyTimezone, refreshTrigger = 0, onRese
                and the digit-strip below would then drop to 6 digits. The
                slice(0, 10) on the stripped value is the real cap. */
             onChange={e => setPhone(String(e.target.value).replace(/\D/g, '').slice(0, 10))}
-            placeholder="Phone number…"
+            placeholder="Full 10-digit phone number…"
             className="input pl-8 w-full text-sm h-9"
           />
         </div>

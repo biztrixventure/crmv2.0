@@ -533,6 +533,26 @@ router.get('/search-by-phone', asyncHandler(async (req, res) => {
   // competitor company holds it (that detail stays compliance-only).
   const fronterSide = !globalView && !closerSide;
 
+  // THE WHOLE NUMBER, OR NOTHING (2026-11-17). This used to substring-match
+  // (`ilike %q%`) from 3 characters, so a closer typing "555" got 50 full lead
+  // records -- name, address, car, every form field -- from EVERY fronter
+  // company: a phone book of the whole shared pool, three keystrokes at a time.
+  // An agent looks a customer up because that customer is on the line, so they
+  // have the full number; anything shorter is browsing. Everyone except the
+  // investigating roles (compliance / superadmin / readonly) must now send all
+  // 10 digits, and it is matched EXACTLY on normalized_phone (indexed; filled on
+  // 106,009 of 106,014 transfers -- the 5 without one have no phone at all).
+  // The screen enforces the same rule (PhoneSearch.jsx), but this is the gate:
+  // the API is reachable without the screen.
+  const digitsOnly = String(phone).replace(/\D/g, '');
+  const fullNumber = digitsOnly.length === 11 && digitsOnly.startsWith('1') ? digitsOnly.slice(1) : digitsOnly;
+  if (!globalView && fullNumber.length !== 10) {
+    return res.status(400).json({ error: 'Enter the full 10-digit phone number.', code: 'FULL_NUMBER_REQUIRED' });
+  }
+  const phoneMatch = globalView
+    ? `form_data->>customer_phone.ilike.%${q}%,form_data->>Phone.ilike.%${q}%`
+    : `normalized_phone.eq.${fullNumber},form_data->>customer_phone.eq.${fullNumber},form_data->>Phone.eq.${fullNumber}`;
+
   // Resolve which fronter companies this caller can see.
   // NOTE: every active fronter company, by design — fronter↔closer linking is
   // implicit across the estate (see getCounterpartCompanyIds in models/helpers)
@@ -581,7 +601,7 @@ router.get('/search-by-phone', asyncHandler(async (req, res) => {
     .from('transfers')
     .select('*')
     .in('company_id', fronterCompanyIds)
-    .or(`form_data->>customer_phone.ilike.%${q}%,form_data->>Phone.ilike.%${q}%`);
+    .or(phoneMatch);
   if (ageCutoff) query = query.gte('created_at', ageCutoff);
   const { data, error } = await query
     .order(sortCol, { ascending: false, nullsFirst: false })
@@ -599,7 +619,7 @@ router.get('/search-by-phone', asyncHandler(async (req, res) => {
       .from('transfers')
       .select('id', { count: 'exact', head: true })
       .in('company_id', fronterCompanyIds)
-      .or(`form_data->>customer_phone.ilike.%${q}%,form_data->>Phone.ilike.%${q}%`)
+      .or(phoneMatch)
       .lt('created_at', ageCutoff);
     hiddenOlder = count || 0;
   }
