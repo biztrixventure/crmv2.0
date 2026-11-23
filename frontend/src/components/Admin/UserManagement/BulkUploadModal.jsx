@@ -13,6 +13,7 @@ const EMAIL_RE      = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MAX_ROWS      = 200;
 
 const LEVEL_COLORS = {
+  support_agent:      { bg: '#0891b2', light: 'rgba(8,145,178,0.1)',   label: 'Support Agent' },
   fronter:            { bg: '#10b981', light: 'rgba(16,185,129,0.1)',  label: 'Fronter'      },
   fronter_manager:    { bg: '#f59e0b', light: 'rgba(245,158,11,0.1)',  label: 'Fronter Mgr'  },
   closer:             { bg: '#6366f1', light: 'rgba(99,102,241,0.1)',  label: 'Closer'       },

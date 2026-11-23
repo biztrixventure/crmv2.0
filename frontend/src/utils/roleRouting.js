@@ -39,6 +39,9 @@ export const ROLE_ROUTES = {
   closer:              '/closer',
   fronter:             '/fronter',
 
+  // Support agent (mig 355) -- customer retention. Its own isolated shell.
+  support_agent:       '/support',
+
   // Trainee (mig 311) -- a fronter who has not been signed off yet. Deliberately
   // the SAME shell and the SAME URL as a fronter: promoting someone changes
   // their role and nothing else, so the training tab they have been living in
@@ -74,6 +77,7 @@ const ROLE_HIERARCHY = {
   manager:             6, // legacy alias, same level as fronter_manager
   closer:              7,
   qa_agent:            7, // QA reviewer — isolated shell, gated in hasRoleAccess
+  support_agent:       7, // Retention desk — isolated shell, gated in hasRoleAccess
   employee:            8, // HR-only self-service rung
   fronter:             8,
   // Same rung as fronter, NOT one below. hasRoleAccess compares userLevel <=
@@ -147,6 +151,15 @@ export const hasRoleAccess = (userRole, requiredRole) => {
   if (normUser === 'qamanager' || normUser === 'qaagent') {
     return normRequired === 'qamanager' || normRequired === 'qaagent';
   }
+
+  // Support agent: ONLY the retention desk. Without this the hierarchy test
+  // below would let rank 7 into /closer and /fronter, whose screens call APIs
+  // the server refuses this role (authMiddleware SUPPORT_AGENT_APIS).
+  if (normUser === 'supportagent') {
+    return normRequired === 'supportagent';
+  }
+  // ...and nobody else is let in by rank: a closer is rank 7 too.
+  if (normRequired === 'supportagent') return false;
 
   // Portal client: ONLY the recording portal — never any CRM shell.
   if (normUser === 'portalclient') {

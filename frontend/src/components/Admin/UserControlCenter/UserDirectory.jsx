@@ -20,10 +20,10 @@ const LEVEL_COLOR = {
   compliance_manager: '#f59e0b', company_admin: 'var(--color-error-500)',
   operations_manager: 'var(--color-info-500)', closer_manager: '#10b981',
   fronter_manager: '#10b981', qa_manager: '#0ea5e9', qa_agent: '#0ea5e9',
-  closer: '#6b7280', fronter: '#6b7280',
+  closer: '#6b7280', fronter: '#6b7280', support_agent: '#0891b2',
 };
 // Highest authority → lowest, for ordering the role sub-tabs.
-const ROLE_ORDER = ['company_admin', 'operations_manager', 'compliance_manager', 'closer_manager', 'fronter_manager', 'qa_manager', 'closer', 'fronter', 'qa_agent', 'readonly_admin', 'superadmin'];
+const ROLE_ORDER = ['company_admin', 'operations_manager', 'compliance_manager', 'closer_manager', 'fronter_manager', 'qa_manager', 'closer', 'fronter', 'support_agent', 'qa_agent', 'readonly_admin', 'superadmin'];
 const roleRank = (r) => { const i = ROLE_ORDER.indexOf(r); return i === -1 ? 99 : i; };
 const prettyRole = (r) => String(r || '').replace(/_/g, ' ');
 const initialsOf = (u) => (u.first_name?.[0] || u.name?.[0] || u.email?.[0] || '?').toUpperCase();

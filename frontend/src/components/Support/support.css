@@ -1,0 +1,151 @@
+/* ============================================================================
+   Support desk -- the classic desktop-application look, on purpose.
+
+   The operator asked for the retention screen to look like the policy
+   administration program their support staff already know: grey form, boxed
+   read-only fields, a strip toolbar, square tabs, ruled grids. So this sheet
+   does NOT use the app's theme tokens and does NOT follow dark mode -- every
+   colour is fixed, and everything is scoped under .sx so nothing leaks out
+   into the rest of the CRM (or in from it).
+   ========================================================================== */
+
+.sx {
+  color-scheme: light;
+  --sx-bg: #f0f0f0;
+  --sx-panel: #ffffff;
+  --sx-field: #e4e4e4;
+  --sx-line: #a0a0a0;
+  --sx-line-soft: #c8c8c8;
+  --sx-ink: #111111;
+  --sx-ink-soft: #444444;
+  --sx-link: #1a6b1a;
+  --sx-sel: #cde6ff;
+  --sx-green: #33cc33;
+  --sx-red: #e05555;
+  --sx-amber: #f2c230;
+  --sx-blue: #6aa9e6;
+  font-family: "Segoe UI", Tahoma, Verdana, Arial, sans-serif;
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--sx-ink);
+  background: var(--sx-bg);
+  min-height: calc(100vh - 64px);
+}
+.sx *, .sx *::before, .sx *::after { box-sizing: border-box; }
+.sx button, .sx input, .sx select, .sx textarea { font: inherit; color: inherit; }
+
+/* ── top "Search" tab strip ─────────────────────────────────────────────── */
+.sx-tabstrip { display: flex; align-items: flex-end; gap: 2px; padding: 4px 6px 0; border-bottom: 1px solid var(--sx-line); background: var(--sx-bg); overflow-x: auto; }
+.sx-tab { display: inline-flex; align-items: center; gap: 6px; padding: 5px 16px; border: 1px solid var(--sx-line); border-bottom: none; background: #e6e6e6; cursor: pointer; white-space: nowrap; position: relative; top: 1px; }
+.sx-tab:hover { background: #f5f5f5; }
+.sx-tab[aria-selected="true"] { background: var(--sx-panel); padding-top: 7px; font-weight: 600; }
+.sx-tab .sx-count { font-weight: 400; color: var(--sx-ink-soft); }
+
+/* ── strip toolbar ("Policy 1 of 1" + icons) ────────────────────────────── */
+.sx-toolbar { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; padding: 3px 8px; border: 1px solid var(--sx-line); border-left: none; border-right: none; background: linear-gradient(#fdfdfd, #dcdcdc 55%, #c9c9c9); min-height: 30px; }
+.sx-toolbar .sx-pos { font-weight: 600; margin-right: 10px; white-space: nowrap; }
+.sx-tool { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 7px; border: 1px solid transparent; background: transparent; cursor: pointer; white-space: nowrap; }
+.sx-tool:hover:not(:disabled) { border-color: #7da2ce; background: linear-gradient(#f3f9ff, #cfe3fb); }
+.sx-tool:disabled { opacity: 0.4; cursor: default; }
+.sx-tool-sep { width: 1px; height: 18px; background: var(--sx-line); margin: 0 4px; }
+.sx-spacer { flex: 1; }
+
+/* ── buttons ────────────────────────────────────────────────────────────── */
+.sx-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 26px; padding: 2px 14px; border: 1px solid #8a8a8a; background: linear-gradient(#fbfbfb, #dddddd); cursor: pointer; white-space: nowrap; }
+.sx-btn:hover:not(:disabled) { border-color: #3c7fb1; background: linear-gradient(#f0f8ff, #c6e0f7); }
+.sx-btn:active:not(:disabled) { background: #c6e0f7; }
+.sx-btn:disabled { opacity: 0.5; cursor: default; }
+.sx-btn:focus-visible, .sx-tool:focus-visible, .sx-tab:focus-visible, .sx-input:focus-visible, .sx-link:focus-visible { outline: 2px solid #1c5fa8; outline-offset: 1px; }
+.sx-btn-go   { background: linear-gradient(#d6f5d0, #9fdc92); border-color: #4c9a3f; font-weight: 600; }
+.sx-btn-stop { background: linear-gradient(#fbdcdc, #eea5a5); border-color: #b04a4a; }
+.sx-btn-send { background: linear-gradient(#dcecff, #a8cdf3); border-color: #3c7fb1; font-weight: 600; }
+
+/* ── inputs ─────────────────────────────────────────────────────────────── */
+.sx-input, .sx-select, .sx-textarea { height: 24px; padding: 1px 6px; border: 1px solid #7a7a7a; background: #fff; width: 100%; min-width: 0; }
+.sx-textarea { height: auto; min-height: 96px; padding: 5px 6px; resize: vertical; }
+.sx-select { padding-right: 2px; }
+/* global.css themes every <option> with the app palette (dark in dark mode).
+   This desk is fixed-light, so its dropdown lists are too. */
+.sx select option { background-color: #fff; color: #111; }
+
+/* ── group boxes (Contact / Vehicle / Campaign) ─────────────────────────── */
+.sx-body { padding: 8px 10px 14px; }
+.sx-groups { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 10px; }
+.sx-group { border: 1px solid var(--sx-line); border-radius: 3px; background: var(--sx-panel); margin: 0; padding: 4px 10px 8px; min-width: 0; }
+.sx-group > legend { padding: 0 5px; font-size: 13px; color: var(--sx-ink); }
+.sx-group-row { display: flex; gap: 10px; align-items: flex-start; }
+.sx-group-ico { flex: 0 0 auto; margin-top: 2px; color: #333; }
+.sx-group-ico.car { color: #2f8f2f; }
+.sx-link { color: var(--sx-link); text-decoration: underline; background: none; border: none; padding: 0; cursor: pointer; text-align: left; }
+.sx-group-lines > div { overflow-wrap: anywhere; }
+
+/* ── the label / boxed-value form grid ──────────────────────────────────── */
+.sx-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: 20px; row-gap: 4px; }
+.sx-fld { display: grid; grid-template-columns: 118px minmax(0, 1fr); align-items: center; gap: 4px; min-width: 0; }
+.sx-fld > label, .sx-fld > .sx-lbl { color: var(--sx-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sx-val { min-height: 21px; padding: 1px 5px; background: var(--sx-field); border: 1px solid #cfcfcf; border-bottom-color: #9c9c9c; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sx-val.wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
+.sx-val.money { font-variant-numeric: tabular-nums; }
+.sx-val.st-active    { background: var(--sx-green); border-color: #2a9a2a; }
+.sx-val.st-cancelled { background: var(--sx-red);   border-color: #b03a3a; color: #fff; }
+.sx-val.st-other     { background: var(--sx-amber); border-color: #c79a12; }
+.sx-fld.span3 { grid-column: 1 / -1; }
+.sx-fld.span2 { grid-column: span 2; }
+
+/* ── lower tab control (Details / Payments / Calls ...) ─────────────────── */
+.sx-subtabs { display: flex; gap: 0; margin-top: 12px; border-bottom: 1px solid var(--sx-line); overflow-x: auto; }
+.sx-subtab { padding: 5px 22px; border: 1px solid var(--sx-line); border-bottom: none; margin-right: -1px; background: #e9e9e9; cursor: pointer; white-space: nowrap; position: relative; top: 1px; }
+.sx-subtab[aria-selected="true"] { background: var(--sx-panel); padding-top: 7px; }
+.sx-pane { background: var(--sx-panel); border: 1px solid var(--sx-line); border-top: none; padding: 8px 8px 12px; min-height: 180px; }
+
+/* ── grids ──────────────────────────────────────────────────────────────── */
+.sx-gridwrap { border: 1px solid var(--sx-line); background: var(--sx-panel); overflow: auto; }
+.sx-grid { width: 100%; border-collapse: collapse; }
+.sx-grid th { position: sticky; top: 0; text-align: left; font-weight: 400; padding: 5px 8px; background: linear-gradient(#ffffff, #ebebeb); border-right: 1px solid var(--sx-line-soft); border-bottom: 2px solid #8c8c8c; white-space: nowrap; }
+.sx-grid td { padding: 5px 8px; border-right: 1px solid #e3e3e3; border-bottom: 1px solid #e3e3e3; vertical-align: top; }
+.sx-grid td.nowrap, .sx-grid th.nowrap { white-space: nowrap; }
+.sx-grid td.num, .sx-grid th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.sx-grid tbody tr.pick { cursor: pointer; }
+.sx-grid tbody tr.pick:hover td { background: #eef6ff; }
+.sx-grid tbody tr.on td { background: var(--sx-sel); }
+.sx-grid td.story { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 260px; }
+.sx-pill { display: inline-block; padding: 0 7px; border: 1px solid #8a8a8a; background: #eee; white-space: nowrap; }
+.sx-pill.green { background: var(--sx-green); border-color: #2a9a2a; }
+.sx-pill.red   { background: var(--sx-red); border-color: #b03a3a; color: #fff; }
+.sx-pill.amber { background: var(--sx-amber); border-color: #c79a12; }
+.sx-pill.blue  { background: var(--sx-blue); border-color: #3c7fb1; }
+.sx-empty { padding: 26px 12px; text-align: center; color: var(--sx-ink-soft); }
+.sx-note { padding: 6px 9px; border: 1px solid #c9b458; background: #fff8d6; margin-bottom: 8px; }
+.sx-note.bad { border-color: #c06060; background: #fde8e8; }
+.sx-note.good { border-color: #4c9a3f; background: #e6f7e2; }
+
+/* ── search bar + status bar ────────────────────────────────────────────── */
+.sx-searchbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 10px; background: var(--sx-bg); border-bottom: 1px solid var(--sx-line-soft); }
+.sx-searchbar .sx-input { width: 260px; }
+.sx-searchbar .sx-select { width: 190px; }
+.sx-statusbar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 3px 10px; border-top: 1px solid var(--sx-line); background: #e9e9e9; color: var(--sx-ink-soft); }
+
+/* ── stats boxes ────────────────────────────────────────────────────────── */
+.sx-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-bottom: 10px; }
+.sx-stat { border: 1px solid var(--sx-line); background: var(--sx-panel); padding: 6px 10px; }
+.sx-stat b { display: block; font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* ── dialog ─────────────────────────────────────────────────────────────── */
+.sx-veil { position: fixed; inset: 0; z-index: 60; background: rgba(0, 0, 0, 0.35); display: flex; align-items: center; justify-content: center; padding: 16px; }
+.sx-dialog { width: min(560px, 100%); max-height: calc(100vh - 32px); display: flex; flex-direction: column; background: var(--sx-bg); border: 1px solid #5a5a5a; box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.3); }
+.sx-dialog-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 5px 9px; color: #fff; font-weight: 600; background: linear-gradient(#3f78bd, #1f4f91); }
+.sx-dialog-x { border: 1px solid #fff; background: #c44; color: #fff; width: 22px; height: 20px; line-height: 16px; cursor: pointer; }
+.sx-dialog-body { padding: 12px; overflow: auto; display: grid; gap: 9px; }
+.sx-dialog-body .sx-fld { grid-template-columns: 110px minmax(0, 1fr); align-items: start; }
+.sx-dialog-body .sx-fld > label { padding-top: 3px; }
+.sx-dialog-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 8px 12px 12px; }
+.sx-hint { color: var(--sx-ink-soft); font-size: 12px; }
+
+@media (max-width: 1000px) {
+  .sx-groups, .sx-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .sx-groups, .sx-form { grid-template-columns: minmax(0, 1fr); }
+  .sx-fld.span2 { grid-column: auto; }
+  .sx-searchbar .sx-input, .sx-searchbar .sx-select { width: 100%; }
+}

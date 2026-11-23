@@ -1104,6 +1104,57 @@ book of the shared pool.
   transfers, `/sales/search`, Lead Intelligence) only narrow records the caller
   can already see in full.
 
+### Support desk -- customer retention (migs 355-356, applied 2026-11-24)
+A **Support Agent** (role level `support_agent`, closer companies only, seeded
+for 1-Vertex) calls a CLIENT's customers to keep them on the policy. Shell
+`/support` (`shells/SupportShell.jsx`), API `/api/support` (`routes/support.js`),
+screens in `components/Support/`.
+- **Scope is CLIENT NAMES, not a company.** `support_agent_clients(user_id,
+  client_name)`, set in Support Reports -> Agents & Clients (superadmin or
+  compliance). No row = the agent sees NOTHING (an impossible filter, never an
+  unfiltered query). Sales are filed under fronter companies, so company scope
+  would have meant nothing here.
+- **The work list** = cancelled + still-active (`closed_won`) sales of those
+  clients, post-dates excluded. A case (`retention_cases`) opens on the FIRST
+  logged call and that claims the customer: one live case per sale (partial
+  unique index `uq_retention_live_case`), a second agent gets 409 `OTHER_AGENT`.
+- Flow: `open -> saved -> pending_approval -> approved`, or `returned` (back to
+  the agent with a note) / `lost`. Every call is a `retention_calls` row:
+  outcome key (catalog `OUTCOMES` in the route, served by `/support/me`), the
+  agent's typed story, optional follow-up time (`datetime-local` -> UTC).
+- **The sale is touched ONLY on compliance approval, and only if it is
+  cancelled**: `status -> closed_won`, `cancellation_date` cleared,
+  `reinstated_at/by/reason` stamped. What it was before stays on the case
+  (`sale_status_at_open`, `cancellation_*_at_open`). An active policy saved
+  before it cancelled is approved as a case and the sale is left alone. The
+  timeline writes ONE `reinstated` event (not `approved`) with the reason as its
+  note -- `fn_log_policy_event`, mig 356.
+- **THE FENCE (`middleware/authMiddleware.js`, `SUPPORT_AGENT_APIS`).** Most list
+  routes name the roles they know (`closer` -> own rows) and let every OTHER
+  role fall through to the manager branch: the whole company. A new agent-level
+  role inherits that on every route nobody taught about it. So `support_agent`
+  is allowed onto a named list of API groups and 403'd everywhere else
+  (`SUPPORT_FENCE`). Add a group to that set to open it; do NOT add the role to
+  individual route branches. (A closer-floor `trainee` still has the old
+  fall-through on GET /sales -- pre-existing, not changed here.) Frontend twin:
+  `hasRoleAccess` pins `supportagent` to `/support` and lets nobody else in by rank.
+- `sale_id` on a case is `ON DELETE SET NULL` with `customer_name` /
+  `reference_no` snapshotted -- deleting a sale must not erase logged work (352).
+- Reports: `GET /support/reports` (an agent only ever gets their own; reviewers
+  everyone). One component, `SupportReports.jsx`, mounted in AdminPanel
+  (`support-reports`) and ComplianceShell (`support`): Approvals, Agent Report,
+  Call Log, Agents & Clients. Approving opens the SAME `PolicyScreen` the agent
+  used (`mode="review"`). CSVs log to egress as dataset `support_retention`.
+- **The classic look is deliberate** (`components/Support/support.css`): the
+  operator asked for the old policy-admin program's grey boxed form. Everything
+  is scoped under `.sx` with fixed colours -- it does NOT follow the theme or
+  dark mode, on purpose. Do not "fix" it onto the design tokens.
+- A sale's `form_data` never leaves the server whole: `FORM_KEYS` in the route
+  is the allow-list. Columns are named, never `*`.
+- Tested 2026-11-24 with throwaway user ids against the live DB (44 checks,
+  cleaned up) + the reinstatement UPDATE in a rolled-back transaction. NOT
+  clicked through in a browser.
+
 ### IP access control (mig 319, applied 2026-09-15)
 Which networks each user may use the CRM from. Ships OFF, and everyone is `anywhere`. README → "IP access control" has the operator steps.
 - **Mode lives in `user_ip_access` (sidecar), NEVER on `user_profiles`.** That table has RLS `users_can_update_own_profile`

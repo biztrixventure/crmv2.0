@@ -64,6 +64,7 @@ import DotGridBg from "../components/UI/DotGridBg";
 import { Loading } from "../components/UI/kit";
 import AdminHub from "../components/Admin/Layout/AdminHub";
 import CompanyReports from "../components/Reports/CompanyReports";
+import SupportReports from "../components/Support/SupportReports";
 import { resolveHub, HUB_MEMBER_IDS, ADMIN_HUBS } from "../config/adminHubs";
 
 // ============================================================================
@@ -179,6 +180,9 @@ const AdminPanel = () => {
     // an All-companies comparison. Read-only, so a readonly admin gets it too --
     // the server scopes them to their governance companies.
     ...(isSAorRO                                       ? [{ id: "company-reports", label: "Company Reports"     }] : []),
+    // Support / retention desk (mig 356): approvals, agent reports, call log,
+    // and which clients each support agent works.
+    ...(isSAorRO                                       ? [{ id: "support-reports", label: "Support Reports"     }] : []),
     ...(isSAorRO && hasPermission('manage_forms')      ? [{ id: "forms",          label: "Form Builder"         }] : []),
     ...(hasPermission('search_sales')                  ? [{ id: "sale-search",    label: "Lead Search"          }] : []),
     ...(isSAorRO                                       ? [{ id: "customer-profiles", label: "Customer Profiles"  }] : []),
@@ -264,6 +268,7 @@ const AdminPanel = () => {
       case 'teams':             return <TeamManager />;
       case 'quota_report':      return <QuotaReport />;
       case 'company-reports':   return <CompanyReports />;
+      case 'support-reports':   return <SupportReports />;
       case 'sale-search':       return <LeadIntelligence />;
       case 'customer-profiles': return <CustomerProfile />;
       // Its own boundary, like the form builder: without one the lazy chunk

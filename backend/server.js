@@ -97,6 +97,7 @@ const qa1ReadonlyGate           = require('./middleware/qa1ReadonlyGate');
 const kanbanRoutes              = require('./routes/kanban');
 const quizRoutes                = require('./routes/quiz');
 const trainingRoutes            = require('./routes/training');
+const supportRoutes             = require('./routes/support');
 // Accounting + HR (migs 283-290). Each is a MODULE router: the sub-routers
 // (accounts/journal/invoices/expenses/reports, employees/attendance/leave/
 // payroll/reviews) hang off it, so the module mounts in one line instead of ten.
@@ -525,6 +526,10 @@ app.use('/api/quiz',  authMiddleware, readonlyGuard, quizRoutes);
 // designation (module_designations, module='training'), so this is deliberately
 // NOT role-guarded -- every handler re-checks through utils/moduleAccess.js.
 app.use('/api/training', authMiddleware, readonlyGuard, trainingRoutes);
+// Customer retention desk (mig 355-356): support agents, their call log,
+// compliance approval and the reports. readonlyGuard refuses a readonly
+// admin's writes; the route decides everything else by role.
+app.use('/api/support', authMiddleware, readonlyGuard, supportRoutes);
 // Two-tier team quotas (mig 216) — admin sets the team target, the lead splits it.
 app.use('/api/quotas', authMiddleware, readonlyGuard, quotasRoutes);
 // Daily performance review + finalise (mig 310). readonlyGuard blocks the

@@ -28,6 +28,7 @@ const ManagerShell    = lazy(() => import("./shells/ManagerShell"));
 const ComplianceShell = lazy(() => import("./shells/ComplianceShell"));
 const QAShell         = lazy(() => import("./shells/QAShell"));
 const QA2Shell        = lazy(() => import("./shells/QA2Shell"));
+const SupportShell    = lazy(() => import("./shells/SupportShell"));
 const ClientPortal    = lazy(() => import("./pages/ClientPortal"));
 const NotFound        = lazy(() => import("./pages/NotFound"));
 const KanbanBoard     = lazy(() => import("./pages/KanbanBoard"));
@@ -118,6 +119,9 @@ const AppContent = () => {
           <Route path="/qa2/*" element={
             <ProtectedRoute requiredRole="qa_agent"><QA2Shell /></ProtectedRoute>
           } />
+
+          {/* Support desk — customer retention (support_agent; superadmin may look) */}
+          <Route path="/support/*" element={<ProtectedRoute requiredRole="support_agent"><SupportShell /></ProtectedRoute>} />
 
           {/* Staff Shell — closer / fronter */}
           <Route path="/closer/*"  element={<ProtectedRoute requiredRole="closer"><StaffShell /></ProtectedRoute>} />

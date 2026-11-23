@@ -45,6 +45,9 @@ export const ADMIN_TAB_CATALOG = [
   { id: 'teams',            label: 'Teams',                group: 'admin',         roEligible: true,  defaultForRo: false, gate: null },
   // Company Reports (mig 332). NEW id -- never rename: readonly governance stores it.
   { id: 'company-reports',  label: 'Company Reports',      group: 'admin',         roEligible: true,  defaultForRo: true,  gate: null },
+  // Support / retention reports (mig 356). Read-only eligible: approvals and
+  // client assignment are refused server-side for a readonly admin.
+  { id: 'support-reports',  label: 'Support Reports',      group: 'admin',         roEligible: true,  defaultForRo: false, gate: null },
   { id: 'forms',            label: 'Form Builder',         group: 'admin',         roEligible: true,  defaultForRo: false, gate: 'manage_forms' },
   { id: 'bulk-upload',      label: 'Bulk Upload',          group: 'admin',         roEligible: true,  defaultForRo: false, gate: null },
   { id: 'chat',             label: 'Chat Control',         group: 'admin',         roEligible: true,  defaultForRo: false, gate: null },

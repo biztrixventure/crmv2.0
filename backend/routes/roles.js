@@ -213,7 +213,7 @@ router.post(
   [
     body("name").trim().isLength({ min: 1 }),
     body("description").trim().optional(),
-    body("level").isIn(["superadmin", "readonly_admin", "company_admin", "fronter", "fronter_manager", "operations_manager", "closer_manager", "compliance_manager", "closer", "qa_manager", "qa_agent"]),
+    body("level").isIn(["superadmin", "readonly_admin", "company_admin", "fronter", "fronter_manager", "operations_manager", "closer_manager", "compliance_manager", "closer", "qa_manager", "qa_agent", "trainee", "support_agent"]),
     body("company_id").isUUID().optional(),
     body("permissions").isArray().optional(),
   ],
@@ -596,6 +596,17 @@ const TRAINEE_ROLE = {
   ],
 };
 
+// Closer companies only (mig 355-356). The role LEVEL is what opens the
+// retention desk (/support, routes/support.js); the permission list is tiny on
+// purpose so no sale / transfer / callback screen opens for a support agent.
+// WHICH clients they work is support_agent_clients, set on the Support screen.
+const SUPPORT_AGENT_ROLE = {
+  name: 'Support Agent',
+  description: "Customer retention — calls a client's customers to keep them on their policy",
+  level: 'support_agent',
+  permissions: ['view_notifications'],
+};
+
 const OPS_MANAGER_ROLE = {
   name: 'Operations Manager',
   description: 'Full oversight — analytics, reports, leaderboards, user management',
@@ -737,6 +748,7 @@ const CLOSER_DEFAULTS = [
     ],
   },
   TRAINEE_ROLE,
+  SUPPORT_AGENT_ROLE,
   OPS_MANAGER_ROLE,
   COMPANY_ADMIN_ROLE,
 ];

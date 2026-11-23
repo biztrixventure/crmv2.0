@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, BarChart3, Users, Shield, Building2, FileText, ChevronRight, Zap, Network, HelpCircle, MessageSquareText, UploadCloud, Megaphone, Radio, Trophy, MessagesSquare, CalendarDays, DollarSign, ArrowRight, PhoneCall, Database, Car, Tag, Settings2, Eye, Eraser, UserCircle, Download, ClipboardCheck, Palette, Paintbrush, Hash, Send, LayoutGrid, BookOpen, Lock, Target, X, IdCard, Scale, Plug, ExternalLink } from 'lucide-react';
+import { Search, BarChart3, Headset, Users, Shield, Building2, FileText, ChevronRight, Zap, Network, HelpCircle, MessageSquareText, UploadCloud, Megaphone, Radio, Trophy, MessagesSquare, CalendarDays, DollarSign, ArrowRight, PhoneCall, Database, Car, Tag, Settings2, Eye, Eraser, UserCircle, Download, ClipboardCheck, Palette, Paintbrush, Hash, Send, LayoutGrid, BookOpen, Lock, Target, X, IdCard, Scale, Plug, ExternalLink } from 'lucide-react';
 import { useBranding } from '../../../contexts/BrandingContext';
 import useExternalModules from '../../../hooks/useExternalModules';
 
@@ -37,6 +37,7 @@ const NAV_SECTIONS = [
       { id: 'teams',         label: 'Teams',           icon: Users      },
       { id: 'quota_report',  label: 'Team Performance', icon: Target     },
       { id: 'company-reports', label: 'Company Reports', icon: BarChart3 },
+      { id: 'support-reports', label: 'Support Reports', icon: Headset },
       { id: 'user-control',  label: 'User Control',    icon: UserCircle },
       { id: 'clients-plans', label: 'Clients & Plans', icon: Tag        },
       { id: 'forms',         label: 'Form Builder',    icon: FileText   },

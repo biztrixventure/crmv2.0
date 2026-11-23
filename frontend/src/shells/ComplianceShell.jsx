@@ -50,15 +50,19 @@ import TrainingPortal      from '../components/Training/TrainingPortal';
 // My HR (stage 2): the compliance manager's own record, payslips, leave,
 // attendance and expense claims -- same component every shell mounts.
 import useExternalModules  from '../hooks/useExternalModules';
-import { IdCard, BarChart3 } from 'lucide-react';
+import { IdCard, BarChart3, Headset } from 'lucide-react';
 // Company Reports (mig 332) -- per-agent performance, any company (compliance is estate-wide).
 import CompanyReports      from '../components/Reports/CompanyReports';
+import SupportReports      from '../components/Support/SupportReports';
 
 const CODE_TABS = [
   { key: 'companies',   label: 'Companies',          icon: Building2 },
   { key: 'calendar',    label: 'Calendar',           icon: CalendarDays },
   { key: 'company_reports', label: 'Agent Reports',  icon: BarChart3 },
   { key: 'queue',       label: 'Review Queue',       icon: Clock },
+  // Retention desk (mig 356): saved customers waiting for final approval, the
+  // support agents' reports and call log, and their client assignment.
+  { key: 'support',     label: 'Support Desk',       icon: Headset },
   { key: 'payments',    label: 'Payments at Risk',   icon: AlertTriangle },
   { key: 'sales',       label: 'All Sales',          icon: FileText },
   { key: 'rec_review',  label: 'Recording Review',   icon: Headphones },
@@ -91,7 +95,7 @@ const CODE_TABS = [
 // "More" so nothing can ever disappear.
 const TAB_GROUPS = [
   { id: 'overview', label: 'Overview',        icon: Building2,      keys: ['companies', 'calendar', 'company_reports'] },
-  { id: 'review',   label: 'Compliance Work', icon: Clock,          keys: ['queue', 'rec_review', 'payments', 'double_sold', 'bulk_status'] },
+  { id: 'review',   label: 'Compliance Work', icon: Clock,          keys: ['queue', 'support', 'rec_review', 'payments', 'double_sold', 'bulk_status'] },
   { id: 'records',  label: 'Records',         icon: FileText,       keys: ['sales', 'transfers', 'callbacks'] },
   // Batches owns upload → assign → dispositions; Assigned Numbers / Number
   // Assignment are retired from the nav (their keys still render if deep-linked).
@@ -312,6 +316,7 @@ const ComplianceShell = () => {
           />
         )}
         {activeTab === 'company_reports' && <CompanyReports />}
+        {activeTab === 'support' && <SupportReports />}
         {activeTab === 'calendar' && (
           <EventsCalendar canEdit={false} />
         )}

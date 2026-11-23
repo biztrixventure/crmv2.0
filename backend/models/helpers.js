@@ -19,6 +19,9 @@ const ROLE_HIERARCHY = {
   hr_manager:          4,   // HR module lead -- see mig 290
   closer:              5,
   qa_agent:            5,   // QA reviewer — same tier as closer
+  // Support agent (mig 355) -- customer retention. Same tier as closer, so
+  // whoever may hire a closer may hire one, and neither can assign the other.
+  support_agent:       5,
   employee:            6,   // HR-only self-service rung
   fronter:             6,
   // Trainee (mig 311) -- a fronter who has not been signed off yet. Same rung as
@@ -201,7 +204,7 @@ const ASSIGNABLE_LEVELS = {
   // 'trainee' is on the list because hiring one is the same act as hiring an
   // agent -- leaving it off would let an operations_manager create the fronter
   // but not the trainee who becomes that fronter.
-  operations_manager: ['fronter', 'closer', 'fronter_manager', 'closer_manager', 'trainee'],
+  operations_manager: ['fronter', 'closer', 'fronter_manager', 'closer_manager', 'trainee', 'support_agent'],
 };
 
 /** The levels `sourceLevelName` may assign, or null for "hierarchy only". */
@@ -384,7 +387,8 @@ const getTeamMembers = async (managerId, companyId) => {
 const getCompanyTypeLevels = (companyType) =>
   companyType === 'fronter'
     ? ['fronter', 'fronter_manager', 'operations_manager', 'company_admin', 'qa_manager', 'qa_agent', 'trainee']
-    : ['closer', 'closer_manager', 'compliance_manager', 'operations_manager', 'company_admin', 'qa_manager', 'qa_agent', 'trainee'];
+    // support_agent (mig 355): the retention desk sits on the closer side only.
+    : ['closer', 'closer_manager', 'compliance_manager', 'operations_manager', 'company_admin', 'qa_manager', 'qa_agent', 'trainee', 'support_agent'];
 
 // ============================================================================
 // Company type, cached. Every list route used to re-query companies.company_type

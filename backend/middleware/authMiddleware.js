@@ -4,6 +4,24 @@ const logger = require('../utils/logger');
 const { runWithContext } = require('../utils/requestContext');
 const { ipAccessGate } = require('./ipAccessGate');
 
+// THE SUPPORT AGENT'S FENCE (mig 355). Most list routes scope by naming the
+// roles they know (`closer` -> own rows, `fronter` -> own rows) and let every
+// OTHER role fall through to the manager branch -- the whole company. A new
+// agent-level role therefore inherits manager scope on every route nobody
+// thought to teach about it (GET /sales, /transfers, /stats ...). Rather than
+// add `support_agent` to dozens of branches and hope none is missed, the role
+// is allowed onto a named list of API groups and refused everywhere else. Its
+// customer data comes from /api/support, which scopes it to the agent's clients.
+const SUPPORT_AGENT_APIS = new Set([
+  '/api/support', '/api/auth', '/api/notifications', '/api/push', '/api/presence',
+  '/api/feature-flags', '/api/business-config', '/api/branding', '/api/pwa',
+  '/api/external-modules', '/api/user-preferences', '/api/chat', '/api/emails',
+  '/api/announcements', '/api/marquee', '/api/events', '/api/scratchpad',
+  '/api/training', '/api/quiz', '/api/faqs', '/api/scripts', '/api/zipcode',
+]);
+const fencedOut = (req) =>
+  req.user?.role === 'support_agent' && !SUPPORT_AGENT_APIS.has(req.baseUrl);
+
 const authMiddleware = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
@@ -75,6 +93,10 @@ const authMiddleware = async (req, res, next) => {
       iat: token.iat,
       exp: token.exp,
     };
+
+    if (fencedOut(req)) {
+      return res.status(403).json({ error: 'Not available for a support agent', code: 'SUPPORT_FENCE' });
+    }
 
     // Everything downstream of here runs "as" this user: every database write
     // made while serving the request carries their id to the mig 313 change

@@ -138,6 +138,7 @@ const BLP_TEMPLATES = [
 
 const LEVEL_COLORS = {
   trainee: '#14b8a6',
+  support_agent: '#0891b2',
   fronter: '#10b981',
   fronter_manager: '#f59e0b',
   closer: '#6366f1',
@@ -300,6 +301,7 @@ const RoleForm = ({ role = null, onSubmit, isLoading = false }) => {
           <option value="closer">Closer</option>
           <option value="fronter">Fronter</option>
           <option value="trainee">Trainee</option>
+          <option value="support_agent">Support Agent (closer companies)</option>
         </ThemedSelect>
         {!role && (
           <p className="text-[11px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>
