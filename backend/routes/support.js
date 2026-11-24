@@ -1,21 +1,27 @@
 // ============================================================================
-// /api/support -- customer retention (mig 355-356).
+// /api/support -- customer retention (migs 355-357).
 //
 // A SUPPORT AGENT works for named clients. They call that client's customers
-// (the cancelled ones and the still-active ones), log every call, and when a
-// customer agrees to stay they mark the case Saved and send it to compliance.
-// Compliance's approval is the ONLY thing that changes the sale: it goes back
-// to closed_won with the reinstate columns stamped.
+// (the cancelled ones and the still-active ones), log every call, schedule
+// follow-ups, and mark the customer Saved or Not Saved. They can also TAG a
+// closer on a policy, which puts it in that closer's Support Requests.
+//
+// THE SUPPORT DESK NEVER CHANGES A SALE. There was a compliance approval step
+// that reinstated the sale (mig 356); the operator removed it (mig 357). Saved
+// is a fact about the retention case and shows in the support reports only --
+// the sale's own status is changed the normal way, by whoever does that.
 //
 // Who may do what, decided here and nowhere else:
 //   support_agent      -> policies of THEIR clients (support_agent_clients),
-//                         their own cases, calls and stats. No row in
+//                         their own cases, calls, tags and stats. No row in
 //                         support_agent_clients = they see nothing.
-//   compliance_manager -> every client; approve / return; reports; may set
-//                         which clients an agent works.
+//   compliance_manager -> reads every client and the reports; may set which
+//                         clients an agent works.
 //   superadmin         -> everything above, and may also work a case.
-//   readonly_admin     -> read the reports (writes are refused by
+//   readonly_admin     -> reads the reports (writes are refused by
 //                         readonlyGuard at the mount).
+//   a tagged closer    -> ONLY /support/tags/mine and /support/tags/:id/done,
+//                         and only the tags that name them.
 // The role LEVEL is the grant. There is no permission key to forget to seed.
 // ============================================================================
 const express = require('express');
@@ -29,29 +35,56 @@ const logger = require('../utils/logger');
 
 const router = express.Router();
 
-// What a call can end as. The key is stored; the label is what people read.
+// What a call can end as. The key is stored; the label is what people read;
+// `tone` is the row colour in the support lists (support.css .sx-tone-*).
 const OUTCOMES = [
-  { key: 'no_answer',     label: 'No Answer' },
-  { key: 'voicemail',     label: 'Left Voicemail' },
-  { key: 'spoke',         label: 'Spoke - Undecided' },
-  { key: 'callback',      label: 'Callback Requested' },
-  { key: 'agreed',        label: 'Agreed to Stay' },
-  { key: 'payment_issue', label: 'Payment Issue' },
-  { key: 'refused',       label: 'Refused / Wants Out' },
-  { key: 'wrong_number',  label: 'Wrong Number' },
-  { key: 'other',         label: 'Other' },
+  { key: 'agreed',        label: 'Agreed to Stay',      tone: 'green' },
+  { key: 'callback',      label: 'Callback Requested',  tone: 'blue' },
+  { key: 'spoke',         label: 'Spoke - Undecided',   tone: 'yellow' },
+  { key: 'payment_issue', label: 'Payment Issue',       tone: 'orange' },
+  { key: 'no_answer',     label: 'No Answer',           tone: 'grey' },
+  { key: 'voicemail',     label: 'Left Voicemail',      tone: 'purple' },
+  { key: 'refused',       label: 'Refused / Wants Out', tone: 'red' },
+  { key: 'wrong_number',  label: 'Wrong Number',        tone: 'brown' },
+  { key: 'other',         label: 'Other',               tone: 'none' },
 ];
 const OUTCOME_KEYS = new Set(OUTCOMES.map(o => o.key));
+const OUTCOME_LABEL = Object.fromEntries(OUTCOMES.map(o => [o.key, o.label]));
 
 const CANCELLED = ['cancelled', 'compliance_cancelled'];
-const LIVE_CASE = ['open', 'saved', 'pending_approval', 'returned'];
+// A case that still holds its customer. `saved` stays held so the agent who
+// saved them can log a later check-in call without opening a second case.
+const LIVE_CASE = ['open', 'saved'];
 
 // Columns the policy screen shows. Named, never '*': a new sales column must be
 // a decision to show it to a support agent, not an accident.
-const SALE_LIST_COLS = 'id, customer_name, customer_phone, client_name, plan, status, sale_date, cancellation_date, cancellation_reason_key, reference_no, policy_number, car_year, car_make, car_model, monthly_payment, down_payment, company_id';
-const SALE_DETAIL_COLS = SALE_LIST_COLS + ', customer_phone_2, customer_email, customer_address, car_miles, car_vin, payment_due_note, closer_id, fronter_id, created_at, updated_at, form_data, compliance_note, closer_disposition, is_resell, customer_uuid, superseded_by, reinstated_at, reinstated_by, reinstate_reason, chargeback_date, chargeback_amount, transfer_id';
+const SALE_BASE_COLS = 'id, customer_name, customer_phone, client_name, plan, status, sale_date, cancellation_date, cancellation_reason_key, reference_no, policy_number, car_year, car_make, car_model, monthly_payment, down_payment, company_id';
+// monthly_date = the day the monthly payment is taken. It lives in form_data.
+const SALE_LIST_COLS = SALE_BASE_COLS + ', monthly_date:form_data->>Monthly_Date';
+const SALE_DETAIL_COLS = SALE_BASE_COLS + ', customer_phone_2, customer_email, customer_address, car_miles, car_vin, payment_due_note, closer_id, fronter_id, created_at, updated_at, form_data, compliance_note, closer_disposition, is_resell, customer_uuid, chargeback_date, chargeback_amount, transfer_id';
 // The only form_data keys that leave the server.
 const FORM_KEYS = ['FirstName', 'LastName', 'Middle', 'Address', 'City', 'State', 'Zip', 'Email', 'PlanDuration', 'Payment_Duration', 'Monthly_Date', 'Condition', 'Age', 'Variant', 'Other_Contact', '2nd_user', 'Miles'];
+
+// Click-to-sort: the screen sends a column KEY, never a column name. Anything
+// not listed here falls back to the list's default order.
+const POLICY_SORT = {
+  customer: ['customer_name'], phone: ['customer_phone'], client: ['client_name'],
+  vehicle: ['car_make', 'car_model', 'car_year'], coverage: ['plan'],
+  effective: ['sale_date'], cancelled: ['cancellation_date'], monthly: ['monthly_payment'],
+  monthly_date: ['form_data->>Monthly_Date'], policy: ['reference_no'], status: ['status'],
+};
+const CASE_SORT = {
+  customer: ['customer_name'], client: ['client_name'], policy: ['reference_no'],
+  status: ['status'], outcome: ['last_outcome'], calls: ['call_count'],
+  last_call: ['last_call_at'], follow_up: ['next_follow_up_at'], updated: ['updated_at'],
+};
+const applySort = (q, map, key, dir, fallback) => {
+  const cols = map[key];
+  if (!cols) return fallback(q);
+  const ascending = dir !== 'desc';
+  cols.forEach(c => { q = q.order(c, { ascending, nullsFirst: false }); });
+  return q.order('id', { ascending: true });      // stable paging on ties
+};
 
 // ── who is asking ───────────────────────────────────────────────────────────
 async function resolveAccess(req) {
@@ -100,13 +133,13 @@ async function namesOf(ids) {
   return out;
 }
 
-// Latest case per sale id (live one wins over a closed one).
+// Latest case per sale id (a live one wins over a closed one).
 async function casesForSales(saleIds) {
   const by = {};
   for (let i = 0; i < saleIds.length; i += 100) {
     const { data } = await supabaseAdmin
       .from('retention_cases')
-      .select('id, sale_id, agent_id, status, call_count, last_call_at, next_follow_up_at, updated_at')
+      .select('id, sale_id, agent_id, status, last_outcome, call_count, last_call_at, next_follow_up_at, updated_at')
       .in('sale_id', saleIds.slice(i, i + 100))
       .order('created_at', { ascending: true });
     (data || []).forEach(c => {
@@ -117,13 +150,29 @@ async function casesForSales(saleIds) {
   return by;
 }
 
+// Everyone who can be tagged: active closers of the closer companies.
+async function taggableClosers() {
+  const { data, error } = await supabaseAdmin
+    .from('user_company_roles')
+    .select('user_id, company_id, is_active, custom_roles!inner(level), companies!inner(name, company_type)')
+    .eq('custom_roles.level', 'closer').eq('companies.company_type', 'closer').eq('is_active', true);
+  if (error) throw new Error(error.message);
+  const rows = data || [];
+  const names = await namesOf(rows.map(r => r.user_id));
+  const seen = new Set();
+  return rows
+    .filter(r => (seen.has(r.user_id) ? false : (seen.add(r.user_id), true)))
+    .map(r => ({ user_id: r.user_id, name: names[r.user_id] || 'Unknown', company_id: r.company_id, company: r.companies?.name || null }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
 // ── GET /support/me ─────────────────────────────────────────────────────────
 router.get('/me', gate(async (req, res, access) => {
   res.json({
     role: access.role,
     clients: access.clients,                // null = all clients
     can_work: access.canWork,
-    can_review: access.isReviewer,
+    can_assign: access.isReviewer,
     can_report: access.isViewer,
     outcomes: OUTCOMES,
   });
@@ -137,9 +186,14 @@ router.get('/clients', gate(async (req, res, access) => {
   res.json({ clients: [...new Set((data || []).map(r => r.client_name).filter(Boolean))].sort() });
 }));
 
+// ── GET /support/closers -- who can be tagged ───────────────────────────────
+router.get('/closers', gate(async (req, res) => {
+  res.json({ closers: (await taggableClosers()).map(({ user_id, name, company }) => ({ user_id, name, company })) });
+}));
+
 // ── GET /support/policies -- the work list ──────────────────────────────────
 // view = cancelled | active | all.  search = phone digits, or name / reference
-// / policy number / VIN.
+// / policy number / VIN.  sort = a POLICY_SORT key, dir = asc | desc.
 router.get('/policies', gate(async (req, res, access) => {
   const view   = ['cancelled', 'active', 'all'].includes(req.query.view) ? req.query.view : 'cancelled';
   const page   = Math.max(parseInt(req.query.page, 10) || 1, 1);
@@ -163,9 +217,9 @@ router.get('/policies', gate(async (req, res, access) => {
       : q.or(`customer_name.ilike.%${s}%,reference_no.ilike.%${s}%,policy_number.ilike.%${s}%,car_vin.ilike.%${s}%`);
   }
 
-  q = view === 'active'
-    ? q.order('sale_date', { ascending: false, nullsFirst: false })
-    : q.order('cancellation_date', { ascending: false, nullsFirst: false }).order('sale_date', { ascending: false });
+  q = applySort(q, POLICY_SORT, String(req.query.sort || ''), String(req.query.dir || ''), (x) => (view === 'active'
+    ? x.order('sale_date', { ascending: false, nullsFirst: false }).order('id', { ascending: true })
+    : x.order('cancellation_date', { ascending: false, nullsFirst: false }).order('sale_date', { ascending: false }).order('id', { ascending: true })));
   const { data, error, count } = await q.range((page - 1) * limit, page * limit - 1);
   if (error) return res.status(500).json({ error: error.message });
 
@@ -181,27 +235,30 @@ router.get('/policies', gate(async (req, res, access) => {
   });
 }));
 
-// ── GET /support/cases -- retention cases (mine, or everyone's for a reviewer)
-// view = mine | followups | saved | pending | returned | approved | lost
+// ── GET /support/cases -- retention cases (mine, or everyone's for a viewer) ─
+// view = mine (in progress) | followups | saved | lost.  sort = a CASE_SORT key.
 router.get('/cases', gate(async (req, res, access) => {
   const view  = String(req.query.view || 'mine');
   const page  = Math.max(parseInt(req.query.page, 10) || 1, 1);
   const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
 
-  let q = supabaseAdmin.from('retention_cases').select('*', { count: 'exact' });
+  let q = supabaseAdmin.from('retention_cases')
+    .select('id, sale_id, agent_id, client_name, customer_name, reference_no, status, last_outcome, save_reason, lost_reason, saved_at, call_count, last_call_at, next_follow_up_at, created_at, updated_at', { count: 'exact' });
   if (access.isAgent) q = q.eq('agent_id', req.user.id);
   else if (req.query.agent_id && safeUuid(req.query.agent_id)) q = q.eq('agent_id', req.query.agent_id);
 
+  let fallback;
   if (view === 'followups') {
-    q = q.in('status', ['open', 'saved', 'returned']).not('next_follow_up_at', 'is', null)
-         .order('next_follow_up_at', { ascending: true });
-  } else if (view === 'pending') {
-    q = q.eq('status', 'pending_approval').order('submitted_at', { ascending: true });
-  } else if (['saved', 'returned', 'approved', 'lost', 'open'].includes(view)) {
-    q = q.eq('status', view).order('updated_at', { ascending: false });
+    q = q.in('status', LIVE_CASE).not('next_follow_up_at', 'is', null);
+    fallback = (x) => x.order('next_follow_up_at', { ascending: true }).order('id', { ascending: true });
+  } else if (view === 'saved' || view === 'lost') {
+    q = q.eq('status', view);
+    fallback = (x) => x.order('updated_at', { ascending: false }).order('id', { ascending: true });
   } else {
-    q = q.in('status', LIVE_CASE).order('updated_at', { ascending: false });
+    q = q.eq('status', 'open');
+    fallback = (x) => x.order('updated_at', { ascending: false }).order('id', { ascending: true });
   }
+  q = applySort(q, CASE_SORT, String(req.query.sort || ''), String(req.query.dir || ''), fallback);
   const { data, error, count } = await q.range((page - 1) * limit, page * limit - 1);
   if (error) return res.status(500).json({ error: error.message });
 
@@ -212,15 +269,10 @@ router.get('/cases', gate(async (req, res, access) => {
     const { data: s } = await supabaseAdmin.from('sales').select(SALE_LIST_COLS).in('id', saleIds.slice(i, i + 100));
     (s || []).forEach(x => { saleBy[x.id] = x; });
   }
-  const names = await namesOf(cases.flatMap(c => [c.agent_id, c.reviewed_by]));
+  const names = await namesOf(cases.map(c => c.agent_id));
   res.json({
     total: count || 0, page, limit,
-    cases: cases.map(c => ({
-      ...c,
-      agent_name: names[c.agent_id] || null,
-      reviewer_name: names[c.reviewed_by] || null,
-      sale: saleBy[c.sale_id] || null,
-    })),
+    cases: cases.map(c => ({ ...c, agent_name: names[c.agent_id] || null, sale: saleBy[c.sale_id] || null })),
   });
 }));
 
@@ -231,26 +283,28 @@ router.get('/policies/:saleId', gate(async (req, res, access) => {
     .from('sales').select(SALE_DETAIL_COLS).eq('id', req.params.saleId).maybeSingle();
   if (!mayTouchSale(sale, access)) return res.status(404).json({ error: 'Policy not found' });
 
-  const [casesRes, callsRes, eventsRes, othersRes, companyRes] = await Promise.all([
+  const [casesRes, callsRes, eventsRes, othersRes, companyRes, tagsRes] = await Promise.all([
     supabaseAdmin.from('retention_cases').select('*').eq('sale_id', sale.id).order('created_at', { ascending: false }),
     supabaseAdmin.from('retention_calls').select('*').eq('sale_id', sale.id).order('called_at', { ascending: false }),
     supabaseAdmin.from('policy_events').select('id, event_type, at, actor_id, note').eq('sale_id', sale.id).order('at', { ascending: false }).limit(100),
     sale.customer_uuid
       ? scopeSales(supabaseAdmin.from('sales').select(SALE_LIST_COLS).eq('customer_uuid', sale.customer_uuid), access)
           .order('sale_date', { ascending: false }).limit(25)
-      : Promise.resolve({ data: [sale] }),
+      : supabaseAdmin.from('sales').select(SALE_LIST_COLS).eq('id', sale.id),
     sale.company_id
       ? supabaseAdmin.from('companies').select('name').eq('id', sale.company_id).maybeSingle()
       : Promise.resolve({ data: null }),
+    supabaseAdmin.from('retention_tags').select('*').eq('sale_id', sale.id).order('created_at', { ascending: false }),
   ]);
 
   const cases = casesRes.data || [];
   const calls = callsRes.data || [];
   const events = eventsRes.data || [];
+  const tags = tagsRes.data || [];
   const names = await namesOf([
-    sale.closer_id, sale.fronter_id, sale.reinstated_by,
-    ...cases.flatMap(c => [c.agent_id, c.reviewed_by]),
-    ...calls.map(c => c.agent_id), ...events.map(e => e.actor_id),
+    sale.closer_id, sale.fronter_id,
+    ...cases.map(c => c.agent_id), ...calls.map(c => c.agent_id), ...events.map(e => e.actor_id),
+    ...tags.flatMap(t => [t.tagged_user_id, t.tagged_by]),
   ]);
 
   const fd = sale.form_data || {};
@@ -259,27 +313,25 @@ router.get('/policies/:saleId', gate(async (req, res, access) => {
   const { form_data: _drop, ...saleOut } = sale;
 
   const live = cases.find(c => LIVE_CASE.includes(c.status)) || null;
-  const decorate = (c) => ({ ...c, agent_name: names[c.agent_id] || null, reviewer_name: names[c.reviewed_by] || null });
+  const decorate = (c) => ({ ...c, agent_name: names[c.agent_id] || null });
   res.json({
     policy: {
       ...saleOut,
       form,
       closer_name: names[sale.closer_id] || null,
       fronter_name: names[sale.fronter_id] || null,
-      reinstated_by_name: names[sale.reinstated_by] || null,
       company_name: companyRes.data?.name || null,
     },
     case: live ? decorate(live) : null,
     cases: cases.map(decorate),
     calls: calls.map(c => ({ ...c, agent_name: names[c.agent_id] || null })),
+    tags: tags.map(t => ({ ...t, tagged_name: names[t.tagged_user_id] || null, tagged_by_name: names[t.tagged_by] || null })),
     history: events.map(e => ({ ...e, actor_name: names[e.actor_id] || null })),
     other_policies: (othersRes.data || []),
     // Can THIS caller log a call right now, and if not, why.
     work: {
-      can: access.canWork && (!live || (live.agent_id === req.user.id && live.status !== 'pending_approval')),
-      reason: !access.canWork ? 'view_only'
-        : live && live.agent_id !== req.user.id ? 'other_agent'
-        : live && live.status === 'pending_approval' ? 'with_compliance' : null,
+      can: access.canWork && (!live || live.agent_id === req.user.id),
+      reason: !access.canWork ? 'view_only' : live && live.agent_id !== req.user.id ? 'other_agent' : null,
       held_by: live && live.agent_id !== req.user.id ? (names[live.agent_id] || 'another agent') : null,
     },
   });
@@ -313,9 +365,6 @@ router.post('/policies/:saleId/calls', gate(async (req, res, access) => {
   if (live && live.agent_id !== req.user.id) {
     return res.status(409).json({ error: 'Another support agent is already working this customer', code: 'OTHER_AGENT' });
   }
-  if (live && live.status === 'pending_approval') {
-    return res.status(409).json({ error: 'This case is with compliance for approval', code: 'WITH_COMPLIANCE' });
-  }
 
   if (!live) {
     const { data: created, error: cErr } = await supabaseAdmin.from('retention_cases').insert({
@@ -339,44 +388,40 @@ router.post('/policies/:saleId/calls', gate(async (req, res, access) => {
   }).select('*').single();
   if (callErr) return res.status(500).json({ error: callErr.message });
 
+  // follow_up_notified_at is cleared with every call: a new follow-up time is a
+  // new reminder, and no follow-up means there is nothing left to ring for.
   const { data: updated } = await supabaseAdmin.from('retention_cases').update({
-    call_count: (live.call_count || 0) + 1, last_call_at: now,
-    next_follow_up_at: followUp, updated_at: now,
+    call_count: (live.call_count || 0) + 1, last_call_at: now, last_outcome: outcome,
+    next_follow_up_at: followUp, follow_up_notified_at: null, updated_at: now,
   }).eq('id', live.id).select('*').single();
 
   res.json({ call, case: updated || live });
 }));
 
-// Load a case the caller owns (or any case, for superadmin).
-async function ownCase(req, res, access) {
-  if (!access.canWork) { res.status(403).json({ error: 'Only a support agent can change a case' }); return null; }
-  if (!safeUuid(req.params.id)) { res.status(404).json({ error: 'Case not found' }); return null; }
-  const { data: c } = await supabaseAdmin.from('retention_cases').select('*').eq('id', req.params.id).maybeSingle();
-  if (!c || (access.isAgent && c.agent_id !== req.user.id)) { res.status(404).json({ error: 'Case not found' }); return null; }
-  return c;
-}
-
 // ── POST /support/cases/:id/status -- saved | lost | open ───────────────────
+// Saved and Not Saved are where a case ends. Neither touches the sale.
 router.post('/cases/:id/status', gate(async (req, res, access) => {
-  const c = await ownCase(req, res, access); if (!c) return;
+  if (!access.canWork) return res.status(403).json({ error: 'Only a support agent can change a case' });
+  if (!safeUuid(req.params.id)) return res.status(404).json({ error: 'Case not found' });
+  const { data: c } = await supabaseAdmin.from('retention_cases').select('*').eq('id', req.params.id).maybeSingle();
+  if (!c || (access.isAgent && c.agent_id !== req.user.id)) return res.status(404).json({ error: 'Case not found' });
+
   const status = String(req.body?.status || '');
   const reason = String(req.body?.reason || '').trim();
   const now = new Date().toISOString();
 
-  if (!['open', 'saved', 'returned'].includes(c.status)) {
-    return res.status(409).json({ error: c.status === 'pending_approval' ? 'This case is with compliance for approval' : 'This case is closed' });
-  }
-
   let patch;
   if (status === 'saved') {
+    if (c.status !== 'open') return res.status(409).json({ error: 'Only a case in progress can be marked saved' });
     if (!c.call_count) return res.status(400).json({ error: 'Log at least one call before marking the customer saved' });
     if (reason.length < 10) return res.status(400).json({ error: 'Write how the customer was saved (what they agreed to)' });
-    patch = { status: 'saved', save_reason: reason, saved_at: now, lost_reason: null };
+    patch = { status: 'saved', save_reason: reason, saved_at: now, lost_reason: null, next_follow_up_at: null };
   } else if (status === 'lost') {
+    if (!LIVE_CASE.includes(c.status)) return res.status(409).json({ error: 'This case is already closed' });
     if (reason.length < 5) return res.status(400).json({ error: 'Write why the customer could not be saved' });
-    patch = { status: 'lost', lost_reason: reason, next_follow_up_at: null };
+    patch = { status: 'lost', lost_reason: reason, saved_at: null, next_follow_up_at: null };
   } else if (status === 'open') {
-    if (c.status !== 'saved') return res.status(400).json({ error: 'Only a saved case can be reopened' });
+    if (c.status === 'open') return res.status(409).json({ error: 'This case is already in progress' });
     patch = { status: 'open', saved_at: null };
   } else {
     return res.status(400).json({ error: 'Unknown status' });
@@ -384,91 +429,114 @@ router.post('/cases/:id/status', gate(async (req, res, access) => {
 
   const { data, error } = await supabaseAdmin.from('retention_cases')
     .update({ ...patch, updated_at: now }).eq('id', c.id).select('*').single();
+  // Reopening a Not Saved case while someone else has since started on the
+  // customer hits the one-live-case index.
+  if (error?.code === '23505') return res.status(409).json({ error: 'Another support agent is working this customer now', code: 'OTHER_AGENT' });
   if (error) return res.status(500).json({ error: error.message });
   res.json({ case: data });
 }));
 
-// ── POST /support/cases/:id/submit -- send a saved case to compliance ───────
-router.post('/cases/:id/submit', gate(async (req, res, access) => {
-  const c = await ownCase(req, res, access); if (!c) return;
-  if (c.status !== 'saved') return res.status(409).json({ error: 'Mark the customer saved first, then send it to compliance' });
-  const now = new Date().toISOString();
-  const { data, error } = await supabaseAdmin.from('retention_cases')
-    .update({ status: 'pending_approval', submitted_at: now, review_note: null, reviewed_by: null, reviewed_at: null, updated_at: now })
-    .eq('id', c.id).select('*').single();
-  if (error) return res.status(500).json({ error: error.message });
-
-  // Tell compliance. Never let a failed bell undo the submit.
-  try {
-    const companyId = req.user.company_id;
-    const ids = companyId ? await notifications.getUserIdsByLevel(companyId, ['compliance_manager']) : [];
-    await notifications.notifyUsers(ids, {
-      companyId, type: 'support_case_submitted',
-      title: 'Saved customer waiting for approval',
-      message: `${c.customer_name || 'A customer'} (${c.client_name || 'client'}) was saved by support and needs your final approval.`,
-      data: { case_id: c.id, sale_id: c.sale_id },
-    });
-  } catch (e) { logger.warn('SUPPORT', `submit notify failed: ${e.message}`); }
-
-  res.json({ case: data });
-}));
-
-// ── POST /support/cases/:id/review -- compliance: approve | return ──────────
-router.post('/cases/:id/review', gate(async (req, res, access) => {
-  if (!access.isReviewer) return res.status(403).json({ error: 'Only compliance can approve a saved customer' });
-  if (!safeUuid(req.params.id)) return res.status(404).json({ error: 'Case not found' });
-  const decision = String(req.body?.decision || '');
+// ── POST /support/policies/:saleId/tags -- tag a closer on a policy ─────────
+router.post('/policies/:saleId/tags', gate(async (req, res, access) => {
+  if (!access.canWork) return res.status(403).json({ error: 'Only a support agent can tag a closer' });
+  if (!safeUuid(req.params.saleId)) return res.status(404).json({ error: 'Policy not found' });
+  const target = String(req.body?.user_id || '');
   const note = String(req.body?.note || '').trim();
-  if (!['approve', 'return'].includes(decision)) return res.status(400).json({ error: 'Unknown decision' });
-  if (decision === 'return' && note.length < 5) return res.status(400).json({ error: 'Tell the agent what is missing' });
+  if (!safeUuid(target)) return res.status(400).json({ error: 'Pick the closer to tag' });
+  if (note.length < 3) return res.status(400).json({ error: 'Write what you need the closer to do' });
 
-  const { data: c } = await supabaseAdmin.from('retention_cases').select('*').eq('id', req.params.id).maybeSingle();
-  if (!c) return res.status(404).json({ error: 'Case not found' });
-  if (c.status !== 'pending_approval') return res.status(409).json({ error: 'This case is not waiting for approval' });
+  const { data: sale } = await supabaseAdmin
+    .from('sales').select('id, client_name, customer_name, reference_no, policy_number')
+    .eq('id', req.params.saleId).maybeSingle();
+  if (!mayTouchSale(sale, access)) return res.status(404).json({ error: 'Policy not found' });
+
+  // The target must really be a closer -- a tag opens this customer's record to
+  // whoever is named on it.
+  const closer = (await taggableClosers()).find(c => c.user_id === target);
+  if (!closer) return res.status(400).json({ error: 'That user is not an active closer' });
+
+  const { data: live } = await supabaseAdmin
+    .from('retention_cases').select('id').eq('sale_id', sale.id).in('status', LIVE_CASE).maybeSingle();
+
+  const { data: tag, error } = await supabaseAdmin.from('retention_tags').insert({
+    sale_id: sale.id, case_id: live?.id || null, tagged_user_id: target, tagged_by: req.user.id, note,
+    client_name: sale.client_name, customer_name: sale.customer_name,
+    reference_no: sale.policy_number || sale.reference_no,
+  }).select('*').single();
+  if (error?.code === '23505') return res.status(409).json({ error: `${closer.name} already has an open tag on this policy`, code: 'ALREADY_TAGGED' });
+  if (error) return res.status(500).json({ error: error.message });
+
+  // Bell + push, straight away. A failed notification never undoes the tag --
+  // the closer still finds it under Support Requests.
+  try {
+    const me = (await namesOf([req.user.id]))[req.user.id] || 'Support';
+    await notifications.notifyUsers([target], {
+      companyId: closer.company_id, type: 'support_tag',
+      title: 'Support tagged you on a policy',
+      message: `${me}: ${sale.customer_name || 'a customer'}${sale.client_name ? ` (${sale.client_name})` : ''} - ${note}`.slice(0, 400),
+      data: { tag_id: tag.id, sale_id: sale.id, tab: 'support_requests' },
+    });
+  } catch (e) { logger.warn('SUPPORT', `tag notify failed: ${e.message}`); }
+
+  res.json({ tag: { ...tag, tagged_name: closer.name } });
+}));
+
+// ── GET /support/tags/mine -- the policies I have been tagged on ────────────
+// NOT behind gate(): this is the closer's door. It returns ONLY tags that name
+// the caller, with just enough of the sale to act on it.
+router.get('/tags/mine', asyncHandler(async (req, res) => {
+  const status = ['open', 'done'].includes(req.query.status) ? req.query.status : null;
+  let q = supabaseAdmin.from('retention_tags').select('*')
+    .eq('tagged_user_id', req.user.id).order('created_at', { ascending: false }).limit(200);
+  if (status) q = q.eq('status', status);
+  const [{ data, error }, { count: openCount }] = await Promise.all([
+    q,
+    supabaseAdmin.from('retention_tags').select('id', { count: 'exact', head: true })
+      .eq('tagged_user_id', req.user.id).eq('status', 'open'),
+  ]);
+  if (error) return res.status(500).json({ error: error.message });
+
+  const tags = data || [];
+  const saleIds = [...new Set(tags.map(t => t.sale_id).filter(Boolean))];
+  const saleBy = {};
+  for (let i = 0; i < saleIds.length; i += 100) {
+    const { data: s } = await supabaseAdmin.from('sales')
+      .select('id, customer_name, customer_phone, customer_phone_2, client_name, plan, status, sale_date, cancellation_date, reference_no, policy_number, car_year, car_make, car_model, monthly_payment, monthly_date:form_data->>Monthly_Date')
+      .in('id', saleIds.slice(i, i + 100));
+    (s || []).forEach(x => { saleBy[x.id] = x; });
+  }
+  const names = await namesOf(tags.map(t => t.tagged_by));
+  res.json({
+    open_count: openCount || 0,
+    tags: tags.map(t => ({ ...t, tagged_by_name: names[t.tagged_by] || 'Support', sale: saleBy[t.sale_id] || null })),
+  });
+}));
+
+// ── POST /support/tags/:id/done -- the tagged closer closes it ──────────────
+router.post('/tags/:id/done', asyncHandler(async (req, res) => {
+  if (!safeUuid(req.params.id)) return res.status(404).json({ error: 'Request not found' });
+  const note = String(req.body?.note || '').trim();
+  const { data: tag } = await supabaseAdmin.from('retention_tags').select('*').eq('id', req.params.id).maybeSingle();
+  if (!tag || tag.tagged_user_id !== req.user.id) return res.status(404).json({ error: 'Request not found' });
+  if (tag.status === 'done') return res.status(409).json({ error: 'This request is already done' });
 
   const now = new Date().toISOString();
-  let reinstated = false;
-
-  if (decision === 'approve' && c.sale_id) {
-    const { data: sale } = await supabaseAdmin.from('sales').select('id, status').eq('id', c.sale_id).maybeSingle();
-    // Only a cancelled sale has anything to bring back. An active policy that
-    // was saved BEFORE it cancelled is approved as a case and left alone.
-    if (sale && CANCELLED.includes(sale.status)) {
-      const { error: sErr } = await supabaseAdmin.from('sales').update({
-        status: 'closed_won',
-        cancellation_date: null,
-        cancellation_reason_key: null,
-        reinstated_at: now,
-        reinstated_by: c.agent_id,
-        reinstate_reason: c.save_reason,
-        last_modified_by: req.user.id,
-        updated_at: now,
-      }).eq('id', sale.id);
-      if (sErr) return res.status(500).json({ error: `Could not reinstate the sale: ${sErr.message}` });
-      reinstated = true;
-    }
-  }
-
-  const { data, error } = await supabaseAdmin.from('retention_cases').update({
-    status: decision === 'approve' ? 'approved' : 'returned',
-    reviewed_by: req.user.id, reviewed_at: now, review_note: note || null,
-    sale_reinstated: reinstated, next_follow_up_at: null, updated_at: now,
-  }).eq('id', c.id).select('*').single();
+  const { data, error } = await supabaseAdmin.from('retention_tags')
+    .update({ status: 'done', closer_note: note || null, done_at: now })
+    .eq('id', tag.id).eq('status', 'open').select('*').single();
   if (error) return res.status(500).json({ error: error.message });
 
   try {
-    await notifications.createNotification({
-      userId: c.agent_id, companyId: req.user.company_id || c.company_id,
-      type: decision === 'approve' ? 'support_case_approved' : 'support_case_returned',
-      title: decision === 'approve' ? 'Saved customer approved' : 'Saved customer sent back',
-      message: decision === 'approve'
-        ? `${c.customer_name || 'Your customer'} was approved by compliance${reinstated ? ' and the policy is active again' : ''}.`
-        : `${c.customer_name || 'Your customer'} was sent back: ${note}`,
-      data: { case_id: c.id, sale_id: c.sale_id },
+    const me = (await namesOf([req.user.id]))[req.user.id] || 'The closer';
+    await notifications.notifyUsers([tag.tagged_by], {
+      companyId: req.user.company_id, type: 'support_tag_done',
+      title: 'Closer finished your request',
+      message: `${me} is done with ${tag.customer_name || 'your customer'}${note ? `: ${note}` : '.'}`.slice(0, 400),
+      data: { tag_id: tag.id, sale_id: tag.sale_id },
     });
-  } catch (e) { logger.warn('SUPPORT', `review notify failed: ${e.message}`); }
+  } catch (e) { logger.warn('SUPPORT', `tag-done notify failed: ${e.message}`); }
 
-  res.json({ case: data, sale_reinstated: reinstated });
+  res.json({ tag: data });
 }));
 
 // ── GET /support/reports -- per-agent numbers + the call log ────────────────
@@ -491,54 +559,55 @@ router.get('/reports', gate(async (req, res, access) => {
     }
     return out;
   };
-  const who = (q) => (onlyAgent ? q.eq('agent_id', onlyAgent) : q);
+  const who = (q, col = 'agent_id') => (onlyAgent ? q.eq(col, onlyAgent) : q);
 
-  const [calls, cases] = await Promise.all([
+  const [calls, cases, tags] = await Promise.all([
     pageAll(() => who(supabaseAdmin.from('retention_calls')
       .select('id, case_id, sale_id, agent_id, outcome, notes, follow_up_at, called_at')
       .gte('called_at', from).lte('called_at', to)).order('called_at', { ascending: false })),
-    // Every case that MOVED in the window: opened, saved, submitted or reviewed.
+    // Every case that MOVED in the window: opened, saved or closed.
     pageAll(() => who(supabaseAdmin.from('retention_cases')
-      .select('id, sale_id, agent_id, client_name, customer_name, reference_no, status, created_at, saved_at, submitted_at, reviewed_at, sale_reinstated, call_count, updated_at')
-      .or(`created_at.gte."${from}",saved_at.gte."${from}",submitted_at.gte."${from}",reviewed_at.gte."${from}",updated_at.gte."${from}"`))
+      .select('id, sale_id, agent_id, client_name, customer_name, reference_no, status, created_at, saved_at, call_count, updated_at')
+      .or(`created_at.gte."${from}",saved_at.gte."${from}",updated_at.gte."${from}"`))
       .order('updated_at', { ascending: false })),
+    pageAll(() => who(supabaseAdmin.from('retention_tags').select('id, tagged_by, status, created_at')
+      .gte('created_at', from).lte('created_at', to), 'tagged_by').order('created_at', { ascending: false })),
   ]);
 
   const fromMs = Date.parse(from), toMs = Date.parse(to);
   const inWin = (t) => { if (!t) return false; const ms = Date.parse(t); return ms >= fromMs && ms <= toMs; };
-  const blank = () => ({ calls: 0, customers: 0, opened: 0, saved: 0, submitted: 0, approved: 0, reinstated: 0, returned: 0, lost: 0, pending: 0 });
+  const blank = () => ({ calls: 0, customers: 0, opened: 0, saved: 0, lost: 0, in_progress: 0, tags: 0 });
   const by = {};
   const row = (id) => (by[id] = by[id] || { ...blank(), _cust: new Set() });
 
   calls.forEach(c => { const r = row(c.agent_id); r.calls++; r._cust.add(c.case_id); });
   cases.forEach(c => {
     const r = row(c.agent_id);
-    if (inWin(c.created_at))   r.opened++;
-    if (inWin(c.saved_at))     r.saved++;
-    if (inWin(c.submitted_at)) r.submitted++;
-    if (c.status === 'approved' && inWin(c.reviewed_at)) { r.approved++; if (c.sale_reinstated) r.reinstated++; }
-    if (c.status === 'returned' && inWin(c.reviewed_at)) r.returned++;
-    if (c.status === 'lost'     && inWin(c.updated_at))  r.lost++;
-    if (c.status === 'pending_approval') r.pending++;
+    if (inWin(c.created_at)) r.opened++;
+    if (c.status === 'saved' && inWin(c.saved_at))   r.saved++;
+    if (c.status === 'lost'  && inWin(c.updated_at)) r.lost++;
+    if (c.status === 'open') r.in_progress++;
   });
+  tags.forEach(t => { row(t.tagged_by).tags++; });
 
   const names = await namesOf(Object.keys(by));
   const agents = Object.entries(by).map(([id, r]) => {
     const { _cust, ...rest } = r;
-    const decided = rest.approved + rest.lost;
+    const decided = rest.saved + rest.lost;
     return {
       agent_id: id, name: names[id] || 'Unknown', ...rest, customers: _cust.size,
-      save_rate: decided ? Math.round((rest.approved / decided) * 100) : null,
+      save_rate: decided ? Math.round((rest.saved / decided) * 100) : null,
     };
-  }).sort((a, b) => b.approved - a.approved || b.saved - a.saved || b.calls - a.calls);
+  }).sort((a, b) => b.saved - a.saved || b.calls - a.calls);
 
   const totals = agents.reduce((t, a) => {
     Object.keys(blank()).forEach(k => { t[k] += a[k] || 0; });
     return t;
   }, blank());
+  const decidedAll = totals.saved + totals.lost;
+  totals.save_rate = decidedAll ? Math.round((totals.saved / decidedAll) * 100) : null;
 
   const caseBy = Object.fromEntries(cases.map(c => [c.id, c]));
-  const outcomeLabel = Object.fromEntries(OUTCOMES.map(o => [o.key, o.label]));
   const outcomes = {};
   calls.forEach(c => { outcomes[c.outcome] = (outcomes[c.outcome] || 0) + 1; });
 
@@ -554,11 +623,11 @@ router.get('/reports', gate(async (req, res, access) => {
   res.json({
     range: { date_from: dateFrom, date_to: dateTo },
     agents, totals,
-    outcomes: Object.entries(outcomes).map(([key, n]) => ({ key, label: outcomeLabel[key] || key, count: n }))
+    outcomes: Object.entries(outcomes).map(([key, n]) => ({ key, label: OUTCOME_LABEL[key] || key, count: n }))
       .sort((a, b) => b.count - a.count),
     calls: calls.slice(0, 500).map(c => ({
       ...c,
-      outcome_label: outcomeLabel[c.outcome] || c.outcome,
+      outcome_label: OUTCOME_LABEL[c.outcome] || c.outcome,
       agent_name: names[c.agent_id] || null,
       customer_name: caseBy[c.case_id]?.customer_name || null,
       client_name: caseBy[c.case_id]?.client_name || null,

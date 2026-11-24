@@ -24,6 +24,7 @@ const { runBatchExpiry } = require('./batchExpiry');
 const ipAccess = require('./ipAccess');
 const lookupHistory = require('./customerLookupHistory');
 const attachments = require('./attachments');
+const { runSupportFollowUpReminders } = require('./supportReminders');
 
 const REFRESH_SEGMENTS_MS = 10 * 60 * 1000;     // every 10 min
 const CACHE_SWEEP_MS      = 5  * 60 * 1000;      // every 5 min
@@ -136,6 +137,13 @@ function startBackgroundJobs() {
   const scan = () => runPaymentReminderScan().catch(e => logger.warn('JOBS', `payment scan error: ${e.message}`));
   _timers.push(setTimeout(scan, PAYMENT_SCAN_INIT));
   _timers.push(setInterval(scan, PAYMENT_SCAN_MS));
+
+  // Support desk follow-up reminders (mig 357): every minute, so the agent's
+  // bell + push land within a minute of the follow-up time they picked. One
+  // indexed query when nothing is due.
+  const followUps = () => runSupportFollowUpReminders().catch(e => logger.warn('JOBS', `support follow-up error: ${e.message}`));
+  _timers.push(setTimeout(followUps, 45 * 1000));
+  _timers.push(setInterval(followUps, 60 * 1000));
 
   // QA worklist materialization (TRA full coverage + RCM frozen sampling).
   // No-op unless a company has QA explicitly enabled (mig 171 default is off).

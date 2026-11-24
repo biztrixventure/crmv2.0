@@ -1104,7 +1104,7 @@ book of the shared pool.
   transfers, `/sales/search`, Lead Intelligence) only narrow records the caller
   can already see in full.
 
-### Support desk -- customer retention (migs 355-356, applied 2026-11-24)
+### Support desk -- customer retention (migs 355-357, applied 2026-11-24)
 A **Support Agent** (role level `support_agent`, closer companies only, seeded
 for 1-Vertex) calls a CLIENT's customers to keep them on the policy. Shell
 `/support` (`shells/SupportShell.jsx`), API `/api/support` (`routes/support.js`),
@@ -1118,17 +1118,14 @@ screens in `components/Support/`.
   clients, post-dates excluded. A case (`retention_cases`) opens on the FIRST
   logged call and that claims the customer: one live case per sale (partial
   unique index `uq_retention_live_case`), a second agent gets 409 `OTHER_AGENT`.
-- Flow: `open -> saved -> pending_approval -> approved`, or `returned` (back to
-  the agent with a note) / `lost`. Every call is a `retention_calls` row:
-  outcome key (catalog `OUTCOMES` in the route, served by `/support/me`), the
-  agent's typed story, optional follow-up time (`datetime-local` -> UTC).
-- **The sale is touched ONLY on compliance approval, and only if it is
-  cancelled**: `status -> closed_won`, `cancellation_date` cleared,
-  `reinstated_at/by/reason` stamped. What it was before stays on the case
-  (`sale_status_at_open`, `cancellation_*_at_open`). An active policy saved
-  before it cancelled is approved as a case and the sale is left alone. The
-  timeline writes ONE `reinstated` event (not `approved`) with the reason as its
-  note -- `fn_log_policy_event`, mig 356.
+- Flow (since mig 357, see below): `open` (shown as "In Progress") -> `saved`
+  or `lost`, and back to `open` by Reopen. Every call is a `retention_calls`
+  row: outcome key (catalog `OUTCOMES` in the route, served by `/support/me`),
+  the agent's typed story, optional follow-up time (`datetime-local` -> UTC).
+- **THE SUPPORT DESK NEVER CHANGES A SALE** (mig 357). 355-356 had compliance
+  approve a save and reinstate the policy; the operator removed that step.
+  `pending_approval` / `approved` / `returned`, the `reinstated_*` columns and
+  the `reinstated` timeline event are still in the database, unused.
 - **THE FENCE (`middleware/authMiddleware.js`, `SUPPORT_AGENT_APIS`).** Most list
   routes name the roles they know (`closer` -> own rows) and let every OTHER
   role fall through to the manager branch: the whole company. A new agent-level
@@ -1142,9 +1139,9 @@ screens in `components/Support/`.
   `reference_no` snapshotted -- deleting a sale must not erase logged work (352).
 - Reports: `GET /support/reports` (an agent only ever gets their own; reviewers
   everyone). One component, `SupportReports.jsx`, mounted in AdminPanel
-  (`support-reports`) and ComplianceShell (`support`): Approvals, Agent Report,
-  Call Log, Agents & Clients. Approving opens the SAME `PolicyScreen` the agent
-  used (`mode="review"`). CSVs log to egress as dataset `support_retention`.
+  (`support-reports`) and ComplianceShell (`support`): Agent Report, Call Log,
+  Agents & Clients. Save rate = saved / (saved + lost). CSVs log to egress as
+  dataset `support_retention`.
 - **The classic look is deliberate** (`components/Support/support.css`): the
   operator asked for the old policy-admin program's grey boxed form. Everything
   is scoped under `.sx` with fixed colours -- it does NOT follow the theme or
@@ -1154,6 +1151,38 @@ screens in `components/Support/`.
 - Tested 2026-11-24 with throwaway user ids against the live DB (44 checks,
   cleaned up) + the reinstatement UPDATE in a rolled-back transaction. NOT
   clicked through in a browser.
+
+### Support desk: no compliance, closer tags, reminders (mig 357, applied 2026-11-24)
+Additive only (a version that dropped the 356 approval columns was declined).
+- **Tag a closer** (`retention_tags`): the agent names a closer on the policy
+  with a note. `POST /support/policies/:saleId/tags` -- the closer must come
+  from `taggableClosers()` (`GET /support/closers`); one OPEN tag per (sale,
+  closer) (`uq_retention_open_tag`, 409 `ALREADY_TAGGED`). The closer is
+  notified (`support_tag`) and works it from a **Support Requests** tab in
+  StaffShell (`components/Support/SupportRequests.jsx`): the CRM's normal
+  look, NOT the classic `.sx` one. Mark done -> the agent is notified
+  (`support_tag_done`).
+- **`GET /support/tags/mine` and `POST /support/tags/:id/done` sit OUTSIDE the
+  desk's `gate`** and return only the caller's own tags: that is the one door a
+  closer has into `/api/support`. Everything else still 403s for them.
+- **Follow-up reminders**: `utils/supportReminders.js`, every 60s from
+  `utils/scheduler.js`. Claim-then-send on `follow_up_notified_at` (one ring
+  per follow-up, safe across instances); logging the next call clears the stamp
+  and re-arms it. Older than 24h is never sent. **In a test pass
+  `{ onlyAgentIds }`** -- an unscoped run with notifications stubbed claims and
+  swallows real agents' reminders (it did, once, on 2026-11-24; reset by hand).
+- **Row colour = the LAST call's outcome** (`retention_cases.last_outcome`,
+  written by the call route). Each `OUTCOMES` entry carries a `tone`; the CSS
+  is `.sx-tone-<tone>`, `toneClass()` in `supportFormat.js`.
+- **Monthly Date** is `form_data->>Monthly_Date`, selected as `monthly_date` in
+  `SALE_LIST_COLS` and shown on every list.
+- **Every column sorts.** Paged lists sort on the SERVER (`POLICY_SORT` /
+  `CASE_SORT` whitelists, unknown key = default); columns that come from a join
+  sort the loaded page (`PAGE_SORT` in `SupportWorkspace.jsx`); whole tables use
+  `useClientSort`. One header component: `SortTh` in `sxSort.jsx`.
+- Tested 2026-11-24 in-process against the live DB with throwaway user ids and
+  notifications stubbed (44 checks, cleaned up). NOT clicked through in a
+  browser.
 
 ### IP access control (mig 319, applied 2026-09-15)
 Which networks each user may use the CRM from. Ships OFF, and everyone is `anywhere`. README → "IP access control" has the operator steps.

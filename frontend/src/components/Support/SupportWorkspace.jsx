@@ -2,41 +2,74 @@
 // SupportWorkspace -- the support agent's desk.
 //
 // One row of square tabs across the top, the way the old program had them:
-//   Cancelled   every cancelled policy of the agent's clients (the main list)
-//   Active      policies still in force -- call them before they cancel
-//   My Cases    customers I have started working
-//   Follow-ups  cases with a call-back time, soonest first
-//   Saved       saved by me, not yet sent to compliance
-//   With Compliance / Sent Back / Approved / Not Saved
-//   My Stats    my own numbers for a date range
+//   Cancelled    every cancelled policy of the agent's clients (the main list)
+//   Active       policies still in force -- call them before they cancel
+//   In Progress  customers I am working
+//   Follow-ups   cases with a call-back time, soonest first
+//   Saved / Not Saved
+//   My Stats     my own numbers for a date range
+//
+// Every column header sorts on click. These lists are paged, so the sort is
+// done by the SERVER (sorting only the 50 rows on screen would lie about the
+// order); the one exception is the Retention column of the policy lists, which
+// is not a column of the sale and so sorts the page that is showing.
+//
+// Rows are tinted by how the customer's LAST call ended (the outcome picked in
+// Log Call), so a list reads at a glance -- the legend above each grid says
+// which colour is which.
 //
 // Clicking a row opens the PolicyScreen; its toolbar steps "Policy 3 of 50"
 // through the list that was on screen. The server decides what each list
 // holds (routes/support.js) -- this component only asks.
 // ============================================================================
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Search, RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
 import client from '../../api/client';
+import { useLiveRefresh } from '../../hooks/useLiveRefresh';
 import PolicyScreen from './PolicyScreen';
-import { money, day, dateTime, saleStatus, caseStatus, vehicle, errText } from './supportFormat';
+import { SortTh, useClientSort } from './sxSort';
+import {
+  money, day, dateTime, saleStatus, caseStatus, vehicle, errText, outcomeOf, toneClass, monthlyDate,
+} from './supportFormat';
 import './support.css';
 
 const VIEWS = [
-  { key: 'cancelled', label: 'Cancelled', kind: 'policies' },
-  { key: 'active',    label: 'Active',    kind: 'policies' },
-  { key: 'mine',      label: 'My Cases',  kind: 'cases' },
-  { key: 'followups', label: 'Follow-ups', kind: 'cases' },
-  { key: 'saved',     label: 'Saved',     kind: 'cases' },
-  { key: 'pending',   label: 'With Compliance', kind: 'cases' },
-  { key: 'returned',  label: 'Sent Back', kind: 'cases' },
-  { key: 'approved',  label: 'Approved',  kind: 'cases' },
-  { key: 'lost',      label: 'Not Saved', kind: 'cases' },
-  { key: 'stats',     label: 'My Stats',  kind: 'stats' },
+  { key: 'cancelled', label: 'Cancelled',   kind: 'policies' },
+  { key: 'active',    label: 'Active',      kind: 'policies' },
+  { key: 'mine',      label: 'In Progress', kind: 'cases' },
+  { key: 'followups', label: 'Follow-ups',  kind: 'cases' },
+  { key: 'saved',     label: 'Saved',       kind: 'cases' },
+  { key: 'lost',      label: 'Not Saved',   kind: 'cases' },
+  { key: 'stats',     label: 'My Stats',    kind: 'stats' },
 ];
 const PAGE = 50;
+const LIVE_TYPES = ['support_followup_due', 'support_tag_done'];
+
+// Columns that are NOT a column of the table being paged (they come from the
+// joined case or sale), so the server cannot order by them: these sort the page
+// that is showing. Everything else is sorted by the server across all pages.
+const PAGE_SORT = {
+  policies: { retention: (r) => (r.case ? caseStatus(r.case.status).label : '') },
+  cases: {
+    phone: (r) => r.sale?.customer_phone || '',
+    monthly_date: (r) => (r.sale?.monthly_date && r.sale.monthly_date !== '-' ? r.sale.monthly_date : ''),
+    policy_status: (r) => (r.sale ? saleStatus(r.sale.status).label : ''),
+  },
+};
 
 const todayIso = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
 const monthStartIso = () => `${todayIso().slice(0, 8)}01`;
+
+function Legend({ outcomes }) {
+  return (
+    <div className="sx-legend" aria-label="Row colours">
+      <span>Last call:</span>
+      {outcomes.filter((o) => o.tone && o.tone !== 'none').map((o) => (
+        <span key={o.key} className="sx-swatch"><i className={`sx-tone-${o.tone}`} />{o.label}</span>
+      ))}
+    </div>
+  );
+}
 
 export default function SupportWorkspace() {
   const [me, setMe] = useState(null);
@@ -45,14 +78,15 @@ export default function SupportWorkspace() {
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
+  const [sort, setSort] = useState(null);             // { key, dir } or null = the list's own order
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
   const [clientFilter, setClientFilter] = useState('');
   // The open policy is remembered by SALE ID, not by row number: logging a call
-  // or sending a case reloads the list, and a row that leaves it (a Saved case
-  // that was just sent) must not swap the screen to whichever row took its place.
+  // reloads the list, and a row that leaves it (a case just marked Saved) must
+  // not swap the screen to whichever row took its place.
   const [openId, setOpenId] = useState(null);         // opened from the list
   const [openSale, setOpenSale] = useState(null);     // opened from the Policies tab (may not be in the list)
   const [stats, setStats] = useState(null);
@@ -60,6 +94,8 @@ export default function SupportWorkspace() {
   const reqId = useRef(0);
 
   const kind = VIEWS.find((v) => v.key === view)?.kind;
+  const pageSorter = sort ? PAGE_SORT[kind]?.[sort.key] : null;
+  const serverSort = sort && !pageSorter ? sort : null;
 
   useEffect(() => {
     client.get('support/me')
@@ -71,17 +107,18 @@ export default function SupportWorkspace() {
     if (!me) return;
     const id = ++reqId.current;
     setLoading(true); setError('');
+    const sortParams = serverSort ? { sort: serverSort.key, dir: serverSort.dir } : {};
     try {
       if (kind === 'stats') {
         const r = await client.get('support/reports', { params: { date_from: range.from, date_to: range.to } });
         if (id === reqId.current) setStats(r.data);
       } else if (kind === 'policies') {
         const r = await client.get('support/policies', {
-          params: { view, page, limit: PAGE, search: search || undefined, client: clientFilter || undefined },
+          params: { view, page, limit: PAGE, search: search || undefined, client: clientFilter || undefined, ...sortParams },
         });
         if (id === reqId.current) { setRows(r.data.policies || []); setTotal(r.data.total || 0); }
       } else {
-        const r = await client.get('support/cases', { params: { view, page, limit: PAGE } });
+        const r = await client.get('support/cases', { params: { view, page, limit: PAGE, ...sortParams } });
         if (id === reqId.current) { setRows(r.data.cases || []); setTotal(r.data.total || 0); }
       }
     } catch (e) {
@@ -89,17 +126,37 @@ export default function SupportWorkspace() {
     } finally {
       if (id === reqId.current) setLoading(false);
     }
-  }, [me, kind, view, page, search, clientFilter, range.from, range.to]);
+    // serverSort is derived from sort; its key + dir are the real inputs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me, kind, view, page, search, clientFilter, range.from, range.to, serverSort?.key, serverSort?.dir]);
 
   useEffect(() => { load(); }, [load]);
+  // A follow-up coming due, or a closer finishing a tag, arrives as a
+  // notification: refresh the list that is showing (never a hidden tab, and
+  // not while a policy is open on top of it -- that screen reloads itself).
+  useLiveRefresh(LIVE_TYPES, load, { enabled: !openId && !openSale });
 
-  const pickView = (k) => { setView(k); setPage(1); setRows([]); setTotal(0); setOpenId(null); setOpenSale(null); };
+  const pickView = (k) => { setView(k); setPage(1); setSort(null); setRows([]); setTotal(0); setOpenId(null); setOpenSale(null); };
   const runSearch = (e) => { e.preventDefault(); setPage(1); setSearch(searchInput.trim()); };
+  const changeSort = (next) => { setSort(next); setPage(1); };
+
+  // Page-sorted columns (see PAGE_SORT). Blanks always sink to the bottom.
+  const shown = useMemo(() => {
+    if (!pageSorter) return rows;
+    const sign = sort.dir === 'desc' ? -1 : 1;
+    return [...rows].sort((a, b) => {
+      const x = pageSorter(a), y = pageSorter(b);
+      if (!x && !y) return 0;
+      if (!x) return 1;
+      if (!y) return -1;
+      return sign * String(x).localeCompare(String(y), undefined, { numeric: true });
+    });
+  }, [rows, sort, pageSorter]);
 
   const saleIdOf = (r) => (kind === 'cases' ? r.sale_id : r.id);
-  const openIdx = openId ? rows.findIndex((r) => saleIdOf(r) === openId) : -1;
+  const openIdx = openId ? shown.findIndex((r) => saleIdOf(r) === openId) : -1;
   const shownSale = openSale || openId;
-  const openAt = (i) => setOpenId(saleIdOf(rows[i]) || null);
+  const openAt = (i) => setOpenId(saleIdOf(shown[i]) || null);
 
   if (meError) return <div className="sx"><div className="sx-body"><div className="sx-note bad">{meError}</div></div></div>;
   if (!me) return <div className="sx"><div className="sx-empty">Opening the support desk...</div></div>;
@@ -120,7 +177,7 @@ export default function SupportWorkspace() {
 
       {noClients && (
         <div className="sx-body">
-          <div className="sx-note">No clients have been assigned to you yet. Ask your superadmin or compliance manager to choose which clients you support. Until then your lists are empty.</div>
+          <div className="sx-note">No clients have been assigned to you yet. Ask your superadmin to choose which clients you support. Until then your lists are empty.</div>
         </div>
       )}
 
@@ -132,59 +189,13 @@ export default function SupportWorkspace() {
           mode="work"
           position={!openSale && openIdx >= 0 ? { index: (page - 1) * PAGE + openIdx, total } : null}
           onPrev={!openSale && openIdx > 0 ? () => openAt(openIdx - 1) : null}
-          onNext={!openSale && openIdx >= 0 && openIdx < rows.length - 1 ? () => openAt(openIdx + 1) : null}
+          onNext={!openSale && openIdx >= 0 && openIdx < shown.length - 1 ? () => openAt(openIdx + 1) : null}
           onBack={() => { if (openSale) setOpenSale(null); else setOpenId(null); }}
           onOpenSale={(id) => setOpenSale(id)}
           onChanged={load}
         />
       ) : kind === 'stats' ? (
-        <div className="sx-body">
-          <form className="sx-searchbar" style={{ padding: '0 0 8px', border: 'none' }} onSubmit={(e) => { e.preventDefault(); load(); }}>
-            <label htmlFor="sx-from">From:</label>
-            <input id="sx-from" type="date" className="sx-input" style={{ width: 150 }} value={range.from} max={range.to}
-              onChange={(e) => setRange((r) => ({ ...r, from: e.target.value }))} />
-            <label htmlFor="sx-to">To:</label>
-            <input id="sx-to" type="date" className="sx-input" style={{ width: 150 }} value={range.to} min={range.from}
-              onChange={(e) => setRange((r) => ({ ...r, to: e.target.value }))} />
-            <button type="submit" className="sx-btn" disabled={loading}><RefreshCw size={14} /> Refresh</button>
-          </form>
-          {error && <div className="sx-note bad">{error}</div>}
-          {stats && (() => {
-            const t = stats.totals || {};
-            const mine = stats.agents?.[0];
-            return (
-              <>
-                <div className="sx-stats">
-                  <div className="sx-stat"><b>{t.calls || 0}</b>Calls made</div>
-                  <div className="sx-stat"><b>{mine?.customers || 0}</b>Customers called</div>
-                  <div className="sx-stat"><b>{t.saved || 0}</b>Marked saved</div>
-                  <div className="sx-stat"><b>{t.submitted || 0}</b>Sent to compliance</div>
-                  <div className="sx-stat"><b>{t.approved || 0}</b>Approved</div>
-                  <div className="sx-stat"><b>{t.returned || 0}</b>Sent back</div>
-                  <div className="sx-stat"><b>{t.lost || 0}</b>Not saved</div>
-                  <div className="sx-stat"><b>{mine?.save_rate == null ? '-' : `${mine.save_rate}%`}</b>Save rate</div>
-                </div>
-                <div className="sx-gridwrap" style={{ maxHeight: '55vh' }}>
-                  <table className="sx-grid">
-                    <thead><tr><th>Date / Time (ET)</th><th>Customer</th><th>Client</th><th>Outcome</th><th>What happened</th></tr></thead>
-                    <tbody>
-                      {(stats.calls || []).length === 0 && <tr><td colSpan={5}><div className="sx-empty">No calls in this date range.</div></td></tr>}
-                      {(stats.calls || []).map((c) => (
-                        <tr key={c.id}>
-                          <td className="nowrap">{dateTime(c.called_at)}</td>
-                          <td className="nowrap">{c.customer_name}</td>
-                          <td className="nowrap">{c.client_name}</td>
-                          <td className="nowrap">{c.outcome_label}</td>
-                          <td className="story">{c.notes}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </>
-            );
-          })()}
-        </div>
+        <StatsView stats={stats} range={range} setRange={setRange} loading={loading} error={error} onRefresh={load} outcomes={me.outcomes} />
       ) : (
         <>
           {kind === 'policies' && (
@@ -207,15 +218,22 @@ export default function SupportWorkspace() {
 
           <div className="sx-body" style={{ paddingTop: 8 }}>
             {error && <div className="sx-note bad">{error}</div>}
-            <div className="sx-gridwrap" style={{ maxHeight: 'calc(100vh - 250px)' }}>
+            <Legend outcomes={me.outcomes} />
+            <div className="sx-gridwrap" style={{ maxHeight: 'calc(100vh - 285px)' }}>
               {kind === 'policies'
-                ? <PolicyGrid rows={rows} loading={loading} view={view} onOpen={openAt} />
-                : <CaseGrid rows={rows} loading={loading} view={view} onOpen={openAt} />}
+                ? <PolicyGrid rows={shown} loading={loading} view={view} onOpen={openAt} sort={sort} onSort={changeSort} outcomes={me.outcomes} />
+                : <CaseGrid rows={shown} loading={loading} view={view} onOpen={openAt} sort={sort} onSort={changeSort} outcomes={me.outcomes} />}
             </div>
           </div>
 
           <div className="sx-statusbar">
             <span>{loading ? 'Loading...' : `${total.toLocaleString()} record${total === 1 ? '' : 's'}`}</span>
+            {sort && (
+              <span>
+                {pageSorter ? 'Sorted within this page.' : 'Sorted across all pages.'}{' '}
+                <button type="button" className="sx-link" onClick={() => changeSort(null)}>Reset order</button>
+              </span>
+            )}
             <span className="sx-spacer" />
             <button type="button" className="sx-tool" disabled={page <= 1 || loading} onClick={() => setPage((p) => p - 1)} aria-label="Previous page"><ChevronLeft size={15} /></button>
             <span>Page {page} of {pages}</span>
@@ -243,25 +261,36 @@ function ClientSelect({ id, me, value, onChange }) {
 }
 
 // A row opens on click, and on Enter / Space for keyboard users.
-const rowProps = (onOpen, i) => ({
-  className: 'pick',
+const rowProps = (onOpen, i, extra = '') => ({
+  className: `pick ${extra}`.trim(),
   tabIndex: 0,
   onClick: () => onOpen(i),
   onKeyDown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(i); } },
 });
 
-function PolicyGrid({ rows, loading, view, onOpen }) {
+function PolicyGrid({ rows, loading, view, onOpen, sort, onSort, outcomes }) {
+  const th = { sort, onSort };
   return (
     <table className="sx-grid">
       <thead>
         <tr>
-          <th>Customer</th><th>Phone</th><th>Client</th><th>Vehicle</th><th>Coverage</th>
-          <th>Effective</th><th>{view === 'active' ? 'Monthly' : 'Cancelled'}</th><th>Policy Number</th><th>Status</th><th>Retention</th>
+          <SortTh label="Customer" k="customer" {...th} />
+          <SortTh label="Phone" k="phone" {...th} />
+          <SortTh label="Client" k="client" {...th} />
+          <SortTh label="Vehicle" k="vehicle" {...th} />
+          <SortTh label="Coverage" k="coverage" {...th} />
+          <SortTh label="Effective" k="effective" {...th} />
+          {view !== 'active' && <SortTh label="Cancelled" k="cancelled" {...th} />}
+          <SortTh label="Monthly" k="monthly" num {...th} />
+          <SortTh label="Monthly Date" k="monthly_date" {...th} title="Sort by the monthly payment date" />
+          <SortTh label="Policy Number" k="policy" {...th} />
+          <SortTh label="Status" k="status" {...th} />
+          <SortTh label="Retention" k="retention" {...th} title="Sort the rows on this page by retention status" />
         </tr>
       </thead>
       <tbody>
         {!loading && rows.length === 0 && (
-          <tr><td colSpan={10}><div className="sx-empty">
+          <tr><td colSpan={12}><div className="sx-empty">
             {view === 'active' ? 'No active policies match.' : 'No cancelled policies match.'}
           </div></td></tr>
         )}
@@ -269,14 +298,16 @@ function PolicyGrid({ rows, loading, view, onOpen }) {
           const st = saleStatus(r.status);
           const cs = r.case ? caseStatus(r.case.status) : null;
           return (
-            <tr key={r.id} {...rowProps(onOpen, i)}>
+            <tr key={r.id} {...rowProps(onOpen, i, r.case ? toneClass(outcomes, r.case.last_outcome) : '')}>
               <td className="nowrap"><span className="sx-link">{r.customer_name || '(no name)'}</span></td>
               <td className="nowrap">{r.customer_phone}</td>
               <td className="nowrap">{r.client_name}</td>
               <td className="nowrap">{vehicle(r)}</td>
               <td className="nowrap">{r.plan}</td>
               <td className="nowrap">{day(r.sale_date)}</td>
-              <td className={view === 'active' ? 'num' : 'nowrap'}>{view === 'active' ? money(r.monthly_payment) : day(r.cancellation_date)}</td>
+              {view !== 'active' && <td className="nowrap">{day(r.cancellation_date)}</td>}
+              <td className="num">{money(r.monthly_payment)}</td>
+              <td className="nowrap">{monthlyDate(r.monthly_date)}</td>
               <td className="nowrap">{r.policy_number || r.reference_no}</td>
               <td className="nowrap"><span className={`sx-pill ${st.tone === 'active' ? 'green' : st.tone === 'cancelled' ? 'red' : 'amber'}`}>{st.label}</span></td>
               <td className="nowrap">
@@ -292,27 +323,40 @@ function PolicyGrid({ rows, loading, view, onOpen }) {
   );
 }
 
-function CaseGrid({ rows, loading, view, onOpen }) {
+function CaseGrid({ rows, loading, view, onOpen, sort, onSort, outcomes }) {
+  const th = { sort, onSort };
+  const now = Date.now();
   return (
     <table className="sx-grid">
       <thead>
         <tr>
-          <th>Customer</th><th>Phone</th><th>Client</th><th>Policy Number</th><th>Case</th>
-          <th className="num">Calls</th><th>Last Call</th><th>{view === 'followups' ? 'Follow up on' : 'Updated'}</th><th>Policy</th>
+          <SortTh label="Customer" k="customer" {...th} />
+          <SortTh label="Phone" k="phone" {...th} title="Sort the rows on this page by phone" />
+          <SortTh label="Client" k="client" {...th} />
+          <SortTh label="Policy Number" k="policy" {...th} />
+          <SortTh label="Status" k="status" {...th} />
+          <SortTh label="Last Outcome" k="outcome" {...th} />
+          <SortTh label="Calls" k="calls" num {...th} />
+          <SortTh label="Last Call" k="last_call" {...th} />
+          <SortTh label="Follow up on" k="follow_up" {...th} />
+          <SortTh label="Updated" k="updated" {...th} />
+          <SortTh label="Monthly Date" k="monthly_date" {...th} title="Sort the rows on this page by monthly payment date" />
+          <SortTh label="Policy" k="policy_status" {...th} title="Sort the rows on this page by policy status" />
         </tr>
       </thead>
       <tbody>
         {!loading && rows.length === 0 && (
-          <tr><td colSpan={9}><div className="sx-empty">
-            {view === 'followups' ? 'No follow-ups scheduled.' : 'Nothing in this list.'}
+          <tr><td colSpan={12}><div className="sx-empty">
+            {view === 'followups' ? 'No follow-ups scheduled. Pick a follow-up time when you log a call and it appears here.' : 'Nothing in this list.'}
           </div></td></tr>
         )}
         {rows.map((r, i) => {
           const cs = caseStatus(r.status);
           const st = saleStatus(r.sale?.status);
-          const overdue = view === 'followups' && r.next_follow_up_at && new Date(r.next_follow_up_at) < new Date();
+          const due = !!r.next_follow_up_at && Date.parse(r.next_follow_up_at) <= now;
+          const tone = `${toneClass(outcomes, r.last_outcome)} ${due ? 'sx-overdue' : ''}`.trim();
           // A case whose sale was deleted has nothing to open.
-          const props = r.sale_id ? rowProps(onOpen, i) : {};
+          const props = r.sale_id ? rowProps(onOpen, i, tone) : { className: tone };
           return (
             <tr key={r.id} {...props}>
               <td className="nowrap"><span className={r.sale_id ? 'sx-link' : ''}>{r.customer_name || r.sale?.customer_name || '(no name)'}</span></td>
@@ -320,18 +364,74 @@ function CaseGrid({ rows, loading, view, onOpen }) {
               <td className="nowrap">{r.client_name}</td>
               <td className="nowrap">{r.reference_no}</td>
               <td className="nowrap"><span className={`sx-pill ${cs.pill}`}>{cs.label}</span></td>
+              <td className="nowrap">{outcomeOf(outcomes, r.last_outcome)?.label}</td>
               <td className="num">{r.call_count}</td>
               <td className="nowrap">{dateTime(r.last_call_at)}</td>
-              <td className="nowrap">
-                {view === 'followups'
-                  ? <span className={overdue ? 'sx-pill red' : ''}>{dateTime(r.next_follow_up_at)}{overdue ? ' (due)' : ''}</span>
-                  : dateTime(r.updated_at)}
-              </td>
+              <td className="nowrap">{r.next_follow_up_at ? <>{dateTime(r.next_follow_up_at)}{due && <b> (due)</b>}</> : ''}</td>
+              <td className="nowrap">{dateTime(r.updated_at)}</td>
+              <td className="nowrap">{monthlyDate(r.sale?.monthly_date)}</td>
               <td className="nowrap">{r.sale ? st.label : 'Removed'}</td>
             </tr>
           );
         })}
       </tbody>
     </table>
+  );
+}
+
+function StatsView({ stats, range, setRange, loading, error, onRefresh, outcomes }) {
+  const t = stats?.totals || {};
+  const mine = stats?.agents?.[0];
+  const log = useClientSort(stats?.calls || [], {
+    when: (r) => r.called_at, customer: (r) => r.customer_name, client: (r) => r.client_name,
+    outcome: (r) => r.outcome_label, notes: (r) => r.notes,
+  });
+  const th = { sort: log.sort, onSort: log.setSort };
+  return (
+    <div className="sx-body">
+      <form className="sx-searchbar" style={{ padding: '0 0 8px', border: 'none' }} onSubmit={(e) => { e.preventDefault(); onRefresh(); }}>
+        <label htmlFor="sx-from">From:</label>
+        <input id="sx-from" type="date" className="sx-input" style={{ width: 150 }} value={range.from} max={range.to}
+          onChange={(e) => setRange((r) => ({ ...r, from: e.target.value }))} />
+        <label htmlFor="sx-to">To:</label>
+        <input id="sx-to" type="date" className="sx-input" style={{ width: 150 }} value={range.to} min={range.from}
+          onChange={(e) => setRange((r) => ({ ...r, to: e.target.value }))} />
+        <button type="submit" className="sx-btn" disabled={loading}><RefreshCw size={14} /> Refresh</button>
+      </form>
+      {error && <div className="sx-note bad">{error}</div>}
+      {stats && (
+        <>
+          <div className="sx-stats">
+            <div className="sx-stat"><b>{t.calls || 0}</b>Calls made</div>
+            <div className="sx-stat"><b>{mine?.customers || 0}</b>Customers called</div>
+            <div className="sx-stat"><b>{t.in_progress || 0}</b>In progress now</div>
+            <div className="sx-stat"><b>{t.saved || 0}</b>Saved</div>
+            <div className="sx-stat"><b>{t.lost || 0}</b>Not saved</div>
+            <div className="sx-stat"><b>{t.tags || 0}</b>Closers tagged</div>
+            <div className="sx-stat"><b>{t.save_rate == null ? '-' : `${t.save_rate}%`}</b>Save rate</div>
+          </div>
+          <div className="sx-gridwrap" style={{ maxHeight: '55vh' }}>
+            <table className="sx-grid">
+              <thead><tr>
+                <SortTh label="Date / Time (ET)" k="when" {...th} /><SortTh label="Customer" k="customer" {...th} />
+                <SortTh label="Client" k="client" {...th} /><SortTh label="Outcome" k="outcome" {...th} /><SortTh label="What happened" k="notes" {...th} />
+              </tr></thead>
+              <tbody>
+                {(stats.calls || []).length === 0 && <tr><td colSpan={5}><div className="sx-empty">No calls in this date range.</div></td></tr>}
+                {log.sorted.map((c) => (
+                  <tr key={c.id} className={toneClass(outcomes, c.outcome)}>
+                    <td className="nowrap">{dateTime(c.called_at)}</td>
+                    <td className="nowrap">{c.customer_name}</td>
+                    <td className="nowrap">{c.client_name}</td>
+                    <td className="nowrap">{c.outcome_label}</td>
+                    <td className="story">{c.notes}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
   );
 }

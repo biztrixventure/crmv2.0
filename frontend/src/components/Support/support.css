@@ -101,7 +101,7 @@
 /* ── grids ──────────────────────────────────────────────────────────────── */
 .sx-gridwrap { border: 1px solid var(--sx-line); background: var(--sx-panel); overflow: auto; }
 .sx-grid { width: 100%; border-collapse: collapse; }
-.sx-grid th { position: sticky; top: 0; text-align: left; font-weight: 400; padding: 5px 8px; background: linear-gradient(#ffffff, #ebebeb); border-right: 1px solid var(--sx-line-soft); border-bottom: 2px solid #8c8c8c; white-space: nowrap; }
+.sx-grid th { position: sticky; top: 0; z-index: 1; text-align: left; font-weight: 400; background: linear-gradient(#ffffff, #ebebeb); border-right: 1px solid var(--sx-line-soft); border-bottom: 2px solid #8c8c8c; white-space: nowrap; }
 .sx-grid td { padding: 5px 8px; border-right: 1px solid #e3e3e3; border-bottom: 1px solid #e3e3e3; vertical-align: top; }
 .sx-grid td.nowrap, .sx-grid th.nowrap { white-space: nowrap; }
 .sx-grid td.num, .sx-grid th.num { text-align: right; font-variant-numeric: tabular-nums; }
@@ -149,3 +149,46 @@
   .sx-fld.span2 { grid-column: auto; }
   .sx-searchbar .sx-input, .sx-searchbar .sx-select { width: 100%; }
 }
+
+/* ── sortable column headers ────────────────────────────────────────────── */
+.sx-grid th { padding: 0; }
+.sx-grid th > .sx-sort, .sx-grid th > .sx-th { display: flex; align-items: center; gap: 4px; width: 100%; padding: 5px 8px; border: none; background: transparent; text-align: left; white-space: nowrap; }
+.sx-grid th.num > .sx-sort, .sx-grid th.num > .sx-th { justify-content: flex-end; }
+.sx-sort { cursor: pointer; }
+.sx-sort svg { opacity: 0.35; flex: 0 0 auto; }
+.sx-sort:hover { background: linear-gradient(#f3f9ff, #cfe3fb); }
+.sx-sort.on { font-weight: 600; background: linear-gradient(#fdf6d8, #f3e3a0); }
+.sx-sort.on svg { opacity: 1; }
+
+/* ── row colour by how the last call ended ──────────────────────────────── */
+.sx-grid tbody tr.sx-tone-green  td { background: #dff5d8; }
+.sx-grid tbody tr.sx-tone-blue   td { background: #dceafd; }
+.sx-grid tbody tr.sx-tone-yellow td { background: #fff6c9; }
+.sx-grid tbody tr.sx-tone-orange td { background: #ffe3c2; }
+.sx-grid tbody tr.sx-tone-grey   td { background: #e9e9e9; }
+.sx-grid tbody tr.sx-tone-purple td { background: #ece1f7; }
+.sx-grid tbody tr.sx-tone-red    td { background: #fbd9d9; }
+.sx-grid tbody tr.sx-tone-brown  td { background: #ead9c8; }
+.sx-grid tbody tr[class*=sx-tone-].pick:hover td { filter: brightness(0.95); }
+.sx-grid tbody tr.sx-overdue td:first-child { box-shadow: inset 4px 0 0 #c0392b; }
+.sx-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-bottom: 6px; color: var(--sx-ink-soft); }
+.sx-swatch { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.sx-swatch i { width: 14px; height: 14px; border: 1px solid #8a8a8a; display: inline-block; }
+.sx-swatch i.sx-tone-green  { background: #dff5d8; }
+.sx-swatch i.sx-tone-blue   { background: #dceafd; }
+.sx-swatch i.sx-tone-yellow { background: #fff6c9; }
+.sx-swatch i.sx-tone-orange { background: #ffe3c2; }
+.sx-swatch i.sx-tone-grey   { background: #e9e9e9; }
+.sx-swatch i.sx-tone-purple { background: #ece1f7; }
+.sx-swatch i.sx-tone-red    { background: #fbd9d9; }
+.sx-swatch i.sx-tone-brown  { background: #ead9c8; }
+
+/* the Log Call outcome dropdown shows the colour its choice will give the row */
+.sx select.sx-tone-green { background-color: #dff5d8; }
+.sx select.sx-tone-blue { background-color: #dceafd; }
+.sx select.sx-tone-yellow { background-color: #fff6c9; }
+.sx select.sx-tone-orange { background-color: #ffe3c2; }
+.sx select.sx-tone-grey { background-color: #e9e9e9; }
+.sx select.sx-tone-purple { background-color: #ece1f7; }
+.sx select.sx-tone-red { background-color: #fbd9d9; }
+.sx select.sx-tone-brown { background-color: #ead9c8; }

@@ -30,6 +30,7 @@ import {
   Users, Shield, FileText, BarChart3, AlertTriangle, RefreshCw, CalendarPlus, Pencil, Trash2, Download,
   ChevronLeft, ChevronRight, HelpCircle, CalendarDays, Copy, UserCircle, Database, CreditCard, Award,
   LayoutGrid, List as ListIcon, GraduationCap, IdCard,
+  Headset,
 } from "lucide-react";
 
 const PAGE_SIZE = 25;
@@ -103,6 +104,7 @@ import ComboInput from "../components/UI/ComboInput";
 import { canonicalizeFormData } from "../utils/canonicalizeOption";
 import TargetsStrip from "../components/Engagement/TargetsStrip";
 import CrossRoleContent from "../components/Navigation/CrossRoleContent";
+import SupportRequests from "../components/Support/SupportRequests";
 import TransferDetailDrawer from "../components/Shared/TransferDetailDrawer";
 import DialerBadge from "../components/Shared/DialerBadge";
 import SaleDetailDrawer from "../components/Shared/SaleDetailDrawer";
@@ -1014,6 +1016,12 @@ const StaffShell = () => {
   const CODE_TABS = [
     ...((isCloser || hasPermission('view_own_sales')) && isEnabled('sales')
       ? [{ key: 'sales',          label: 'My Sales',        icon: DollarSign }] : []),
+    // Support Requests (mig 357): policies a support agent tagged this closer
+    // on. Closers only -- a tag can only ever name a closer (routes/support.js),
+    // so nobody else has anything to see here. Rendered below (a tab is not a
+    // screen: grep 'support_requests' must hit the content area too).
+    ...(isCloser
+      ? [{ key: 'support_requests', label: 'Support Requests', icon: Headset }] : []),
     ...((isFronter || hasPermission('view_own_transfers')) && isEnabled('transfers')
       ? [{ key: 'transfers',      label: 'My Transfers',    icon: Send       }] : []),
     ...((hasPermission('view_team_transfers') || hasPermission('view_all_company_transfers')) && isEnabled('transfers')
@@ -1405,6 +1413,10 @@ const StaffShell = () => {
             )}
           </Card>
         )}
+
+        {/* ── SUPPORT REQUESTS TAB (mig 357) — re-checks its own gate: activeTab
+            is restored from localStorage and settable by ?tab=. ── */}
+        {activeTab === 'support_requests' && isCloser && <SupportRequests />}
 
         {/* ── TEAM SALES TAB ── */}
         {activeTab === 'team_sales' && (

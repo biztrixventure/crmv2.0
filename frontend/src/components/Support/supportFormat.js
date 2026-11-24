@@ -40,12 +40,10 @@ export const SALE_STATUS = {
 };
 export const saleStatus = (s) => SALE_STATUS[s] || { label: s ? String(s).replace(/_/g, ' ') : '', tone: 'other' };
 
+// 'open' reads as "In Progress" everywhere a person sees it.
 export const CASE_STATUS = {
-  open: { label: 'Working', pill: 'amber' },
+  open: { label: 'In Progress', pill: 'amber' },
   saved: { label: 'Saved', pill: 'green' },
-  pending_approval: { label: 'With Compliance', pill: 'blue' },
-  approved: { label: 'Approved', pill: 'green' },
-  returned: { label: 'Sent Back', pill: 'red' },
   lost: { label: 'Not Saved', pill: 'red' },
 };
 export const caseStatus = (s) => CASE_STATUS[s] || { label: s || '', pill: '' };
@@ -63,3 +61,14 @@ export const localInputToIso = (v) => {
 };
 
 export const errText = (e, fallback) => e?.response?.data?.error || fallback;
+
+// Row colour for a call outcome. The catalog (key, label, tone) comes from the
+// server with /support/me, so a new outcome needs no change here.
+export const outcomeOf = (outcomes, key) => (outcomes || []).find((o) => o.key === key) || null;
+export const toneClass = (outcomes, key) => {
+  const o = outcomeOf(outcomes, key);
+  return o && o.tone && o.tone !== 'none' ? `sx-tone-${o.tone}` : '';
+};
+
+// Monthly payment date as stored on the sale form: an ISO day, or free text.
+export const monthlyDate = (v) => (!v || v === '-' ? '' : day(v));

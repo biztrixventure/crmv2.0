@@ -2,30 +2,32 @@
 // SupportReports -- the management side of the retention desk. Mounted by
 // AdminPanel (superadmin / readonly admin) and ComplianceShell.
 //
-//   Approvals        saved customers a support agent sent for final approval.
-//                    Opening one shows the SAME policy screen the agent used,
-//                    with Approve / Send Back.
 //   Agent Report     per-agent numbers for a date range + how calls ended.
 //   Call Log         every call in the range, with the agent's own story.
+//                    Click a row to open the policy (read-only).
 //   Agents & Clients which clients each support agent works. An agent with no
 //                    client sees nothing, so this is where a new one is set up.
 //
-// The server decides who may approve and who may assign (routes/support.js);
-// `me.can_review` only hides the buttons that would be refused anyway.
+// There is no approval step here any more (mig 357): a support agent's Saved
+// is final and never changes the sale, so there is nothing to approve.
+//
+// Every column sorts on click (in the browser -- these tables are whole, not
+// paged). The server decides who may assign clients (routes/support.js);
+// `me.can_assign` only hides the button that would be refused anyway.
 // ============================================================================
 import { useState, useEffect, useCallback } from 'react';
 import { RefreshCw, Download, Save } from 'lucide-react';
 import client from '../../api/client';
 import { logClientExport } from '../../utils/exportSpec';
 import PolicyScreen from './PolicyScreen';
-import { dateTime, caseStatus, saleStatus, errText } from './supportFormat';
+import { SortTh, useClientSort } from './sxSort';
+import { dateTime, caseStatus, errText, toneClass } from './supportFormat';
 import './support.css';
 
 const todayIso = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
 const monthStartIso = () => `${todayIso().slice(0, 8)}01`;
 
 const TABS = [
-  ['approvals', 'Approvals'],
   ['report', 'Agent Report'],
   ['calls', 'Call Log'],
   ['agents', 'Agents & Clients'],
@@ -51,13 +53,18 @@ const downloadCsv = async (name, header, rows, filters) => {
   return true;
 };
 
+const AGENT_COLS = [
+  ['name', 'Agent', false], ['calls', 'Calls', true], ['customers', 'Customers', true], ['opened', 'Started', true],
+  ['in_progress', 'In progress', true], ['saved', 'Saved', true], ['lost', 'Not saved', true],
+  ['tags', 'Closers tagged', true], ['save_rate', 'Save rate', true],
+];
+
 export default function SupportReports() {
   const [me, setMe] = useState(null);
   const [meError, setMeError] = useState('');
-  const [tab, setTab] = useState('approvals');
+  const [tab, setTab] = useState('report');
   const [range, setRange] = useState({ from: monthStartIso(), to: todayIso() });
   const [agentFilter, setAgentFilter] = useState('');
-  const [pending, setPending] = useState([]);
   const [report, setReport] = useState(null);
   const [agents, setAgents] = useState([]);
   const [allClients, setAllClients] = useState([]);
@@ -71,10 +78,6 @@ export default function SupportReports() {
       .catch((e) => setMeError(errText(e, 'Could not open support reports.')));
   }, []);
 
-  const loadPending = useCallback(async () => {
-    const r = await client.get('support/cases', { params: { view: 'pending', limit: 200 } });
-    setPending(r.data.cases || []);
-  }, []);
   const loadReport = useCallback(async () => {
     const r = await client.get('support/reports', {
       params: { date_from: range.from, date_to: range.to, agent_id: agentFilter || undefined },
@@ -91,17 +94,23 @@ export default function SupportReports() {
     if (!me) return;
     setLoading(true); setError('');
     try {
-      if (tab === 'approvals') await loadPending();
-      else if (tab === 'agents') await loadAgents();
+      if (tab === 'agents') await loadAgents();
       else await loadReport();
     } catch (e) {
       setError(errText(e, 'Could not load.'));
     } finally { setLoading(false); }
-  }, [me, tab, loadPending, loadAgents, loadReport]);
+  }, [me, tab, loadAgents, loadReport]);
 
   useEffect(() => { load(); }, [load]);
   // The agent picker on the report needs the roster even before the Agents tab is opened.
   useEffect(() => { if (me) loadAgents().catch(() => {}); }, [me, loadAgents]);
+
+  const agentRows = useClientSort(report?.agents || [], Object.fromEntries(AGENT_COLS.map(([k]) => [k, (r) => r[k]])));
+  const outcomeRows = useClientSort(report?.outcomes || [], { label: (r) => r.label, count: (r) => r.count });
+  const callRows = useClientSort(report?.calls || [], {
+    when: (r) => r.called_at, agent: (r) => r.agent_name, customer: (r) => r.customer_name, client: (r) => r.client_name,
+    outcome: (r) => r.outcome_label, notes: (r) => r.notes, status: (r) => caseStatus(r.case_status).label,
+  });
 
   if (meError) return <div className="sx" style={{ minHeight: 0 }}><div className="sx-body"><div className="sx-note bad">{meError}</div></div></div>;
   if (!me) return <div className="sx" style={{ minHeight: 0 }}><div className="sx-empty">Opening support reports...</div></div>;
@@ -129,6 +138,7 @@ export default function SupportReports() {
       <button type="submit" className="sx-btn" disabled={loading}><RefreshCw size={14} /> Refresh</button>
     </form>
   );
+  const t = report?.totals;
 
   return (
     <div className="sx" style={{ minHeight: 420, border: '1px solid #a0a0a0' }}>
@@ -136,54 +146,17 @@ export default function SupportReports() {
         {TABS.map(([k, label]) => (
           <button key={k} type="button" role="tab" aria-selected={tab === k} className="sx-tab"
             onClick={() => { setTab(k); setOpenSale(null); }}>
-            {label}{k === 'approvals' && pending.length > 0 && <span className="sx-count">({pending.length})</span>}
+            {label}
           </button>
         ))}
       </div>
 
       {openSale ? (
-        <PolicyScreen
-          key={openSale}
-          saleId={openSale}
-          outcomes={me.outcomes}
-          mode={me.can_review ? 'review' : 'view'}
-          onBack={() => setOpenSale(null)}
-          onOpenSale={setOpenSale}
-          onChanged={() => { loadPending().catch(() => {}); }}
-        />
+        <PolicyScreen key={openSale} saleId={openSale} outcomes={me.outcomes} mode="view"
+          onBack={() => setOpenSale(null)} onOpenSale={setOpenSale} />
       ) : (
         <>
           {error && <div className="sx-body" style={{ paddingBottom: 0 }}><div className="sx-note bad">{error}</div></div>}
-
-          {tab === 'approvals' && (
-            <div className="sx-body">
-              <div className="sx-hint" style={{ marginBottom: 6 }}>
-                Customers a support agent saved and sent for final approval. Open one to read the policy and the call log, then approve it or send it back.
-              </div>
-              <div className="sx-gridwrap">
-                <table className="sx-grid">
-                  <thead><tr><th>Customer</th><th>Client</th><th>Policy Number</th><th>Agent</th><th className="num">Calls</th><th>Sent</th><th>Policy</th><th>How it was saved</th></tr></thead>
-                  <tbody>
-                    {!loading && pending.length === 0 && <tr><td colSpan={8}><div className="sx-empty">Nothing is waiting for approval.</div></td></tr>}
-                    {pending.map((c) => (
-                      <tr key={c.id} className={c.sale_id ? 'pick' : ''} tabIndex={c.sale_id ? 0 : undefined}
-                        onClick={() => c.sale_id && setOpenSale(c.sale_id)}
-                        onKeyDown={(e) => { if (c.sale_id && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setOpenSale(c.sale_id); } }}>
-                        <td className="nowrap"><span className="sx-link">{c.customer_name || '(no name)'}</span></td>
-                        <td className="nowrap">{c.client_name}</td>
-                        <td className="nowrap">{c.reference_no}</td>
-                        <td className="nowrap">{c.agent_name}</td>
-                        <td className="num">{c.call_count}</td>
-                        <td className="nowrap">{dateTime(c.submitted_at)}</td>
-                        <td className="nowrap">{c.sale ? saleStatus(c.sale.status).label : 'Removed'}</td>
-                        <td className="story">{c.save_reason}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
 
           {tab === 'report' && (
             <>
@@ -192,54 +165,55 @@ export default function SupportReports() {
                 {report && (
                   <>
                     <div className="sx-stats">
-                      <div className="sx-stat"><b>{report.totals.calls}</b>Calls made</div>
-                      <div className="sx-stat"><b>{report.totals.opened}</b>Customers started</div>
-                      <div className="sx-stat"><b>{report.totals.saved}</b>Marked saved</div>
-                      <div className="sx-stat"><b>{report.totals.submitted}</b>Sent to compliance</div>
-                      <div className="sx-stat"><b>{report.totals.approved}</b>Approved</div>
-                      <div className="sx-stat"><b>{report.totals.reinstated}</b>Policies reinstated</div>
-                      <div className="sx-stat"><b>{report.totals.lost}</b>Not saved</div>
-                      <div className="sx-stat"><b>{report.totals.pending}</b>Waiting now</div>
+                      <div className="sx-stat"><b>{t.calls}</b>Calls made</div>
+                      <div className="sx-stat"><b>{t.opened}</b>Customers started</div>
+                      <div className="sx-stat"><b>{t.in_progress}</b>In progress now</div>
+                      <div className="sx-stat"><b>{t.saved}</b>Saved</div>
+                      <div className="sx-stat"><b>{t.lost}</b>Not saved</div>
+                      <div className="sx-stat"><b>{t.tags}</b>Closers tagged</div>
+                      <div className="sx-stat"><b>{t.save_rate == null ? '-' : `${t.save_rate}%`}</b>Save rate</div>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 6 }}>
                       <button type="button" className="sx-btn" disabled={!report.agents.length}
                         onClick={() => exportCsv(`support-agents_${report.range.date_from}_${report.range.date_to}.csv`,
-                          ['Agent', 'Calls', 'Customers called', 'Started', 'Saved', 'Sent to compliance', 'Approved', 'Reinstated', 'Sent back', 'Not saved', 'Waiting now', 'Save rate %'],
-                          report.agents.map((a) => [a.name, a.calls, a.customers, a.opened, a.saved, a.submitted, a.approved, a.reinstated, a.returned, a.lost, a.pending, a.save_rate ?? '']))}>
+                          AGENT_COLS.map(([, label]) => (label === 'Save rate' ? 'Save rate %' : label)),
+                          agentRows.sorted.map((a) => AGENT_COLS.map(([k]) => a[k] ?? '')))}>
                         <Download size={14} /> Export
                       </button>
                     </div>
                     <div className="sx-gridwrap">
                       <table className="sx-grid">
-                        <thead>
-                          <tr>
-                            <th>Agent</th><th className="num">Calls</th><th className="num">Customers</th><th className="num">Started</th>
-                            <th className="num">Saved</th><th className="num">Sent</th><th className="num">Approved</th><th className="num">Reinstated</th>
-                            <th className="num">Sent back</th><th className="num">Not saved</th><th className="num">Waiting</th><th className="num">Save rate</th>
-                          </tr>
-                        </thead>
+                        <thead><tr>
+                          {AGENT_COLS.map(([k, label, isNum]) => (
+                            <SortTh key={k} label={label} k={k} num={isNum} sort={agentRows.sort} onSort={agentRows.setSort} />
+                          ))}
+                        </tr></thead>
                         <tbody>
-                          {report.agents.length === 0 && <tr><td colSpan={12}><div className="sx-empty">No support activity in this date range.</div></td></tr>}
-                          {report.agents.map((a) => (
+                          {report.agents.length === 0 && <tr><td colSpan={AGENT_COLS.length}><div className="sx-empty">No support activity in this date range.</div></td></tr>}
+                          {agentRows.sorted.map((a) => (
                             <tr key={a.agent_id}>
                               <td className="nowrap">{a.name}</td>
                               <td className="num">{a.calls}</td><td className="num">{a.customers}</td><td className="num">{a.opened}</td>
-                              <td className="num">{a.saved}</td><td className="num">{a.submitted}</td><td className="num">{a.approved}</td>
-                              <td className="num">{a.reinstated}</td><td className="num">{a.returned}</td><td className="num">{a.lost}</td>
-                              <td className="num">{a.pending}</td><td className="num">{a.save_rate == null ? '-' : `${a.save_rate}%`}</td>
+                              <td className="num">{a.in_progress}</td><td className="num">{a.saved}</td><td className="num">{a.lost}</td>
+                              <td className="num">{a.tags}</td><td className="num">{a.save_rate == null ? '-' : `${a.save_rate}%`}</td>
                             </tr>
                           ))}
                         </tbody>
                       </table>
                     </div>
                     <div className="sx-hint" style={{ margin: '6px 0 12px' }}>
-                      Save rate = approved out of (approved + not saved) in the range. Days are US Eastern.
+                      Save rate = saved out of (saved + not saved) in the range. In progress = open right now. Days are US Eastern.
                     </div>
                     {report.outcomes.length > 0 && (
                       <div className="sx-gridwrap" style={{ maxWidth: 420 }}>
                         <table className="sx-grid">
-                          <thead><tr><th>How calls ended</th><th className="num">Calls</th></tr></thead>
-                          <tbody>{report.outcomes.map((o) => <tr key={o.key}><td>{o.label}</td><td className="num">{o.count}</td></tr>)}</tbody>
+                          <thead><tr>
+                            <SortTh label="How calls ended" k="label" sort={outcomeRows.sort} onSort={outcomeRows.setSort} />
+                            <SortTh label="Calls" k="count" num sort={outcomeRows.sort} onSort={outcomeRows.setSort} />
+                          </tr></thead>
+                          <tbody>{outcomeRows.sorted.map((o) => (
+                            <tr key={o.key} className={toneClass(me.outcomes, o.key)}><td>{o.label}</td><td className="num">{o.count}</td></tr>
+                          ))}</tbody>
                         </table>
                       </div>
                     )}
@@ -264,19 +238,28 @@ export default function SupportReports() {
                       <button type="button" className="sx-btn" disabled={!report.calls.length}
                         onClick={() => exportCsv(`support-calls_${report.range.date_from}_${report.range.date_to}.csv`,
                           ['Date/Time (ET)', 'Agent', 'Customer', 'Client', 'Policy Number', 'Outcome', 'What happened', 'Follow-up', 'Case'],
-                          report.calls.map((c) => [dateTime(c.called_at), c.agent_name, c.customer_name, c.client_name, c.reference_no, c.outcome_label, c.notes, dateTime(c.follow_up_at), caseStatus(c.case_status).label]))}>
+                          callRows.sorted.map((c) => [dateTime(c.called_at), c.agent_name, c.customer_name, c.client_name, c.reference_no, c.outcome_label, c.notes, dateTime(c.follow_up_at), caseStatus(c.case_status).label]))}>
                         <Download size={14} /> Export
                       </button>
                     </div>
                     <div className="sx-gridwrap" style={{ maxHeight: '62vh' }}>
                       <table className="sx-grid">
-                        <thead><tr><th>Date / Time (ET)</th><th>Agent</th><th>Customer</th><th>Client</th><th>Outcome</th><th>What happened</th><th>Case</th></tr></thead>
+                        <thead><tr>
+                          <SortTh label="Date / Time (ET)" k="when" sort={callRows.sort} onSort={callRows.setSort} />
+                          <SortTh label="Agent" k="agent" sort={callRows.sort} onSort={callRows.setSort} />
+                          <SortTh label="Customer" k="customer" sort={callRows.sort} onSort={callRows.setSort} />
+                          <SortTh label="Client" k="client" sort={callRows.sort} onSort={callRows.setSort} />
+                          <SortTh label="Outcome" k="outcome" sort={callRows.sort} onSort={callRows.setSort} />
+                          <SortTh label="What happened" k="notes" sort={callRows.sort} onSort={callRows.setSort} />
+                          <SortTh label="Case" k="status" sort={callRows.sort} onSort={callRows.setSort} />
+                        </tr></thead>
                         <tbody>
                           {report.calls.length === 0 && <tr><td colSpan={7}><div className="sx-empty">No calls in this date range.</div></td></tr>}
-                          {report.calls.map((c) => {
+                          {callRows.sorted.map((c) => {
                             const cs = caseStatus(c.case_status);
+                            const tone = toneClass(me.outcomes, c.outcome);
                             return (
-                              <tr key={c.id} className={c.sale_id ? 'pick' : ''} tabIndex={c.sale_id ? 0 : undefined}
+                              <tr key={c.id} className={`${c.sale_id ? 'pick' : ''} ${tone}`.trim()} tabIndex={c.sale_id ? 0 : undefined}
                                 onClick={() => c.sale_id && setOpenSale(c.sale_id)}
                                 onKeyDown={(e) => { if (c.sale_id && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setOpenSale(c.sale_id); } }}>
                                 <td className="nowrap">{dateTime(c.called_at)}</td>
@@ -307,7 +290,7 @@ export default function SupportReports() {
                 <div className="sx-empty">No support agents yet. Create a user with the Support Agent role and they will appear here.</div>
               )}
               {agents.map((a) => (
-                <AgentClients key={a.user_id} agent={a} allClients={allClients} canEdit={me.can_review} onSaved={loadAgents} />
+                <AgentClients key={a.user_id} agent={a} allClients={allClients} canEdit={me.can_assign} onSaved={loadAgents} />
               ))}
             </div>
           )}
