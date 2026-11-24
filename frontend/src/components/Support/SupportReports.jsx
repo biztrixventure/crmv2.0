@@ -20,6 +20,8 @@ import { RefreshCw, Download, Save } from 'lucide-react';
 import client from '../../api/client';
 import { logClientExport } from '../../utils/exportSpec';
 import PolicyScreen from './PolicyScreen';
+import SupportColorStyle from './supportColors';
+import SupportColorsEditor from './SupportColorsEditor';
 import { SortTh, useClientSort } from './sxSort';
 import { dateTime, caseStatus, errText, toneClass } from './supportFormat';
 import './support.css';
@@ -94,6 +96,7 @@ export default function SupportReports() {
     if (!me) return;
     setLoading(true); setError('');
     try {
+      if (tab === 'colors') return;            // nothing to fetch: the colours came with /me
       if (tab === 'agents') await loadAgents();
       else await loadReport();
     } catch (e) {
@@ -142,8 +145,9 @@ export default function SupportReports() {
 
   return (
     <div className="sx" style={{ minHeight: 420, border: '1px solid #a0a0a0' }}>
+      <SupportColorStyle colors={me.colors} />
       <div className="sx-tabstrip" role="tablist" aria-label="Support reports">
-        {TABS.map(([k, label]) => (
+        {[...TABS, ...(me.can_colors ? [['colors', 'Colours']] : [])].map(([k, label]) => (
           <button key={k} type="button" role="tab" aria-selected={tab === k} className="sx-tab"
             onClick={() => { setTab(k); setOpenSale(null); }}>
             {label}
@@ -153,7 +157,7 @@ export default function SupportReports() {
 
       {openSale ? (
         <PolicyScreen key={openSale} saleId={openSale} outcomes={me.outcomes} mode="view"
-          onBack={() => setOpenSale(null)} onOpenSale={setOpenSale} />
+          onBack={() => setOpenSale(null)} />
       ) : (
         <>
           {error && <div className="sx-body" style={{ paddingBottom: 0 }}><div className="sx-note bad">{error}</div></div>}
@@ -279,6 +283,10 @@ export default function SupportReports() {
                 )}
               </div>
             </>
+          )}
+
+          {tab === 'colors' && me.can_colors && (
+            <SupportColorsEditor me={me} onSaved={(colors) => setMe((m) => ({ ...m, colors }))} />
           )}
 
           {tab === 'agents' && (

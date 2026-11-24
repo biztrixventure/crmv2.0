@@ -1171,9 +1171,6 @@ Additive only (a version that dropped the 356 approval columns was declined).
   and re-arms it. Older than 24h is never sent. **In a test pass
   `{ onlyAgentIds }`** -- an unscoped run with notifications stubbed claims and
   swallows real agents' reminders (it did, once, on 2026-11-24; reset by hand).
-- **Row colour = the LAST call's outcome** (`retention_cases.last_outcome`,
-  written by the call route). Each `OUTCOMES` entry carries a `tone`; the CSS
-  is `.sx-tone-<tone>`, `toneClass()` in `supportFormat.js`.
 - **Monthly Date** is `form_data->>Monthly_Date`, selected as `monthly_date` in
   `SALE_LIST_COLS` and shown on every list.
 - **Every column sorts.** Paged lists sort on the SERVER (`POLICY_SORT` /
@@ -1181,8 +1178,42 @@ Additive only (a version that dropped the 356 approval columns was declined).
   sort the loaded page (`PAGE_SORT` in `SupportWorkspace.jsx`); whole tables use
   `useClientSort`. One header component: `SortTh` in `sxSort.jsx`.
 - Tested 2026-11-24 in-process against the live DB with throwaway user ids and
-  notifications stubbed (44 checks, cleaned up). NOT clicked through in a
+  notifications stubbed (50 checks, cleaned up). NOT clicked through in a
   browser.
+
+### Support desk: colours are data, one History, the closer is nagged (2026-11-24)
+No migration. The desk went live the same day and was changed on feedback.
+- **COLOURS ARE A SETTING, NOT CSS.** A superadmin sets them in Support Reports
+  -> Colours (`SupportColorsEditor.jsx`, `PUT /support/colors`); they live in
+  `business_config` `support.colors` (global) and ride along with
+  `GET /support/me`. `supportColors.jsx` turns them into ONE `<style>` element
+  (`sx-oc-<outcome key>`, `cs-<case status>`, `sx-tone-saved`,
+  `sx-tone-progress`); `support.css` holds no row/pill colour any more. Text
+  flips to white on a dark colour (`inkFor`). `cleanColors()` in the route
+  falls back per key, so a malformed value can never blank a list.
+- **A reset WRITES the defaults.** `businessConfig.resetConfig` refuses to delete
+  a global key (it throws), so "Back to defaults" is a `setConfig`.
+- **Row colour**: Saved = the Saved colour whatever the last call was. In
+  Progress carries both classes; the outcome rule is written AFTER the status
+  rule in the generated sheet, so the last call's colour wins when that outcome
+  has one and the In Progress colour shows when it has none. Order in
+  `buildColorCss` is therefore load-bearing.
+- **The policy screen**: Details is a fixed block (no longer a tab); under it
+  two tabs, History and Payments. Calls / Tags / Policies / Retention tabs are
+  gone. **History is one timeline** built in the browser from what
+  `GET /support/policies/:id` already returns (calls, tags, cases,
+  policy_events): time, type, who, what, notes, follow-up, with a Show filter.
+  "Not Saved" has no timestamp of its own; it is shown at the case's
+  `updated_at`. "How it was saved" reads "Notes".
+- **A closer cannot close a request without saying what happened**:
+  `POST /support/tags/:id/done` needs `result` (catalog `TAG_RESULTS`, served
+  by `/tags/mine`). There is no result column (357 has open|done), so the label
+  leads `closer_note`.
+- **The nag** (`SupportTagNag.jsx`, mounted by StaffShell for closers): popup
+  when a tag arrives and every 5 minutes while one is open, plus the red count
+  badge on the Support Requests tab. It polls ONLY while the last answer was
+  "some are open"; a new tag arrives through the notification channel. Held
+  back while the closer is on the Requests tab.
 
 ### IP access control (mig 319, applied 2026-09-15)
 Which networks each user may use the CRM from. Ships OFF, and everyone is `anywhere`. README → "IP access control" has the operator steps.

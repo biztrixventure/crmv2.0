@@ -1,8 +1,12 @@
 // ============================================================================
 // PolicyScreen -- one policy, the way the support desk's old policy program
 // drew it: Contact / Vehicle / Campaign boxes, a grid of boxed read-only
-// fields, then a tab control (Details, Calls, Tags, Payments, Policies,
-// History, Retention).
+// fields, then Details (always on screen) and under it two tabs: History and
+// Payments.
+//
+// HISTORY IS THE ONE TIMELINE. Calls, closer tags, the saved / not-saved
+// decisions and the policy's own events used to be four tabs; they are one
+// list now, each line with its time and the person who did it.
 //
 // The support agent logs calls here, marks the customer Saved / Not Saved, and
 // tags a closer. Superadmin / compliance open the same screen from the Support
@@ -15,7 +19,7 @@
 // API says whether THIS person may log a call, so the buttons never have to
 // re-derive it.
 // ============================================================================
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   ArrowLeft, ChevronLeft, ChevronRight, PhoneCall, CheckCircle2, XCircle, RotateCcw,
   RefreshCw, IdCard, Car, UserPlus,
@@ -36,13 +40,14 @@ const Fld = ({ label, value, cls = '', span = '' }) => (
 );
 
 export default function PolicyScreen({
-  saleId, position, onPrev, onNext, onBack, onOpenSale, onChanged,
+  saleId, position, onPrev, onNext, onBack, onChanged,
   outcomes = [], mode = 'work',
 }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [tab, setTab] = useState('details');
+  const [tab, setTab] = useState('history');
+  const [kind, setKind] = useState('');             // History filter
   const [dialog, setDialog] = useState(null);      // 'call' | 'saved' | 'lost' | 'tag'
   const [busy, setBusy] = useState(false);
   const [dlgError, setDlgError] = useState('');
@@ -61,30 +66,46 @@ export default function PolicyScreen({
     } finally { setLoading(false); }
   }, [saleId]);
 
-  useEffect(() => { setTab('details'); setFlash(''); load(); }, [load]);
+  useEffect(() => { setTab('history'); setKind(''); setFlash(''); load(); }, [load]);
 
-  const calls = useClientSort(data?.calls || [], {
-    when: (r) => r.called_at, agent: (r) => r.agent_name,
-    outcome: (r) => outcomeOf(outcomes, r.outcome)?.label || r.outcome,
-    notes: (r) => r.notes, follow: (r) => r.follow_up_at,
-  });
-  const tags = useClientSort(data?.tags || [], {
-    when: (r) => r.created_at, closer: (r) => r.tagged_name, by: (r) => r.tagged_by_name,
-    note: (r) => r.note, status: (r) => r.status, reply: (r) => r.closer_note, done: (r) => r.done_at,
-  });
-  const others = useClientSort(data?.other_policies || [], {
-    policy: (r) => `${r.plan || ''} ${vehicle(r)}`, client: (r) => r.client_name,
-    down: (r) => Number(r.down_payment) || 0, monthly: (r) => Number(r.monthly_payment) || 0,
-    monthly_date: (r) => r.monthly_date, effective: (r) => r.sale_date, cancelled: (r) => r.cancellation_date,
-    number: (r) => r.policy_number || r.reference_no, status: (r) => saleStatus(r.status).label,
-  });
-  const history = useClientSort(data?.history || [], {
-    when: (r) => r.at, event: (r) => r.event_type, by: (r) => r.actor_name, note: (r) => r.note,
-  });
-  const caseRows = useClientSort(data?.cases || [], {
-    opened: (r) => r.created_at, agent: (r) => r.agent_name, status: (r) => caseStatus(r.status).label,
-    calls: (r) => r.call_count, outcome: (r) => outcomeOf(outcomes, r.last_outcome)?.label,
-    story: (r) => r.save_reason || r.lost_reason,
+  // One timeline out of everything that happened on this policy.
+  const timeline = useMemo(() => {
+    if (!data) return [];
+    const rows = [];
+    (data.calls || []).forEach((k) => rows.push({
+      id: `call-${k.id}`, at: k.called_at, kind: 'call', type: 'Call', who: k.agent_name,
+      what: outcomeOf(outcomes, k.outcome)?.label || pretty(k.outcome), detail: k.notes,
+      follow: k.follow_up_at, cls: toneClass(outcomes, k.outcome),
+    }));
+    (data.tags || []).forEach((t) => {
+      rows.push({
+        id: `tag-${t.id}`, at: t.created_at, kind: 'tag', type: 'Tag', who: t.tagged_by_name,
+        what: `Tagged closer ${t.tagged_name || ''}`.trim(), detail: t.note,
+        pill: t.status === 'done' ? ['green', 'Done'] : ['amber', 'Waiting'],
+      });
+      if (t.status === 'done') {
+        rows.push({
+          id: `tagdone-${t.id}`, at: t.done_at, kind: 'tag', type: 'Tag', who: t.tagged_name,
+          what: 'Closer finished the request', detail: t.closer_note,
+        });
+      }
+    });
+    (data.cases || []).forEach((k) => {
+      rows.push({ id: `case-${k.id}`, at: k.created_at, kind: 'status', type: 'Status', who: k.agent_name, what: 'Started working this customer', pill: ['cs-open', 'In Progress'] });
+      if (k.status === 'saved') rows.push({ id: `saved-${k.id}`, at: k.saved_at || k.updated_at, kind: 'status', type: 'Status', who: k.agent_name, what: 'Customer', detail: k.save_reason, pill: ['cs-saved', 'Saved'] });
+      if (k.status === 'lost') rows.push({ id: `lost-${k.id}`, at: k.updated_at, kind: 'status', type: 'Status', who: k.agent_name, what: 'Customer', detail: k.lost_reason, pill: ['cs-lost', 'Not Saved'] });
+    });
+    (data.history || []).forEach((h) => rows.push({
+      id: `ev-${h.id}`, at: h.at, kind: 'policy', type: 'Policy', who: h.actor_name, what: pretty(h.event_type), detail: h.note,
+    }));
+    // Newest first until a header is clicked. Compared as instants: the
+    // sources do not all print their timestamps the same way.
+    return rows.sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0));
+  }, [data, outcomes]);
+  const shown = useMemo(() => (kind ? timeline.filter((r) => r.kind === kind) : timeline), [timeline, kind]);
+  const history = useClientSort(shown, {
+    when: (r) => Date.parse(r.at) || 0, type: (r) => r.type, by: (r) => r.who, what: (r) => r.what,
+    detail: (r) => r.detail, follow: (r) => r.follow,
   });
 
   const open = async (kind) => {
@@ -147,14 +168,10 @@ export default function PolicyScreen({
   const lastOutcome = c ? outcomeOf(outcomes, c.last_outcome) : null;
 
   const TABS = [
-    ['details', 'Details'],
-    ['calls', `Calls (${data.calls.length})`],
-    ['tags', `Tags (${data.tags.length})`],
+    ['history', `History (${timeline.length})`],
     ['payments', 'Payments'],
-    ['policies', `Policies (${data.other_policies.length})`],
-    ['history', 'History'],
-    ['retention', `Retention (${data.cases.length})`],
   ];
+  const KINDS = [['', 'Everything'], ['call', 'Calls'], ['tag', 'Tags'], ['status', 'Saved / Not Saved'], ['policy', 'Policy events']];
 
   return (
     <>
@@ -196,7 +213,7 @@ export default function PolicyScreen({
         {openTags > 0 && (
           <div className="sx-note">
             {openTags === 1 ? 'A closer is tagged on this policy and has not finished yet.' : `${openTags} closers are tagged on this policy and have not finished yet.`}
-            {' '}<button type="button" className="sx-link" onClick={() => setTab('tags')}>See tags</button>
+            {' '}<button type="button" className="sx-link" onClick={() => { setTab('history'); setKind('tag'); }}>See tags</button>
           </div>
         )}
 
@@ -261,21 +278,16 @@ export default function PolicyScreen({
           <Fld label="Cancel Date" value={day(p.cancellation_date)} />
           <Fld label="Cancel Reason" value={pretty(p.cancellation_reason_key)} />
           <Fld label="Retention" value={cs ? `${cs.label}${c.agent_name ? ` - ${c.agent_name}` : ''}` : 'Not started'}
-            cls={c?.status === 'saved' ? 'st-active' : c?.status === 'open' ? 'st-other' : ''} />
+            cls={c ? `cs-${c.status}` : ''} />
 
           <Fld label="Last Call" value={dateTime(c?.last_call_at)} />
           <Fld label="Last Outcome" value={lastOutcome?.label} />
           <Fld label="Follow up on" value={dateTime(c?.next_follow_up_at)} />
         </div>
 
-        <div className="sx-subtabs" role="tablist">
-          {TABS.map(([k, label]) => (
-            <button key={k} type="button" role="tab" aria-selected={tab === k} className="sx-subtab" onClick={() => setTab(k)}>{label}</button>
-          ))}
-        </div>
-
-        <div className="sx-pane" role="tabpanel">
-          {tab === 'details' && (
+        <div className="sx-section">
+          <div className="sx-section-title">Details</div>
+          <div className="sx-pane">
             <div className="sx-form">
               <Fld label="Type" value="Vehicle Service Contract" />
               <Fld label="Sold By" value={p.closer_name} />
@@ -294,73 +306,19 @@ export default function PolicyScreen({
               <Fld label="Other Contact" value={f.Other_Contact} />
 
               <Fld label="Last Updated" value={dateTime(p.updated_at)} />
-              {c?.save_reason && <Fld label="How it was saved" value={c.save_reason} cls="wrap" span="span3" />}
+              {c?.save_reason && <Fld label="Notes" value={c.save_reason} cls="wrap" span="span3" />}
               {p.compliance_note && <Fld label="Sale Note" value={p.compliance_note} cls="wrap" span="span3" />}
             </div>
-          )}
+          </div>
+        </div>
 
-          {tab === 'calls' && (
-            data.calls.length === 0
-              ? <div className="sx-empty">No calls logged on this policy yet.{canLog ? ' Use Log Call after you speak to the customer.' : ''}</div>
-              : (
-                <div className="sx-gridwrap">
-                  <table className="sx-grid">
-                    <thead><tr>
-                      <SortTh label="Date / Time (ET)" k="when" sort={calls.sort} onSort={calls.setSort} />
-                      <SortTh label="Agent" k="agent" sort={calls.sort} onSort={calls.setSort} />
-                      <SortTh label="Outcome" k="outcome" sort={calls.sort} onSort={calls.setSort} />
-                      <SortTh label="What happened" k="notes" sort={calls.sort} onSort={calls.setSort} />
-                      <SortTh label="Follow-up" k="follow" sort={calls.sort} onSort={calls.setSort} />
-                    </tr></thead>
-                    <tbody>
-                      {calls.sorted.map((k) => (
-                        <tr key={k.id} className={toneClass(outcomes, k.outcome)}>
-                          <td className="nowrap">{dateTime(k.called_at)}</td>
-                          <td className="nowrap">{k.agent_name}</td>
-                          <td className="nowrap">{outcomeOf(outcomes, k.outcome)?.label || pretty(k.outcome)}</td>
-                          <td className="story">{k.notes}</td>
-                          <td className="nowrap">{dateTime(k.follow_up_at)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )
-          )}
+        <div className="sx-subtabs" role="tablist">
+          {TABS.map(([k, label]) => (
+            <button key={k} type="button" role="tab" aria-selected={tab === k} className="sx-subtab" onClick={() => setTab(k)}>{label}</button>
+          ))}
+        </div>
 
-          {tab === 'tags' && (
-            data.tags.length === 0
-              ? <div className="sx-empty">No closer has been tagged on this policy.{canLog ? ' Use Tag Closer to ask one to work it.' : ''}</div>
-              : (
-                <div className="sx-gridwrap">
-                  <table className="sx-grid">
-                    <thead><tr>
-                      <SortTh label="Tagged (ET)" k="when" sort={tags.sort} onSort={tags.setSort} />
-                      <SortTh label="Closer" k="closer" sort={tags.sort} onSort={tags.setSort} />
-                      <SortTh label="By" k="by" sort={tags.sort} onSort={tags.setSort} />
-                      <SortTh label="What is needed" k="note" sort={tags.sort} onSort={tags.setSort} />
-                      <SortTh label="Status" k="status" sort={tags.sort} onSort={tags.setSort} />
-                      <SortTh label="Closer's reply" k="reply" sort={tags.sort} onSort={tags.setSort} />
-                      <SortTh label="Done (ET)" k="done" sort={tags.sort} onSort={tags.setSort} />
-                    </tr></thead>
-                    <tbody>
-                      {tags.sorted.map((t) => (
-                        <tr key={t.id}>
-                          <td className="nowrap">{dateTime(t.created_at)}</td>
-                          <td className="nowrap">{t.tagged_name}</td>
-                          <td className="nowrap">{t.tagged_by_name}</td>
-                          <td className="story">{t.note}</td>
-                          <td className="nowrap"><span className={`sx-pill ${t.status === 'done' ? 'green' : 'amber'}`}>{t.status === 'done' ? 'Done' : 'Waiting'}</span></td>
-                          <td className="story">{t.closer_note}</td>
-                          <td className="nowrap">{dateTime(t.done_at)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )
-          )}
-
+        <div className="sx-pane" role="tabpanel">
           {tab === 'payments' && (
             <div className="sx-form">
               <Fld label="Down Payment" value={money(p.down_payment)} cls="money" />
@@ -374,106 +332,49 @@ export default function PolicyScreen({
             </div>
           )}
 
-          {tab === 'policies' && (
-            <div className="sx-gridwrap">
-              <table className="sx-grid">
-                <thead><tr>
-                  <SortTh label="Policy" k="policy" sort={others.sort} onSort={others.setSort} />
-                  <SortTh label="Client" k="client" sort={others.sort} onSort={others.setSort} />
-                  <SortTh label="Down Pmt" k="down" num sort={others.sort} onSort={others.setSort} />
-                  <SortTh label="Monthly" k="monthly" num sort={others.sort} onSort={others.setSort} />
-                  <SortTh label="Monthly Date" k="monthly_date" sort={others.sort} onSort={others.setSort} />
-                  <SortTh label="Effective Date" k="effective" sort={others.sort} onSort={others.setSort} />
-                  <SortTh label="Cancel Date" k="cancelled" sort={others.sort} onSort={others.setSort} />
-                  <SortTh label="Policy Number" k="number" sort={others.sort} onSort={others.setSort} />
-                  <SortTh label="Status" k="status" sort={others.sort} onSort={others.setSort} />
-                </tr></thead>
-                <tbody>
-                  {others.sorted.map((o) => {
-                    const os = saleStatus(o.status);
-                    const here = o.id === p.id;
-                    return (
-                      <tr key={o.id} className={here ? 'on' : ''}>
-                        <td>
-                          {here || !onOpenSale
-                            ? `${o.plan || 'Policy'} - ${vehicle(o)}`
-                            : <button type="button" className="sx-link" onClick={() => onOpenSale(o.id)}>{o.plan || 'Policy'} - {vehicle(o)}</button>}
-                        </td>
-                        <td className="nowrap">{o.client_name}</td>
-                        <td className="num">{money(o.down_payment)}</td>
-                        <td className="num">{money(o.monthly_payment)}</td>
-                        <td className="nowrap">{monthlyDate(o.monthly_date)}</td>
-                        <td className="nowrap">{day(o.sale_date)}</td>
-                        <td className="nowrap">{day(o.cancellation_date)}</td>
-                        <td className="nowrap">{o.policy_number || o.reference_no}</td>
-                        <td className="nowrap"><span className={`sx-pill ${os.tone === 'active' ? 'green' : os.tone === 'cancelled' ? 'red' : 'amber'}`}>{os.label}</span></td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-
           {tab === 'history' && (
-            data.history.length === 0
-              ? <div className="sx-empty">No history recorded for this policy.</div>
-              : (
-                <div className="sx-gridwrap">
-                  <table className="sx-grid">
-                    <thead><tr>
-                      <SortTh label="Date / Time (ET)" k="when" sort={history.sort} onSort={history.setSort} />
-                      <SortTh label="Event" k="event" sort={history.sort} onSort={history.setSort} />
-                      <SortTh label="By" k="by" sort={history.sort} onSort={history.setSort} />
-                      <SortTh label="Note" k="note" sort={history.sort} onSort={history.setSort} />
-                    </tr></thead>
-                    <tbody>
-                      {history.sorted.map((h) => (
-                        <tr key={h.id}>
-                          <td className="nowrap">{dateTime(h.at)}</td>
-                          <td className="nowrap">{pretty(h.event_type)}</td>
-                          <td className="nowrap">{h.actor_name}</td>
-                          <td className="story">{h.note}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )
-          )}
-
-          {tab === 'retention' && (
-            data.cases.length === 0
-              ? <div className="sx-empty">Nobody has worked this customer yet.</div>
-              : (
-                <div className="sx-gridwrap">
-                  <table className="sx-grid">
-                    <thead><tr>
-                      <SortTh label="Opened (ET)" k="opened" sort={caseRows.sort} onSort={caseRows.setSort} />
-                      <SortTh label="Agent" k="agent" sort={caseRows.sort} onSort={caseRows.setSort} />
-                      <SortTh label="Status" k="status" sort={caseRows.sort} onSort={caseRows.setSort} />
-                      <SortTh label="Calls" k="calls" num sort={caseRows.sort} onSort={caseRows.setSort} />
-                      <SortTh label="Last Outcome" k="outcome" sort={caseRows.sort} onSort={caseRows.setSort} />
-                      <SortTh label="How it was saved / why not" k="story" sort={caseRows.sort} onSort={caseRows.setSort} />
-                    </tr></thead>
-                    <tbody>
-                      {caseRows.sorted.map((k) => {
-                        const ks = caseStatus(k.status);
-                        return (
-                          <tr key={k.id}>
-                            <td className="nowrap">{dateTime(k.created_at)}</td>
-                            <td className="nowrap">{k.agent_name}</td>
-                            <td className="nowrap"><span className={`sx-pill ${ks.pill}`}>{ks.label}</span></td>
-                            <td className="num">{k.call_count}</td>
-                            <td className="nowrap">{outcomeOf(outcomes, k.last_outcome)?.label}</td>
-                            <td className="story">{k.save_reason || k.lost_reason}</td>
+            <>
+              <div className="sx-searchbar" style={{ padding: '0 0 6px', border: 'none', background: 'none' }}>
+                <label htmlFor="sx-hist-kind">Show:</label>
+                <select id="sx-hist-kind" className="sx-select" style={{ width: 200 }} value={kind} onChange={(e) => setKind(e.target.value)}>
+                  {KINDS.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+                </select>
+                <span className="sx-hint">Calls, closer tags, saved / not saved and policy events. Newest first. Times are US Eastern.</span>
+              </div>
+              {history.sorted.length === 0
+                ? (
+                  <div className="sx-empty">
+                    {timeline.length > 0 ? 'Nothing of that kind on this policy.'
+                      : `Nothing has happened on this policy yet.${canLog ? ' Use Log Call after you speak to the customer.' : ''}`}
+                  </div>
+                )
+                : (
+                  <div className="sx-gridwrap">
+                    <table className="sx-grid">
+                      <thead><tr>
+                        <SortTh label="Date / Time (ET)" k="when" sort={history.sort} onSort={history.setSort} />
+                        <SortTh label="Type" k="type" sort={history.sort} onSort={history.setSort} />
+                        <SortTh label="By" k="by" sort={history.sort} onSort={history.setSort} />
+                        <SortTh label="What" k="what" sort={history.sort} onSort={history.setSort} />
+                        <SortTh label="Notes" k="detail" sort={history.sort} onSort={history.setSort} />
+                        <SortTh label="Follow-up" k="follow" sort={history.sort} onSort={history.setSort} />
+                      </tr></thead>
+                      <tbody>
+                        {history.sorted.map((h) => (
+                          <tr key={h.id} className={h.cls || ''}>
+                            <td className="nowrap">{dateTime(h.at)}</td>
+                            <td className="nowrap">{h.type}</td>
+                            <td className="nowrap">{h.who}</td>
+                            <td className="nowrap">{h.what}{h.pill && <> <span className={`sx-pill ${h.pill[0]}`}>{h.pill[1]}</span></>}</td>
+                            <td className="story">{h.detail}</td>
+                            <td className="nowrap">{dateTime(h.follow)}</td>
                           </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+            </>
           )}
         </div>
       </div>
@@ -488,7 +389,7 @@ export default function PolicyScreen({
                   outcome: form.outcome, notes: form.notes, follow_up_at: localInputToIso(form.follow),
                 }),
                 form.follow ? 'Call logged. You will be reminded at the follow-up time.' : 'Call logged.',
-                'calls',
+                'history',
               )}>
               {busy ? 'Saving...' : 'Save Call'}
             </button>
@@ -530,7 +431,7 @@ export default function PolicyScreen({
               onClick={() => run(
                 () => client.post(`support/policies/${p.id}/tags`, { user_id: form.closer, note: form.notes }),
                 'Closer tagged. They have been notified.',
-                'tags',
+                'history',
               )}>
               {busy ? 'Tagging...' : 'Tag Closer'}
             </button>
@@ -565,14 +466,14 @@ export default function PolicyScreen({
               onClick={() => run(
                 () => client.post(`support/cases/${c.id}/status`, { status: dialog, reason: form.reason }),
                 dialog === 'saved' ? 'Customer marked Saved.' : 'Customer marked Not Saved.',
-                'retention',
+                'history',
               )}>
               {busy ? 'Saving...' : dialog === 'saved' ? 'Mark Saved' : 'Mark Not Saved'}
             </button>
           </>}>
           {dlgError && <div className="sx-note bad" role="alert">{dlgError}</div>}
           <div className="sx-fld">
-            <label htmlFor="sx-reason">{dialog === 'saved' ? 'How it was saved:' : 'Why not:'}</label>
+            <label htmlFor="sx-reason">{dialog === 'saved' ? 'Notes:' : 'Why not:'}</label>
             <textarea id="sx-reason" className="sx-textarea" value={form.reason} maxLength={4000}
               onChange={(e) => setForm((v) => ({ ...v, reason: e.target.value }))}
               placeholder={dialog === 'saved'

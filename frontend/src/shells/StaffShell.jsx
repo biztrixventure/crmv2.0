@@ -105,6 +105,7 @@ import { canonicalizeFormData } from "../utils/canonicalizeOption";
 import TargetsStrip from "../components/Engagement/TargetsStrip";
 import CrossRoleContent from "../components/Navigation/CrossRoleContent";
 import SupportRequests from "../components/Support/SupportRequests";
+import SupportTagNag from "../components/Support/SupportTagNag";
 import TransferDetailDrawer from "../components/Shared/TransferDetailDrawer";
 import DialerBadge from "../components/Shared/DialerBadge";
 import SaleDetailDrawer from "../components/Shared/SaleDetailDrawer";
@@ -285,6 +286,9 @@ const StaffShell = () => {
   const allowedClientNames = (Array.isArray(user?.client_access) && user.client_access.length) ? user.client_access : null;
   const visibleSaleClients = allowedClientNames ? saleClients.filter(c => allowedClientNames.includes(c.value)) : saleClients;
   const notifHook = useNotifications();
+  // Open support requests (mig 357): the red badge on the tab and the
+  // 5-minute popup both read this. SupportTagNag keeps it true.
+  const [supportOpen, setSupportOpen] = useState(0);
 
   // Cross-closer double-sell badge (issue #6): map of the fronter's own leads
   // whose customer was closed_won by >= 2 closer companies → { closer_company_count }.
@@ -1221,6 +1225,13 @@ const StaffShell = () => {
       <ModuleNavLinks className="px-4 sm:px-6 lg:px-8 pt-3 relative z-10" />
 
       <EngagementBanners />
+      {/* A closer with an open support request is reminded every 5 minutes
+          until they update it; also feeds the badge on the tab. */}
+      {isCloser && (
+        <SupportTagNag count={supportOpen} onCount={setSupportOpen}
+          onTab={effectiveNav === 'dashboard' && activeTab === 'support_requests'}
+          onOpen={() => { setActiveNav('dashboard'); setActiveTab('support_requests'); }} />
+      )}
       {effectiveNav !== 'dashboard' && <CrossRoleContent section={effectiveNav} user={user} />}
       <main className="w-full px-4 sm:px-6 lg:px-8 py-6 relative z-10"
         style={{ display: effectiveNav !== 'dashboard' ? 'none' : undefined }}>
@@ -1280,6 +1291,12 @@ const StaffShell = () => {
                   boxShadow: activeTab === tab.key ? 'var(--shadow-sm)' : 'none',
                 }}>
                 <tab.icon size={15} />{tab.label}
+                {tab.key === 'support_requests' && supportOpen > 0 && (
+                  <span className="min-w-[20px] h-5 px-1.5 inline-flex items-center justify-center rounded-full text-[11px] font-bold text-white"
+                    style={{ background: 'var(--color-error-500)' }} aria-label={`${supportOpen} open support requests`}>
+                    {supportOpen > 99 ? '99+' : supportOpen}
+                  </span>
+                )}
               </button>
             ))}
           </div>
@@ -1416,7 +1433,7 @@ const StaffShell = () => {
 
         {/* ── SUPPORT REQUESTS TAB (mig 357) — re-checks its own gate: activeTab
             is restored from localStorage and settable by ?tab=. ── */}
-        {activeTab === 'support_requests' && isCloser && <SupportRequests />}
+        {activeTab === 'support_requests' && isCloser && <SupportRequests onCount={setSupportOpen} />}
 
         {/* ── TEAM SALES TAB ── */}
         {activeTab === 'team_sales' && (

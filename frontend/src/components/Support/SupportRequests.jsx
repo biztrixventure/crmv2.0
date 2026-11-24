@@ -33,6 +33,8 @@ export default function SupportRequests({ onCount }) {
   const [error, setError] = useState('');
   const [doneFor, setDoneFor] = useState(null);     // tag id whose "done" box is open
   const [note, setNote] = useState('');
+  const [result, setResult] = useState('');
+  const [results, setResults] = useState([]);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
@@ -41,6 +43,7 @@ export default function SupportRequests({ onCount }) {
       const r = await client.get('support/tags/mine', { params: { status: filter } });
       setTags(r.data.tags || []);
       setOpenCount(r.data.open_count || 0);
+      setResults(r.data.results || []);
       onCount?.(r.data.open_count || 0);
     } catch (e) {
       setError(e?.response?.data?.error || 'Could not load your support requests.');
@@ -54,9 +57,9 @@ export default function SupportRequests({ onCount }) {
   const finish = async (tag) => {
     setBusy(true);
     try {
-      await client.post(`support/tags/${tag.id}/done`, { note });
-      toast.success('Marked done. Support has been told.');
-      setDoneFor(null); setNote('');
+      await client.post(`support/tags/${tag.id}/done`, { note, result });
+      toast.success('Request closed. Support has been told.');
+      setDoneFor(null); setNote(''); setResult('');
       await load();
     } catch (e) {
       toast.error(e?.response?.data?.error || 'Could not mark it done.');
@@ -91,7 +94,7 @@ export default function SupportRequests({ onCount }) {
       </div>
 
       <p className="text-xs mb-4" style={{ color: 'var(--color-text-tertiary)' }}>
-        Policies the support team needs you on. Read the note, call the customer, then mark it done so support knows.
+        Policies the support team needs you on. Read the note, call the customer, then update the status so support knows what happened. You are reminded every 5 minutes while one is open.
       </p>
 
       {error && (
@@ -169,27 +172,34 @@ export default function SupportRequests({ onCount }) {
                 </div>
               ) : doneFor === t.id ? (
                 <div className="mt-3 grid gap-2">
+                  <label htmlFor={`sr-result-${t.id}`} className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
+                    What happened
+                  </label>
+                  <select id={`sr-result-${t.id}`} className="input text-sm w-full" value={result} onChange={(e) => setResult(e.target.value)}>
+                    <option value="">-- pick one --</option>
+                    {results.map((x) => <option key={x.key} value={x.key}>{x.label}</option>)}
+                  </select>
                   <label htmlFor={`sr-note-${t.id}`} className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
-                    What happened (optional, support sees this)
+                    Notes for support{result === 'other' ? '' : ' (optional)'}
                   </label>
                   <textarea id={`sr-note-${t.id}`} className="input text-sm w-full" rows={2} maxLength={1000} value={note}
                     onChange={(e) => setNote(e.target.value)} placeholder="e.g. Spoke to the customer, payment date moved to the 5th." />
                   <div className="flex items-center gap-2 justify-end">
-                    <button type="button" disabled={busy} onClick={() => { setDoneFor(null); setNote(''); }}
+                    <button type="button" disabled={busy} onClick={() => { setDoneFor(null); setNote(''); setResult(''); }}
                       className="px-3 py-1.5 rounded-lg text-xs font-semibold border" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
                       Cancel
                     </button>
-                    <button type="button" disabled={busy} onClick={() => finish(t)}
+                    <button type="button" disabled={busy || !result || (result === 'other' && note.trim().length < 3)} onClick={() => finish(t)}
                       className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white disabled:opacity-50" style={{ background: 'var(--color-success-600)' }}>
-                      {busy ? 'Saving...' : 'Mark done'}
+                      {busy ? 'Saving...' : 'Close request'}
                     </button>
                   </div>
                 </div>
               ) : (
                 <div className="mt-3 flex justify-end">
-                  <button type="button" onClick={() => { setDoneFor(t.id); setNote(''); }}
+                  <button type="button" onClick={() => { setDoneFor(t.id); setNote(''); setResult(''); }}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white" style={{ background: 'var(--color-success-600)' }}>
-                    <CheckCircle2 size={13} /> Mark done
+                    <CheckCircle2 size={13} /> Update status
                   </button>
                 </div>
               )}

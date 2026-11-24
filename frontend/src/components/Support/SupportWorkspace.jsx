@@ -27,6 +27,7 @@ import { Search, RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
 import client from '../../api/client';
 import { useLiveRefresh } from '../../hooks/useLiveRefresh';
 import PolicyScreen from './PolicyScreen';
+import SupportColorStyle from './supportColors';
 import { SortTh, useClientSort } from './sxSort';
 import {
   money, day, dateTime, saleStatus, caseStatus, vehicle, errText, outcomeOf, toneClass, caseRowTone, monthlyDate,
@@ -60,14 +61,14 @@ const PAGE_SORT = {
 const todayIso = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
 const monthStartIso = () => `${todayIso().slice(0, 8)}01`;
 
-function Legend({ outcomes }) {
+function Legend({ outcomes, colors }) {
   return (
     <div className="sx-legend" aria-label="Row colours">
-      <span className="sx-swatch"><i className="sx-tone-saved" />Saved</span>
-      <span className="sx-swatch"><i className="sx-tone-progress" />In Progress</span>
+      <span className="sx-swatch"><i className="cs-saved" />Saved</span>
+      <span className="sx-swatch"><i className="cs-open" />In Progress</span>
       <span>Last call:</span>
-      {outcomes.filter((o) => o.tone && o.tone !== 'none').map((o) => (
-        <span key={o.key} className="sx-swatch"><i className={`sx-tone-${o.tone}`} />{o.label}</span>
+      {outcomes.filter((o) => colors?.outcomes?.[o.key]).map((o) => (
+        <span key={o.key} className="sx-swatch"><i className={`sx-oc-${o.key}`} />{o.label}</span>
       ))}
     </div>
   );
@@ -168,6 +169,7 @@ export default function SupportWorkspace() {
 
   return (
     <div className="sx">
+      <SupportColorStyle colors={me.colors} />
       <div className="sx-tabstrip" role="tablist" aria-label="Support lists">
         {VIEWS.map((v) => (
           <button key={v.key} type="button" role="tab" aria-selected={view === v.key} className="sx-tab" onClick={() => pickView(v.key)}>
@@ -220,7 +222,7 @@ export default function SupportWorkspace() {
 
           <div className="sx-body" style={{ paddingTop: 8 }}>
             {error && <div className="sx-note bad">{error}</div>}
-            <Legend outcomes={me.outcomes} />
+            <Legend outcomes={me.outcomes} colors={me.colors} />
             <div className="sx-gridwrap" style={{ maxHeight: 'calc(100vh - 285px)' }}>
               {kind === 'policies'
                 ? <PolicyGrid rows={shown} loading={loading} view={view} onOpen={openAt} sort={sort} onSort={changeSort} outcomes={me.outcomes} />

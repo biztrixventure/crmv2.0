@@ -42,9 +42,9 @@ export const saleStatus = (s) => SALE_STATUS[s] || { label: s ? String(s).replac
 
 // 'open' reads as "In Progress" everywhere a person sees it.
 export const CASE_STATUS = {
-  open: { label: 'In Progress', pill: 'sky' },
-  saved: { label: 'Saved', pill: 'green' },
-  lost: { label: 'Not Saved', pill: 'red' },
+  open: { label: 'In Progress', pill: 'cs-open' },
+  saved: { label: 'Saved', pill: 'cs-saved' },
+  lost: { label: 'Not Saved', pill: 'cs-lost' },
 };
 export const caseStatus = (s) => CASE_STATUS[s] || { label: s || '', pill: '' };
 
@@ -67,15 +67,17 @@ export const errText = (e, fallback) => e?.response?.data?.error || fallback;
 export const outcomeOf = (outcomes, key) => (outcomes || []).find((o) => o.key === key) || null;
 export const toneClass = (outcomes, key) => {
   const o = outcomeOf(outcomes, key);
-  return o && o.tone && o.tone !== 'none' ? `sx-tone-${o.tone}` : '';
+  return o ? `sx-oc-${o.key}` : '';
 };
 
 // Monthly payment date as stored on the sale form: an ISO day, or free text.
 export const monthlyDate = (v) => (!v || v === '-' ? '' : day(v));
 
-// Row colour for a CASE: Saved is green whatever the last call was; otherwise
-// the last call's colour, and sky blue (In Progress) when it has none.
+// Row colour for a CASE: Saved takes the Saved colour whatever the last call
+// was. In Progress carries BOTH classes: the generated stylesheet writes the
+// outcome rule after the status one, so the last call's colour wins when the
+// admin gave that outcome one, and the In Progress colour shows when not.
 export const caseRowTone = (outcomes, status, lastOutcome) => {
   if (status === 'saved') return 'sx-tone-saved';
-  return toneClass(outcomes, lastOutcome) || (status === 'open' ? 'sx-tone-progress' : '');
+  return `${status === 'open' ? 'sx-tone-progress ' : ''}${toneClass(outcomes, lastOutcome)}`.trim();
 };

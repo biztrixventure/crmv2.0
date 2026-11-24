@@ -32,6 +32,7 @@ const { excludePostDate } = require('../utils/postDate');
 const { etDateToUtcStart, etDateToUtcEnd, todayEt } = require('../utils/etUtils');
 const notifications = require('../utils/notificationService');
 const logger = require('../utils/logger');
+const { getConfig, setConfig } = require('../utils/businessConfig');
 
 const router = express.Router();
 
@@ -50,6 +51,45 @@ const OUTCOMES = [
 ];
 const OUTCOME_KEYS = new Set(OUTCOMES.map(o => o.key));
 const OUTCOME_LABEL = Object.fromEntries(OUTCOMES.map(o => [o.key, o.label]));
+
+// ── colours ─────────────────────────────────────────────────────────────────
+// The support lists are colour-coded and a superadmin picks the colours
+// (Support Reports -> Colours). Stored whole in business_config
+// 'support.colors' (global); anything missing or malformed falls back to the
+// default below, so a half-saved or hand-edited value can never blank a list.
+// An outcome may be '' (no colour); a status always has one.
+const DEFAULT_COLORS = {
+  status: { saved: '#22c55e', open: '#38bdf8', lost: '#e23636' },
+  outcomes: {
+    agreed: '#8fe6d3', callback: '#b9c2ff', spoke: '#ffe75e', payment_issue: '#ffb561',
+    no_answer: '#cdd3da', voicemail: '#deb0f7', refused: '#ff9c9c', wrong_number: '#d8ae88', other: '',
+  },
+};
+const HEX = /^#[0-9a-f]{6}$/;
+const cleanColors = (raw) => {
+  const out = { status: { ...DEFAULT_COLORS.status }, outcomes: { ...DEFAULT_COLORS.outcomes } };
+  const pick = (v) => (typeof v === 'string' ? v.trim().toLowerCase() : null);
+  for (const k of Object.keys(out.status)) {
+    const v = pick(raw?.status?.[k]);
+    if (v && HEX.test(v)) out.status[k] = v;
+  }
+  for (const k of Object.keys(out.outcomes)) {
+    const v = pick(raw?.outcomes?.[k]);
+    if (v === '' || (v && HEX.test(v))) out.outcomes[k] = v;
+  }
+  return out;
+};
+const loadColors = async () => cleanColors(await getConfig(null, 'support.colors', null));
+
+// What the tagged closer answers with. A request cannot be closed without one:
+// "done" alone told the support agent nothing about what happened.
+const TAG_RESULTS = [
+  { key: 'sorted',     label: 'Spoke to customer - sorted' },
+  { key: 'still_out',  label: 'Spoke to customer - still wants out' },
+  { key: 'no_answer',  label: 'Could not reach the customer' },
+  { key: 'other',      label: 'Other' },
+];
+const TAG_RESULT_LABEL = Object.fromEntries(TAG_RESULTS.map(r => [r.key, r.label]));
 
 const CANCELLED = ['cancelled', 'compliance_cancelled'];
 // A case that still holds its customer. `saved` stays held so the agent who
@@ -174,8 +214,35 @@ router.get('/me', gate(async (req, res, access) => {
     can_work: access.canWork,
     can_assign: access.isReviewer,
     can_report: access.isViewer,
+    can_colors: access.role === 'superadmin',
     outcomes: OUTCOMES,
+    colors: await loadColors(),
+    default_colors: DEFAULT_COLORS,
   });
+}));
+
+// ── PUT /support/colors -- superadmin sets the list colours ─────────────────
+// { reset: true } goes back to the defaults.
+router.put('/colors', gate(async (req, res, access) => {
+  if (access.role !== 'superadmin') return res.status(403).json({ error: 'Only a superadmin can change the colours' });
+  if (req.body?.reset) {
+    // businessConfig refuses to DELETE a global key, so a reset writes the
+    // defaults back as the value.
+    const defaults = cleanColors(null);
+    await setConfig('global', 'support.colors', defaults, req.user.id);
+    return res.json({ colors: defaults });
+  }
+  const bad = [];
+  const check = (group, allowEmpty) => Object.entries(req.body?.[group] || {}).forEach(([k, v]) => {
+    if (!(k in DEFAULT_COLORS[group])) return;
+    const x = String(v ?? '').trim().toLowerCase();
+    if (!(HEX.test(x) || (allowEmpty && x === ''))) bad.push(k);
+  });
+  check('status', false); check('outcomes', true);
+  if (bad.length) return res.status(400).json({ error: `Not a colour: ${bad.join(', ')}` });
+  const colors = cleanColors(req.body);
+  await setConfig('global', 'support.colors', colors, req.user.id);
+  res.json({ colors });
 }));
 
 // ── GET /support/clients -- every client name on a sale ─────────────────────
@@ -414,7 +481,7 @@ router.post('/cases/:id/status', gate(async (req, res, access) => {
   if (status === 'saved') {
     if (c.status !== 'open') return res.status(409).json({ error: 'Only a case in progress can be marked saved' });
     if (!c.call_count) return res.status(400).json({ error: 'Log at least one call before marking the customer saved' });
-    if (reason.length < 10) return res.status(400).json({ error: 'Write how the customer was saved (what they agreed to)' });
+    if (reason.length < 10) return res.status(400).json({ error: 'Write a note: what the customer agreed to' });
     patch = { status: 'saved', save_reason: reason, saved_at: now, lost_reason: null, next_follow_up_at: null };
   } else if (status === 'lost') {
     if (!LIVE_CASE.includes(c.status)) return res.status(409).json({ error: 'This case is already closed' });
@@ -508,6 +575,7 @@ router.get('/tags/mine', asyncHandler(async (req, res) => {
   const names = await namesOf(tags.map(t => t.tagged_by));
   res.json({
     open_count: openCount || 0,
+    results: TAG_RESULTS,
     tags: tags.map(t => ({ ...t, tagged_by_name: names[t.tagged_by] || 'Support', sale: saleBy[t.sale_id] || null })),
   });
 }));
@@ -515,10 +583,16 @@ router.get('/tags/mine', asyncHandler(async (req, res) => {
 // ── POST /support/tags/:id/done -- the tagged closer closes it ──────────────
 router.post('/tags/:id/done', asyncHandler(async (req, res) => {
   if (!safeUuid(req.params.id)) return res.status(404).json({ error: 'Request not found' });
-  const note = String(req.body?.note || '').trim();
   const { data: tag } = await supabaseAdmin.from('retention_tags').select('*').eq('id', req.params.id).maybeSingle();
   if (!tag || tag.tagged_user_id !== req.user.id) return res.status(404).json({ error: 'Request not found' });
   if (tag.status === 'done') return res.status(409).json({ error: 'This request is already done' });
+  const typed = String(req.body?.note || '').trim();
+  const result = String(req.body?.result || '');
+  if (!TAG_RESULT_LABEL[result]) return res.status(400).json({ error: 'Pick what happened before closing the request' });
+  if (result === 'other' && typed.length < 3) return res.status(400).json({ error: 'Write what happened' });
+  // No status column for the result (mig 357 has open | done only), so it leads
+  // the note the support agent reads.
+  const note = typed ? `${TAG_RESULT_LABEL[result]}: ${typed}` : TAG_RESULT_LABEL[result];
 
   const now = new Date().toISOString();
   const { data, error } = await supabaseAdmin.from('retention_tags')
