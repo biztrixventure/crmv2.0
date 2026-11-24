@@ -21,12 +21,22 @@
 // Superadmin only. A non-superadmin viewer gets a 403 from the endpoint, and
 // the section simply does not render its switches rather than showing dead ones.
 import { useState, useEffect, useCallback } from 'react';
-import { Scale, IdCard, Layers, Building2, GraduationCap } from 'lucide-react';
+import { Scale, IdCard, Layers, Building2, GraduationCap, Headset } from 'lucide-react';
 import client from '../../../api/client';
 import { Alert } from '../../../components/UI';
 import { Panel, SectionHeader, Loading, Toggle, CheckRow, useFlash } from '../../UI/kit';
 
 const MODULES = [
+  {
+    // Support manager (mig 358). The desk works on CLIENT names, not companies,
+    // so this one has no company list: on means the whole admin view.
+    key: 'support',
+    icon: Headset,
+    title: 'Support manager',
+    label: 'This user also manages the support desk',
+    hint: 'Shows them Support Reports inside the dashboard they already use: the agent report, the call log, which clients each support agent works, and the list colours. They see every client. Their role, shell and permissions are untouched. Switch it off and Support Reports disappears for them.',
+    noCompanies: true,
+  },
   {
     key: 'training',
     icon: GraduationCap,
@@ -79,6 +89,13 @@ export default function ModulesSection({ account }) {
       setScope(s => ({ ...s, [mod]: r.data.companies || [] }));
 
       const n = (r.data.companies || []).length;
+      const def = MODULES.find(x => x.key === mod);
+      if (def?.noCompanies) {
+        flash('success', enabled
+          ? 'Saved. They now see Support Reports in their dashboard (they may need to reload the page).'
+          : 'Support manager switched off. Support Reports is hidden for them again.');
+        return;
+      }
       flash('success', !enabled
         ? `${mod.charAt(0).toUpperCase() + mod.slice(1)} access removed. Their company choices and anything they created are kept.`
         : n
@@ -106,7 +123,7 @@ export default function ModulesSection({ account }) {
       <div className="max-w-2xl">
         <SectionHeader icon={Layers} title="Modules" />
         <Alert type="info" dismissible={false}>
-          Only a superadmin can grant Training module access.
+          Only a superadmin can grant these.
         </Alert>
       </div>
     );
@@ -139,7 +156,7 @@ export default function ModulesSection({ account }) {
               label={m.label}
               hint={m.hint} />
 
-            {on && (
+            {on && !m.noCompanies && (
               <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--color-border)' }}>
                 <div className="flex items-center gap-1.5 mb-1.5">
                   <Building2 size={13} style={{ color: 'var(--color-text-tertiary)' }} />

@@ -1215,6 +1215,30 @@ No migration. The desk went live the same day and was changed on feedback.
   "some are open"; a new tag arrives through the notification channel. Held
   back while the closer is on the Requests tab.
 
+### Support manager is a PERSON, not a role (mig 358, applied 2026-11-25)
+A superadmin switches it on in User Control Center -> Modules -> **Support
+manager** (`module_designations`, `module='support'`; 358 only widens the two
+CHECK constraints). The person keeps their role, shell and permissions and
+gains the admin view of the desk: Support Reports (Agent Report, Call Log,
+Agents & Clients, Colours). Off = gone.
+- ONE place decides: `resolveAccess()` in `routes/support.js` reads
+  `isDesignated(userId, 'support')` -> `isManager`, which makes them a
+  reviewer, lifts the client scope (they see every client) and grants
+  colours. It does NOT grant `canWork`: a manager who is not a support agent
+  cannot log a call or tag a closer.
+- **Not company-scoped.** The desk works on client names, so the Modules card
+  has `noCompanies: true` and nothing writes `module_designation_companies`
+  rows for it. `can()`/`deny()` are not used here -- only `isDesignated`.
+- The shells ask `GET /support/my-access` (outside `gate`, answers
+  `{manager}` for anyone) through `hooks/useSupportManager.js` (60s cache,
+  false while unknown). Tab key `support_reports` in ManagerShell (Tools
+  group) and StaffShell, each with its own renderer re-checking the same
+  flag; SupportShell shows a My Desk / Support Reports switch for an agent
+  who is also the manager. Compliance and Admin already had the screen.
+- The designation cache is 30s per process: switching it off can take that
+  long to bite on another instance, and the shell hook another 60s to hide
+  the tab (the API refuses at once on the instance that saved it).
+
 ### IP access control (mig 319, applied 2026-09-15)
 Which networks each user may use the CRM from. Ships OFF, and everyone is `anywhere`. README → "IP access control" has the operator steps.
 - **Mode lives in `user_ip_access` (sidecar), NEVER on `user_profiles`.** That table has RLS `users_can_update_own_profile`

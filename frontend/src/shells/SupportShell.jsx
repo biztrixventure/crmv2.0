@@ -7,6 +7,7 @@
 // their notifications), and the classic-looking desk underneath it. All of the
 // desk lives in components/Support.
 // ============================================================================
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Headset } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
@@ -17,6 +18,8 @@ import { getRoleRoute } from '../utils/roleRouting';
 import { AppHeader } from '../components/Layout';
 import UpdateBanner from '../components/UI/UpdateBanner';
 import SupportWorkspace from '../components/Support/SupportWorkspace';
+import SupportReports from '../components/Support/SupportReports';
+import { useSupportManager } from '../hooks/useSupportManager';
 
 export default function SupportShell() {
   const { user, logout, updateUser } = useAuth();
@@ -24,6 +27,10 @@ export default function SupportShell() {
   const navigate = useNavigate();
   const notifHook = useNotifications();
   const updateAvailable = useVersionCheck();
+  // A support agent who is ALSO the support manager (mig 358) can flip between
+  // their own desk and the admin view.
+  const supportManager = useSupportManager(user?.id);
+  const [view, setView] = useState('desk');
 
   const handleLogout = () => { logout(); navigate('/login'); };
 
@@ -51,7 +58,20 @@ export default function SupportShell() {
         onClearNotifications={notifHook.clearAll}
         onBrandClick={() => navigate(getRoleRoute(user?.role))}
       />
-      <SupportWorkspace />
+      {supportManager && (
+        <div className="flex gap-2 px-4 pt-3">
+          {[['desk', 'My Desk'], ['reports', 'Support Reports']].map(([k, label]) => (
+            <button key={k} type="button" onClick={() => setView(k)} aria-pressed={view === k}
+              className="px-3 py-1.5 rounded text-sm font-semibold border"
+              style={view === k
+                ? { background: '#1f4e8c', color: '#fff', borderColor: '#1f4e8c' }
+                : { background: '#fff', color: '#222', borderColor: '#999' }}>
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+      {supportManager && view === 'reports' ? <SupportReports /> : <SupportWorkspace />}
     </div>
   );
 }

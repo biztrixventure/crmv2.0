@@ -106,6 +106,8 @@ import TargetsStrip from "../components/Engagement/TargetsStrip";
 import CrossRoleContent from "../components/Navigation/CrossRoleContent";
 import SupportRequests from "../components/Support/SupportRequests";
 import SupportTagNag from "../components/Support/SupportTagNag";
+import SupportReports from "../components/Support/SupportReports";
+import { useSupportManager } from "../hooks/useSupportManager";
 import TransferDetailDrawer from "../components/Shared/TransferDetailDrawer";
 import DialerBadge from "../components/Shared/DialerBadge";
 import SaleDetailDrawer from "../components/Shared/SaleDetailDrawer";
@@ -289,6 +291,8 @@ const StaffShell = () => {
   // Open support requests (mig 357): the red badge on the tab and the
   // 5-minute popup both read this. SupportTagNag keeps it true.
   const [supportOpen, setSupportOpen] = useState(0);
+  // Support manager (mig 358): a per-person switch, so the shell has to ask.
+  const supportManager = useSupportManager(user?.id);
 
   // Cross-closer double-sell badge (issue #6): map of the fronter's own leads
   // whose customer was closed_won by >= 2 closer companies → { closer_company_count }.
@@ -1026,6 +1030,8 @@ const StaffShell = () => {
     // screen: grep 'support_requests' must hit the content area too).
     ...(isCloser
       ? [{ key: 'support_requests', label: 'Support Requests', icon: Headset }] : []),
+    ...(supportManager
+      ? [{ key: 'support_reports', label: 'Support Reports', icon: Headset }] : []),
     ...((isFronter || hasPermission('view_own_transfers')) && isEnabled('transfers')
       ? [{ key: 'transfers',      label: 'My Transfers',    icon: Send       }] : []),
     ...((hasPermission('view_team_transfers') || hasPermission('view_all_company_transfers')) && isEnabled('transfers')
@@ -1434,6 +1440,8 @@ const StaffShell = () => {
         {/* ── SUPPORT REQUESTS TAB (mig 357) — re-checks its own gate: activeTab
             is restored from localStorage and settable by ?tab=. ── */}
         {activeTab === 'support_requests' && isCloser && <SupportRequests onCount={setSupportOpen} />}
+        {/* Support manager's admin view (mig 358) -- same gate as its tab. */}
+        {activeTab === 'support_reports' && supportManager && <SupportReports />}
 
         {/* ── TEAM SALES TAB ── */}
         {activeTab === 'team_sales' && (

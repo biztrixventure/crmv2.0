@@ -33,6 +33,7 @@ const { etDateToUtcStart, etDateToUtcEnd, todayEt } = require('../utils/etUtils'
 const notifications = require('../utils/notificationService');
 const logger = require('../utils/logger');
 const { getConfig, setConfig } = require('../utils/businessConfig');
+const { isDesignated } = require('../utils/moduleAccess');
 
 const router = express.Router();
 
@@ -130,16 +131,21 @@ const applySort = (q, map, key, dir, fallback) => {
 async function resolveAccess(req) {
   const role = req.user.role;
   const isAgent    = role === 'support_agent';
-  const isReviewer = role === 'superadmin' || role === 'compliance_manager';
+  // A support MANAGER (mig 358) is a person, not a role: a superadmin switches
+  // it on in User Control Center -> Modules and they get the admin view of the
+  // desk while keeping the role and shell they already have.
+  const isManager  = await isDesignated(req.user.id, 'support');
+  const isReviewer = role === 'superadmin' || role === 'compliance_manager' || isManager;
   const isViewer   = isReviewer || role === 'readonly_admin';
   let clients = null;                       // null = every client
-  if (isAgent) {
+  if (isAgent && !isManager) {
     const { data } = await supabaseAdmin
       .from('support_agent_clients').select('client_name').eq('user_id', req.user.id);
     clients = (data || []).map(r => r.client_name);
   }
   return {
-    role, isAgent, isReviewer, isViewer, clients,
+    role, isAgent, isManager, isReviewer, isViewer, clients,
+    canColors: role === 'superadmin' || isManager,
     canWork: isAgent || role === 'superadmin',
     allowed: isAgent || isViewer,
   };
@@ -206,6 +212,14 @@ async function taggableClosers() {
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
+// ── GET /support/my-access -- may I open the admin view? ────────────────────
+// NOT behind gate(): every shell asks this to decide whether to show Support
+// Reports, and for most people the answer is simply no. The token cannot
+// carry it -- it is a per-person switch (mig 358).
+router.get('/my-access', asyncHandler(async (req, res) => {
+  res.json({ manager: await isDesignated(req.user.id, 'support') });
+}));
+
 // ── GET /support/me ─────────────────────────────────────────────────────────
 router.get('/me', gate(async (req, res, access) => {
   res.json({
@@ -214,7 +228,8 @@ router.get('/me', gate(async (req, res, access) => {
     can_work: access.canWork,
     can_assign: access.isReviewer,
     can_report: access.isViewer,
-    can_colors: access.role === 'superadmin',
+    can_colors: access.canColors,
+    manager: access.isManager,
     outcomes: OUTCOMES,
     colors: await loadColors(),
     default_colors: DEFAULT_COLORS,
@@ -224,7 +239,7 @@ router.get('/me', gate(async (req, res, access) => {
 // ── PUT /support/colors -- superadmin sets the list colours ─────────────────
 // { reset: true } goes back to the defaults.
 router.put('/colors', gate(async (req, res, access) => {
-  if (access.role !== 'superadmin') return res.status(403).json({ error: 'Only a superadmin can change the colours' });
+  if (!access.canColors) return res.status(403).json({ error: 'Only a superadmin or a support manager can change the colours' });
   if (req.body?.reset) {
     // businessConfig refuses to DELETE a global key, so a reset writes the
     // defaults back as the value.
@@ -741,7 +756,7 @@ router.get('/agents', gate(async (req, res, access) => {
 
 // ── PUT /support/agents/:userId/clients -- set an agent's clients ───────────
 router.put('/agents/:userId/clients', gate(async (req, res, access) => {
-  if (!access.isReviewer) return res.status(403).json({ error: 'Only a superadmin or compliance can assign clients' });
+  if (!access.isReviewer) return res.status(403).json({ error: 'Only a superadmin, compliance or a support manager can assign clients' });
   const userId = req.params.userId;
   if (!safeUuid(userId)) return res.status(404).json({ error: 'Agent not found' });
   const wanted = [...new Set((Array.isArray(req.body?.clients) ? req.body.clients : [])

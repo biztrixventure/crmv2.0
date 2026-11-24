@@ -45,7 +45,10 @@ const cache = require('./cache');
 // compliance_manager or a fronter_manager, and moving their role to run it
 // would move their shell. One more entry here gives it the designation, the
 // company scope, the cache and the User Control Center switch for free.
-const MODULES = ['accounting', 'hr', 'training'];
+// 'support' (mig 358) is the support MANAGER: the admin view of the support
+// desk for someone who keeps their own role. It is not company-scoped (the
+// desk works on client names), so only isDesignated() is ever asked about it.
+const MODULES = ['accounting', 'hr', 'training', 'support'];
 const DESIG_TTL_MS = 30_000;          // same TTL as the permission cache
 
 // 'accounting.invoices.manage' -> 'accounting'

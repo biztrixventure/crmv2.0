@@ -13,6 +13,8 @@ import QuotaReport from '../components/Teams/QuotaReport';
 import { useTheme } from "../contexts/ThemeContext";
 import { useFeatureFlags } from "../contexts/FeatureFlagsContext";
 import { useReportAccess } from '../hooks/useReportAccess';
+import { useSupportManager } from '../hooks/useSupportManager';
+import SupportReports from '../components/Support/SupportReports';
 import { useNavigate } from "react-router-dom";
 import {
   Users, DollarSign, Send, Phone, BarChart3, TrendingUp,
@@ -20,7 +22,7 @@ import {
   Search, Star, Shield, FileText, RefreshCw, Plus,
   MessageSquare, Trash2, Activity, ChevronLeft, ChevronRight, CalendarDays, HelpCircle, FileSpreadsheet, Trophy,
   UserCircle, Database, Settings2, Zap, Building2, CreditCard,
-  LayoutGrid, ChevronUp, ChevronDown, ChevronsUpDown, Target, ClipboardList, GraduationCap, IdCard,
+  LayoutGrid, ChevronUp, ChevronDown, ChevronsUpDown, Target, ClipboardList, GraduationCap, IdCard, Headset,
 } from "lucide-react";
 import { Badge, Alert } from "../components/UI";
 import { Panel, TableScroll, Loading, EmptyState, SectionHeader } from "../components/UI/kit";
@@ -43,7 +45,7 @@ const TAB_GROUPS = [
   { id: 'g_callbacks', label: 'Callbacks', icon: Phone,      tabs: ['callbacks', 'numbers', 'batches'] },
   { id: 'g_team',      label: 'Team',      icon: Users,      tabs: ['teams', 'quota_report'] },
   { id: 'g_resources', label: 'Resources', icon: HelpCircle, tabs: ['faqs', 'scripts', 'note_shortcodes'] },
-  { id: 'g_tools',     label: 'Tools',     icon: Shield,     tabs: ['tool_customer_profiles', 'tool_data_analyzer', 'tool_chat_control', 'dnc', 'card_validator', 'customer_lookup'] },
+  { id: 'g_tools',     label: 'Tools',     icon: Shield,     tabs: ['tool_customer_profiles', 'tool_data_analyzer', 'tool_chat_control', 'dnc', 'card_validator', 'customer_lookup', 'support_reports'] },
 ];
 import DateRangePicker, { getPresetRange } from "../components/UI/DateRangePicker";
 import { AppHeader } from "../components/Layout";
@@ -227,6 +229,8 @@ const ManagerShell = ({ workspaceMode = false }) => {
   // Company Reports nav: the server's answer (it knows the per-person switch);
   // the role permissions stand in until it arrives so the item does not flicker.
   const reportAccess = useReportAccess(user?.id);
+  // Support manager (mig 358): a per-person switch, so the shell has to ask.
+  const supportManager = useSupportManager(user?.id);
   const roleReports = (hasPermission('view_fronter_stats') || hasPermission('view_closer_stats') || hasPermission('view_company_reports') || hasPermission('view_reports')) && isEnabled('reports');
   const reportsNav = reportAccess
     ? reportAccess.can && (reportAccess.source !== 'role' || isEnabled('reports'))
@@ -383,6 +387,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
     ...(isEnabledStrict('tool_blacklist_lookup')  ? [{ key: 'dnc',                    label: 'DNC Check',         icon: Shield        }] : []),
     ...(isEnabledStrict('tool_card_validator')    ? [{ key: 'card_validator',         label: 'Card Validator',    icon: CreditCard    }] : []),
     ...(lookupAccess?.any                        ? [{ key: 'customer_lookup',        label: 'Customer Lookup',   icon: Search        }] : []),
+    ...(supportManager                           ? [{ key: 'support_reports',        label: 'Support Reports',   icon: Headset       }] : []),
     ...(isEnabledStrict('tool_compliance_review') ? [{ key: 'tool_compliance_review', label: 'Compliance Review', icon: Shield        }] : []),
     ...(isEnabledStrict('tool_business_rules')    ? [{ key: 'tool_business_rules',    label: 'Business Rules',    icon: Settings2     }] : []),
     ...(isEnabledStrict('tool_feature_admin')     ? [{ key: 'tool_feature_admin',     label: 'Feature Flags',     icon: Zap           }] : []),
@@ -1452,6 +1457,7 @@ const ManagerShell = ({ workspaceMode = false }) => {
             gate its tab entry used: the nav list is rebuilt on every render,
             but activeTab also comes back from localStorage and ?tab=, so a
             revoked tool must not keep rendering for whoever was parked on it. */}
+        {activeTab === 'support_reports' && supportManager && <SupportReports />}
         {activeTab === 'customer_lookup' && lookupAccess?.any && (
           <Suspense fallback={<Loading variant="block" height={200} />}>
             <CustomerLookupPanel />
