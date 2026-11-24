@@ -42,7 +42,7 @@ export const saleStatus = (s) => SALE_STATUS[s] || { label: s ? String(s).replac
 
 // 'open' reads as "In Progress" everywhere a person sees it.
 export const CASE_STATUS = {
-  open: { label: 'In Progress', pill: 'amber' },
+  open: { label: 'In Progress', pill: 'sky' },
   saved: { label: 'Saved', pill: 'green' },
   lost: { label: 'Not Saved', pill: 'red' },
 };
@@ -72,3 +72,10 @@ export const toneClass = (outcomes, key) => {
 
 // Monthly payment date as stored on the sale form: an ISO day, or free text.
 export const monthlyDate = (v) => (!v || v === '-' ? '' : day(v));
+
+// Row colour for a CASE: Saved is green whatever the last call was; otherwise
+// the last call's colour, and sky blue (In Progress) when it has none.
+export const caseRowTone = (outcomes, status, lastOutcome) => {
+  if (status === 'saved') return 'sx-tone-saved';
+  return toneClass(outcomes, lastOutcome) || (status === 'open' ? 'sx-tone-progress' : '');
+};

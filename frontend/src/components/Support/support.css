@@ -114,6 +114,9 @@
 .sx-pill.red   { background: var(--sx-red); border-color: #b03a3a; color: #fff; }
 .sx-pill.amber { background: var(--sx-amber); border-color: #c79a12; }
 .sx-pill.blue  { background: var(--sx-blue); border-color: #3c7fb1; }
+.sx-pill.sky   { background: #38bdf8; border-color: #0e86c2; font-weight: 600; }
+.sx-pill.green { background: #22c55e; border-color: #12813a; font-weight: 600; }
+.sx-pill.red   { background: #e23636; border-color: #9f1f1f; font-weight: 600; }
 .sx-empty { padding: 26px 12px; text-align: center; color: var(--sx-ink-soft); }
 .sx-note { padding: 6px 9px; border: 1px solid #c9b458; background: #fff8d6; margin-bottom: 8px; }
 .sx-note.bad { border-color: #c06060; background: #fde8e8; }
@@ -161,34 +164,46 @@
 .sx-sort.on svg { opacity: 1; }
 
 /* ── row colour by how the last call ended ──────────────────────────────── */
-.sx-grid tbody tr.sx-tone-green  td { background: #dff5d8; }
-.sx-grid tbody tr.sx-tone-blue   td { background: #dceafd; }
-.sx-grid tbody tr.sx-tone-yellow td { background: #fff6c9; }
-.sx-grid tbody tr.sx-tone-orange td { background: #ffe3c2; }
-.sx-grid tbody tr.sx-tone-grey   td { background: #e9e9e9; }
-.sx-grid tbody tr.sx-tone-purple td { background: #ece1f7; }
-.sx-grid tbody tr.sx-tone-red    td { background: #fbd9d9; }
-.sx-grid tbody tr.sx-tone-brown  td { background: #ead9c8; }
+.sx-grid tbody tr.sx-tone-green  td { background: #8fe6d3; }
+.sx-grid tbody tr.sx-tone-blue   td { background: #b9c2ff; }
+.sx-grid tbody tr.sx-tone-yellow td { background: #ffe75e; }
+.sx-grid tbody tr.sx-tone-orange td { background: #ffb561; }
+.sx-grid tbody tr.sx-tone-grey   td { background: #cdd3da; }
+.sx-grid tbody tr.sx-tone-purple td { background: #deb0f7; }
+.sx-grid tbody tr.sx-tone-red    td { background: #ff9c9c; }
+.sx-grid tbody tr.sx-tone-brown  td { background: #d8ae88; }
 .sx-grid tbody tr[class*=sx-tone-].pick:hover td { filter: brightness(0.95); }
 .sx-grid tbody tr.sx-overdue td:first-child { box-shadow: inset 4px 0 0 #c0392b; }
 .sx-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-bottom: 6px; color: var(--sx-ink-soft); }
 .sx-swatch { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
 .sx-swatch i { width: 14px; height: 14px; border: 1px solid #8a8a8a; display: inline-block; }
-.sx-swatch i.sx-tone-green  { background: #dff5d8; }
-.sx-swatch i.sx-tone-blue   { background: #dceafd; }
-.sx-swatch i.sx-tone-yellow { background: #fff6c9; }
-.sx-swatch i.sx-tone-orange { background: #ffe3c2; }
-.sx-swatch i.sx-tone-grey   { background: #e9e9e9; }
-.sx-swatch i.sx-tone-purple { background: #ece1f7; }
-.sx-swatch i.sx-tone-red    { background: #fbd9d9; }
-.sx-swatch i.sx-tone-brown  { background: #ead9c8; }
+.sx-swatch i.sx-tone-green  { background: #8fe6d3; }
+.sx-swatch i.sx-tone-blue   { background: #b9c2ff; }
+.sx-swatch i.sx-tone-yellow { background: #ffe75e; }
+.sx-swatch i.sx-tone-orange { background: #ffb561; }
+.sx-swatch i.sx-tone-grey   { background: #cdd3da; }
+.sx-swatch i.sx-tone-purple { background: #deb0f7; }
+.sx-swatch i.sx-tone-red    { background: #ff9c9c; }
+.sx-swatch i.sx-tone-brown  { background: #d8ae88; }
 
 /* the Log Call outcome dropdown shows the colour its choice will give the row */
-.sx select.sx-tone-green { background-color: #dff5d8; }
-.sx select.sx-tone-blue { background-color: #dceafd; }
-.sx select.sx-tone-yellow { background-color: #fff6c9; }
-.sx select.sx-tone-orange { background-color: #ffe3c2; }
-.sx select.sx-tone-grey { background-color: #e9e9e9; }
-.sx select.sx-tone-purple { background-color: #ece1f7; }
-.sx select.sx-tone-red { background-color: #fbd9d9; }
-.sx select.sx-tone-brown { background-color: #ead9c8; }
+.sx select.sx-tone-green { background-color: #8fe6d3; }
+.sx select.sx-tone-blue { background-color: #b9c2ff; }
+.sx select.sx-tone-yellow { background-color: #ffe75e; }
+.sx select.sx-tone-orange { background-color: #ffb561; }
+.sx select.sx-tone-grey { background-color: #cdd3da; }
+.sx select.sx-tone-purple { background-color: #deb0f7; }
+.sx select.sx-tone-red { background-color: #ff9c9c; }
+.sx select.sx-tone-brown { background-color: #d8ae88; }
+
+/* Case status colours (2026-11-24): Saved is GREEN and In Progress is SKY BLUE,
+   on the pill and on the row. A saved row is green whatever its last call was;
+   an in-progress row shows its last call's colour and is sky blue without one.
+   The outcome colours above are deliberately neither: "Agreed to Stay"
+   (sx-tone-green) is drawn TEAL and "Callback" (sx-tone-blue) INDIGO, so a
+   last-call colour is never mistaken for a status. The tone keys come from the
+   server's OUTCOMES catalog, which is why the names were left alone. */
+.sx-grid tbody tr.sx-tone-saved    td { background: #86e59b; }
+.sx-grid tbody tr.sx-tone-progress td { background: #a5dfff; }
+.sx-swatch i.sx-tone-saved    { background: #86e59b; }
+.sx-swatch i.sx-tone-progress { background: #a5dfff; }

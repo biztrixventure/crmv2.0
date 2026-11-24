@@ -29,7 +29,7 @@ import { useLiveRefresh } from '../../hooks/useLiveRefresh';
 import PolicyScreen from './PolicyScreen';
 import { SortTh, useClientSort } from './sxSort';
 import {
-  money, day, dateTime, saleStatus, caseStatus, vehicle, errText, outcomeOf, toneClass, monthlyDate,
+  money, day, dateTime, saleStatus, caseStatus, vehicle, errText, outcomeOf, toneClass, caseRowTone, monthlyDate,
 } from './supportFormat';
 import './support.css';
 
@@ -63,6 +63,8 @@ const monthStartIso = () => `${todayIso().slice(0, 8)}01`;
 function Legend({ outcomes }) {
   return (
     <div className="sx-legend" aria-label="Row colours">
+      <span className="sx-swatch"><i className="sx-tone-saved" />Saved</span>
+      <span className="sx-swatch"><i className="sx-tone-progress" />In Progress</span>
       <span>Last call:</span>
       {outcomes.filter((o) => o.tone && o.tone !== 'none').map((o) => (
         <span key={o.key} className="sx-swatch"><i className={`sx-tone-${o.tone}`} />{o.label}</span>
@@ -298,7 +300,7 @@ function PolicyGrid({ rows, loading, view, onOpen, sort, onSort, outcomes }) {
           const st = saleStatus(r.status);
           const cs = r.case ? caseStatus(r.case.status) : null;
           return (
-            <tr key={r.id} {...rowProps(onOpen, i, r.case ? toneClass(outcomes, r.case.last_outcome) : '')}>
+            <tr key={r.id} {...rowProps(onOpen, i, r.case ? caseRowTone(outcomes, r.case.status, r.case.last_outcome) : '')}>
               <td className="nowrap"><span className="sx-link">{r.customer_name || '(no name)'}</span></td>
               <td className="nowrap">{r.customer_phone}</td>
               <td className="nowrap">{r.client_name}</td>
@@ -354,7 +356,7 @@ function CaseGrid({ rows, loading, view, onOpen, sort, onSort, outcomes }) {
           const cs = caseStatus(r.status);
           const st = saleStatus(r.sale?.status);
           const due = !!r.next_follow_up_at && Date.parse(r.next_follow_up_at) <= now;
-          const tone = `${toneClass(outcomes, r.last_outcome)} ${due ? 'sx-overdue' : ''}`.trim();
+          const tone = `${caseRowTone(outcomes, r.status, r.last_outcome)} ${due ? 'sx-overdue' : ''}`.trim();
           // A case whose sale was deleted has nothing to open.
           const props = r.sale_id ? rowProps(onOpen, i, tone) : { className: tone };
           return (
