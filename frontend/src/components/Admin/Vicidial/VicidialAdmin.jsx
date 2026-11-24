@@ -271,6 +271,8 @@ const IPValidation = () => {
                     <span className="font-semibold" style={{ color: 'var(--color-text)' }}>{b.box}</span>
                     <span style={{ color: ok ? 'var(--color-success-600)' : 'var(--color-error-600)' }}>{b.status}</span>
                     <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>{b.ms}ms {b.error || ''}</span>
+                    {/* The dialer's own words: it names the permission that is missing. */}
+                    {!ok && b.sample && <span className="text-xs font-mono break-all" style={{ color: 'var(--color-error-600)' }}>{b.sample}</span>}
                   </div>
                 );
               })}
