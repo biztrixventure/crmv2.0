@@ -182,3 +182,14 @@
 .sx-color-row { display: grid; grid-template-columns: 1fr 46px 92px auto; gap: 6px; align-items: center; }
 .sx-color-row input[type=color] { width: 46px; height: 24px; padding: 0; border: 1px solid var(--sx-line); background: #fff; cursor: pointer; }
 .sx-color-sample { padding: 2px 8px; border: 1px solid var(--sx-line); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* First Monthly (mig 359): one box per follow-up. Fixed colours like the rest
+   of the desk -- yellow = call now, red = window passed, grey = not needed. */
+.sx-grid td.fm-cell { white-space: nowrap; }
+.sx-grid td.fm-due      { background: #ffe25c; font-weight: 600; }
+.sx-grid td.fm-missed   { background: #ffd0d0; color: #8a1f1f; }
+.sx-grid td.fm-done     { background: #d6f5d0; }
+.sx-grid td.fm-na       { color: #7a7a7a; font-style: italic; }
+.sx-grid td.fm-upcoming { color: #5a5a5a; }
+.fm-btn { background: none; border: none; padding: 0; font: inherit; color: inherit; cursor: pointer; text-decoration: underline dotted; text-align: left; }
+.fm-btn:focus-visible { outline: 2px solid #1c5fa8; outline-offset: 1px; }

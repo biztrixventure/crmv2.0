@@ -24,7 +24,7 @@ const { runBatchExpiry } = require('./batchExpiry');
 const ipAccess = require('./ipAccess');
 const lookupHistory = require('./customerLookupHistory');
 const attachments = require('./attachments');
-const { runSupportFollowUpReminders } = require('./supportReminders');
+const { runSupportFollowUpReminders, runFirstMonthlyDigest } = require('./supportReminders');
 
 const REFRESH_SEGMENTS_MS = 10 * 60 * 1000;     // every 10 min
 const CACHE_SWEEP_MS      = 5  * 60 * 1000;      // every 5 min
@@ -144,6 +144,12 @@ function startBackgroundJobs() {
   const followUps = () => runSupportFollowUpReminders().catch(e => logger.warn('JOBS', `support follow-up error: ${e.message}`));
   _timers.push(setTimeout(followUps, 45 * 1000));
   _timers.push(setInterval(followUps, 60 * 1000));
+
+  // First-monthly digest (mig 359): once a day per support agent, from 9am ET,
+  // 'N calls due today'. Checked every 10 minutes; a no-op once sent.
+  const fmDigest = () => runFirstMonthlyDigest().catch(e => logger.warn('JOBS', 'first-monthly digest error: ' + e.message));
+  _timers.push(setTimeout(fmDigest, 90 * 1000));
+  _timers.push(setInterval(fmDigest, 10 * 60 * 1000));
 
   // QA worklist materialization (TRA full coverage + RCM frozen sampling).
   // No-op unless a company has QA explicitly enabled (mig 171 default is off).

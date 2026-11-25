@@ -20,6 +20,7 @@ import { RefreshCw, Download, Save } from 'lucide-react';
 import client from '../../api/client';
 import { logClientExport } from '../../utils/exportSpec';
 import PolicyScreen from './PolicyScreen';
+import FirstMonthly from './FirstMonthly';
 import SupportColorStyle from './supportColors';
 import SupportColorsEditor from './SupportColorsEditor';
 import { SortTh, useClientSort } from './sxSort';
@@ -31,7 +32,8 @@ const monthStartIso = () => `${todayIso().slice(0, 8)}01`;
 
 const TABS = [
   ['report', 'Agent Report'],
-  ['calls', 'Call Log'],
+  ['calls', 'Support & Retention'],
+  ['first_monthly', 'First Monthly'],
   ['agents', 'Agents & Clients'],
 ];
 
@@ -55,10 +57,15 @@ const downloadCsv = async (name, header, rows, filters) => {
   return true;
 };
 
+const yn = (v) => (v ? 'Yes' : 'No');
+
 const AGENT_COLS = [
   ['name', 'Agent', false], ['calls', 'Calls', true], ['customers', 'Customers', true], ['opened', 'Started', true],
   ['in_progress', 'In progress', true], ['saved', 'Saved', true], ['lost', 'Not saved', true],
   ['tags', 'Closers tagged', true], ['save_rate', 'Save rate', true],
+  // Support & Retention sheet + First Monthly sheet (mig 359)
+  ['cancel_requests', 'Cancel requests', true], ['refunds', 'Refunds', true], ['guided', 'Guided', true],
+  ['fm_calls', '1st monthly calls', true], ['fm_agreed', 'Agreed to pay', true], ['fm_closed', 'Monthly status set', true],
 ];
 
 export default function SupportReports() {
@@ -96,7 +103,7 @@ export default function SupportReports() {
     if (!me) return;
     setLoading(true); setError('');
     try {
-      if (tab === 'colors') return;            // nothing to fetch: the colours came with /me
+      if (tab === 'colors' || tab === 'first_monthly') return;   // colours came with /me; First Monthly loads itself
       if (tab === 'agents') await loadAgents();
       else await loadReport();
     } catch (e) {
@@ -113,6 +120,8 @@ export default function SupportReports() {
   const callRows = useClientSort(report?.calls || [], {
     when: (r) => r.called_at, agent: (r) => r.agent_name, customer: (r) => r.customer_name, client: (r) => r.client_name,
     outcome: (r) => r.outcome_label, notes: (r) => r.notes, status: (r) => caseStatus(r.case_status).label,
+    policy: (r) => r.reference_no, cancel: (r) => yn(r.cancel_request), refund: (r) => yn(r.refund_processed),
+    action: (r) => r.action_label, escalated: (r) => yn(r.escalated),
   });
 
   if (meError) return <div className="sx" style={{ minHeight: 0 }}><div className="sx-body"><div className="sx-note bad">{meError}</div></div></div>;
@@ -156,7 +165,7 @@ export default function SupportReports() {
       </div>
 
       {openSale ? (
-        <PolicyScreen key={openSale} saleId={openSale} outcomes={me.outcomes} mode="view"
+        <PolicyScreen key={openSale} saleId={openSale} outcomes={me.outcomes} actions={me.actions} mode="view"
           onBack={() => setOpenSale(null)} />
       ) : (
         <>
@@ -176,6 +185,11 @@ export default function SupportReports() {
                       <div className="sx-stat"><b>{t.lost}</b>Not saved</div>
                       <div className="sx-stat"><b>{t.tags}</b>Closers tagged</div>
                       <div className="sx-stat"><b>{t.save_rate == null ? '-' : `${t.save_rate}%`}</b>Save rate</div>
+                      <div className="sx-stat"><b>{t.cancel_requests}</b>Cancel requests</div>
+                      <div className="sx-stat"><b>{t.refunds}</b>Refunds processed</div>
+                      <div className="sx-stat"><b>{t.fm_calls}</b>First-monthly calls</div>
+                      <div className="sx-stat"><b>{t.fm_agreed}</b>Agreed to pay</div>
+                      <div className="sx-stat"><b>{t.fm_closed}</b>Monthly status set</div>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 6 }}>
                       <button type="button" className="sx-btn" disabled={!report.agents.length}
@@ -196,10 +210,11 @@ export default function SupportReports() {
                           {report.agents.length === 0 && <tr><td colSpan={AGENT_COLS.length}><div className="sx-empty">No support activity in this date range.</div></td></tr>}
                           {agentRows.sorted.map((a) => (
                             <tr key={a.agent_id}>
-                              <td className="nowrap">{a.name}</td>
-                              <td className="num">{a.calls}</td><td className="num">{a.customers}</td><td className="num">{a.opened}</td>
-                              <td className="num">{a.in_progress}</td><td className="num">{a.saved}</td><td className="num">{a.lost}</td>
-                              <td className="num">{a.tags}</td><td className="num">{a.save_rate == null ? '-' : `${a.save_rate}%`}</td>
+                              {AGENT_COLS.map(([k, , isNum]) => (
+                                <td key={k} className={isNum ? 'num' : 'nowrap'}>
+                                  {k === 'save_rate' ? (a.save_rate == null ? '-' : `${a.save_rate}%`) : a[k]}
+                                </td>
+                              ))}
                             </tr>
                           ))}
                         </tbody>
@@ -241,8 +256,8 @@ export default function SupportReports() {
                       <span className="sx-spacer" />
                       <button type="button" className="sx-btn" disabled={!report.calls.length}
                         onClick={() => exportCsv(`support-calls_${report.range.date_from}_${report.range.date_to}.csv`,
-                          ['Date/Time (ET)', 'Agent', 'Customer', 'Client', 'Policy Number', 'Outcome', 'What happened', 'Follow-up', 'Case'],
-                          callRows.sorted.map((c) => [dateTime(c.called_at), c.agent_name, c.customer_name, c.client_name, c.reference_no, c.outcome_label, c.notes, dateTime(c.follow_up_at), caseStatus(c.case_status).label]))}>
+                          ['Date/Time (ET)', 'Agent', 'Name', 'Client', 'Policy #', 'Inquiry', 'Cancellation request', 'Refund Processed', 'Action Taken', 'Escalated to the closer', 'Outcome', 'Follow-up', 'Case'],
+                          callRows.sorted.map((c) => [dateTime(c.called_at), c.agent_name, c.customer_name, c.client_name, c.reference_no, c.notes, yn(c.cancel_request), yn(c.refund_processed), c.action_label || '', yn(c.escalated), c.outcome_label, dateTime(c.follow_up_at), caseStatus(c.case_status).label]))}>
                         <Download size={14} /> Export
                       </button>
                     </div>
@@ -253,12 +268,17 @@ export default function SupportReports() {
                           <SortTh label="Agent" k="agent" sort={callRows.sort} onSort={callRows.setSort} />
                           <SortTh label="Customer" k="customer" sort={callRows.sort} onSort={callRows.setSort} />
                           <SortTh label="Client" k="client" sort={callRows.sort} onSort={callRows.setSort} />
+                          <SortTh label="Policy #" k="policy" sort={callRows.sort} onSort={callRows.setSort} />
+                          <SortTh label="Inquiry" k="notes" sort={callRows.sort} onSort={callRows.setSort} />
+                          <SortTh label="Cancel request" k="cancel" sort={callRows.sort} onSort={callRows.setSort} />
+                          <SortTh label="Refund" k="refund" sort={callRows.sort} onSort={callRows.setSort} />
+                          <SortTh label="Action taken" k="action" sort={callRows.sort} onSort={callRows.setSort} />
+                          <SortTh label="Escalated to closer" k="escalated" sort={callRows.sort} onSort={callRows.setSort} />
                           <SortTh label="Outcome" k="outcome" sort={callRows.sort} onSort={callRows.setSort} />
-                          <SortTh label="What happened" k="notes" sort={callRows.sort} onSort={callRows.setSort} />
                           <SortTh label="Case" k="status" sort={callRows.sort} onSort={callRows.setSort} />
                         </tr></thead>
                         <tbody>
-                          {report.calls.length === 0 && <tr><td colSpan={7}><div className="sx-empty">No calls in this date range.</div></td></tr>}
+                          {report.calls.length === 0 && <tr><td colSpan={12}><div className="sx-empty">No calls in this date range.</div></td></tr>}
                           {callRows.sorted.map((c) => {
                             const cs = caseStatus(c.case_status);
                             const tone = toneClass(me.outcomes, c.outcome);
@@ -270,8 +290,13 @@ export default function SupportReports() {
                                 <td className="nowrap">{c.agent_name}</td>
                                 <td className="nowrap">{c.customer_name}</td>
                                 <td className="nowrap">{c.client_name}</td>
-                                <td className="nowrap">{c.outcome_label}</td>
+                                <td className="nowrap">{c.reference_no}</td>
                                 <td className="story">{c.notes}</td>
+                                <td className="nowrap">{yn(c.cancel_request)}</td>
+                                <td className="nowrap">{yn(c.refund_processed)}</td>
+                                <td className="nowrap">{c.action_label}</td>
+                                <td className="nowrap">{yn(c.escalated)}</td>
+                                <td className="nowrap">{c.outcome_label}</td>
                                 <td className="nowrap">{cs.label && <span className={`sx-pill ${cs.pill}`}>{cs.label}</span>}</td>
                               </tr>
                             );
@@ -283,6 +308,10 @@ export default function SupportReports() {
                 )}
               </div>
             </>
+          )}
+
+          {tab === 'first_monthly' && (
+            <FirstMonthly me={me} canWork={false} onOpenSale={setOpenSale} onExport={exportCsv} />
           )}
 
           {tab === 'colors' && me.can_colors && (

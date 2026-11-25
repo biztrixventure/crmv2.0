@@ -27,6 +27,7 @@ import { Search, RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
 import client from '../../api/client';
 import { useLiveRefresh } from '../../hooks/useLiveRefresh';
 import PolicyScreen from './PolicyScreen';
+import FirstMonthly from './FirstMonthly';
 import SupportColorStyle from './supportColors';
 import { SortTh, useClientSort } from './sxSort';
 import {
@@ -37,6 +38,7 @@ import './support.css';
 const VIEWS = [
   { key: 'cancelled', label: 'Cancelled',   kind: 'policies' },
   { key: 'active',    label: 'Active',      kind: 'policies' },
+  { key: 'first_monthly', label: 'First Monthly', kind: 'fm' },
   { key: 'mine',      label: 'In Progress', kind: 'cases' },
   { key: 'followups', label: 'Follow-ups',  kind: 'cases' },
   { key: 'saved',     label: 'Saved',       kind: 'cases' },
@@ -108,6 +110,7 @@ export default function SupportWorkspace() {
 
   const load = useCallback(async () => {
     if (!me) return;
+    if (kind === 'fm') return;                 // FirstMonthly loads itself
     const id = ++reqId.current;
     setLoading(true); setError('');
     const sortParams = serverSort ? { sort: serverSort.key, dir: serverSort.dir } : {};
@@ -174,7 +177,7 @@ export default function SupportWorkspace() {
         {VIEWS.map((v) => (
           <button key={v.key} type="button" role="tab" aria-selected={view === v.key} className="sx-tab" onClick={() => pickView(v.key)}>
             {v.key === 'cancelled' && <Search size={14} />}{v.label}
-            {view === v.key && v.kind !== 'stats' && <span className="sx-count">({total.toLocaleString()})</span>}
+            {view === v.key && v.kind !== 'stats' && v.kind !== 'fm' && <span className="sx-count">({total.toLocaleString()})</span>}
           </button>
         ))}
       </div>
@@ -190,6 +193,7 @@ export default function SupportWorkspace() {
           key={shownSale}
           saleId={shownSale}
           outcomes={me.outcomes}
+          actions={me.actions}
           mode="work"
           position={!openSale && openIdx >= 0 ? { index: (page - 1) * PAGE + openIdx, total } : null}
           onPrev={!openSale && openIdx > 0 ? () => openAt(openIdx - 1) : null}
@@ -198,6 +202,8 @@ export default function SupportWorkspace() {
           onOpenSale={(id) => setOpenSale(id)}
           onChanged={load}
         />
+      ) : kind === 'fm' ? (
+        <FirstMonthly me={me} canWork={me.can_work} onOpenSale={(id) => setOpenSale(id)} />
       ) : kind === 'stats' ? (
         <StatsView stats={stats} range={range} setRange={setRange} loading={loading} error={error} onRefresh={load} outcomes={me.outcomes} />
       ) : (
@@ -413,6 +419,11 @@ function StatsView({ stats, range, setRange, loading, error, onRefresh, outcomes
             <div className="sx-stat"><b>{t.lost || 0}</b>Not saved</div>
             <div className="sx-stat"><b>{t.tags || 0}</b>Closers tagged</div>
             <div className="sx-stat"><b>{t.save_rate == null ? '-' : `${t.save_rate}%`}</b>Save rate</div>
+            <div className="sx-stat"><b>{t.fm_calls || 0}</b>First-monthly calls</div>
+            <div className="sx-stat"><b>{t.fm_agreed || 0}</b>Agreed to pay</div>
+            <div className="sx-stat"><b>{t.fm_closed || 0}</b>Monthly status set</div>
+            <div className="sx-stat"><b>{t.cancel_requests || 0}</b>Cancel requests</div>
+            <div className="sx-stat"><b>{t.refunds || 0}</b>Refunds</div>
           </div>
           <div className="sx-gridwrap" style={{ maxHeight: '55vh' }}>
             <table className="sx-grid">

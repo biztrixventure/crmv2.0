@@ -41,7 +41,7 @@ const Fld = ({ label, value, cls = '', span = '' }) => (
 
 export default function PolicyScreen({
   saleId, position, onPrev, onNext, onBack, onChanged,
-  outcomes = [], mode = 'work',
+  outcomes = [], actions = [], mode = 'work',
 }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -52,7 +52,7 @@ export default function PolicyScreen({
   const [busy, setBusy] = useState(false);
   const [dlgError, setDlgError] = useState('');
   const [flash, setFlash] = useState('');
-  const [form, setForm] = useState({ outcome: '', notes: '', follow: '', reason: '', closer: '' });
+  const [form, setForm] = useState({ outcome: '', notes: '', follow: '', reason: '', closer: '', cancel: false, refund: false, action: '' });
   const [closers, setClosers] = useState(null);
 
   const load = useCallback(async () => {
@@ -74,7 +74,10 @@ export default function PolicyScreen({
     const rows = [];
     (data.calls || []).forEach((k) => rows.push({
       id: `call-${k.id}`, at: k.called_at, kind: 'call', type: 'Call', who: k.agent_name,
-      what: outcomeOf(outcomes, k.outcome)?.label || pretty(k.outcome), detail: k.notes,
+      what: [outcomeOf(outcomes, k.outcome)?.label || pretty(k.outcome),
+        k.cancel_request && 'Cancellation request', k.refund_processed && 'Refund processed',
+        k.action && `Action: ${pretty(k.action)}`].filter(Boolean).join(' / '),
+      detail: k.notes,
       follow: k.follow_up_at, cls: toneClass(outcomes, k.outcome),
     }));
     (data.tags || []).forEach((t) => {
@@ -95,6 +98,10 @@ export default function PolicyScreen({
       if (k.status === 'saved') rows.push({ id: `saved-${k.id}`, at: k.saved_at || k.updated_at, kind: 'status', type: 'Status', who: k.agent_name, what: 'Customer', detail: k.save_reason, pill: ['cs-saved', 'Saved'] });
       if (k.status === 'lost') rows.push({ id: `lost-${k.id}`, at: k.updated_at, kind: 'status', type: 'Status', who: k.agent_name, what: 'Customer', detail: k.lost_reason, pill: ['cs-lost', 'Not Saved'] });
     });
+    (data.first_monthly || []).forEach((x) => rows.push({
+      id: `fm-${x.id}`, at: x.done_at, kind: 'fm', type: 'First Monthly', who: x.agent_name,
+      what: `${x.step_label}: ${x.result_label}`, detail: x.note,
+    }));
     (data.history || []).forEach((h) => rows.push({
       id: `ev-${h.id}`, at: h.at, kind: 'policy', type: 'Policy', who: h.actor_name, what: pretty(h.event_type), detail: h.note,
     }));
@@ -109,7 +116,7 @@ export default function PolicyScreen({
   });
 
   const open = async (kind) => {
-    setForm({ outcome: '', notes: '', follow: '', reason: '', closer: data?.policy?.closer_id || '' });
+    setForm({ outcome: '', notes: '', follow: '', reason: '', closer: data?.policy?.closer_id || '', cancel: false, refund: false, action: '' });
     setDlgError(''); setDialog(kind);
     if (kind === 'tag' && !closers) {
       try {
@@ -171,7 +178,7 @@ export default function PolicyScreen({
     ['history', `History (${timeline.length})`],
     ['payments', 'Payments'],
   ];
-  const KINDS = [['', 'Everything'], ['call', 'Calls'], ['tag', 'Tags'], ['status', 'Saved / Not Saved'], ['policy', 'Policy events']];
+  const KINDS = [['', 'Everything'], ['call', 'Calls'], ['tag', 'Tags'], ['status', 'Saved / Not Saved'], ['fm', 'First Monthly'], ['policy', 'Policy events']];
 
   return (
     <>
@@ -387,6 +394,7 @@ export default function PolicyScreen({
               onClick={() => run(
                 () => client.post(`support/policies/${p.id}/calls`, {
                   outcome: form.outcome, notes: form.notes, follow_up_at: localInputToIso(form.follow),
+                  cancel_request: form.cancel, refund_processed: form.refund, action: form.action || null,
                 }),
                 form.follow ? 'Call logged. You will be reminded at the follow-up time.' : 'Call logged.',
                 'history',
@@ -407,10 +415,33 @@ export default function PolicyScreen({
             </div>
           </div>
           <div className="sx-fld">
-            <label htmlFor="sx-call-notes">What happened:</label>
+            <label htmlFor="sx-call-notes">Inquiry / what happened:</label>
             <textarea id="sx-call-notes" className="sx-textarea" value={form.notes} maxLength={4000}
               onChange={(e) => setForm((v) => ({ ...v, notes: e.target.value }))}
               placeholder="What the customer said, why they cancelled, what you offered, what was agreed." />
+          </div>
+          <div className="sx-fld">
+            <label>Customer asked:</label>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 18px' }}>
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                <input type="checkbox" checked={form.cancel} onChange={(e) => setForm((v) => ({ ...v, cancel: e.target.checked }))} />
+                Cancellation request
+              </label>
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                <input type="checkbox" checked={form.refund} onChange={(e) => setForm((v) => ({ ...v, refund: e.target.checked }))} />
+                Refund processed
+              </label>
+            </div>
+          </div>
+          <div className="sx-fld">
+            <label htmlFor="sx-call-action">Action taken:</label>
+            <div>
+              <select id="sx-call-action" className="sx-select" value={form.action} onChange={(e) => setForm((v) => ({ ...v, action: e.target.value }))}>
+                <option value="">-- none --</option>
+                {actions.map((a) => <option key={a.key} value={a.key}>{a.label}</option>)}
+              </select>
+              <div className="sx-hint">Optional. To escalate, also use Tag Closer so the closer is told.</div>
+            </div>
           </div>
           <div className="sx-fld">
             <label htmlFor="sx-call-follow">Follow up on:</label>

@@ -1239,6 +1239,46 @@ Agents & Clients, Colours). Off = gone.
   long to bite on another instance, and the shell hook another 60s to hide
   the tab (the API refuses at once on the instance that saved it).
 
+### Support desk: First Monthly + Support & Retention sheets (mig 359, applied 2026-11-26)
+The support team kept two spreadsheets; both are in the desk now.
+- **First Monthly** (tab on the agent desk and in Support Reports). The list IS
+  the sales whose `form_data->>Monthly_Date` falls in the window -- nothing
+  about the policy is copied. Only the work is stored: `first_monthly_steps`,
+  ONE ROW PER (sale, step), step = `fu1` (7 days before) / `fu2` (3) / `fu3`
+  (1) / `final` (what happened to the payment). Logging a step again corrects
+  it (upsert on `sale_id,step`). It never changes the sale.
+- **What is due is decided in ONE pure function**, `stepStates()` in
+  `backend/utils/firstMonthly.js` (done / na / upcoming / due / missed), used
+  by the list, the daily reminder and nothing else may re-derive it. A
+  follow-up's window runs to the day before the next one's; the final status
+  is due from the monthly date on and is never "missed".
+- **N/A is computed, never stored**: an earlier step with result `agreed`, or a
+  cancelled policy, makes the remaining follow-ups N/A.
+- Catalogs (`FU_RESULTS`, `FINAL_STATUSES`) live in that util and ride along
+  with `GET /support/me` as `first_monthly`. Days are ET `YYYY-MM-DD` strings
+  compared as strings; `addDays` is UTC maths on a bare date.
+- Routes: `GET /support/first-monthly` (`view=due|all`, range bounds the
+  MONTHLY date, default today -7..+7; returns every row, the browser sorts)
+  and `POST /support/first-monthly/:saleId/steps`. Scoped by the agent's
+  clients like the rest of the desk. UI: `components/Support/FirstMonthly.jsx`.
+- **Daily digest** `runFirstMonthlyDigest` (`utils/supportReminders.js`, every
+  10 min, from 9am ET): "N calls due today", once per agent per day. The
+  `support_fm_digest` row is the claim (insert first, send if it won). Pass
+  `{ onlyAgentIds }` in a test, same reason as the follow-up reminders.
+- **Support & Retention** = the call log. Three answers were added ON the
+  call (`retention_calls.cancel_request`, `refund_processed`, `action`
+  saved|escalated|guided -- all optional), set in the Log Call dialog.
+  "Escalated to the closer" is derived: action `escalated` OR a closer tag on
+  that policy. "Refund processed" is a record only. The Call Log tab is now
+  titled Support & Retention and its CSV has the sheet's columns.
+- **Agent Report** gained: cancel requests, refunds, guided, 1st-monthly
+  calls, agreed to pay, monthly status set. The table renders from
+  `AGENT_COLS`, so a new metric is one entry there + the field in `/reports`.
+- File check (2026-11-26): of 16 policy numbers sampled from the sheet, 12
+  matched a sale with the same dates; `191`, `136`, `172`, `127` match nothing.
+- 88 in-process API checks against the live DB, cleaned up. NOT clicked
+  through in a browser.
+
 ### IP access control (mig 319, applied 2026-09-15)
 Which networks each user may use the CRM from. Ships OFF, and everyone is `anywhere`. README → "IP access control" has the operator steps.
 - **Mode lives in `user_ip_access` (sidecar), NEVER on `user_profiles`.** That table has RLS `users_can_update_own_profile`

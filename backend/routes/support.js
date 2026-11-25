@@ -34,6 +34,7 @@ const notifications = require('../utils/notificationService');
 const logger = require('../utils/logger');
 const { getConfig, setConfig } = require('../utils/businessConfig');
 const { isDesignated } = require('../utils/moduleAccess');
+const fm = require('../utils/firstMonthly');
 
 const router = express.Router();
 
@@ -50,6 +51,14 @@ const OUTCOMES = [
   { key: 'wrong_number',  label: 'Wrong Number',        tone: 'brown' },
   { key: 'other',         label: 'Other',               tone: 'none' },
 ];
+// What the agent DID about the inquiry (the "Action Taken" column of the
+// Support and Retention sheet, mig 359). Optional on a call.
+const ACTIONS = [
+  { key: 'saved',     label: 'Saved' },
+  { key: 'escalated', label: 'Escalated' },
+  { key: 'guided',    label: 'Guided' },
+];
+const ACTION_LABEL = Object.fromEntries(ACTIONS.map(a => [a.key, a.label]));
 const OUTCOME_KEYS = new Set(OUTCOMES.map(o => o.key));
 const OUTCOME_LABEL = Object.fromEntries(OUTCOMES.map(o => [o.key, o.label]));
 
@@ -231,6 +240,8 @@ router.get('/me', gate(async (req, res, access) => {
     can_colors: access.canColors,
     manager: access.isManager,
     outcomes: OUTCOMES,
+    actions: ACTIONS,
+    first_monthly: { follow_ups: fm.FOLLOW_UPS, results: fm.FU_RESULTS, statuses: fm.FINAL_STATUSES },
     colors: await loadColors(),
     default_colors: DEFAULT_COLORS,
   });
@@ -365,7 +376,7 @@ router.get('/policies/:saleId', gate(async (req, res, access) => {
     .from('sales').select(SALE_DETAIL_COLS).eq('id', req.params.saleId).maybeSingle();
   if (!mayTouchSale(sale, access)) return res.status(404).json({ error: 'Policy not found' });
 
-  const [casesRes, callsRes, eventsRes, othersRes, companyRes, tagsRes] = await Promise.all([
+  const [casesRes, callsRes, eventsRes, othersRes, companyRes, tagsRes, fmRes] = await Promise.all([
     supabaseAdmin.from('retention_cases').select('*').eq('sale_id', sale.id).order('created_at', { ascending: false }),
     supabaseAdmin.from('retention_calls').select('*').eq('sale_id', sale.id).order('called_at', { ascending: false }),
     supabaseAdmin.from('policy_events').select('id, event_type, at, actor_id, note').eq('sale_id', sale.id).order('at', { ascending: false }).limit(100),
@@ -377,13 +388,16 @@ router.get('/policies/:saleId', gate(async (req, res, access) => {
       ? supabaseAdmin.from('companies').select('name').eq('id', sale.company_id).maybeSingle()
       : Promise.resolve({ data: null }),
     supabaseAdmin.from('retention_tags').select('*').eq('sale_id', sale.id).order('created_at', { ascending: false }),
+    supabaseAdmin.from('first_monthly_steps').select('id, step, result, note, agent_id, done_at').eq('sale_id', sale.id),
   ]);
 
   const cases = casesRes.data || [];
   const calls = callsRes.data || [];
   const events = eventsRes.data || [];
   const tags = tagsRes.data || [];
+  const fmSteps = fmRes.data || [];       // missing table (backend ahead of 359) reads as none
   const names = await namesOf([
+    ...fmSteps.map(x => x.agent_id),
     sale.closer_id, sale.fronter_id,
     ...cases.map(c => c.agent_id), ...calls.map(c => c.agent_id), ...events.map(e => e.actor_id),
     ...tags.flatMap(t => [t.tagged_user_id, t.tagged_by]),
@@ -409,6 +423,10 @@ router.get('/policies/:saleId', gate(async (req, res, access) => {
     calls: calls.map(c => ({ ...c, agent_name: names[c.agent_id] || null })),
     tags: tags.map(t => ({ ...t, tagged_name: names[t.tagged_user_id] || null, tagged_by_name: names[t.tagged_by] || null })),
     history: events.map(e => ({ ...e, actor_name: names[e.actor_id] || null })),
+    first_monthly: fmSteps.map(x => ({
+      ...x, agent_name: names[x.agent_id] || null, result_label: fm.labelOf(x.step, x.result),
+      step_label: x.step === 'final' ? '1st Monthly status' : (fm.FOLLOW_UPS.find(f => f.step === x.step)?.label || x.step),
+    })),
     other_policies: (othersRes.data || []),
     // Can THIS caller log a call right now, and if not, why.
     work: {
@@ -429,6 +447,9 @@ router.post('/policies/:saleId/calls', gate(async (req, res, access) => {
   const notes   = String(req.body?.notes || '').trim();
   if (!OUTCOME_KEYS.has(outcome)) return res.status(400).json({ error: 'Pick how the call ended' });
   if (notes.length < 3) return res.status(400).json({ error: 'Write what happened on the call' });
+  const action = req.body?.action ? String(req.body.action) : null;
+  if (action && !ACTION_LABEL[action]) return res.status(400).json({ error: 'Unknown action' });
+  const extra = { cancel_request: req.body?.cancel_request === true, refund_processed: req.body?.refund_processed === true, action };
   let followUp = null;
   if (req.body?.follow_up_at) {
     const d = new Date(req.body.follow_up_at);
@@ -466,7 +487,7 @@ router.post('/policies/:saleId/calls', gate(async (req, res, access) => {
   const now = new Date().toISOString();
   const { data: call, error: callErr } = await supabaseAdmin.from('retention_calls').insert({
     case_id: live.id, sale_id: sale.id, agent_id: req.user.id,
-    outcome, notes, follow_up_at: followUp, called_at: now,
+    outcome, notes, follow_up_at: followUp, called_at: now, ...extra,
   }).select('*').single();
   if (callErr) return res.status(500).json({ error: callErr.message });
 
@@ -628,6 +649,61 @@ router.post('/tags/:id/done', asyncHandler(async (req, res) => {
   res.json({ tag: data });
 }));
 
+// ── GET /support/first-monthly -- policies whose first monthly is coming ────
+// view = due (a call or the final status is owed today) | all.
+// date_from / date_to bound the FIRST MONTHLY DATE, not the sale date.
+router.get('/first-monthly', gate(async (req, res, access) => {
+  const today = todayEt();
+  const ok = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v || '');
+  const from = ok(req.query.date_from) ? req.query.date_from : fm.addDays(today, -7);
+  const to   = ok(req.query.date_to)   ? req.query.date_to   : fm.addDays(today, 7);
+  const view = req.query.view === 'all' ? 'all' : 'due';
+  let rows;
+  try {
+    rows = await fm.listFirstMonthly({
+      clients: access.clients, from, to, today,
+      client: String(req.query.client || '').trim(), search: String(req.query.search || '').trim(),
+    });
+  } catch (e) { return res.status(500).json({ error: e.message }); }
+  const names = await namesOf(rows.flatMap(r => fm.STEPS.map(k => r.steps[k].agent_id)));
+  rows.forEach(r => fm.STEPS.forEach(k => { r.steps[k].agent_name = names[r.steps[k].agent_id] || null; }));
+  const due = rows.filter(r => r.needs_action);
+  res.json({
+    range: { date_from: from, date_to: to }, today, view,
+    total: rows.length, due_count: due.length,
+    policies: view === 'due' ? due : rows,
+  });
+}));
+
+// ── POST /support/first-monthly/:saleId/steps -- log one call / the status ──
+// { step: fu1|fu2|fu3|final, result, note }. Logging the same step again
+// corrects it. Never touches the sale.
+router.post('/first-monthly/:saleId/steps', gate(async (req, res, access) => {
+  if (!access.canWork) return res.status(403).json({ error: 'Only a support agent can log a first-monthly call' });
+  if (!safeUuid(req.params.saleId)) return res.status(404).json({ error: 'Policy not found' });
+  const step = String(req.body?.step || '');
+  const result = String(req.body?.result || '');
+  const note = String(req.body?.note || '').trim().slice(0, 2000);
+  if (!fm.STEPS.includes(step)) return res.status(400).json({ error: 'Unknown step' });
+  if (!fm.validResult(step, result)) return res.status(400).json({ error: step === 'final' ? 'Pick the payment status' : 'Pick how the call ended' });
+  if (result === 'other' && note.length < 3) return res.status(400).json({ error: 'Write a note for "Other"' });
+
+  const { data: sale } = await supabaseAdmin.from('sales')
+    .select('id, client_name, customer_name, reference_no, policy_number, monthly_date:form_data->>Monthly_Date')
+    .eq('id', req.params.saleId).maybeSingle();
+  if (!mayTouchSale(sale, access)) return res.status(404).json({ error: 'Policy not found' });
+
+  const { data, error } = await supabaseAdmin.from('first_monthly_steps').upsert({
+    sale_id: sale.id, step, result, note: note || null, agent_id: req.user.id,
+    client_name: sale.client_name, customer_name: sale.customer_name,
+    reference_no: sale.policy_number || sale.reference_no,
+    monthly_date: /^\d{4}-\d{2}-\d{2}$/.test(sale.monthly_date || '') ? sale.monthly_date : null,
+    done_at: new Date().toISOString(),
+  }, { onConflict: 'sale_id,step' }).select('*').single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ step: { ...data, result_label: fm.labelOf(step, result) } });
+}));
+
 // ── GET /support/reports -- per-agent numbers + the call log ────────────────
 // An agent gets their own numbers only. Days are US Eastern, like every report.
 router.get('/reports', gate(async (req, res, access) => {
@@ -650,9 +726,9 @@ router.get('/reports', gate(async (req, res, access) => {
   };
   const who = (q, col = 'agent_id') => (onlyAgent ? q.eq(col, onlyAgent) : q);
 
-  const [calls, cases, tags] = await Promise.all([
+  const [calls, cases, tags, fmSteps] = await Promise.all([
     pageAll(() => who(supabaseAdmin.from('retention_calls')
-      .select('id, case_id, sale_id, agent_id, outcome, notes, follow_up_at, called_at')
+      .select('id, case_id, sale_id, agent_id, outcome, notes, follow_up_at, called_at, cancel_request, refund_processed, action')
       .gte('called_at', from).lte('called_at', to)).order('called_at', { ascending: false })),
     // Every case that MOVED in the window: opened, saved or closed.
     pageAll(() => who(supabaseAdmin.from('retention_cases')
@@ -661,15 +737,31 @@ router.get('/reports', gate(async (req, res, access) => {
       .order('updated_at', { ascending: false })),
     pageAll(() => who(supabaseAdmin.from('retention_tags').select('id, tagged_by, status, created_at')
       .gte('created_at', from).lte('created_at', to), 'tagged_by').order('created_at', { ascending: false })),
+    // First-monthly work done in the window (mig 359).
+    pageAll(() => who(supabaseAdmin.from('first_monthly_steps').select('id, step, result, agent_id, done_at')
+      .gte('done_at', from).lte('done_at', to)).order('done_at', { ascending: false })),
   ]);
 
   const fromMs = Date.parse(from), toMs = Date.parse(to);
   const inWin = (t) => { if (!t) return false; const ms = Date.parse(t); return ms >= fromMs && ms <= toMs; };
-  const blank = () => ({ calls: 0, customers: 0, opened: 0, saved: 0, lost: 0, in_progress: 0, tags: 0 });
+  const blank = () => ({
+    calls: 0, customers: 0, opened: 0, saved: 0, lost: 0, in_progress: 0, tags: 0,
+    cancel_requests: 0, refunds: 0, guided: 0, fm_calls: 0, fm_agreed: 0, fm_closed: 0,
+  });
   const by = {};
   const row = (id) => (by[id] = by[id] || { ...blank(), _cust: new Set() });
 
-  calls.forEach(c => { const r = row(c.agent_id); r.calls++; r._cust.add(c.case_id); });
+  calls.forEach(c => {
+    const r = row(c.agent_id); r.calls++; r._cust.add(c.case_id);
+    if (c.cancel_request) r.cancel_requests++;
+    if (c.refund_processed) r.refunds++;
+    if (c.action === 'guided') r.guided++;
+  });
+  fmSteps.forEach(x => {
+    const r = row(x.agent_id);
+    if (x.step === 'final') r.fm_closed++;
+    else { r.fm_calls++; if (x.result === 'agreed') r.fm_agreed++; }
+  });
   cases.forEach(c => {
     const r = row(c.agent_id);
     if (inWin(c.created_at)) r.opened++;
@@ -709,13 +801,24 @@ router.get('/reports', gate(async (req, res, access) => {
     (data || []).forEach(c => { caseBy[c.id] = c; });
   }
 
+  // "Escalated to the closer" = a closer was tagged on that policy.
+  const shownCalls = calls.slice(0, 500);
+  const tagged = new Set();
+  const tagSales = [...new Set(shownCalls.map(c => c.sale_id).filter(Boolean))];
+  for (let i = 0; i < tagSales.length; i += 100) {
+    const { data } = await supabaseAdmin.from('retention_tags').select('sale_id').in('sale_id', tagSales.slice(i, i + 100));
+    (data || []).forEach(t => tagged.add(t.sale_id));
+  }
+
   res.json({
     range: { date_from: dateFrom, date_to: dateTo },
     agents, totals,
     outcomes: Object.entries(outcomes).map(([key, n]) => ({ key, label: OUTCOME_LABEL[key] || key, count: n }))
       .sort((a, b) => b.count - a.count),
-    calls: calls.slice(0, 500).map(c => ({
+    calls: shownCalls.map(c => ({
       ...c,
+      action_label: ACTION_LABEL[c.action] || null,
+      escalated: c.action === 'escalated' || tagged.has(c.sale_id),
       outcome_label: OUTCOME_LABEL[c.outcome] || c.outcome,
       agent_name: names[c.agent_id] || null,
       customer_name: caseBy[c.case_id]?.customer_name || null,
