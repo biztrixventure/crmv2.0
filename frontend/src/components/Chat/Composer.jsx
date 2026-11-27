@@ -25,7 +25,11 @@ const ToolBtn = ({ title, onClick, children, active }) => (
 // image attachments (≤10MB), paste-preserves-formatting, and "/" templates.
 const replySnippet = (msg) => (msg?.body || (msg?.attachments?.length ? `📎 ${msg.attachments.length} attachment${msg.attachments.length > 1 ? 's' : ''}` : '')) || 'Message';
 
-const Composer = ({ onSend, onTyping, disabled, disabledReason, meId, members = [], replyTo = null, onClearReply }) => {
+// "@all" -- one chip that mentions every member of a group. The id 'all' is a
+// marker only: the server swaps it for the real member ids (routes/chat.js).
+const ALL_MENTION = { id: 'all', name: 'all', role: 'Everyone in this group' };
+
+const Composer = ({ onSend, onTyping, disabled, disabledReason, meId, members = [], replyTo = null, onClearReply, allowAll = false }) => {
   const edRef = useRef(null);
   const imgRef = useRef(null);
   const fileRef = useRef(null);
@@ -52,8 +56,11 @@ const Composer = ({ onSend, onTyping, disabled, disabledReason, meId, members = 
     if (sug.kind === 'template') {
       return templates.filter(t => (t.shortcut || '').toLowerCase().includes(q) || (t.text || '').toLowerCase().includes(q));
     }
-    return mentionable.filter(m => m.name.toLowerCase().includes(q)).slice(0, 8);
-  }, [sug, templates, mentionable]);
+    const people = mentionable.filter(m => m.name.toLowerCase().includes(q)).slice(0, 8);
+    // First in the list, so "@" then Enter tags the whole group.
+    const all = allowAll && mentionable.length > 0 && ('all'.startsWith(q) || 'everyone'.startsWith(q));
+    return all ? [ALL_MENTION, ...people] : people;
+  }, [sug, templates, mentionable, allowAll]);
 
   useEffect(() => { setHighlight(0); }, [sug?.kind, sug?.query, matches.length]);
 

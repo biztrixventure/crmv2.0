@@ -393,7 +393,7 @@ const MessageThread = ({ conversation, meId, onlineIds, onBack, banned, msgSetti
         })}
       </div>
 
-      <Composer key={conversation.id} onSend={handleSend} onTyping={sendTyping} disabled={!!disabledReason} disabledReason={disabledReason} meId={meId} members={conversation.members}
+      <Composer key={conversation.id} onSend={handleSend} onTyping={sendTyping} disabled={!!disabledReason} disabledReason={disabledReason} meId={meId} members={conversation.members} allowAll={conversation.type === 'group'}
         replyTo={replyTo} onClearReply={() => setReplyTo(null)} />
     </div>
   );

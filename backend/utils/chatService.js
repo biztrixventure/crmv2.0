@@ -136,7 +136,7 @@ async function createInvites(conversationId, inviterId, inviteeIds) {
 }
 
 /** Web Push to users @mentioned in a message (best-effort, never blocks). */
-async function pushMentions({ conversationId, senderId, senderName, convTitle, mentionIds, body }) {
+async function pushMentions({ conversationId, senderId, senderName, convTitle, mentionIds, body, everyone = false }) {
   const recipients = (mentionIds || []).filter(id => id && id !== senderId);
   if (!recipients.length) return;
   const where = convTitle ? ` in ${convTitle}` : '';
@@ -152,7 +152,7 @@ async function pushMentions({ conversationId, senderId, senderName, convTitle, m
   const ids = gate.pushIds;
   if (!ids.length) return;
   pushNow(ids, {
-    title: `${senderName || 'Someone'} mentioned you${where}`,
+    title: `${senderName || 'Someone'} mentioned ${everyone ? 'everyone' : 'you'}${where}`,
     body:  preview || 'You were mentioned in a message',
     tag:   `chat_mention_${conversationId}`,
     data:  { conversation_id: conversationId, type: 'chat_mention' },

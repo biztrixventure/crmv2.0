@@ -687,9 +687,12 @@ router.post('/conversations/:id/messages', [
   const text        = (req.body.body || '').trim();
   const html        = scrubHtml(req.body.body_html);
   const attachments = cleanAttachments(req.body.attachments);
-  const mentions    = Array.isArray(req.body.mentions)
-    ? [...new Set(req.body.mentions.filter(id => typeof id === 'string'))].slice(0, 50)
+  // The composer's "@all" chip arrives as the literal id 'all'. It is expanded
+  // to the real member ids below, once the conversation is known to be a group.
+  const rawMentions = Array.isArray(req.body.mentions)
+    ? [...new Set(req.body.mentions.filter(id => typeof id === 'string'))]
     : null;
+  const wantsAll = !!rawMentions?.includes('all');
 
   if (!text && !attachments) return res.status(400).json({ error: 'Message is empty' });
 
@@ -721,23 +724,36 @@ router.post('/conversations/:id/messages', [
     return res.status(403).json({ error: 'This is a broadcast announcement — replies are disabled.' });
   }
 
+  // Member ids: needed for push, and BEFORE the insert so "@all" can be stored
+  // as the people it named. Storing the ids (not the word 'all') is what lets
+  // every reader's own bubble highlight with no change on the reading side,
+  // and keeps the record true if someone joins the group later.
+  const { data: members } = await supabaseAdmin
+    .from('conversation_members').select('user_id').eq('conversation_id', convId);
+  const memberIds = (members || []).map(m => m.user_id);
+
+  // @all works in a group only. Anywhere else the chip is plain text.
+  const everyone = wantsAll && conv.type === 'group';
+  const mentions = !rawMentions ? null
+    : everyone ? memberIds.filter(id => id !== uid)
+    : rawMentions.filter(id => id !== 'all').slice(0, 50);
+
   const { data: msg, error } = await supabaseAdmin
     .from('messages')
     .insert({ conversation_id: convId, sender_id: uid, body: text || null, body_html: html, attachments, mentions, reply_to: replyTo })
     .select('id, conversation_id, sender_id, body, body_html, attachments, mentions, reply_to, created_at, edited_at, deleted_at').single();
   if (error) return res.status(500).json({ error: error.message });
 
-  // Sender card + member ids for push (fire-and-forget).
-  const { data: members } = await supabaseAdmin
-    .from('conversation_members').select('user_id').eq('conversation_id', convId);
-  const memberIds = (members || []).map(m => m.user_id);
   const cards = await getUserCards([uid]);
   const senderName = cards.get(uid)?.name || 'New message';
   const preview = text || (attachments ? `📎 ${attachments.length} attachment${attachments.length > 1 ? 's' : ''}` : '');
 
-  pushNewMessage({ conversationId: convId, senderId: uid, senderName, body: preview, memberIds });
+  // A mentioned person gets the mention notification INSTEAD of the ordinary
+  // one, never both: with @all that would be two alerts for every member.
+  const mentionSet = new Set(mentions || []);
+  pushNewMessage({ conversationId: convId, senderId: uid, senderName, body: preview, memberIds: memberIds.filter(id => !mentionSet.has(id)) });
   if (mentions?.length) {
-    pushMentions({ conversationId: convId, senderId: uid, senderName, convTitle: conv.title, mentionIds: mentions, body: preview });
+    pushMentions({ conversationId: convId, senderId: uid, senderName, convTitle: conv.title, mentionIds: mentions, body: preview, everyone });
   }
 
   let replyPreview = null;
